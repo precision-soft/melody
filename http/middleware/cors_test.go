@@ -118,8 +118,6 @@ func TestRestrictiveCorsConfig_Shim_ReturnsExpectedDefaults(t *testing.T) {
     }
 }
 
-/* @info the deprecated shim is still the configuration an application written against the old API holds, and CorsMiddleware reads its unexported fields directly — so a setter that stored somewhere the middleware does not read would leave the caller believing a policy that never reaches a request. Each setter is asserted through the accessor AND through a request the middleware answers. */
-
 func TestCorsConfig_SettersReachTheMiddlewareThatReadsThem(t *testing.T) {
     config := DefaultCorsConfig()
 
@@ -174,8 +172,6 @@ func TestCorsConfig_SettersReachTheMiddlewareThatReadsThem(t *testing.T) {
     }
 }
 
-/* @info the three list accessors and the three setters each keep a copy, so a caller holding the slice it passed in cannot rewrite the policy afterwards — the same guarantee the cors package makes, on the shim that feeds it. */
-
 func TestCorsConfig_ListAccessorsAndSettersKeepTheirOwnCopies(t *testing.T) {
     supplied := []string{"https://app.example.com"}
 
@@ -216,8 +212,6 @@ func TestCorsConfig_ListAccessorsAndSettersKeepTheirOwnCopies(t *testing.T) {
         t.Fatalf("expected SetAllowOrigins to copy the caller's slice")
     }
 }
-
-/* @info the origin predicate is the escape hatch that overrides the list entirely inside cors.Service, so the shim reporting it is what lets a caller verify the one field that can grant an origin no list mentions. */
 
 func TestCorsConfig_AllowOriginFuncIsReportedAndDecidesTheOrigin(t *testing.T) {
     config := DefaultCorsConfig()

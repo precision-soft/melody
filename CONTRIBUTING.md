@@ -181,7 +181,9 @@ The repository enforces a strict, opinionated style. Contributions are expected 
 
 - All comments must be in **English**.
 - Use `/* ... */` for comments; do not use `//` (except for Go build/tool directives such as `//go:build` and `//go:embed`).
-- Permanent comments should be used only exceptionally. Annotation comments (`@todo`, `@important`, etc.) must also use `/* ... */`.
+- A comment is the exception, not the norm. Where the code is clear, write none; where a comment stays, it states the constraint the code *currently* carries and cannot show for itself — not the history of a repair, and not what the code used to do. The long "why" belongs in `CHANGELOG.md` and in `.documentation/`.
+- In a test, the test name is the explanation. A comment there earns its place only by saying something about the *test* that the test cannot show: that the guard it drives is shadowed by a sibling, that the branch is unreachable through the public API, that a probe is shaped a particular way on purpose, or an external fact the code is aligned to.
+- Annotation markers (`@info`, `@important`, `@todo`) are not used.
 - Deprecations use the Go-standard marker as a `/* ... */` block — a doc comment whose first paragraph begins with `Deprecated:` (for example `/* Deprecated: use NewThing instead. */`). This is machine-recognized by `go doc`, `gopls`, and `staticcheck`, and renders correctly on `pkg.go.dev`.
 
 #### Function/method formatting

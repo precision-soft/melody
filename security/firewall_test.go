@@ -101,7 +101,6 @@ func TestFirewall_Check_ReturnsFirstError(t *testing.T) {
     }
 }
 
-/* @info a typed-nil rule is not `nil ==`, so without the reflective guard it passed construction, passed Compile, and was called on the request path — inside no recovery. The refusal belongs at the definition site. */
 func TestNewFirewall_TypedNilRulePanics(t *testing.T) {
     var typedNilRule *ApiKeyHeaderRule
 
@@ -114,7 +113,6 @@ func TestNewFirewall_TypedNilRulePanics(t *testing.T) {
     )
 }
 
-/* @info the firewall owns the rule list it was built with: a caller that keeps the slice and edits it afterwards must not be able to swap a rule the firewall enforces */
 func TestNewFirewall_CopiesTheCallersRules(t *testing.T) {
     refusingRule := NewApiKeyHeaderRule(&alwaysMatchingRuleMatcher{}, "X-Api-Key", "expected-secret")
 

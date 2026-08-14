@@ -48,7 +48,6 @@ func TestStringMapStringString_CopiesAndErrors(t *testing.T) {
     }
 }
 
-/* @info an absent name is unset rather than an empty map, so a caller can tell a map nobody configured from one configured empty */
 func TestStringMapStringString_AnAbsentNameIsUnsetRatherThanAnEmptyMap(t *testing.T) {
     parameterBag := NewParameterBag()
 

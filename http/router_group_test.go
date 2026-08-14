@@ -255,8 +255,6 @@ func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testin
     )
 }
 
-/* @info the four convenience registrations on a group were all at zero coverage — every existing test drives HandleWithOptions directly. Each has to carry the group's path prefix, which is the whole reason a group exists: a registration that skipped the prefix would mount the route at the root, outside whatever the group was created to scope. */
-
 func TestRouteGroup_HandleCarriesTheGroupPrefix(t *testing.T) {
     router := NewRouter()
 

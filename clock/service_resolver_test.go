@@ -35,7 +35,6 @@ func TestClockServiceResolvers(t *testing.T) {
     }
 }
 
-/* @info a nil or typed-nil resolver used to dereference inside the container package, blaming the container instead of the argument these helpers were handed */
 func TestClockMustFromContainer_RefusesNilContainer(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,

@@ -75,7 +75,6 @@ func TestWorkingDirectoryHasEnvironmentFile_ReturnsFalseWhenAbsent(t *testing.T)
     }
 }
 
-/* @info A directory named .env is not an environment file: it must not suppress the missing-.env hint nor pin the working directory as the project root. */
 func TestWorkingDirectoryHasEnvironmentFile_IgnoresDirectoryNamedDotEnv(t *testing.T) {
     directory := t.TempDir()
 
@@ -89,7 +88,7 @@ func TestWorkingDirectoryHasEnvironmentFile_IgnoresDirectoryNamedDotEnv(t *testi
     }
 }
 
-/* @info A stat error other than not-exist cannot prove the file absent, so it counts as present; stat-ing through a regular file yields such an error (ENOTDIR) without needing permission tricks. */
+/* stat-ing through a regular file yields ENOTDIR, which is how the non-not-exist stat error is produced here without permission tricks. */
 func TestWorkingDirectoryHasEnvironmentFile_TreatsUnprovableStatErrorAsPresent(t *testing.T) {
     directory := t.TempDir()
 
@@ -104,7 +103,6 @@ func TestWorkingDirectoryHasEnvironmentFile_TreatsUnprovableStatErrorAsPresent(t
     }
 }
 
-/* @info the go run detection must not swallow an installation path that merely contains a segment starting with go-build: misclassification silently redirects all configuration discovery from the executable's directory to the working directory. */
 func TestIsGoRunExecutableDirectory_MatchesOnlyTheToolsTemporaryDirectories(t *testing.T) {
     matching := []string{
         "/tmp/go-build2932477933/b001/exe",

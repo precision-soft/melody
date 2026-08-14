@@ -92,7 +92,6 @@ func TestJsonSerializer_Deserialize_NilTarget(t *testing.T) {
     }
 }
 
-/* @info a typed-nil pointer target answers with the same refusal the untyped nil gets, so both serializers report the identical misuse identically instead of leaning on the encoder's own diagnostic — the assertion pins the guard's message because the encoder would also answer with an error of its own */
 func TestJsonSerializer_Deserialize_TypedNilTarget(t *testing.T) {
     serializer := NewJsonSerializer()
 
@@ -163,7 +162,6 @@ func TestJsonSerializer_Serialize_ProducesValidJson(t *testing.T) {
     }
 }
 
-/* @info the pretty constructor and the indented branch of Serialize it is the only way to reach were never entered by anything: nothing in the framework builds one, so a constructor that handed back the compact serializer — or an indent that never reached MarshalIndent — would have left every caller who asked for readable output silently getting one line, with the round-trip tests still green because both spellings deserialize the same. */
 func TestNewPrettyJsonSerializer_IndentsWhereTheCompactOneDoesNot(t *testing.T) {
     value := map[string]any{"x": "y"}
 
@@ -190,7 +188,6 @@ func TestNewPrettyJsonSerializer_IndentsWhereTheCompactOneDoesNot(t *testing.T) 
     }
 }
 
-/* @info both spellings must still deserialize to the same value: the indentation is a rendering choice, not a format change, and a pretty payload no reader can parse back is worse than an unindented one. */
 func TestNewPrettyJsonSerializer_RoundTripsThroughTheCompactDeserializer(t *testing.T) {
     payload, serializeErr := NewPrettyJsonSerializer().Serialize(map[string]any{"x": "y"})
     if nil != serializeErr {

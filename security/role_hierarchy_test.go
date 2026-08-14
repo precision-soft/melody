@@ -45,7 +45,6 @@ func TestRoleHierarchy_ExpandRoles_DeduplicatesAndSorts(t *testing.T) {
     }
 }
 
-/* @info a cycle in the hierarchy must terminate. The walk marks a role BEFORE it is queued, so a role reached a second time is never enqueued again; without that, A inheriting B inheriting A loops forever at boot-configured data and hangs the first request that votes. */
 func TestRoleHierarchy_ExpandRolesTerminatesOnACycle(t *testing.T) {
     hierarchy := NewRoleHierarchy(
         map[string][]string{
@@ -61,7 +60,6 @@ func TestRoleHierarchy_ExpandRolesTerminatesOnACycle(t *testing.T) {
     }
 }
 
-/* @info a longer cycle, A→B→C→A, closes the same way */
 func TestRoleHierarchy_ExpandRolesTerminatesOnALongerCycle(t *testing.T) {
     hierarchy := NewRoleHierarchy(
         map[string][]string{
@@ -78,7 +76,6 @@ func TestRoleHierarchy_ExpandRolesTerminatesOnALongerCycle(t *testing.T) {
     }
 }
 
-/* @info the empty role is dropped on both sides of the walk — in the roles handed in and in the roles inherited — so it can never become an entry that hasRole would match */
 func TestRoleHierarchy_ExpandRolesDropsEmptyRoles(t *testing.T) {
     hierarchy := NewRoleHierarchy(
         map[string][]string{
@@ -93,7 +90,6 @@ func TestRoleHierarchy_ExpandRolesDropsEmptyRoles(t *testing.T) {
     }
 }
 
-/* @info a repeated role handed in is expanded once */
 func TestRoleHierarchy_ExpandRolesDeduplicatesTheInput(t *testing.T) {
     hierarchy := NewRoleHierarchy(nil)
 
@@ -104,7 +100,6 @@ func TestRoleHierarchy_ExpandRolesDeduplicatesTheInput(t *testing.T) {
     }
 }
 
-/* @info a role with no inheritance entry passes through untouched, and an absent role list expands to nothing */
 func TestRoleHierarchy_ExpandRolesWithoutAnyInheritance(t *testing.T) {
     hierarchy := NewRoleHierarchy(nil)
 
@@ -119,7 +114,6 @@ func TestRoleHierarchy_ExpandRolesWithoutAnyInheritance(t *testing.T) {
     }
 }
 
-/* @info the hierarchy owns its map: a caller that edits the map it passed in, or the slice inside it, must not be able to grant itself a role after construction */
 func TestNewRoleHierarchy_CopiesTheCallersMap(t *testing.T) {
     inheritedRolesByRole := map[string][]string{
         "ROLE_ADMIN": {"ROLE_USER"},

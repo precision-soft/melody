@@ -326,8 +326,6 @@ func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
     }
 }
 
-/* @info the three redirect constructors were never entered by a test. A redirect is the one response whose whole content is a header, so a Location that never reached the header map would answer a bare 302 with nothing to follow — a client sits on a blank page and the log shows a successful redirect. */
-
 func TestRedirectResponse_CarriesTheLocationAndTheStatus(t *testing.T) {
     response := RedirectResponse("/dashboard", nethttp.StatusSeeOther)
 
@@ -340,8 +338,6 @@ func TestRedirectResponse_CarriesTheLocationAndTheStatus(t *testing.T) {
     }
 }
 
-/* @info a zero status is read as "no status was chosen" and becomes 302, which is the only sane default: writing a literal zero to the wire is not a status at all, and net/http would answer it as an error the handler never sees. */
-
 func TestRedirectResponse_ZeroStatusBecomesFound(t *testing.T) {
     response := RedirectResponse("/dashboard", 0)
 
@@ -353,8 +349,6 @@ func TestRedirectResponse_ZeroStatusBecomesFound(t *testing.T) {
         t.Fatalf("unexpected location: %q", response.Headers().Get("Location"))
     }
 }
-
-/* @info the two shorthands name different statuses on purpose: 302 is a redirect a client repeats next time and 301 is one it caches forever, so crossing them makes a temporary maintenance redirect permanent in every browser that saw it. */
 
 func TestRedirectShorthands_NameDifferentStatuses(t *testing.T) {
     found := RedirectFound("/dashboard")

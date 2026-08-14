@@ -42,7 +42,6 @@ func (instance *Regex) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        /* @important fail closed on a type the pattern can never run against: a regex declared on a []byte or interface field silently enforced nothing, while the numeric constraints refuse the types they cannot interpret */
         return NewValidationError(field, "value must be a string", ConstraintRegexErrorMismatch, nil)
     }
 
@@ -89,7 +88,7 @@ func (instance *Regex) WithParams(params map[string]string) (validationcontract.
         )
     }
 
-    /* @important the empty pattern compiles to a regular expression that matches every string, so a tag such as regex= would silently enforce nothing; a pattern that is genuinely meant to match everything can say so explicitly */
+    /* the empty pattern compiles to a regular expression that matches every string, so it is refused rather than armed; a pattern meant to match everything says so explicitly */
     if "" == patternString {
         return nil, exception.NewError(
             "regex constraint requires a non-empty pattern",

@@ -9,7 +9,6 @@ import (
     "testing"
 )
 
-/* @info Close nils the body, so Body handed back a nil reader and the ordinary consumption shape — io.Copy(destination, streamResponse.Body()) — dereferenced it and took the process down. The whole point of Close on a stream is that a watchdog may call it while the consumer is deciding to read. */
 func TestStreamResponse_BodyAfterCloseReadsAsAFailureNotAsNil(t *testing.T) {
     streamResponse := NewStreamResponse(200, http.Header{}, io.NopCloser(strings.NewReader("payload")))
 
@@ -35,7 +34,6 @@ func TestStreamResponse_BodyAfterCloseReadsAsAFailureNotAsNil(t *testing.T) {
     }
 }
 
-/* @info A stream response built with no body at all answers the same way, rather than handing back a nil reader. */
 func TestStreamResponse_BodyOfAnEmptyStreamIsNotNil(t *testing.T) {
     streamResponse := NewStreamResponse(204, http.Header{}, nil)
 
@@ -48,7 +46,6 @@ func TestStreamResponse_BodyOfAnEmptyStreamIsNotNil(t *testing.T) {
     }
 }
 
-/* @info aborting an indefinite stream from a watchdog goroutine must not race the consumer nor SIGSEGV it. */
 func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
     for iteration := 0; iteration < 200; iteration++ {
         streamResponse := NewStreamResponse(200, http.Header{}, io.NopCloser(strings.NewReader("payload")))
@@ -78,7 +75,6 @@ func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
     }
 }
 
-/* @info the streaming response's header accessor had never been executed, and it is the only way a caller of the streaming API reads a content type or a content length before deciding whether to consume the body at all — a stream is precisely the case where reading the body to find out is too late. */
 func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
     receivedRequests := 0
 

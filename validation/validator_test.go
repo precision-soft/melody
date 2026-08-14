@@ -577,7 +577,6 @@ func TestValidator_ParamsOnNonParameterizableConstraintFailClosed(t *testing.T) 
     validatorInstance := NewValidator()
     validatorInstance.RegisterConstraint("rigid", &rigidConstraint{})
 
-    /* @important a parameterized constraint given parameters without its recognized key must be rejected as invalid rather than validated with the registered singleton (which would fail open) */
     err := validatorInstance.Validate(payloadWithRigidParams{Code: "anything"})
     validationErrors := requireValidationErrors(t, err)
 
@@ -626,7 +625,6 @@ func findValidationErrorByField(validationErrors ValidationErrors, field string)
     return nil
 }
 
-/* @info validate tags declared on nested struct fields and on slice-of-struct elements are enforced, with a path identifying the offending nested field. */
 func TestValidator_EnforcesNestedConstraints(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -647,7 +645,6 @@ func TestValidator_EnforcesNestedConstraints(t *testing.T) {
     }
 }
 
-/* @info a fully valid nested payload still passes so the cascade adds no false rejections. */
 func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -660,7 +657,6 @@ func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
     requireNoValidationErrors(t, err)
 }
 
-/* @info a self-referential value must not hang or overflow the stack during the recursive cascade. */
 func TestValidator_CyclicPayloadTerminates(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -671,7 +667,6 @@ func TestValidator_CyclicPayloadTerminates(t *testing.T) {
     requireNoValidationErrors(t, err)
 }
 
-/* @info a field encoding/json never populates must not be validated: its permanent zero value would fail the tag on every request, while the openapi mirror rightly omits the field from the schema — the whole endpoint would advertise one contract and reject another */
 func TestValidateStruct_SkipsAFieldJsonNeverPopulates(t *testing.T) {
     type payload struct {
         Internal string `json:"-" validate:"notBlank"`
@@ -695,7 +690,6 @@ type shadowingPayload struct {
     UpdatedBy string `json:"updatedBy"`
 }
 
-/* @info the outer field shadows the promoted one under encoding/json's dominance, so the payload can never populate the embed's field; validating its permanent zero value rejected every request while the schema mirror documented only the winner */
 func TestValidateStruct_SkipsAPromotedFieldShadowedByTheOuterOne(t *testing.T) {
     validator := NewValidator()
 
@@ -718,7 +712,6 @@ type ambiguousPayload struct {
     ambiguousRight
 }
 
-/* @info two promoted fields claiming one name at equal depth are the ambiguity encoding/json drops — no field is populated, so none is validated */
 func TestValidateStruct_DropsAnAmbiguousPromotedName(t *testing.T) {
     validator := NewValidator()
 
@@ -741,7 +734,6 @@ type taggedWinsPayload struct {
     untaggedTwin
 }
 
-/* @info at equal depth a single explicitly json-named field beats the untagged one, so only the tagged twin's tag runs — against the value the payload actually lands in */
 func TestValidateStruct_TaggedPromotedFieldBeatsTheUntaggedTwin(t *testing.T) {
     validator := NewValidator()
 
@@ -807,7 +799,6 @@ func TestValidateStruct_AStackedDiamondKeepsThePopulatedNameValidated(t *testing
     t.Fatalf("expected the diamond-promoted CreatedBy to be validated, got %v", validationErrors)
 }
 
-/* @info encoding/json populates the exported fields promoted through an unexported embed, so their tags run — the walk must include what a payload reaches */
 func TestValidateStruct_ValidatesFieldsPromotedThroughAnUnexportedEmbed(t *testing.T) {
     validator := NewValidator()
 
@@ -881,7 +872,6 @@ type taggedEmbedPayload struct {
     Title       string `json:"title"`
 }
 
-/* @info a constraint declared on the embed itself runs against the embed value: the promoted fields are payload-populated, so the tag is satisfiable and must not vanish with the flattening */
 func TestValidateStruct_AppliesTheTagDeclaredOnAPromotedEmbed(t *testing.T) {
     validator := NewValidator()
 
@@ -895,7 +885,6 @@ type payloadWithPaddedSkipTag struct {
     Anything string `validate:" - "`
 }
 
-/* @info a padded " - " is the skip marker, not an unknown rule that would reject every value */
 func TestValidator_PaddedDashSkipsValidation(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -907,7 +896,6 @@ type payloadWithValueLessGreaterThan struct {
     Count int `json:"count" validate:"greaterThan"`
 }
 
-/* @info a value-less parameterized rule fails closed on every value: the registered singleton is a template for WithParams, and falling back to it enforced a configuration the tag never declared — a bare lessThan meant "less than 0" */
 func TestValidator_ValueLessParameterizedRuleFailsClosed(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -1792,7 +1780,6 @@ type sharedPointerBatch struct {
     Secondary *sharedPointerItem `json:"secondary"`
 }
 
-/* @info the visited set is path-scoped: a shared, non-cyclic pointer is walked under every path that reaches it, so the same invalid value reported under primary is reported under secondary too — a whole-call set validated it once and silently skipped the second subtree */
 func TestValidator_SharedPointerIsValidatedUnderEveryPath(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -1826,7 +1813,6 @@ type typedNilErrorPayload struct {
     Value string `json:"value" validate:"typedNilError"`
 }
 
-/* @info a custom constraint written with a concrete error variable returns a typed nil on its success path; a plain nil comparison saw a non-nil interface and dereferenced it, panicking inside Validate on the request path */
 func TestValidator_TypedNilConstraintErrorIsSuccess(t *testing.T) {
     validatorInstance := NewValidator()
     validatorInstance.RegisterConstraint("typedNilError", &typedNilErrorConstraint{})
@@ -1834,7 +1820,7 @@ func TestValidator_TypedNilConstraintErrorIsSuccess(t *testing.T) {
     requireNoValidationErrors(t, validatorInstance.Validate(typedNilErrorPayload{Value: "anything"}))
 }
 
-/* @info the registry is append-only today, so the missing-name read is unreachable through Validate; the guard keeps a future removal path from handing constraint.Validate a nil interface, and this pins it at the only level it is observable */
+/* the registry is append-only, so the missing-name read is unreachable through Validate: the guard is latent and this pins it at the only level it is observable. */
 func TestValidator_CreateConstraintWithParamsRefusesUnregisteredName(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -1853,7 +1839,6 @@ type refusalCausePayload struct {
     Name string `json:"name" validate:"min(value=abc)"`
 }
 
-/* @info the constraint's own refusal reason travels into the error context: without it a rejected parameter value, a malformed tag and a constraint that takes no parameters all collapsed into one generic code with no way to tell them apart */
 func TestValidator_ParameterRefusalCauseReachesTheErrorContext(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -1892,7 +1877,7 @@ func (instance *settlementProbeCodec) UnmarshalJSON(data []byte) error {
     return nil
 }
 
-/* @info the codec memo settles on ONE verdict per type: the probe runs application code whose answer is not guaranteed stable, and with a plain Store the goroutine finishing LAST froze its verdict — here the first probe is held open, computes the opposite answer, and must still adopt the verdict the second probe already published */
+/* the first probe is held open and computes the opposite answer, so the ordering is constructed rather than awaited. */
 func TestValidator_TimeCodecVerdictSettlesOnTheFirstStored(t *testing.T) {
     structType := reflect.TypeOf(settlementProbeCodec{})
 
@@ -1929,7 +1914,6 @@ func TestValidator_TimeCodecVerdictSettlesOnTheFirstStored(t *testing.T) {
     }
 }
 
-/* @info the three refusals at the door of the constraint registry. Only the duplicate refusal had a test, and these three are what keep a registry from being populated with something no tag can ever name: an empty name, a name whose padding makes the lookup miss for every tag that spells it without padding — the tag parser trims, the registry does not — and an instance that is nil through its interface, which would pass a plain comparison and panic on the first value routed to it, on the request path. A registration is boot code, so refusing loudly here is the whole design. */
 func TestValidator_RegisterConstraintRefusesTheThreeShapesNoTagCanEverName(t *testing.T) {
     for _, testCase := range []struct {
         name            string
@@ -1982,7 +1966,6 @@ func TestValidator_RegisterConstraintRefusesTheThreeShapesNoTagCanEverName(t *te
     }
 }
 
-/* @info a decoder that panics on the probe counts as accepting the object body, which is the direction that keeps the constraints on the struct enforced. The opposite reading would let any type crash its own decoder into silently skipping every rule declared on it — the one outcome a validator must never produce from a failure it cannot explain. */
 func TestRefusesValidationObjectBody_APanickingDecoderCountsAsAccepting(t *testing.T) {
     if true == refusesValidationObjectBody(reflect.TypeOf(panickingDecodeTarget{})) {
         t.Fatalf("expected a panicking decoder to count as accepting the object body")
@@ -2006,7 +1989,6 @@ func (instance *panickingDecodeTarget) UnmarshalJSON(payload []byte) error {
     panic("decoder exploded")
 }
 
-/* @info a byte slice is a scalar payload, not a sequence of validatable elements, so the walk stops at it instead of descending into every byte with a path of its own. Without the cut a modest uploaded blob would produce one walk step per byte and a path string per step. */
 func TestValidator_AByteSliceIsAScalarPayloadRatherThanASequence(t *testing.T) {
     validator := NewValidator()
 
@@ -2052,7 +2034,6 @@ func validationErrorsFrom(t *testing.T, validateErr error) ValidationErrors {
     return errors
 }
 
-/* @info the json name a field is validated under follows encoding/json's own reading of the tag, and the shapes that mean "no name here" have to keep the Go field name: a tag that is only options (",omitempty") names nothing, and a tag of "-" removes the field from the wire entirely. A validator that read ",omitempty" as an empty name would report failures under a field called "" for every optional field on every payload. */
 func TestValidator_TheFieldNameFollowsEncodingJsonsOwnReadingOfTheTag(t *testing.T) {
     validator := NewValidator()
 
@@ -2080,7 +2061,6 @@ func TestValidator_TheFieldNameFollowsEncodingJsonsOwnReadingOfTheTag(t *testing
     }
 }
 
-/* @info an embed carrying an explicit json name is an object of its own on the wire, not a set of promoted fields, so its members are validated under a nested path rather than at the top level — and an embed marked "-" is not on the wire at all. Reading either as a promotion would report a nested failure under a top-level name the payload never carried. */
 func TestValidator_AnEmbedWithAJsonNameIsAnObjectRatherThanAPromotion(t *testing.T) {
     validator := NewValidator()
 
@@ -2125,7 +2105,6 @@ type nestedEmbedTagPayload struct {
     Inner nestedEmbedTagHolder `json:"inner"`
 }
 
-/* @info an embed's own tag reports under the parent's path: the embed has no json name of its own, so the error points at it by field name below the path that reached it — without the prefix a nested failure claimed a top-level member the payload does not even spell */
 func TestValidateStruct_AnEmbedsOwnTagReportsUnderTheParentsPath(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -2144,7 +2123,7 @@ type dashExcludedEmbedPayload struct {
     DashExcludedEmbedCore `json:"-"`
 }
 
-/* @info a `json:"-"` embed is dropped exactly as encoding/json drops it: it neither flattens its fields onto the parent nor becomes a named object, so no payload can populate what it carries and none of its constraints may run — enforcing them would validate permanent zero values and reject every request. This test is not the proof of the dash guard in isPromotedValidationEmbed: for the exact "-" tag the split check below it answers the same false, so a dead-branch mutation there survives by shadowing; the guard is proved on verdict by inversion, which stops flattening every plain embed and dies against the promotion tests. */
+/* this test is not the proof of the dash guard in isPromotedValidationEmbed: for the exact "-" tag the split check below it answers the same false, so the guard is shadowed there and is proved instead on verdict, by an inversion that stops flattening every plain embed. */
 func TestIsPromotedValidationEmbed_ADashTaggedEmbedIsNeitherFlattenedNorNamed(t *testing.T) {
     encoded, marshalErr := json.Marshal(dashExcludedEmbedPayload{})
     if nil != marshalErr {
@@ -2186,7 +2165,6 @@ type tiedTimeHostPayload struct {
     Name string `json:"name" validate:"notBlank"`
 }
 
-/* @info two time-origin codecs tied at equal depth inside the carrier cancel each other in the origin walk, so the carrier resolves to itself and the host's promoted codec is the carrier's own, not time.Time's — the host is walked and its constraints stay enforced. Without the tie count a single deeper time origin would win the walk and, the carrier's decoder refusing an object body, the host would read as a promoted time codec and skip every sibling constraint. */
 func TestValidateStruct_ANestedCodecTieResolvesToTheCarrierAndKeepsItsSiblingsValidated(t *testing.T) {
     origin, depth, resolved := promotedValidationMarshalerOrigin(reflect.TypeOf(tiedTimeCarrier{}), map[reflect.Type]bool{})
     if false == resolved || 0 != depth || reflect.TypeOf(tiedTimeCarrier{}) != origin {
@@ -2209,7 +2187,6 @@ type walkedPointerEmbedPayload struct {
     *WalkedPointerEmbedCore
 }
 
-/* @info a non-nil pointer embed is walked through its pointee: the promoted fields a payload populates live behind the pointer, so the dereference is what keeps their constraints enforced — only the nil pointer stands in for "nothing was supplied" and validates the zero embed instead */
 func TestValidator_ANonNilPointerEmbedIsWalkedThroughItsValue(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -2230,7 +2207,6 @@ func (instance *typedNilWithParamsConstraint) WithParams(params map[string]strin
     return (*typedNilWithParamsConstraint)(nil), nil
 }
 
-/* @info a WithParams that returns a typed-nil constraint with a nil error is userland output crossing back into the validator, so it is normalized like every other third-party boundary: accepted, the nil would pass a plain comparison and panic on the first value routed to it, on the request path */
 func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *testing.T) {
     validatorInstance := NewValidator()
     validatorInstance.RegisterConstraint("typedNilFromParams", &typedNilWithParamsConstraint{})

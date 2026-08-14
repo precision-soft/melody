@@ -185,14 +185,14 @@ func TestParseValidationTag_ParenthesizedRegexWithCommaInsideGroup(t *testing.T)
     }
 }
 
-/* @info A ']' outside a character class is a literal in RE2, so a regex constraint containing one is a valid pattern; rejecting the tag made the field un-validatable on every request. */
+/* a ']' outside a character class is a literal in RE2, so a pattern carrying one is valid. */
 func TestParseValidationTag_RegexWithLiteralClosingBracketIsAccepted(t *testing.T) {
     if _, err := parseValidationTag(`regex(pattern=^a]b$)`); nil != err {
         t.Fatalf("expected a regex with a literal ']' to parse, got: %v", err)
     }
 }
 
-/* @info A POSIX named class ([[:alpha:]]) carries its own ']' inside the bracket expression; treating that inner ']' as the class close split a valid RE2 pattern at an in-class comma and made the field reject every value. */
+/* a POSIX named class ([[:alpha:]]) carries its own ']' inside the bracket expression, and that inner ']' is not the class close. */
 func TestSplitByTopLevelComma_PosixNamedClassKeepsInClassComma(t *testing.T) {
     parts := splitByTopLevelComma("regex=[[:alpha:],]")
     if 1 != len(parts) {
@@ -250,7 +250,6 @@ func TestParseValidationTag_MemoizesTheSyntaxError(t *testing.T) {
     }
 }
 
-/* @info a bound is an integer in its entirety or it is refused: a leading-integer parse turned lessThan=-0.5 into a bound of 0 — accepting -0.2, which the tag as written refuses — and 1e3 into a bound of 1 */
 func TestParseIntStrict_RefusesTrailingGarbage(t *testing.T) {
     for _, valueString := range []string{"99.5", "-0.5", "1e3", "5abc", "0x10", "1_000", "", " 5"} {
         if _, ok := parseIntStrict(valueString); true == ok {
@@ -270,7 +269,6 @@ func TestParseIntStrict_RefusesTrailingGarbage(t *testing.T) {
     }
 }
 
-/* @info a tag that survives the empty/skip-marker guard but parses to no rule at all is malformed, not a request to validate nothing: accepting it left a field that visibly declares validation silently unenforced */
 func TestParseValidationTag_RefusesATagWithZeroRules(t *testing.T) {
     for _, tag := range []string{",", " , ", ",,"} {
         rules, err := parseValidationTag(tag)
@@ -286,7 +284,6 @@ func pointerOf(value string) *string {
     return &value
 }
 
-/* @info every shape the tag grammar refuses, entered by name. They were reachable only as a group before — one generic "invalid validation tag syntax" covers all of them and the memo caches it — so a refusal that stopped firing for one spelling would leave that spelling silently parsing to something, and the field it decorates would be validated by a rule nobody wrote. Each case here is a plausible typo, not a synthetic string: a missing rule name before the parentheses, a doubled comma between parameters, a parameter given without a value, a parameter with no name, an equals sign with nothing before it, and a whole tag that comes to no rule at all. */
 func TestParseValidationTag_EveryShapeTheGrammarRefuses(t *testing.T) {
     for _, refusedTag := range []string{
         "(1,2)",
@@ -307,7 +304,6 @@ func TestParseValidationTag_EveryShapeTheGrammarRefuses(t *testing.T) {
     }
 }
 
-/* @info a doubled comma between parameters is skipped rather than refused — it is whitespace in the parameter list, not a missing parameter — while a doubled comma between RULES comes to a part with no name and is skipped too. The two live in different loops and neither had a test; a refusal in either place would reject tags that read perfectly well. */
 func TestParseValidationTag_ADoubledCommaIsSkippedRatherThanRefused(t *testing.T) {
     rules, parseErr := parseValidationTagUncached("between(min=1,,max=9)")
     if nil != parseErr {
@@ -336,7 +332,6 @@ func TestParseValidationTag_ADoubledCommaIsSkippedRatherThanRefused(t *testing.T
     }
 }
 
-/* @info an unbalanced closing brace is refused the way an unbalanced closing parenthesis is. Only the parenthesis half was pinned, and the two counters are separate — a quantifier brace that stopped being counted would let a truncated regex through, where it compiles to something that matches more than the author wrote. */
 func TestHasBalancedBrackets_AnUnbalancedClosingBraceIsRefusedToo(t *testing.T) {
     if true == hasBalancedBrackets("a}b") {
         t.Fatalf("expected a stray closing brace to be refused")
@@ -355,7 +350,6 @@ func TestHasBalancedBrackets_AnUnbalancedClosingBraceIsRefusedToo(t *testing.T) 
     }
 }
 
-/* @info a quoted parameter value keeps its commas, and both quote characters do it. Only one of them was exercised, through a case that also sat inside a character class — so the plain quoted-value path, which is what a caller writes to put a comma inside a message or a pattern, had no test of its own on either quote. */
 func TestSplitByCommaOutsideRegexMeta_BothQuoteCharactersHoldACommaTogether(t *testing.T) {
     doubleQuoted := splitByCommaOutsideRegexMeta(`message="one, two",max=5`)
     if 2 != len(doubleQuoted) {
@@ -382,7 +376,6 @@ func TestSplitByCommaOutsideRegexMeta_BothQuoteCharactersHoldACommaTogether(t *t
     }
 }
 
-/* @info an escape inside a character class marks the class as having content, which is what keeps the caret from being read as a negation marker and the bracket that follows from being read as a close. Without it a pattern like [\]] — a class whose only member is an escaped bracket — would be split in the middle and the rule after it lost. */
 func TestSplitByCommaOutsideRegexMeta_AnEscapeInsideACharacterClassCountsAsContent(t *testing.T) {
     parts := splitByCommaOutsideRegexMeta(`regex=[\],]+,max=5`)
     if 2 != len(parts) {

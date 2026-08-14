@@ -10,7 +10,7 @@ import (
     "github.com/precision-soft/melody/runtime"
 )
 
-/* @info a factory handing back a typed nil is refused by the container itself with an error, and the resolver answers nil with the failure recorded — the pin covers the whole path; the resolver's own typed-nil branch stays as latent defense for a resolution path without the container's refusal */
+/* the container itself refuses a factory handing back a typed nil, so the resolver's own typed-nil branch is LATENT: this pins the whole path, not that branch. */
 func TestLoggerFromRuntime_RefusesATypedNilLogger(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -33,7 +33,6 @@ func TestLoggerFromRuntime_RefusesATypedNilLogger(t *testing.T) {
     }
 }
 
-/* @info the two resolver-shaped doors are what a scoped service actually calls — the container and runtime doors above them are the boot-time pair — and neither had ever been entered. Both must find the logger under the one service name the whole framework agrees on */
 func TestLoggerFromResolverDoors_FindTheRegisteredLogger(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -63,7 +62,6 @@ func TestLoggerFromResolverDoors_FindTheRegisteredLogger(t *testing.T) {
     }
 }
 
-/* @info the soft door reports the failure it cannot serve instead of answering an error the caller drops: a container with no logger registered is a boot mistake, and the error is the only thing that says so */
 func TestLoggerFromResolver_WithoutARegisteredLogger_ReportsTheFailure(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -78,7 +76,6 @@ func TestLoggerFromResolver_WithoutARegisteredLogger_ReportsTheFailure(t *testin
     }
 }
 
-/* @info the must-door is the one a resolution failure must not pass silently: it panics where the caller's assumption breaks instead of handing back a nil that dereferences one frame later */
 func TestLoggerMustFromResolver_WithoutARegisteredLogger_Panics(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -91,7 +88,6 @@ func TestLoggerMustFromResolver_WithoutARegisteredLogger_Panics(t *testing.T) {
     _ = LoggerMustFromResolver(serviceContainer)
 }
 
-/* @info the soft runtime door answers nil for a resolution that failed with an error, and the failure leaves an emergency record: the caller's own nil check then skips its own record, so without this one the failure would vanish twice */
 func TestLoggerFromRuntime_ResolutionError_AnswersNil(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -102,7 +98,6 @@ func TestLoggerFromRuntime_ResolutionError_AnswersNil(t *testing.T) {
     }
 }
 
-/* @info the runtime doors read the same service name as the resolver doors; a divergence between the two would leave half the framework logging into a logger nothing else can find */
 func TestLoggerFromRuntime_FindsTheRegisteredLogger(t *testing.T) {
     serviceContainer := container.NewContainer()
 

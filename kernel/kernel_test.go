@@ -105,8 +105,6 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
     }
 }
 
-/* @info the two accessors nothing had entered are the ones that hand out what the kernel BUILT rather than what it was given: the http kernel it constructed around the router, and the clock every timestamp in the process reads. A kernel reporting a clock other than the one it was built with would give the scheduler and the request log two different notions of now. */
-
 func TestKernel_ReportsTheHttpKernelItBuiltAndTheClockItWasGiven(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     httpRouter := http.NewRouterWithRouteRegistry(http.NewRouteRegistry())
@@ -132,8 +130,6 @@ func TestKernel_ReportsTheHttpKernelItBuiltAndTheClockItWasGiven(t *testing.T) {
         t.Fatalf("expected the http kernel to be built once and reported, not rebuilt per call")
     }
 }
-
-/* @info each of the five constructor arguments is required and refuses the boot by name. A kernel assembled with any of them missing would fail on the request path instead — the router on the first request, the clock on the first timestamp — where the diagnostic names a nil dereference rather than the wiring that omitted it. */
 
 func TestNewKernel_RefusesEachMissingDependencyByName(t *testing.T) {
     clockInstance := clock.NewSystemClock()

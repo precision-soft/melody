@@ -56,7 +56,6 @@ func (instance *rolelessTestToken) UserIdentifier() string { return "u1" }
 func (instance *rolelessTestToken) Roles() []string        { return nil }
 func (instance *rolelessTestToken) IsAuthenticated() bool  { return true }
 
-/* @info the wrapper copies the roles it forwards, so a caller editing the slice it read cannot reach the wrapped token */
 func TestToken_RolesAnswersACopy(t *testing.T) {
     token := NewToken(NewAuthenticatedToken("u1", []string{"ROLE_USER"}))
 
@@ -76,7 +75,6 @@ func TestToken_RolesKeepsANilRoleListNil(t *testing.T) {
     }
 }
 
-/* @info a typed-nil token slipped past the plain nil comparison and became the wrapped user, so every accessor on the wrapper dereferenced it on the request path instead of the mistake being refused here */
 func TestNewToken_TypedNilPanics(t *testing.T) {
     var typedNilToken *AuthenticatedToken
 

@@ -17,7 +17,6 @@ func (instance *countingCloser) Close() error {
     return nil
 }
 
-/* @info A body that ends exactly at the cap is not over it; the buffered path proves the same boundary by reading one byte past, which a stream cannot do without handing the caller bytes it may never want. */
 func TestLimitedStreamBody_ABodyEndingAtTheCapIsDelivered(t *testing.T) {
     body := newLimitedStreamBody(io.NopCloser(strings.NewReader("0123456789")), 10, "GET", "https://host/path")
 
@@ -30,7 +29,6 @@ func TestLimitedStreamBody_ABodyEndingAtTheCapIsDelivered(t *testing.T) {
     }
 }
 
-/* @info One byte past the cap fails, and the caller never receives that byte. */
 func TestLimitedStreamBody_ABodyPastTheCapFails(t *testing.T) {
     body := newLimitedStreamBody(io.NopCloser(strings.NewReader("0123456789X")), 10, "GET", "https://host/path")
 
@@ -46,7 +44,6 @@ func TestLimitedStreamBody_ABodyPastTheCapFails(t *testing.T) {
     }
 }
 
-/* @info A read larger than what is left of the allowance is clamped rather than overrun. */
 func TestLimitedStreamBody_ReadIsClampedToTheRemainingAllowance(t *testing.T) {
     body := newLimitedStreamBody(io.NopCloser(strings.NewReader("0123456789X")), 4, "GET", "https://host/path")
 
@@ -61,7 +58,6 @@ func TestLimitedStreamBody_ReadIsClampedToTheRemainingAllowance(t *testing.T) {
     }
 }
 
-/* @info Closing the wrapper closes the body it wraps, which is the connection the caller owns. */
 func TestLimitedStreamBody_CloseReachesTheWrappedBody(t *testing.T) {
     wrapped := &countingCloser{Reader: strings.NewReader("payload")}
 
@@ -103,7 +99,6 @@ func (instance *silentReader) Close() error {
     return nil
 }
 
-/* @info once the allowance is spent the wrapper probes the body for one more byte to tell a stream that ended at the cap from one that runs past it — and a reader answering that probe with neither a byte nor an error has said nothing about either. Treating that silence as the end would deliver a truncated stream as complete; treating it as an overrun would refuse a body that is merely slow. The cap stays unspent and the read is retried, which is the subtlest branch in the file and the one nothing had entered. */
 func TestLimitedStreamBody_AProbeThatReturnsNothingDoesNotDecideTheStream(t *testing.T) {
     reader := &silentReader{tail: "x"}
 

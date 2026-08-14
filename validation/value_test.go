@@ -30,7 +30,6 @@ func TestDereferenceValue_PointerToNamedStringNormalizes(t *testing.T) {
     }
 }
 
-/* @info the dereference answers "nothing here" for an absent value rather than handing back a nil the callers would go on to type-assert. Every constraint that reads a value goes through it, and its own nil exit had no direct test — the constraints guard against nil themselves first, so this one is entered only by callers that do not. */
 func TestDereferenceValue_AnAbsentValueResolvesToNothing(t *testing.T) {
     resolved, ok := dereferenceValue(nil)
     if true == ok || nil != resolved {
@@ -50,7 +49,6 @@ func TestDereferenceValue_AnAbsentValueResolvesToNothing(t *testing.T) {
     }
 }
 
-/* @info the walk goes through however many pointer and interface layers stand between the caller and the value. A bound version — one Elem and out — would hand a constraint a pointer to assert a string on, which fails the assertion and, since the type refusal fails closed, refuses a perfectly good value. */
 func TestDereferenceValue_WalksThroughStackedPointerAndInterfaceLayers(t *testing.T) {
     plain := "abc"
     onePointer := &plain

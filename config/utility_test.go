@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info the default answers only absence: a parameter that exists but does not parse panics instead of silently becoming a number nobody wrote */
 func TestIntWithDefault_DefaultOnlyOnAbsence(t *testing.T) {
     if 10 != IntWithDefault(nil, 10) {
         t.Fatalf("expected the default for a nil parameter")

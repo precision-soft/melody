@@ -15,7 +15,6 @@ func TestHttpException_DefaultMessageWhenEmpty(t *testing.T) {
     }
 }
 
-/* @info net/http's WriteHeader panics below 100 and above 999 deep in the response path, and a status the writer clamps to 200 serves an exception as success; the refusal names the mistake where it is made */
 func TestNewHttpException_StatusOutOfRange_Panics(t *testing.T) {
     for _, statusCode := range []int{0, 42, 99, 600, 999} {
         assertPanicsWithEmergency(t, "http status code out of range", func() {
@@ -36,7 +35,6 @@ func TestNewHttpException_AcceptsTheRangeBoundaries(t *testing.T) {
     }
 }
 
-/* @info every named constructor carries two decisions no test entered: the status it stands for, and the message it substitutes for an empty one. A wrong constant here answers the client with a status the handler never meant, and a default that drifts from the name leaves an exception describing something else */
 func TestNamedHttpExceptionConstructors_CarryTheirStatusAndDefaultMessage(t *testing.T) {
     constructorList := []struct {
         name            string
@@ -86,7 +84,6 @@ func TestNamedHttpExceptionConstructors_CarryTheirStatusAndDefaultMessage(t *tes
     }
 }
 
-/* @info the seventeen named constructors must not collapse onto one status: a copy-paste that leaves two of them on the same code answers one refusal with another's meaning, and the per-constructor assertions above pass unchanged as long as the wrong constant is spelled in both places */
 func TestNamedHttpExceptionConstructors_DoNotShareAStatus(t *testing.T) {
     seenStatusCodeList := map[int]string{}
 

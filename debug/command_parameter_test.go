@@ -12,7 +12,6 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
 )
 
-/* @info the command exists to tell an operator whether a parameter carries a value, so redaction has to keep that answer while withholding the credential itself */
 func TestRedactedParameterValue_HidesASecretButStillReportsWhetherItIsSet(t *testing.T) {
     cases := []struct {
         name     string
@@ -39,7 +38,6 @@ func TestRedactedParameterValue_HidesASecretButStillReportsWhetherItIsSet(t *tes
     }
 }
 
-/* @info the redaction must not leak the length either: on a short credential it narrows the search meaningfully */
 func TestRedactedParameterValue_DoesNotLeakTheSecretOrItsLength(t *testing.T) {
     secretValue := "P4ssPhrase"
 
@@ -360,7 +358,6 @@ func TestParameterCommand_KeepsRedactingASecretInsideTheWindow(t *testing.T) {
     }
 }
 
-/* @info a nil value carries nothing: fmt renders it as a non-empty placeholder, which the mask then reported as a value being present — the opposite of the one answer the column exists to give */
 func TestRedactedParameterValue_ReportsANilSecretAsEmpty(t *testing.T) {
     if redactedEmptyPlaceholder != redactedParameterValue(nil, true) {
         t.Fatalf("expected the empty placeholder for a nil secret")

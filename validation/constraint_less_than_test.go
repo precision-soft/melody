@@ -156,7 +156,6 @@ func TestLessThan_RejectsNaN(t *testing.T) {
     }
 }
 
-/* @info the upper-bound parameter is refused when it is not an integer in its entirety. The missing-parameter half was pinned and this one was not, though it is the half a typo actually produces: "lessThan=10a" and "lessThan=1e3" both used to parse to a bound nobody wrote, and after the strict parse they have to be refused by name rather than silently becoming 10 and 1. */
 func TestLessThan_RefusesAParameterThatIsNotAnIntegerInItsEntirety(t *testing.T) {
     constraint := NewLessThan(0)
 

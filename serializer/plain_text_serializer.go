@@ -21,7 +21,7 @@ func (instance *PlainTextSerializer) Serialize(value any) ([]byte, error) {
     case string:
         return []byte(typedValue), nil
     case []byte:
-        /* @important the serialized payload is a copy, not the caller's backing array: the string and default branches both allocate, and a caller returning a pooled buffer to its pool after Serialize would otherwise overwrite the bytes it believes it snapshotted */
+        /* the serialized payload is a copy, not the caller's backing array: the string and default branches both allocate, and a caller returning a pooled buffer to its pool after Serialize would otherwise overwrite the bytes it believes it snapshotted */
         copied := make([]byte, len(typedValue))
         copy(copied, typedValue)
 
@@ -32,7 +32,7 @@ func (instance *PlainTextSerializer) Serialize(value any) ([]byte, error) {
 }
 
 func (instance *PlainTextSerializer) Deserialize(payload []byte, target any) error {
-    /* @important a typed-nil pointer target passes the plain comparison, matches its case below and dereferences nil on the assignment — it is refused here with the same error the untyped nil gets, which is how the json serializer answers the identical misuse */
+    /* a typed-nil pointer target passes the plain comparison, matches its case below and dereferences nil on the assignment — it is refused here with the same error the untyped nil gets, which is how the json serializer answers the identical misuse */
     if nil == target || true == internal.IsNilInterface(target) {
         return exception.NewError("deserialize target is nil", nil, nil)
     }
@@ -42,7 +42,7 @@ func (instance *PlainTextSerializer) Deserialize(payload []byte, target any) err
         *typedTarget = string(payload)
         return nil
     case *[]byte:
-        /* @important the deserialized value owns its bytes: storing the payload slice itself would alias the caller's read buffer into the target, where the string case one branch above copies */
+        /* the deserialized value owns its bytes: storing the payload slice itself would alias the caller's read buffer into the target, where the string case one branch above copies */
         copied := make([]byte, len(payload))
         copy(copied, payload)
         *typedTarget = copied

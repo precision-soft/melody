@@ -236,7 +236,6 @@ type nilableContainer struct {
     containercontract.Container
 }
 
-/* @info the guards read through the interface: a typed nil used to pass the plain nil comparison, so every later resolution panicked on the request path instead of the construction failing where it can be named */
 /* typedNilContext is a Context implementation carried as a typed nil, the shape a caller produces by passing an unassigned variable of a concrete context type: it is not equal to nil once it sits in the interface, so a plain comparison lets it through and the first Done() on the request path dereferences it */
 type typedNilContext struct{}
 
@@ -256,7 +255,6 @@ func (instance *typedNilContext) Value(key any) any {
     return nil
 }
 
-/* @info the context is refused where the scope and the container are refused, and for the same reason: every cancellation and every deadline the request path reads goes through it, so a runtime built over a missing one fails on the first read instead of at the construction that can name the mistake */
 func TestNew_RefusesANilAndATypedNilContext(t *testing.T) {
     serviceContainer := container.NewContainer()
 

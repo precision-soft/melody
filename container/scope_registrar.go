@@ -302,5 +302,3 @@ func (instance *scope) scopedProviderByType(canonicalType reflect.Type) (provide
 
     return provider, exists
 }
-
-var _ containercontract.ScopedRegistrar = (*scope)(nil)

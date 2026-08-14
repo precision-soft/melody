@@ -6,7 +6,6 @@ import (
     "time"
 )
 
-/* @info the caller's Go version wins when present, the running binary's answers otherwise: the field used to be silently discarded, the one of the three that was */
 func TestNewMeta_HonoursTheCallerGoVersionAndFallsBackToTheRuntime(t *testing.T) {
     withCaller := NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{Go: "go9.9"})
     if "go9.9" != withCaller.Version.Go {
@@ -19,7 +18,6 @@ func TestNewMeta_HonoursTheCallerGoVersionAndFallsBackToTheRuntime(t *testing.T)
     }
 }
 
-/* @info the arguments are copied on the way in: the meta must not alias a slice the caller keeps mutating */
 func TestNewMeta_CopiesTheArguments(t *testing.T) {
     arguments := []string{"one"}
 

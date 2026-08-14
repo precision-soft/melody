@@ -8,8 +8,6 @@ func newTestFileServerConfig() *FileServerConfig {
     return NewFileServerConfig(ModeFilesystem, "public", "index.html", "", false, 0, false)
 }
 
-/* @info the two list setters decide what the file server refuses without looking at the disk, and each keeps its own copy. A setter that aliased the caller's slice would let a configuration value mutated after the boot rewrite the refusals of a running file server — the ones that keep .env and .git out of the public directory. */
-
 func TestFileServerConfig_SetAllowedDotPrefixListKeepsItsOwnCopy(t *testing.T) {
     config := newTestFileServerConfig()
 
@@ -44,8 +42,6 @@ func TestFileServerConfig_SetExcludedPathListKeepsItsOwnCopy(t *testing.T) {
     }
 }
 
-/* @info an explicit nil is read as "allow no dot prefix at all" rather than left as whatever was there before: a deployment that clears the list means to refuse every dot-prefixed path, and keeping the previous entry would leave one open that the operator believes closed. */
-
 func TestFileServerConfig_SetAllowedDotPrefixListOfNilRefusesEveryDotPrefix(t *testing.T) {
     config := newTestFileServerConfig()
 
@@ -74,8 +70,6 @@ func TestFileServerConfig_SetExcludedPathListOfNilExcludesNothing(t *testing.T) 
         t.Fatalf("expected a cleared exclusion list to exclude nothing")
     }
 }
-
-/* @info the shipped default allows the well-known directory and nothing else — an ACME http-01 challenge and security.txt stay retrievable while .env, .git and .htpasswd do not — and the allowance never reaches past the first path element. */
 
 func TestNewFileServerConfig_AllowsTheWellKnownDirectoryAndNothingElse(t *testing.T) {
     config := newTestFileServerConfig()

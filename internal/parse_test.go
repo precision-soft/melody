@@ -26,7 +26,6 @@ func parseTestCauseMessage(t *testing.T, err error) string {
     return causeErr.Error()
 }
 
-/* @info a bare integer carries no unit and used to be read as nanoseconds — the interpretation almost no caller means — while the same value spelled as a string was refused for missing its unit; both spellings are refused now */
 func TestDuration_RefusesBareInt(t *testing.T) {
     for _, value := range []any{30, int64(30)} {
         _, isSet, err := Duration(value, "probe")
@@ -68,7 +67,6 @@ func TestDuration_RefusesUnparseableString(t *testing.T) {
     }
 }
 
-/* @info strconv.ParseFloat parses "NaN", "Inf" and "Infinity" without an error, and a NaN that slips through disarms every ordered comparison downstream; the typed float branches carry the same refusal */
 func TestFloat64_RefusesNonFinite(t *testing.T) {
     nonFiniteValues := []any{
         "NaN", "nan", "Inf", "+Inf", "-Inf", "Infinity",
@@ -105,7 +103,6 @@ func TestFloat64_AcceptsFiniteShapes(t *testing.T) {
     }
 }
 
-/* @info the three float64 refusals of Int carry three distinct causes — collapsed into one "is not a 'int'" they blamed the type, which the same branch accepts for 2.0 */
 func TestInt_Float64RefusalsAreDistinct(t *testing.T) {
     for _, probe := range []struct {
         value    float64
@@ -148,7 +145,6 @@ func TestInt_AcceptsExactBoundsAndStrings(t *testing.T) {
     }
 }
 
-/* @info a typed-nil map is the absence it reads as: reported present it came back as an empty non-nil map and a caller branching on the presence flag silently lost its default — the strict accessors beside this one already answer absent for nil */
 func TestMapStringString_TypedNilIsAbsent(t *testing.T) {
     var typedNil map[string]string
     value, isSet, err := MapStringString(typedNil, "probe")
@@ -170,7 +166,6 @@ func TestMapStringString_CopiesThePresentMap(t *testing.T) {
     }
 }
 
-/* @info an untyped nil is the absence the strict accessors answer with, and it is the shape a parameter bag hands over for a key it does not hold — reported present it would have reached the type switch and been refused as a wrong type instead */
 func TestMapStringString_UntypedNilIsAbsent(t *testing.T) {
     value, isSet, err := MapStringString(nil, "probe")
     if nil != err || true == isSet || nil != value {
@@ -178,7 +173,6 @@ func TestMapStringString_UntypedNilIsAbsent(t *testing.T) {
     }
 }
 
-/* @info the refusal of a shape Int has no branch for names the type it received: without it an unsupported value would fall out of the switch and be reported as the zero it never was */
 func TestInt_RefusesAnUnsupportedShape(t *testing.T) {
     parsedValue, isSet, err := Int(true, "probe")
     if nil == err {
@@ -192,7 +186,6 @@ func TestInt_RefusesAnUnsupportedShape(t *testing.T) {
     }
 }
 
-/* @info the plain int branch: the widest spelling a Go caller writes by hand, and the one a literal in a configuration map carries */
 func TestInt_AcceptsAPlainInt(t *testing.T) {
     parsedValue, isSet, err := Int(42, "probe")
     if nil != err || false == isSet || 42 != parsedValue {
@@ -200,7 +193,6 @@ func TestInt_AcceptsAPlainInt(t *testing.T) {
     }
 }
 
-/* @info the same refusal on the Bool side — a numeric 1 is not a spelling BoolFromString accepts, and reporting it as false would have armed a disabled feature flag */
 func TestBool_RefusesAnUnsupportedShape(t *testing.T) {
     parsedValue, isSet, err := Bool(1, "probe")
     if nil == err {
@@ -225,8 +217,6 @@ func TestBool_ParsesTheDocumentedSpellings(t *testing.T) {
         t.Fatalf("expected an unknown spelling to be refused")
     }
 }
-
-/* @info until this pin the branches below were entered only by the tests of bag and config, never by this package's own suite: a rewrite of those callers' tests would have left the guards silently unproven, so the suite is made self-sufficient here */
 
 func TestInt_NilIsAbsentAndAnInt64PassesThrough(t *testing.T) {
     _, isSet, err := Int(nil, "probe")

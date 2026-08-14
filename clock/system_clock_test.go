@@ -43,7 +43,7 @@ func TestSystemTickerStopDoesNotPanic(t *testing.T) {
     ticker.Stop()
 }
 
-/* @info the panic is pinned by message: recovered value-blind, the test kept passing with the guard deleted because time.NewTicker panics on the same input three frames deeper — the deletion of the guard the test exists to prove was invisible */
+/* the panic is pinned by MESSAGE: recovered value-blind the guard is SHADOWED, because time.NewTicker panics on the same input three frames deeper */
 func TestSystemClock_NewTicker_PanicsOnInvalidInterval(t *testing.T) {
     clockInstance := NewSystemClock()
 

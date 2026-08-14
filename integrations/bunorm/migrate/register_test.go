@@ -45,7 +45,6 @@ func TestDefaultOptions_Values(t *testing.T) {
     }
 }
 
-/* @info the empty set used to be the answer here; it left the caller believing it had registered the family and finding out at invocation time, as "unknown command". The refusal is deliberate: it names the wiring mistake where it was made */
 func TestRegisterCommands_NilMigrationsIsRefused(t *testing.T) {
     defer func() {
         recovered := recover()

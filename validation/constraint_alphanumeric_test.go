@@ -14,7 +14,6 @@ func TestAlphanumeric_PointerToStringInvalidIsRejected(t *testing.T) {
     }
 }
 
-/* @info the character rule can never hold in a non-string; the skip silently unenforced the rule */
 func TestAlphanumeric_NonStringIsRejected(t *testing.T) {
     constraint := &Alphanumeric{}
 

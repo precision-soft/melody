@@ -130,7 +130,6 @@ func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
     }
 }
 
-/* @info the negative verbosity level is clamped like its integer siblings: the level travelled negative through the option while the boolean read false, two answers for one question */
 func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
     normalized := NormalizeOption(Option{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
 

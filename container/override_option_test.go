@@ -6,7 +6,6 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
 )
 
-/* @info the default decides who closes an installed override, and it is the answer that cannot leak: an override belongs to whoever installed it, because the installer usually still holds it after the scope is gone. A default flipped to closed-with-scope would have the scope close a value its installer goes on using — a use-after-close one request wide, discovered nowhere near the override. */
 func TestApplyOverrideOptions_DefaultsToLeavingTheValueWithItsInstaller(t *testing.T) {
     option := applyOverrideOptions(nil)
 
@@ -15,7 +14,6 @@ func TestApplyOverrideOptions_DefaultsToLeavingTheValueWithItsInstaller(t *testi
     }
 }
 
-/* @info the one option there is hands the value to the scope's teardown, which is the whole of the mechanism — the teardown already walks the created maps, so nothing about closing has to learn about overrides. A nil option is skipped rather than called. */
 func TestOverrideOptions_ClosedWithScopeHandsTheValueToTheTeardown(t *testing.T) {
     option := applyOverrideOptions([]containercontract.OverrideOption{ClosedWithScope()})
 

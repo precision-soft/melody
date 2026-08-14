@@ -850,6 +850,8 @@ func (instance *scope) storeCreatedInstance(
 }
 
 var (
-    _ containercontract.Scope            = (*scope)(nil)
-    _ containercontract.ContainerCarrier = (*scope)(nil)
+    _ containercontract.Scope                      = (*scope)(nil)
+    _ containercontract.ScopedRegistrar            = (*scope)(nil)
+    _ containercontract.OverrideServiceWithOptions = (*scope)(nil)
+    _ containercontract.ContainerCarrier           = (*scope)(nil)
 )

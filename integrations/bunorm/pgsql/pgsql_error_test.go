@@ -47,7 +47,7 @@ func TestIsDuplicateKey(t *testing.T) {
             isDuplicate: true,
         },
         {
-            /* @info the exception wrapper's message never renders its cause, so any probe of the rendered text alone would answer false here; the typed match must see through the wrapping */
+            /* the exception wrapper's message never renders its cause, so any probe of the rendered text alone would answer false here; the typed match must see through the wrapping */
             name:        "typed sqlstate 23505 wrapped in an exception is a duplicate key",
             inputErr:    exception.NewError("insert widget failed", nil, &fakeSqlStateError{sqlState: "23505"}),
             isDuplicate: true,
@@ -58,7 +58,7 @@ func TestIsDuplicateKey(t *testing.T) {
             isDuplicate: false,
         },
         {
-            /* @info pins the verdict to the typed SQLSTATE: a message that merely contains the digits — a quoted value, a constraint name — carries no protocol error and must not be read as one */
+            /* the verdict is pinned to the typed SQLSTATE: a message that merely contains the digits — a quoted value, a constraint name — carries no protocol error and must not be read as one */
             name:        "untyped message containing the digits is not a duplicate key",
             inputErr:    errors.New("ERROR: value (1235051) violates check constraint \"widget_check\""),
             isDuplicate: false,

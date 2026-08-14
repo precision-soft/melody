@@ -10,8 +10,6 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-/* @info the request context carries the two values every other record of a request is correlated by: the id that ties a log line, an audit entry and a trace together, and the instant every duration is measured from. RequestId had no test of its own — the access log asserts what the kernel published, which is a different implementation of the same contract, so the accessor here could answer the empty string with the whole framework still reading as working. */
-
 func TestNewRequestContext_ReportsTheIdAndTheStartItWasGiven(t *testing.T) {
     startedAt := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
 
@@ -26,8 +24,6 @@ func TestNewRequestContext_ReportsTheIdAndTheStartItWasGiven(t *testing.T) {
     }
 }
 
-/* @info two contexts do not share an id: the id exists to tell one request from another, so an accessor answering a constant — or the empty string — makes every line of every request indistinguishable, and the failure is invisible in any single record. */
-
 func TestRequestContext_DistinguishesTwoRequests(t *testing.T) {
     first := NewRequestContext("request-1", time.Now())
     second := NewRequestContext("request-2", time.Now())
@@ -40,8 +36,6 @@ func TestRequestContext_DistinguishesTwoRequests(t *testing.T) {
         t.Fatalf("expected both contexts to carry a non-empty id")
     }
 }
-
-/* @info the kernel mints a context for every request it serves and publishes it on the request, so the accessor is reachable through the request a handler receives — and the id it answers is a real one rather than an empty placeholder. */
 
 func TestRequestContext_ReachesTheHandlerThroughTheRequest(t *testing.T) {
     observedRequestId := ""

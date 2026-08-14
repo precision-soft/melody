@@ -264,8 +264,6 @@ func TestMiddleware_AppliesHeadersEvenWhenHandlerErrored(t *testing.T) {
     }
 }
 
-/* @info Restrictive is the front door of the restrictive policy — the one an application calls — and no test entered it. It is variadic, so calling it with no origin at all is a spelling that compiles and reads like "restrict everything", while it actually reaches NewService with the wildcard default plus credentials and has to refuse the boot. */
-
 func TestRestrictive_RefusesToBootWithoutAnyOrigin(t *testing.T) {
     defer func() {
         if nil == recover() {
@@ -306,8 +304,6 @@ func TestRestrictive_CarriesTheRestrictivePolicyOntoTheResponse(t *testing.T) {
     }
 }
 
-/* @info an origin the caller did not name gets Vary: Origin and nothing else. Without the refusal the credentials the restrictive policy carries would be granted to whoever asked — which is the whole reason this constructor is the one that pairs credentials with a list. */
-
 func TestRestrictive_RefusesAnOriginTheCallerDidNotName(t *testing.T) {
     middleware := Restrictive("https://app.example.com")
 
@@ -341,8 +337,6 @@ func TestRestrictive_RefusesAnOriginTheCallerDidNotName(t *testing.T) {
         t.Fatalf("expected Vary: Origin so a shared cache cannot serve this body to an allowed origin")
     }
 }
-
-/* @info the preflight a restrictive policy answers advertises its own narrower method list, not the permissive default's. A browser reads Access-Control-Allow-Methods to decide whether to send the real request, so a PATCH advertised here would be a policy the service does not hold. */
 
 func TestRestrictive_PreflightAdvertisesTheNarrowMethodList(t *testing.T) {
     middleware := Restrictive("https://app.example.com")

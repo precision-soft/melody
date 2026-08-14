@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info the defaults are the contract every zero-value Options field resolves to; a drift here silently re-roots every registration that relied on them */
 func TestDefaultOptions(t *testing.T) {
     options := DefaultOptions()
 

@@ -16,7 +16,6 @@ func (instance *nilProbe) Probe() string {
     return instance.value
 }
 
-/* @info this is the single most reached-for function in the framework — the typed-nil defence half the repairs of the hardening sweep are built on — and it had no mirror of its own: every proof of it lived in the package that happened to call it, so a change here would have been discovered somewhere far from where it was made. An interface holding a nil pointer is NOT equal to nil, which is the whole reason the function exists, and every reference kind it can hold has to answer nil while every value kind has to answer not-nil. */
 func TestIsNilInterface_AnswersForTheUntypedNilAndForEveryNilReferenceKind(t *testing.T) {
     if false == IsNilInterface(nil) {
         t.Fatalf("expected the untyped nil to read as nil")
@@ -53,7 +52,6 @@ func TestIsNilInterface_AnswersForTheUntypedNilAndForEveryNilReferenceKind(t *te
     }
 }
 
-/* @info the other face of the same guard: a live value of a reference kind, and every value kind, must NOT read as nil — a function that answered true too readily would turn every healthy service into a refused one at the boot line that registered it. */
 func TestIsNilInterface_LiveValuesAndValueKindsAreNotNil(t *testing.T) {
     if true == IsNilInterface(&nilProbe{value: "alive"}) {
         t.Fatalf("expected a live pointer not to read as nil")

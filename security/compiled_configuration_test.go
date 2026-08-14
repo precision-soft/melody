@@ -124,7 +124,6 @@ func (instance *compiledFirewallNilResultLogoutHandler) Logout(
 
 var _ securitycontract.LogoutHandler = (*compiledFirewallNilResultLogoutHandler)(nil)
 
-/* @info a logout handler that returns a nil result without an error must fail closed the way Login does; without the guard the caller dereferences result.Response after the logout success event was already dispatched and panics on the request path */
 func TestCompiledFirewall_Logout_NilResultWithoutErrorFailsClosed(t *testing.T) {
     firewall := NewCompiledFirewall(
         "main",
@@ -174,7 +173,6 @@ func (instance *compiledFirewallErrorLoginHandler) Login(
 
 var _ securitycontract.LoginHandler = (*compiledFirewallErrorLoginHandler)(nil)
 
-/* @info when the login failure event dispatch itself fails, the authentication error must survive as the cause so the client still sees why the login failed; replacing it with the dispatch error turns a 401 into a 500 and hides the real reason */
 func TestCompiledFirewall_Login_KeepsAuthErrorWhenFailureDispatchFails(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -315,7 +313,6 @@ func (instance *compiledFirewallRecordingLogoutHandler) Logout(
 
 var _ securitycontract.LogoutHandler = (*compiledFirewallRecordingLogoutHandler)(nil)
 
-/* @info the compiled firewall answers what it was compiled with: these accessors are what a debug panel and the login/logout routing read, and a constructor argument shifted by one position would be invisible without them */
 func TestCompiledFirewall_AnswersWhatItWasCompiledWith(t *testing.T) {
     matcher := NewPathPrefixMatcher("/admin")
     accessControl := NewAccessControl(
@@ -410,7 +407,6 @@ func TestCompiledFirewall_AnswersWhatItWasCompiledWith(t *testing.T) {
     }
 }
 
-/* @info a firewall compiled without a login handler refuses the login rather than dereferencing it: a route wired to a firewall that never declared one is a configuration mistake, and it must read as one */
 func TestCompiledFirewall_Login_RefusesWithoutALoginHandler(t *testing.T) {
     firewall := newTestCompiledFirewallWithRoleHierarchy("main", nil)
 
@@ -437,7 +433,6 @@ func TestCompiledFirewall_Logout_RefusesWithoutALogoutHandler(t *testing.T) {
     }
 }
 
-/* @info the logout sibling of the login case already pinned: the logout error survives as the cause when the failure event dispatch fails on top of it */
 func TestCompiledFirewall_Logout_KeepsLogoutErrorWhenFailureDispatchFails(t *testing.T) {
     runtimeInstance, dispatcher := newCompiledFirewallTestRuntime(t)
 
@@ -461,7 +456,6 @@ func TestCompiledFirewall_Logout_KeepsLogoutErrorWhenFailureDispatchFails(t *tes
     }
 }
 
-/* @info a logout whose success event fails refuses rather than reporting a logout that half happened */
 func TestCompiledFirewall_Logout_FailsWhenTheSuccessDispatchFails(t *testing.T) {
     runtimeInstance, dispatcher := newCompiledFirewallTestRuntime(t)
 
@@ -487,7 +481,6 @@ func TestCompiledFirewall_Logout_FailsWhenTheSuccessDispatchFails(t *testing.T) 
     }
 }
 
-/* @info the ordinary logout: the handler's result is answered and the success event is emitted once */
 func TestCompiledFirewall_Logout_AnswersTheHandlerResultAndAnnouncesIt(t *testing.T) {
     runtimeInstance, dispatcher := newCompiledFirewallTestRuntime(t)
 
@@ -584,7 +577,6 @@ func (instance *compiledFirewallResultLoginHandler) Login(
 
 var _ securitycontract.LoginHandler = (*compiledFirewallResultLoginHandler)(nil)
 
-/* @info the ordinary login: the handler's result is answered and the success event carries the token that was minted, which is what a listener recording the session reads */
 func TestCompiledFirewall_Login_AnswersTheHandlerResultAndAnnouncesTheToken(t *testing.T) {
     runtimeInstance, dispatcher := newCompiledFirewallTestRuntime(t)
 
@@ -632,7 +624,6 @@ func TestCompiledFirewall_Login_AnswersTheHandlerResultAndAnnouncesTheToken(t *t
     }
 }
 
-/* @info a login whose success event fails refuses rather than reporting a sign-in whose listeners never ran */
 func TestCompiledFirewall_Login_FailsWhenTheSuccessDispatchFails(t *testing.T) {
     runtimeInstance, dispatcher := newCompiledFirewallTestRuntime(t)
 
@@ -660,7 +651,6 @@ func TestCompiledFirewall_Login_FailsWhenTheSuccessDispatchFails(t *testing.T) {
     }
 }
 
-/* @info a login that fails with a dispatch that SUCCEEDS hands back the authentication error itself, unwrapped: the wrapper exists only for the case where the dispatch failed too */
 func TestCompiledFirewall_Login_HandsBackTheAuthenticationErrorWhenTheDispatchSucceeds(t *testing.T) {
     runtimeInstance, _ := newCompiledFirewallTestRuntime(t)
 
@@ -700,7 +690,6 @@ func newTestCompiledFirewallWithLoginHandler(loginHandler securitycontract.Login
     )
 }
 
-/* @info the compiled firewall owns the rule list it was compiled with, and the compiled configuration owns its firewall list: both are handed in by the compiler, and both are read on every request */
 func TestNewCompiledFirewall_CopiesTheCallersRules(t *testing.T) {
     callerRules := []securitycontract.Rule{&compiledFirewallTestRule{}}
 

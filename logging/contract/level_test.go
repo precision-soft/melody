@@ -5,7 +5,6 @@ import (
     "testing"
 )
 
-/* @info the label is what every record says its level was, and the two constructors are the two shapes a configuration can carry: a name and a numeric code (syslog-style). Only the string shape had ever been rendered, so nothing said the numeric one renders as a number instead of as Go's default formatting of an int */
 func TestLevelLabel_RendersBothConstructedShapes(t *testing.T) {
     if "warning" != LevelLabelFromString("warning").String() {
         t.Fatalf("unexpected string label: %s", LevelLabelFromString("warning").String())
@@ -16,7 +15,6 @@ func TestLevelLabel_RendersBothConstructedShapes(t *testing.T) {
     }
 }
 
-/* @info the zero value is constructible outside both constructors — a LevelLabels map written as a literal with a missing entry hands one out — and it carries no value at all; the fallback renders it instead of leaving the record's level field empty */
 func TestLevelLabel_ZeroValue_RendersThroughTheFallback(t *testing.T) {
     zeroValue := LevelLabel{}
 
@@ -25,7 +23,6 @@ func TestLevelLabel_ZeroValue_RendersThroughTheFallback(t *testing.T) {
     }
 }
 
-/* @info the label travels into the record through the encoder, not through String, so the two must agree on the shape: a numeric label that marshalled as a quoted string would silently change the type of the level field for every consumer of the log */
 func TestLevelLabel_MarshalsAsItsUnderlyingShape(t *testing.T) {
     encodedString, err := json.Marshal(LevelLabelFromString("warning"))
     if nil != err {
@@ -64,7 +61,6 @@ func TestDefaultLevelLabels_NamesEveryKnownLevel(t *testing.T) {
     }
 }
 
-/* @info a level with no configured label falls back to the level's own name: a record filed under a level a partial configuration forgot must still say which level it was, not carry an empty field */
 func TestLabelFor_UnconfiguredLevel_FallsBackToTheLevelName(t *testing.T) {
     labels := LevelLabels{
         LevelError: LevelLabelFromString("configured-error"),
@@ -79,7 +75,6 @@ func TestLabelFor_UnconfiguredLevel_FallsBackToTheLevelName(t *testing.T) {
     }
 }
 
-/* @info a numeric label configured for a level is handed back as it is, not re-spelled as the level name: the two accepted shapes are checked separately, and only the string one had been entered */
 func TestLabelFor_NumericLabel_IsKept(t *testing.T) {
     labels := LevelLabels{
         LevelError: LevelLabelFromInt(3),
@@ -90,7 +85,6 @@ func TestLabelFor_NumericLabel_IsKept(t *testing.T) {
     }
 }
 
-/* @info a configured label whose value is neither of the two shapes the constructors produce — the zero value, written directly into the map — is discarded in favour of the level name: rendering it would put "<nil>" in the level field of every record at that level */
 func TestLabelFor_LabelOfAnUnsupportedShape_FallsBackToTheLevelName(t *testing.T) {
     labels := LevelLabels{
         LevelEmergency: {},

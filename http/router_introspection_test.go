@@ -30,8 +30,6 @@ func newIntrospectedRouter(t *testing.T) *Router {
     return router
 }
 
-/* @info the introspection definition is what the debug command, the openapi generator and any route listing read; six of its accessors were never entered by a test. A definition that dropped a field would describe a route the application does not serve, and every consumer of the listing would repeat the wrong description. */
-
 func TestRouteDefinition_ReportsEveryFacetOfTheRoute(t *testing.T) {
     definition, found := newIntrospectedRouter(t).RouteDefinition("article.show")
 
@@ -73,8 +71,6 @@ func TestRouteDefinition_ReportsEveryFacetOfTheRoute(t *testing.T) {
     }
 }
 
-/* @info every map and slice accessor hands out a copy: the definitions are read out of the live registry, so a consumer that mutated what it was handed would rewrite the routing table of a running application from a listing command. */
-
 func TestRouteDefinition_AccessorsHandOutCopies(t *testing.T) {
     definition, _ := newIntrospectedRouter(t).RouteDefinition("article.show")
 
@@ -104,8 +100,6 @@ func TestRouteDefinition_AccessorsHandOutCopies(t *testing.T) {
         t.Fatalf("expected Locales to hand out a copy")
     }
 }
-
-/* @info MarshalJSON is how the route listing leaves the process — a debug command, an openapi document, a deployment inventory. It renders through the accessors rather than the fields, so a field the accessors copy defensively is the field the json carries; every key has to be present, because a consumer reading a missing key gets the zero value and reports a route that allows no method. */
 
 func TestRouteDefinition_MarshalJsonCarriesEveryKey(t *testing.T) {
     definition, _ := newIntrospectedRouter(t).RouteDefinition("article.show")
@@ -142,8 +136,6 @@ func TestRouteDefinition_MarshalJsonCarriesEveryKey(t *testing.T) {
     }
 }
 
-/* @info a route the caller did not name yields found=false and an empty definition rather than nil, so a consumer that ignores the boolean reads zero values instead of dereferencing nothing. */
-
 func TestRouteDefinition_UnknownNameIsReportedRatherThanReturnedAsNil(t *testing.T) {
     definition, found := newIntrospectedRouter(t).RouteDefinition("nothing.here")
 
@@ -159,8 +151,6 @@ func TestRouteDefinition_UnknownNameIsReportedRatherThanReturnedAsNil(t *testing
         t.Fatalf("expected the empty definition to name nothing, got: %q", definition.Name())
     }
 }
-
-/* @info the router forwards both introspection entry points to its registry, which is what lets an application reach the listing through the router it already holds. */
 
 func TestRouter_ForwardsIntrospectionToItsRegistry(t *testing.T) {
     router := newIntrospectedRouter(t)

@@ -10,7 +10,6 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-/* @info this is the request every http-facing test of the framework is built from — the kernel's, the security listeners', the middleware chain's — so a builder that dropped a header or handed back a shared bag would make a whole class of tests assert against something the real request never looks like. It had no mirror of its own: its correctness was only ever implied by the tests that used it. */
 func TestNewHttpTestRequest_BuildsARequestCarryingTheMethodAndTheUrl(t *testing.T) {
     request := NewHttpTestRequest(http.MethodPost, "/things?page=2")
 
@@ -27,7 +26,6 @@ func TestNewHttpTestRequest_BuildsARequestCarryingTheMethodAndTheUrl(t *testing.
     }
 }
 
-/* @info the accept variant is what every content-negotiation test drives, so the header has to land where the negotiation reads it rather than beside it. */
 func TestNewHttpTestRequestWithAccept_PutsTheHeaderWhereTheNegotiationReadsIt(t *testing.T) {
     request := NewHttpTestRequestWithAccept(http.MethodGet, "/things", "application/json")
 
@@ -36,7 +34,6 @@ func TestNewHttpTestRequestWithAccept_PutsTheHeaderWhereTheNegotiationReadsIt(t 
     }
 }
 
-/* @info a nil request is a wiring mistake in the test itself, and it is refused by name rather than dereferenced — a nil-pointer panic inside a helper sends the reader looking at the framework instead of at the line that called it. */
 func TestNewHttpTestRequestFromHttpRequest_ANilRequestIsRefusedByName(t *testing.T) {
     defer func() {
         recoveredValue := recover()
@@ -57,7 +54,6 @@ func TestNewHttpTestRequestFromHttpRequest_ANilRequestIsRefusedByName(t *testing
     _ = NewHttpTestRequestFromHttpRequest(nil)
 }
 
-/* @info two requests built by the helper must not share their bags: a test that seeds parameters into one and asserts the absence of them in another is the ordinary shape of an isolation test, and a shared bag would make it pass for the wrong reason. */
 func TestNewHttpTestRequest_TwoRequestsDoNotShareTheirBags(t *testing.T) {
     first := NewHttpTestRequestFromHttpRequest(httptest.NewRequest(http.MethodGet, "/things", nil)).(*HttpTestRequest)
     second := NewHttpTestRequestFromHttpRequest(httptest.NewRequest(http.MethodGet, "/things", nil)).(*HttpTestRequest)
@@ -71,7 +67,6 @@ func TestNewHttpTestRequest_TwoRequestsDoNotShareTheirBags(t *testing.T) {
     }
 }
 
-/* @info Param is what a routing test reads after seeding a path parameter, and its second result is the whole signal: a route that never matched and a route that matched with an empty value both answer "" on the first result alone. */
 func TestHttpTestRequest_ParamSeparatesAnAbsentParameterFromAnEmptyOne(t *testing.T) {
     request := NewHttpTestRequest(http.MethodGet, "/articles/7").(*HttpTestRequest)
     request.paramsValue["id"] = "7"
@@ -93,7 +88,6 @@ func TestHttpTestRequest_ParamSeparatesAnAbsentParameterFromAnEmptyOne(t *testin
     }
 }
 
-/* @info Params hands out a copy: a test that mutates what it read would otherwise rewrite the request it is asserting against, and the mutation would survive into every later read of the same request. */
 func TestHttpTestRequest_ParamsHandsOutACopyRatherThanTheLiveMap(t *testing.T) {
     request := NewHttpTestRequest(http.MethodGet, "/articles/7").(*HttpTestRequest)
     request.paramsValue["id"] = "7"
@@ -115,7 +109,6 @@ func TestHttpTestRequest_ParamsHandsOutACopyRatherThanTheLiveMap(t *testing.T) {
     }
 }
 
-/* @info RuntimeInstance answers the runtime the test put there, and answers nil when nothing was put there — a scoped-service test that reads a runtime it never seeded must see the absence rather than a leftover from another request. */
 func TestHttpTestRequest_RuntimeInstanceAnswersWhatWasSeeded(t *testing.T) {
     request := NewHttpTestRequest(http.MethodGet, "/articles").(*HttpTestRequest)
 

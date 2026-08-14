@@ -49,7 +49,6 @@ func TestPathPrefixMatcher_NilRequestDoesNotMatch(t *testing.T) {
     }
 }
 
-/* @info a request whose net/http request is missing matches nothing: the matcher reads the URL off it, and the guard is what keeps a firewall selection from panicking on a half-built request */
 func TestPathPrefixMatcher_RequestWithoutAnHttpRequestDoesNotMatch(t *testing.T) {
     matcher := NewPathPrefixMatcher("/admin")
 
@@ -58,7 +57,6 @@ func TestPathPrefixMatcher_RequestWithoutAnHttpRequestDoesNotMatch(t *testing.T)
     }
 }
 
-/* @info an empty prefix matches every request that HAS a url: it is the catch-all a global firewall is written with, and it stays behind the three nil guards rather than in front of them */
 func TestPathPrefixMatcher_EmptyPrefixMatchesEveryRequest(t *testing.T) {
     matcher := NewPathPrefixMatcher("")
 

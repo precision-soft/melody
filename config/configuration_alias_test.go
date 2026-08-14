@@ -37,7 +37,6 @@ func TestConfiguration_AddAliasedParameterFromEnvironment_SharesSinglePointerAcr
     }
 }
 
-/* @info an empty name list registers nothing, and an empty name inside a list is skipped: either one would otherwise put a parameter under a name no lookup can ever spell, where it is invisible to every reader and still occupies the map */
 func TestConfiguration_AddAliasedParameterFromEnvironment_SkipsWhatCannotBeNamed(t *testing.T) {
     configuration := &Configuration{
         environment: nil,
@@ -70,7 +69,6 @@ func TestConfiguration_AddAliasedParameterFromEnvironment_SkipsWhatCannotBeNamed
     }
 }
 
-/* @info every built-in key answers under both spellings — the short environment key and the kernel-prefixed parameter name — while a key the map does not know answers under itself alone. That mapping is what lets a deployment write MELODY_ENV and a service read kernel.env. */
 func TestConfiguration_MapEnvironmentKeyToParameterNames_CollapsesTheBuiltInAliases(t *testing.T) {
     configuration := &Configuration{
         environment: nil,

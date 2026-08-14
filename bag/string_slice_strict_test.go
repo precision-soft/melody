@@ -34,7 +34,6 @@ func TestStringSliceStrict_PresentNilReportsUnset(t *testing.T) {
     }
 }
 
-/* @info the strict reader answers a repeated key with its own values and a single occurrence with a one-element slice, and the slice it hands back is a copy: a caller mutating it must not write into the value the bag still holds behind its lock */
 func TestStringSliceStrict_CopiesTheStoredSliceAndLiftsASingleString(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("repeated", []string{"a", "b"})

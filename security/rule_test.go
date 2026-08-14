@@ -66,7 +66,6 @@ func TestNewApiKeyHeaderRule_EmptyHeaderNamePanics(t *testing.T) {
     )
 }
 
-/* @info a nil matcher is refused at construction the way the other firewall dependencies are: leaving it unvalidated defers the failure to Applies on the request path, outside any recovery, turning a configuration mistake into a panic mid-request instead of a boot error */
 func TestNewApiKeyHeaderRule_NilMatcherPanics(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -89,7 +88,6 @@ func TestApiKeyHeaderRule_AppliesFollowsTheMatcher(t *testing.T) {
     }
 }
 
-/* @info the whole point of the rule: the configured key is accepted and nothing else is. Check was reached by no test at all, so neither the acceptance nor any of the four refusals below had ever been executed. */
 func TestApiKeyHeaderRule_CheckAcceptsTheConfiguredKey(t *testing.T) {
     rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
 
@@ -106,7 +104,7 @@ func TestApiKeyHeaderRule_CheckAcceptsTheConfiguredKey(t *testing.T) {
     }
 }
 
-/* @info a wrong key of the SAME length is the case the constant-time comparison exists for: a length-only check, or a comparison that stopped at the first differing byte, would still answer here, so the refusal has to be asserted on equal-length input and not only on an obviously different one */
+/* the key below is wrong at the SAME length, which is the input the constant-time comparison exists for: a length-only check would answer on an obviously different one. */
 func TestApiKeyHeaderRule_CheckRefusesAWrongKeyOfTheSameLength(t *testing.T) {
     rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
 
@@ -133,7 +131,6 @@ func TestApiKeyHeaderRule_CheckRefusesAWrongKeyOfAnotherLength(t *testing.T) {
     assertRuleRefused(t, rule.Check(request))
 }
 
-/* @info an absent header reads as the empty string, which must not be mistaken for "no key required": the empty expected value is refused at construction precisely so this comparison can never succeed */
 func TestApiKeyHeaderRule_CheckRefusesAnAbsentHeader(t *testing.T) {
     rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
 
@@ -147,7 +144,7 @@ func TestApiKeyHeaderRule_CheckRefusesAnAbsentHeader(t *testing.T) {
     assertRuleRefused(t, rule.Check(request))
 }
 
-/* @info the CONFIGURED header name is read case-insensitively, because Header.Get canonicalizes the name it looks up. The rule below is configured with a lower-case name while the request carries the canonical one — the shape a raw map read over Header would miss, refusing a legitimate caller over a spelling in a configuration file. Spelling the header in lower case on the request side would prove nothing: net/http canonicalizes on the way in, so both sides would agree no matter how the rule read them. */
+/* the rule is configured with a lower-case name while the request carries the canonical one, because Header.Get canonicalizes what it looks up. Spelling the header in lower case on the request side would prove nothing: net/http canonicalizes on the way in, so both sides would agree however the rule read them. */
 func TestApiKeyHeaderRule_CheckReadsTheConfiguredHeaderNameCaseInsensitively(t *testing.T) {
     rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "x-api-key", "expected-secret")
 
@@ -164,7 +161,7 @@ func TestApiKeyHeaderRule_CheckReadsTheConfiguredHeaderNameCaseInsensitively(t *
     }
 }
 
-/* @info a rule that does not apply answers nil without weighing the key at all. The request below carries a WRONG key, so a nil answer can only come from the early exit — had the check run, it would have refused. */
+/* the request below carries a WRONG key, so a nil answer can only come from the early exit — had the check run, it would have refused. */
 func TestApiKeyHeaderRule_CheckSkipsARequestItDoesNotApplyTo(t *testing.T) {
     rule := NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "expected-secret")
 
@@ -181,7 +178,6 @@ func TestApiKeyHeaderRule_CheckSkipsARequestItDoesNotApplyTo(t *testing.T) {
     }
 }
 
-/* @info a matcher that claims a nil request carries the check past its own early exit; the rule refuses rather than dereferencing, which is the difference between a 403 and a panic on the request path */
 func TestApiKeyHeaderRule_CheckRefusesANilRequestAMatcherClaimed(t *testing.T) {
     matcher := &alwaysMatchingRuleMatcher{}
     rule := NewApiKeyHeaderRule(matcher, "X-Api-Key", "expected-secret")
@@ -193,7 +189,6 @@ func TestApiKeyHeaderRule_CheckRefusesANilRequestAMatcherClaimed(t *testing.T) {
     }
 }
 
-/* @info the sibling shape: a request object whose net/http request is missing. Header.Get would dereference it. */
 func TestApiKeyHeaderRule_CheckRefusesARequestWithoutAnHttpRequest(t *testing.T) {
     rule := NewApiKeyHeaderRule(&alwaysMatchingRuleMatcher{}, "X-Api-Key", "expected-secret")
 

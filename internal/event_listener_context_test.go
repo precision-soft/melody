@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info this is the shape every dispatch record in the framework is written from, so a key renamed here silently renames a field in the logs an operator greps — and nothing named the six of them. The listener priority and the duration are the two an operator actually sorts by. */
 func TestNewEventListenerContext_CarriesTheSixFieldsARecordIsWrittenFrom(t *testing.T) {
     context := NewEventListenerContext(
         "catalog.product.written",
@@ -33,7 +32,6 @@ func TestNewEventListenerContext_CarriesTheSixFieldsARecordIsWrittenFrom(t *test
     }
 }
 
-/* @info the panic context is built ON TOP of the base one and must not write into it: the base is assembled once per dispatch and is handed to the ordinary record as well, so a panic that mutated it in place would stamp the panic fields onto a listener that never panicked. */
 func TestNewEventListenerPanicContext_CopiesTheBaseRatherThanWritingIntoIt(t *testing.T) {
     baseContext := NewEventListenerContext("e", "*E", "l", "*L", 0, 1)
 

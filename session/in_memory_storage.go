@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/internal"
+    sessioncontract "github.com/precision-soft/melody/session/contract"
 )
 
 func NewInMemoryStorage() *InMemoryStorage {
@@ -241,3 +242,5 @@ func (instance *InMemoryStorage) deleteLapsedLocked(sessionId string, now time.T
 func isLapsed(expiresAt *time.Time, now time.Time) bool {
     return false == expiresAt.After(now)
 }
+
+var _ sessioncontract.Storage = (*InMemoryStorage)(nil)

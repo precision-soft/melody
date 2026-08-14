@@ -160,7 +160,6 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
     }
 }
 
-/* @info a manager built over a backend somebody else registered does not own it: the container closes every service it created, so a Close that cascaded would close the backend twice and turn a clean shutdown into a reported failure on any backend whose second Close answers with one */
 func TestNewManager_DoesNotCloseTheBackend(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -178,7 +177,6 @@ func TestNewManager_DoesNotCloseTheBackend(t *testing.T) {
     }
 }
 
-/* @info the owning constructor keeps the cascade for the caller that builds both by hand and wants one Close to end both */
 func TestNewManagerOwningBackend_ClosesTheBackend(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -195,7 +193,6 @@ func TestNewManagerOwningBackend_ClosesTheBackend(t *testing.T) {
     }
 }
 
-/* @info a payload the serializer cannot decode comes back as a typed DeserializationError so Remember can tell a corrupt payload from a failed cache and recompute over it */
 func TestManager_Get_TypesTheDeserializationFailure(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -220,7 +217,6 @@ func TestManager_Get_TypesTheDeserializationFailure(t *testing.T) {
     }
 }
 
-/* @info one corrupt entry no longer discards the whole answer: it is left out the way an absent key is, and the error beside the good values names the culprit keys deterministically */
 func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -265,7 +261,6 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
     }
 }
 
-/* @info a serialization failure names the key it happened under: SetMultiple with dozens of dynamically built values answered with a bare encoding error and nothing to locate it by */
 func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -360,7 +355,6 @@ func (instance *cacheTestTypedNilErrorBackend) Close() error {
     return instance.typedNilError()
 }
 
-/* @info a backend declared with a concrete error type hands back a typed nil boxed into a non-nil interface; the manager reads it through the interface as the success it means, instead of treating a healthy operation as failed and panicking whoever renders the error */
 func TestManager_ReadsTypedNilBackendErrorsAsSuccess(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -382,7 +376,6 @@ func TestManager_ReadsTypedNilBackendErrorsAsSuccess(t *testing.T) {
     }
 }
 
-/* @info the counter operations are backend-native so a distributed backend keeps them atomic, which means they store decimal text rather than a serialized value; Get would hand that raw payload to a deserializer that does not expect it */
 func TestManager_GetCounterReadsWhatIncrementWrote(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
     manager := NewManagerOwningBackend(NewInMemoryBackend(0, time.Hour, clockInstance), NewJsonSerializer())
@@ -430,7 +423,6 @@ func TestManager_GetCounterRejectsANonCounterPayload(t *testing.T) {
     }
 }
 
-/* @info Decrement had never been executed by anything. It is the sibling of Increment and the two are not interchangeable — a Decrement wired to the backend's Increment would count the wrong way for every quota, every remaining-attempts counter and every rate limiter built on it — and like Increment it is backend-native, so the value it leaves must be readable by GetCounter and not by Get. */
 func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -472,7 +464,6 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
     }
 }
 
-/* @info a decrement on a key that was never written starts from zero, exactly as an increment does — the absent counter is not an error, or every rate limiter would have to seed its keys before it could refuse anything. */
 func TestManager_DecrementOnAnAbsentKeyStartsFromZero(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -491,7 +482,6 @@ func TestManager_DecrementOnAnAbsentKeyStartsFromZero(t *testing.T) {
     }
 }
 
-/* @info a backend failure travels out of Get, Many and GetCounter as itself rather than as an empty answer. All three read the backend first and each had only its success and its miss pinned: a manager that turned a dead backend into a clean miss would make every caller recompute silently while the operator sees nothing, which is the difference between a slow deployment and one nobody knows is broken. */
 func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -540,7 +530,6 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
     }
 }
 
-/* @info a key repeated in the request is deserialized once and appears once. The backend answers a map, so the duplicate would otherwise pay a second decode of the same payload and — where the payload is corrupt — name the same key twice in the error the caller is handed. */
 func TestManager_ManyDeserializesARepeatedKeyOnlyOnce(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 

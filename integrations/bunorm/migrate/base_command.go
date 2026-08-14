@@ -15,7 +15,7 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-/* @important the unlock must not ride the command context: an interrupted migration cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
+/* the unlock must not ride the command context: an interrupted migration cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
 const migrationUnlockTimeout = 5 * time.Second
 
 type migrationUnlocker interface {

@@ -5,8 +5,6 @@ import (
     "testing"
 )
 
-/* @info the three setters are how a route group rewrites the options it was handed and how an application adjusts a shared options value; none had a test. SetRequirements and SetDefaults each keep their own copy, which is what stopped a group from writing its merged maps back into the caller's value — the bug where one options value reused across two grouped registrations accumulated the first group's prefix. */
-
 func TestRouteOptions_SetNameReplacesTheName(t *testing.T) {
     options := &RouteOptions{}
 
@@ -74,8 +72,6 @@ func TestRouteOptions_SetDefaultsKeepsItsOwnCopy(t *testing.T) {
         t.Fatalf("expected the accessor to hand out a copy as well")
     }
 }
-
-/* @info the setters have to reach the registered route, not merely the options value: a name set through SetName is the name the url generator resolves, and a requirement set through SetRequirements is the one the router enforces. */
 
 func TestRouteOptions_SettersReachTheRegisteredRoute(t *testing.T) {
     router := NewRouter()

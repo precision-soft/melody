@@ -20,7 +20,7 @@ import (
 /* maxNestedValidationDepth bounds the recursive descent into nested struct/slice/map/embedded values so a self-referential or deeply cyclic payload cannot overflow the stack; the visited-pointer set below short-circuits genuine reference cycles, and this depth cap is the belt-and-suspenders backstop for value cycles the pointer set cannot observe. Reaching the cap yields a validation error, never a silent pass: the tags below it were never enforced, so reporting the payload valid would let a caller nest past the cap to bypass validation outright. */
 const maxNestedValidationDepth = 64
 
-/* @important cyclicReference identifies a pointer on the CURRENT descent path so a reference cycle (a self-referential linked node, a structure that reaches back to an ancestor) is validated once and then short-circuited instead of recursing forever. The set is path-scoped — an entry is removed when its subtree returns — because only an ancestor still on the path can close a cycle: a whole-call set would treat a shared, non-cyclic pointer (the same value reachable through two sibling fields) as a cycle and silently skip every constraint under its second occurrence. */
+/* cyclicReference identifies a pointer on the CURRENT descent path, so a reference cycle — a self-referential node, a structure that reaches back to an ancestor — is validated once and then short-circuited instead of recursing forever. The set is path-scoped, an entry leaving it when its subtree returns, because only an ancestor still on the path can close a cycle: a whole-call set reads a shared non-cyclic pointer, the same value reachable through two sibling fields, as a cycle and skips every constraint under its second occurrence. */
 type cyclicReference struct {
     pointer uintptr
     typ     reflect.Type
@@ -130,7 +130,7 @@ func (instance *Validator) validateInternal(data any) ValidationErrors {
     return instance.validateReflected(reflect.ValueOf(data), "", 0, make(map[cyclicReference]bool))
 }
 
-/* @important validateReflected drives the recursive cascade: it unwraps pointers/interfaces (skipping nil and already-visited references), then dispatches structs, slices/arrays and maps to their per-kind walkers so that validate tags declared on nested fields are enforced with a path that identifies the offending nested field. Scalar leaves have no tags of their own to enforce here (their owning struct applies the tag) and fall through untouched, so a flat payload with no nested tags produces exactly the same result as before. */
+/* validateReflected drives the recursive cascade: it unwraps pointers and interfaces, skipping nil and already-visited references, then dispatches structs, slices, arrays and maps to their per-kind walkers, so a validate tag declared on a nested field is enforced under a path that identifies that field. A scalar leaf falls through untouched — the tag on it belongs to the struct that owns it. */
 func (instance *Validator) validateReflected(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
     var errors ValidationErrors
 
@@ -669,7 +669,7 @@ func (instance *Validator) validateSequence(value reflect.Value, path string, de
 
     if reflect.Slice == value.Kind() {
         if reflect.Uint8 == value.Type().Elem().Kind() {
-            /* @important a byte slice is a scalar payload, never a sequence of validatable elements, so it carries no nested tags to enforce. */
+            /* a byte slice is a scalar payload, never a sequence of validatable elements, so it carries no nested tags to enforce */
             return errors
         }
 
@@ -795,7 +795,7 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
     }
 
     if 0 == len(params) {
-        /* @important a parameterized rule named without parameters fails closed: falling back to the registered singleton would silently enforce whatever configuration that instance was built with — a bare `regex` validated with the match-everything default, a bare `lessThan` with a bound of 0 — none of which the tag declares */
+        /* a parameterized rule named without parameters fails closed: the registered instance is the template WithParams is called on, not a fallback, so a bare `regex` or a bare `lessThan` declares nothing the validator could enforce */
         if _, parameterized := constraint.(validationcontract.ParameterizedConstraint); true == parameterized {
             return nil, false, "constraint requires parameters"
         }
@@ -823,15 +823,14 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
 func buildConstraintWithParams(constraint validationcontract.Constraint, params map[string]string) (validationcontract.Constraint, bool, string) {
     parameterized, ok := constraint.(validationcontract.ParameterizedConstraint)
     if false == ok {
-        /* @important fail closed when the tag carries parameters the registered constraint cannot consume: validating with the unparameterized singleton would silently enforce a different configuration than the tag declares (a custom `between(min=1,max=5)` would validate with whatever the singleton was built with) */
+        /* a tag that carries parameters the registered constraint cannot consume fails closed: the unparameterized instance enforces a different configuration than the tag declares */
         return nil, false, "constraint does not accept parameters"
     }
 
     /* the parameter map belongs to the memoized parse of the tag, so a constraint that kept or mutated it would poison every later lookup */
-    /* @info the copy is the barrier between the process-wide memo and userland: the cached rules share this map's identity, so a constraint that retained or mutated what WithParams received would poison every later validation */
     configured, withParamsErr := parameterized.WithParams(copyValidationRuleParams(params))
     if nil != withParamsErr {
-        /* the refusal reason travels with the verdict: swallowing it left a developer with one generic code for a malformed tag, a rejected parameter value and a constraint that takes no parameters */
+        /* the refusal reason travels with the verdict, so a malformed tag, a rejected parameter value and a constraint that takes no parameters are told apart */
         return nil, false, withParamsErr.Error()
     }
 

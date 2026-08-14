@@ -70,7 +70,6 @@ func TestRollbackCommand_NoMigrationsWarns(t *testing.T) {
     }
 }
 
-/* @info the rollback twin of the migrate proof: the two commands fold the unlock failure into their verdicts separately, so each fold carries its own test */
 func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook("20240101000000")

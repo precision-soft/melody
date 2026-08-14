@@ -17,8 +17,6 @@ import (
     "github.com/precision-soft/melody/validation"
 )
 
-/* @info an oversized JSON body must surface as 413, not 400, when the kernel MaxBytesReader caps the read before the BindJson LimitReader does */
-
 func TestRequest_BindJsonOversizedBodyReturns413(t *testing.T) {
     var bindErr error
 
@@ -59,8 +57,6 @@ func TestRequest_BindJsonOversizedBodyReturns413(t *testing.T) {
     }
 }
 
-/* @info a body limit at the top of the int64 range must leave binding functional: the one-byte over-limit allowance would wrap negative and read every body as empty, answering 400 for valid JSON */
-
 func TestRequest_BindJsonMaxIntBodyLimitStillBinds(t *testing.T) {
     var bindErr error
     var target map[string]any
@@ -100,7 +96,6 @@ func TestRequest_BindJsonMaxIntBodyLimitStillBinds(t *testing.T) {
     }
 }
 
-/* @info the decoder's own diagnosis — offending offset, field, type — travels as the exception cause: the flat message denied the log any way to distinguish a malformed body from a type mismatch on a specific field */
 func TestRequest_BindJsonInvalidJsonCarriesTheDecoderCause(t *testing.T) {
     var bindErr error
 
@@ -193,8 +188,6 @@ func bindAndValidateOutcome(body string) (error, int, string) {
     return bindErr, recorder.Code, recorder.Body.String()
 }
 
-/* @info BindJsonAndValidate is the binding an application calls on a write endpoint and it had never been entered by a test, while the changelog documents that the per-field detail of a failed validation now reaches the client under the "errors" key. The contract was written and nothing executed it. */
-
 func TestRequest_BindJsonAndValidateBindsAValidBody(t *testing.T) {
     var bound bindAndValidateSubject
 
@@ -228,8 +221,6 @@ func TestRequest_BindJsonAndValidateBindsAValidBody(t *testing.T) {
         t.Fatalf("expected the body to reach the target, got: %+v", bound)
     }
 }
-
-/* @info a body that fails validation answers 400 carrying every field, message and code the validator computed. The listener used to throw all of it away, so the client of a failed submission learned only that something was wrong and which field was never said. */
 
 func TestRequest_BindJsonAndValidateAnswers400WithThePerFieldDetail(t *testing.T) {
     _, statusCode, body := bindAndValidateOutcome(`{"email":"not-an-email","name":"x"}`)
@@ -269,8 +260,6 @@ func TestRequest_BindJsonAndValidateAnswers400WithThePerFieldDetail(t *testing.T
     }
 }
 
-/* @info the violations reach the exception context under the errors key with their own type intact — which is what lets the listener render that key alone and keep the rest of an exception's context out of a client-facing body. */
-
 func TestRequest_BindJsonAndValidateCarriesTheErrorsContextKey(t *testing.T) {
     bindErr, _, _ := bindAndValidateOutcome(`{"email":"not-an-email","name":"x"}`)
 
@@ -301,8 +290,6 @@ func TestRequest_BindJsonAndValidateCarriesTheErrorsContextKey(t *testing.T) {
         t.Fatalf("expected the reported violations not to be empty")
     }
 }
-
-/* @info a binding failure is returned before the validator is consulted: an unparseable body is a 400 about the body, not about the fields, and validating a target nothing was written into would report every required field as missing — a diagnosis pointing away from the actual mistake. */
 
 func TestRequest_BindJsonAndValidateReturnsTheBindingFailureBeforeValidating(t *testing.T) {
     bindErr, statusCode, _ := bindAndValidateOutcome(`{"email":`)

@@ -9,7 +9,6 @@ import (
     sessioncontract "github.com/precision-soft/melody/session/contract"
 )
 
-/* @info the two service names are what the http kernel and every application reach the session by, and a rename would break the resolution on the REQUEST path — where the failure is a panic inside a handler rather than a boot refusal. The three doors had never been called; the manager and the storage are separate registrations on purpose, because a caller that needs the storage must not be handed a manager that owns it. */
 func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
     if "service.session.manager" != ServiceSessionManager {
         t.Fatalf("the session manager service name is a cross-package contract, got %q", ServiceSessionManager)
@@ -59,7 +58,6 @@ func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
     }
 }
 
-/* @info the doors are the panicking form, and the failure has to land at the line that asked rather than as a nil the first handler dereferences somewhere inside the request. */
 func TestSessionServiceResolvers_PanicWhenNothingIsRegistered(t *testing.T) {
     serviceContainer := container.NewContainer()
 

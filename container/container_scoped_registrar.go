@@ -292,5 +292,3 @@ func (instance *container) rebuildScopePlan() *scopePlan {
 
     return plan
 }
-
-var _ containercontract.ScopedRegistrar = (*container)(nil)

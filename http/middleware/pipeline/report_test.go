@@ -4,8 +4,6 @@ import (
     "testing"
 )
 
-/* @info the build report is what the debug command and the boot diagnostics read to explain a pipeline an operator did not get. Every accessor on it was at zero coverage, so a report that dropped a field on the way in — or handed out the slice it holds — would still have read as a working report through every path that only counts middlewares. */
-
 func TestNewMiddlewareBuildReport_CarriesEveryFieldItWasGiven(t *testing.T) {
     inactive := []*InactiveMiddleware{
         NewInactiveMiddleware("compression", "not enabled in this environment"),
@@ -53,8 +51,6 @@ func TestNewMiddlewareBuildReport_CarriesEveryFieldItWasGiven(t *testing.T) {
     }
 }
 
-/* @info the cycle flag is the one field that turns a report into a refusal — Build fails the boot on it — so it has to survive both the constructor and the setter. A flag that silently stayed false would let a pipeline with a cycle boot and run in an order nothing chose. */
-
 func TestMiddlewareBuildReport_CycleDetectedSurvivesBothWaysOfSettingIt(t *testing.T) {
     report := NewMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
 
@@ -74,8 +70,6 @@ func TestMiddlewareBuildReport_CycleDetectedSurvivesBothWaysOfSettingIt(t *testi
         t.Fatalf("expected the flag to be clearable")
     }
 }
-
-/* @info the constructor and the string-slice setters keep their own copies, so a caller that reuses the slice it passed cannot rewrite a report already handed to the diagnostics. The accessors copy on the way out for the same reason. */
 
 func TestMiddlewareBuildReport_StringSlicesAreCopiedInBothDirections(t *testing.T) {
     selected := []string{"security"}
@@ -121,8 +115,6 @@ func TestMiddlewareBuildReport_StringSlicesAreCopiedInBothDirections(t *testing.
         t.Fatalf("expected SetMissingReference to copy the caller's slice")
     }
 }
-
-/* @info a nil list stays nil rather than becoming an empty slice: the diagnostics distinguish "nothing was inactive" from "the field was never populated", and the copy helpers are the only place that distinction is made. */
 
 func TestMiddlewareBuildReport_NilListsStayNil(t *testing.T) {
     report := NewMiddlewareBuildReport("web", "dev", nil, nil, nil, false)

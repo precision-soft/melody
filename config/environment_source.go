@@ -165,7 +165,7 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
 
     parsed, parseErr := godotenv.Parse(strings.NewReader(preprocessed))
     if nil != parseErr {
-        /* @important the parser's own error is not carried as the cause: godotenv quotes the file content it choked on — the whole remaining tail for a malformed variable name, the first line of an unterminated quoted value — which is exactly the neighborhood where the credentials live, marker bytes included. Only a content-free description of the failure travels; the path names the file to open. */
+        /* the parser's own error is not carried as the cause: godotenv quotes the file content it choked on — the whole remaining tail for a malformed variable name, the first line of an unterminated quoted value — which is exactly the neighborhood where the credentials live, marker bytes included. Only a content-free description of the failure travels; the path names the file to open. */
         return exception.NewError(
             "failed to parse env file",
             exceptioncontract.Context{
@@ -283,7 +283,7 @@ func expandDotEnvValue(
 
         referencedKey, consumedLength, malformedBracedReference := parseDotEnvReference(fragment)
         if 0 == consumedLength {
-            /* @important the braced content is not reported: it may hold arbitrary pasted text — a credential typed where the key belongs — and naming the enclosing key is enough to find it */
+            /* the braced content is not reported: it may hold arbitrary pasted text — a credential typed where the key belongs — and naming the enclosing key is enough to find it */
             if true == malformedBracedReference {
                 return "", exception.NewError(
                     "malformed reference in env file value; ${...} must name a key of upper case letters, digits and underscores, and a literal dollar is written as \\$",
@@ -324,7 +324,7 @@ func expandDotEnvValue(
         }
 
         if _, referencedExists := values[referencedKey]; false == referencedExists {
-            /* @important the offending value is not reported: it commonly holds an inline credential, and naming the two keys is enough to find it */
+            /* the offending value is not reported: it commonly holds an inline credential, and naming the two keys is enough to find it */
             return "", exception.NewError(
                 "undefined key referenced in env file; write a literal dollar as \\$",
                 exceptioncontract.Context{
@@ -436,7 +436,7 @@ func preprocessDotEnvContent(content string) (string, error) {
     for scanner.Scan() {
         line := scanner.Text()
 
-        /* @important the line is walked byte by byte, never through runes: every character the walk decides on is ASCII, and a rune round-trip re-encoded whatever was not valid UTF-8 — a .env saved as Latin-1 had its password silently rewritten, while godotenv alone passes a quoted value through untouched. The produced line is collected into a slice because the dollar handling below has to take the preceding backslash back out again once it turns out to have been escaping the dollar. */
+        /* the line is walked byte by byte, never through runes: every character the walk decides on is ASCII, and a rune round-trip re-encodes whatever is not valid UTF-8 — a .env saved as Latin-1 would have its password rewritten, where godotenv alone passes a quoted value through untouched. The produced line is collected into a slice because the dollar handling below has to take the preceding backslash back out again once it turns out to have been escaping the dollar. */
         output := make([]byte, 0, len(line))
 
         openedInQuotes := inQuotes

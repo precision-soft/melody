@@ -144,7 +144,7 @@ func (instance *CompiledFirewall) Login(
     if nil != err {
         dispatchErr := instance.dispatchLoginFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            /* @important keep the login error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
+            /* keep the login error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
             return nil, exception.NewError(
                 "security login failure event dispatch failed",
                 exceptioncontract.Context{
@@ -195,7 +195,7 @@ func (instance *CompiledFirewall) Logout(
     if nil != err {
         dispatchErr := instance.dispatchLogoutFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            /* @important keep the logout error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
+            /* keep the logout error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
             return nil, exception.NewError(
                 "security logout failure event dispatch failed",
                 exceptioncontract.Context{
@@ -210,7 +210,7 @@ func (instance *CompiledFirewall) Logout(
     }
 
     if nil == result {
-        /* @important fail closed on a nil result the same way Login does: without this the caller dereferences result.Response after the logout success event was already emitted, panicking on the request path instead of returning a clean error */
+        /* fail closed on a nil result the same way Login does: the caller would otherwise dereference result.Response after the logout success event was already emitted, panicking on the request path instead of receiving a clean error */
         return nil, exception.NewError(
             "firewall logout handler returned nil result",
             exceptioncontract.Context{

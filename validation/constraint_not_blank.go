@@ -11,6 +11,7 @@ const (
     ConstraintNotBlankErrorIsBlank = "isBlank"
 )
 
+/* NotBlank judges a string. A value of any other type is refused rather than skipped; notEmpty is the constraint that understands collections. */
 type NotBlank struct{}
 
 func (instance *NotBlank) Validate(value any, field string) validationcontract.ValidationError {
@@ -21,7 +22,6 @@ func (instance *NotBlank) Validate(value any, field string) validationcontract.V
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        /* @important blankness is a property of a string: fmt-formatting anything else produced text that is never blank, so notBlank on a bool, a number or a collection accepted every value including false, 0 and the empty slice — notEmpty is the constraint that understands collections */
         return NewValidationError(field, "value must be a string", ConstraintNotBlankErrorIsBlank, nil)
     }
 

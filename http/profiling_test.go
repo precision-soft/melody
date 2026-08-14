@@ -6,8 +6,6 @@ import (
     "time"
 )
 
-/* @info the request profile is the record the profiler listener publishes and a profiling consumer reads; all nine accessors sat at zero coverage, so a field the constructor dropped or crossed would have described the wrong request with nothing to say so. The two timestamps and the duration are asserted as distinct values because crossing them is the failure that reads as plausible. */
-
 func TestNewHttpRequestProfile_ReportsEveryFieldItWasGiven(t *testing.T) {
     startedAt := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
     finishedAt := startedAt.Add(250 * time.Millisecond)
@@ -64,8 +62,6 @@ func TestNewHttpRequestProfile_ReportsEveryFieldItWasGiven(t *testing.T) {
         t.Fatalf("expected the finish to follow the start, got %v then %v", profile.StartedAt(), profile.FinishedAt())
     }
 }
-
-/* @info the route name and the route pattern are separate fields that a profile of an unmatched request leaves empty — a 404 has neither — while the path it was asked for stays. A profile that filled the name from the path would report a route the application does not have. */
 
 func TestNewHttpRequestProfile_KeepsThePathOfAnUnmatchedRequest(t *testing.T) {
     profile := NewHttpRequestProfile(

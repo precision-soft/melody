@@ -8,7 +8,6 @@ import (
     httpclientcontract "github.com/precision-soft/melody/httpclient/contract"
 )
 
-/* @info this source file had no test counterpart at all, so the two setters of a basic credential were never executed by anything: an application that fills the credential in two steps — a username from configuration, a password from a secret store — went through code no test had entered, and a setter assigning the wrong field would have put the password where the user goes with nothing to say so. */
 func TestBasicAuthorizationOptions_SettersAssignTheHalvesTheyName(t *testing.T) {
     basic := &BasicAuthorizationOptions{}
 
@@ -33,7 +32,6 @@ func TestBasicAuthorizationOptions_SettersAssignTheHalvesTheyName(t *testing.T) 
     }
 }
 
-/* @info the setters are reachable through the option set a request is configured with — SetBasicAuth builds the credential and the setters amend it — and the halves are only distinguishable on the wire, where the two are encoded into one header. A credential amended after it was built has to reach the server as amended, or a token rotated between the declaration and the call would be sent stale. */
 func TestBasicAuthorizationOptions_AmendedCredentialReachesTheRequest(t *testing.T) {
     receivedUsername := ""
     receivedPassword := ""

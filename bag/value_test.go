@@ -175,7 +175,6 @@ func TestBagFloat64_ConversionsAndErrors(t *testing.T) {
     }
 }
 
-/* @info a key set to nil is present but carries no value: String used to report it as set while Int, Bool, Float64 and Duration reported it as unset, so Has and the typed accessors contradicted each other on the same state */
 func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("key", nil)
@@ -207,7 +206,6 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     }
 }
 
-/* @info a string slice read as one string is refused loudly, never guessed at: answering with the empty string silently lost the value, answering with one element silently hid the rest; the slice is read with StringSlice or StringAt */
 func TestString_PanicsOnAStringSlice(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("repeated", []string{"1", "2"})
@@ -222,7 +220,6 @@ func TestString_PanicsOnAStringSlice(t *testing.T) {
     _, _ = String(parameterBag, "repeated")
 }
 
-/* @info the single occurrence stored as its string flows through every lax accessor: the value that used to vanish into ("", true) is delivered, and the guard built on HasNonEmptyString stops lying */
 func TestString_DeliversTheSingleOccurrence(t *testing.T) {
     parameterBag := NewParameterBagFromValues(url.Values{"term": {"melody"}})
 
@@ -240,7 +237,6 @@ func TestString_DeliversTheSingleOccurrence(t *testing.T) {
     }
 }
 
-/* @info every typed reader answers "unset" for a name the bag does not hold, rather than the zero value of its type: a request parameter that was never sent must not read as false, as zero, or as an empty list, because each of those is also a value somebody could legitimately have sent */
 func TestBagTypedReaders_AnAbsentNameIsUnsetRatherThanTheZeroValue(t *testing.T) {
     parameterBag := NewParameterBag()
 

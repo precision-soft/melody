@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info The streaming path applies a cap the caller named and leaves an unnamed one to the buffered path, which holds the whole body in memory; the two are told apart by whether the option was ever applied, not by the value it carries. */
 func TestRequestOptions_ExplicitMaxResponseBodyBytesIsDistinguishedFromTheDefault(t *testing.T) {
     options := NewRequestOptions()
 
@@ -25,7 +24,6 @@ func TestRequestOptions_ExplicitMaxResponseBodyBytesIsDistinguishedFromTheDefaul
     }
 }
 
-/* @info A caller who names the same value the default carries still named it, and the streaming path honours it. */
 func TestRequestOptions_ExplicitCapEqualToTheDefaultIsStillExplicit(t *testing.T) {
     options := NewRequestOptions()
 
@@ -36,7 +34,6 @@ func TestRequestOptions_ExplicitCapEqualToTheDefaultIsStillExplicit(t *testing.T
     }
 }
 
-/* @info the four plural options had never been executed by anything, and they are the ones an application reaches for when the headers come from configuration rather than from literals. They MERGE rather than replace — a header set singly survives a later plural call that does not name it — and they copy entry by entry into the option set's own map, so the caller's map is not the one the request reads. A nil map is a no-op rather than a panic, which is the shape a configuration that resolved to nothing takes. */
 func TestRequestOptions_SetHeadersMergesAndCopies(t *testing.T) {
     options := NewRequestOptions()
 
@@ -71,7 +68,6 @@ func TestRequestOptions_SetHeadersMergesAndCopies(t *testing.T) {
     }
 }
 
-/* @info the query counterpart carries the same contract, and it has to be pinned separately: the two are written as a pair and a copy dropped from one of them would leak only through whichever of the two the application happens to use. */
 func TestRequestOptions_SetQueryParamsMergesAndCopies(t *testing.T) {
     options := NewRequestOptions()
 
@@ -101,7 +97,6 @@ func TestRequestOptions_SetQueryParamsMergesAndCopies(t *testing.T) {
     }
 }
 
-/* @info WithHeaders and WithQueryParams are the option-shaped forms, and they differ from their singular siblings in a way nothing pinned: WithHeader captures two immutable strings at the moment it is built, while WithHeaders captures the caller's MAP and reads it only when the option is applied — which happens inside the request call. This test records the behaviour as it stands today, not as it ought to be: a mutation made between building the option and issuing the request DOES change what is sent, and a mutation made concurrently with a request in flight is a race on a map the caller believes it handed over. Carried to the backlog as a decision to take, alongside the response header map. */
 func TestRequestOptions_WithHeadersAndWithQueryParamsReadTheCallersMapWhenApplied(t *testing.T) {
     callerHeaders := map[string]string{"X-Plural": "at-build-time"}
     callerParameters := map[string]string{"plural": "at-build-time"}

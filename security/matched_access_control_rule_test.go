@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info this is the record the access-control decision hands to whoever asks why a request was refused, and nothing had ever built one: the whole of it — five accessors and the two copies that keep it from aliasing the compiled rule it describes — was never executed. The attribute slice is copied at BOTH ends on purpose: the rule it is built from is shared by every request of the process, so a caller that sorted or appended to what it was handed would rewrite the authorisation of every request that followed. */
 func TestNewMatchedAccessControlRule_CarriesTheMatchAndCopiesTheAttributesAtBothEnds(t *testing.T) {
     callerAttributes := []string{"ROLE_EDITOR", "ROLE_ADMIN"}
 
@@ -40,7 +39,6 @@ func TestNewMatchedAccessControlRule_CarriesTheMatchAndCopiesTheAttributesAtBoth
     }
 }
 
-/* @info a rule that grants without naming an attribute — a public one — carries an empty list rather than a nil the caller has to guard, so the report reads the same shape whatever matched. */
 func TestNewMatchedAccessControlRule_ARuleWithoutAttributesCarriesAnEmptyList(t *testing.T) {
     matched := NewMatchedAccessControlRule("/", nil, SourceGlobal, 0, "")
 

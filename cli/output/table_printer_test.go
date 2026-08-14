@@ -9,7 +9,6 @@ import (
     "unicode/utf8"
 )
 
-/* @info Hard-wrapping sliced cells on byte boundaries (splitLine[:width]) split multibyte UTF-8 runes in half, emitting invalid UTF-8 for any cell wider than the column. */
 func TestTablePrinter_WrapsMultibyteRunesWithoutSplitting(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -35,7 +34,6 @@ func TestTablePrinter_WrapsMultibyteRunesWithoutSplitting(t *testing.T) {
     }
 }
 
-/* @info Column widths and cell padding were measured with len() (bytes); multibyte rows therefore misaligned the rendered border relative to the ASCII header/separator. */
 func TestTablePrinter_PadsMultibyteCellsByRune(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -78,7 +76,6 @@ func TestTablePrinter_PadsMultibyteCellsByRune(t *testing.T) {
     }
 }
 
-/* @info the error is rendered whole, and regardless of quiet: this printer is the only presentation the default format has, and an envelope failure that rendered nowhere left the red one-line echo as the entire report — the code, the details and the cause existed only here */
 func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.SetError(
@@ -108,7 +105,6 @@ func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
     }
 }
 
-/* @info the warnings are printed under quiet as well: quiet suppresses the decorative headers, and a warning is the one thing a command said beside its result — swallowed by a default, it never reached anyone rendering the default table */
 func TestTablePrinter_RendersTheWarningsUnderQuiet(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.AddWarning("cmd.checksum", "checksum mismatch", map[string]any{"file": "a.txt"})
@@ -135,7 +131,6 @@ func TestTablePrinter_RendersTheWarningsUnderQuiet(t *testing.T) {
     }
 }
 
-/* @info the constructor floors an unusable width at the default: zero is what a caller building an Option in code hands over without meaning "no room at all", and a negative one is what a misread flag produces — passed through, every column would shrink to its minimum and every cell would wrap to one rune per line */
 func TestNewTablePrinter_FloorsAnUnusableWidthAtTheDefault(t *testing.T) {
     for _, requestedWidth := range []int{0, -1, -120} {
         printer := NewTablePrinter(requestedWidth)
@@ -151,7 +146,6 @@ func TestNewTablePrinter_FloorsAnUnusableWidthAtTheDefault(t *testing.T) {
     }
 }
 
-/* @info the warning details are rendered under verbose, in key order: an unordered map walk printed the same warning differently on every run, which no diff of two reports can be read across */
 func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.AddWarning(
@@ -188,7 +182,6 @@ func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
     }
 }
 
-/* @info a detail filed under no name is skipped: rendered, it prints as ": value" — a line an operator cannot attribute to anything */
 func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.SetError(
@@ -217,7 +210,7 @@ func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
     }
 }
 
-/* @info a row shorter than the declared columns is measured without reading past its end: the builder refuses such a row, but the printer also serves a TableData assembled by hand, and the sizing pass runs before anything renders */
+/* the builder refuses a row shorter than the declared columns, so this state is reachable only through a TableData assembled by hand — which the printer also serves, and the sizing pass runs before anything renders */
 func TestTablePrinter_MeasuresARowShorterThanTheColumns(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -241,7 +234,6 @@ func TestTablePrinter_MeasuresARowShorterThanTheColumns(t *testing.T) {
     }
 }
 
-/* @info a table wider than its budget is shrunk from the widest column down, never below the header it has to keep readable, and the surplus is wrapped instead of dropped */
 func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
     const tableMaxWidth = 30
 
@@ -300,7 +292,6 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
     }
 }
 
-/* @info when every column already sits at its minimum there is nothing left to take, so the loop breaks instead of spinning: without the break it decrements nothing forever, because the width it would have to reduce is the one it refuses to */
 func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) {
     printer := NewTablePrinter(1)
 
@@ -347,7 +338,7 @@ func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) 
     }
 }
 
-/* @info the two floors of the shrink pass, reached only from code: a block with no columns has nothing to shrink, and a width below one is not a budget — measured against them the loop would compute a negative budget and try to take width from columns that do not exist */
+/* the two floors of the shrink pass are reached only from code, never through the printer's own doors, so the state is built here directly. */
 func TestTablePrinter_ShrinkPassFloors(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -371,7 +362,6 @@ func TestTablePrinter_ShrinkPassFloors(t *testing.T) {
     }
 }
 
-/* @info at a width of one there is no room to wrap into — a single rune per line would render a column of letters — so the value is answered whole and the row overflows visibly instead */
 func TestTablePrinter_AnswersTheCellWholeWhenThereIsNoRoomToWrap(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -384,7 +374,6 @@ func TestTablePrinter_AnswersTheCellWholeWhenThereIsNoRoomToWrap(t *testing.T) {
     }
 }
 
-/* @info an empty line inside a multi-line cell is kept as an empty line: dropped, the blank line separating two paragraphs of a description disappears and the two run together */
 func TestTablePrinter_KeepsTheBlankLinesInsideAMultiLineCell(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -398,7 +387,6 @@ func TestTablePrinter_KeepsTheBlankLinesInsideAMultiLineCell(t *testing.T) {
     }
 }
 
-/* @info the carriage-return spellings are normalized before splitting, so a value produced on windows wraps the same way; and whatever the input, the answer is never an empty slice — printRowWrapped indexes into it per line */
 func TestTablePrinter_NormalizesTheLineEndingsAndAlwaysAnswersALine(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -431,7 +419,6 @@ func (instance *failingTableWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* @info the first write failure is remembered and returned: a report truncated by a full disk used to end with a success banner and exit zero */
 func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
 

@@ -11,7 +11,6 @@ type scopedRegistrarProbe struct {
     value string
 }
 
-/* @info A name that answers with a process singleton outside a scope and with a per-request service inside one is the ambiguity the two lifetimes exist to keep apart. It is refused where it is made, not where it is resolved. */
 func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -40,9 +39,7 @@ func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     }
 }
 
-/* @info The refusal has to hold in the other order too. Without it, whether a collision is reported at all would depend on which module happened to register first, and a framework service registered after a module's scoped one would silently shadow it.
-
-@info Both registrations opt out of the type registration on purpose: with it, the cross-level TYPE check refuses first and the name check underneath is never reached, so a test written without it stays green even when the name check is deleted. */
+/* both registrations opt out of the type registration on purpose: with it, the cross-level TYPE check refuses first and the name check underneath is never reached. */
 func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -73,7 +70,6 @@ func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
     }
 }
 
-/* @info The cross-level type check is a separate guard from the name one and needs its own proof, or deleting either leaves the other covering for it. */
 func TestRegister_RefusesATypeAScopedRegistrationAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -102,7 +98,6 @@ func TestRegister_RefusesATypeAScopedRegistrationAlreadyHolds(t *testing.T) {
     }
 }
 
-/* @info Declaring Replacing on the scoped registration admits the collision whichever order the two arrive in: the opt-in belongs to the registration that means to shadow, and it must not depend on module ordering to be heard. */
 func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
     containerFirst := NewContainer()
 
@@ -155,7 +150,6 @@ func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
     }
 }
 
-/* @info Two scoped registrations under one name would make which provider answers depend on map iteration, so the second is refused with a cause of its own — the report says which lifetime the name was already taken at. */
 func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -196,7 +190,6 @@ func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
     }
 }
 
-/* @info A type resolving to a singleton outside a scope and to a per-request service inside one is the same ambiguity as a name, so the cross-level type check refuses it whether or not the registration called itself strict — strictness only decides whether two names may share a type at the SAME lifetime. */
 func TestRegisterScoped_RefusesATypeTheContainerAlreadyRegistered(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -226,7 +219,6 @@ func TestRegisterScoped_RefusesATypeTheContainerAlreadyRegistered(t *testing.T) 
     }
 }
 
-/* @info A failed type registration must leave nothing behind: a name kept without its type would answer by name and be absent by type, which is a half-registered service nobody declared. */
 func TestRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -259,7 +251,6 @@ func TestRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.
     }
 }
 
-/* @info The provider contract is enforced in one place for both lifetimes, so a scoped registration cannot accept a shape a container registration would refuse. */
 func TestRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -278,7 +269,6 @@ func TestRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
     }
 }
 
-/* @info A registration made after a scope already exists must reach the scopes created next; the published plan is a cache, and leaving it stale would silently drop the registration for the rest of the process. */
 func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -315,7 +305,6 @@ func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
     }
 }
 
-/* @info Creating a scope has to stay O(1) whatever the plan holds: it happens once per request, and copying the registration maps into every scope would put the whole declared graph on the request path. Holding the plan by reference is what makes that true, so the two scopes must share one pointer. */
 func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -337,7 +326,6 @@ func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
     }
 }
 
-/* @info the override path refuses to substitute a protected "service." name, and a scoped registration with Replacing() used to perform exactly that substitution inside every scope — where the kernel resolves through. The protected namespace holds at both lifetimes, with or without Replacing. */
 func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -363,7 +351,7 @@ func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
     }
 }
 
-/* @info the container's own panicking scoped door had never been executed. Unlike its two siblings — the generic front door and the one on a live scope, which both wrap the failure with a message naming the declaration — this one re-panics the registration's own refusal unchanged, matching MustRegister beside it; the assertion pins that spelling, because a wrapper added here later would change what a boot log says without any test noticing. */
+/* unlike its two siblings — the generic front door and the one on a live scope, which both wrap the failure with a message naming the declaration — this door re-panics the registration's own refusal unchanged, matching MustRegister beside it; the assertion pins that spelling. */
 func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -415,7 +403,6 @@ func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t 
     )
 }
 
-/* @info the same refusal on the scoped door, which spells it for its own lifetime: a shared message would let either guard be deleted while the other kept the suite green. */
 func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -429,7 +416,6 @@ func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T
     }
 }
 
-/* @info an empty scoped name is refused at the door for the reason the container one is: a service filed under it can never be asked for again. */
 func TestContainerScopedRegistrar_EmptyNameIsRefusedByName(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -449,7 +435,6 @@ func scopedNameProbeProvider() containercontract.Provider[*providerContractProbe
     }
 }
 
-/* @info a scoped registration landing after Close would be built into scopes the teardown has finished with — the plain registrar has refused a closed container since the container session, and the scoped one carries the same refusal at its own door, where the name it is given is the one the report has to carry. */
 func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -472,7 +457,6 @@ func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
     }
 }
 
-/* @info the strict duplicate-type refusal exists at the scoped lifetime too, with a message of its own: the container one and this one are separate guards, and a shared assertion would let either be deleted while the other kept the suite green. */
 func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
     serviceContainer := NewContainer()
 

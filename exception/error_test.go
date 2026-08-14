@@ -30,7 +30,6 @@ func TestIs_UsesUnwrap(t *testing.T) {
     }
 }
 
-/* @info the zero value is constructible outside the constructors and carries a nil map; the first context write must allocate it instead of panicking on the assignment */
 func TestError_ZeroValueSetContextValue_AllocatesTheMap(t *testing.T) {
     zeroValue := &Error{}
 
@@ -41,7 +40,6 @@ func TestError_ZeroValueSetContextValue_AllocatesTheMap(t *testing.T) {
     }
 }
 
-/* @info SetContext replaces the whole map, and it must copy on the way in for the same reason the constructor does: the caller keeps its reference, and the error is read from other goroutines through Context() — a later write into the map it still holds is a concurrent map write against a map read, which no recover reaches */
 func TestError_SetContext_ReplacesTheContextAndCopiesTheInput(t *testing.T) {
     err := NewError("message", map[string]any{"old": "value"}, nil)
 
@@ -64,7 +62,6 @@ func TestError_SetContext_ReplacesTheContextAndCopiesTheInput(t *testing.T) {
     }
 }
 
-/* @info a nil map handed to SetContext must leave the error with an empty context rather than a nil one: the next SetContextValue writes into whatever is there, and the copy is what makes that map non-nil */
 func TestError_SetContext_WithNilMap_LeavesAWritableContext(t *testing.T) {
     err := NewError("message", map[string]any{"old": "value"}, nil)
 
@@ -81,7 +78,7 @@ func TestError_SetContext_WithNilMap_LeavesAWritableContext(t *testing.T) {
     }
 }
 
-/* @info a creation failure memoized by the container is reachable from the owner request and every waiter request at once, so the mutable fields are locked; the proof is one writer held against one reader on the same instance, which without the lock is a concurrent map iteration and map write */
+/* the proof is one writer held open against one reader on the same instance, which without the lock is a concurrent map iteration and map write; a memoized creation failure is reachable from the owner request and every waiter at once. */
 func TestError_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
     sharedError := NewError("creation failed", map[string]any{"attempt": 1}, nil)
 

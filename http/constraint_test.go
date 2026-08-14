@@ -6,8 +6,6 @@ import (
     "testing"
 )
 
-/* @info the whole file was at zero coverage, including NewRequirements — which is not an accessor but a filter: it drops a requirement whose parameter name or pattern is empty. A dropped requirement is a route constraint the caller wrote and does not get, and the parameter it was meant to constrain then accepts anything, so the silence is the part that needs a test. */
-
 func TestNewRequirement_CarriesBothHalvesOfTheConstraint(t *testing.T) {
     requirement := NewRequirement("id", ConstraintNumeric)
 
@@ -38,8 +36,6 @@ func TestNewRequirements_MapsEveryCompleteRequirement(t *testing.T) {
         t.Fatalf("unexpected pattern for slug: %q", requirements["slug"])
     }
 }
-
-/* @info a requirement missing either half is dropped whole rather than stored under an empty key or with an empty pattern. Storing an empty key would put an entry in the map that names no parameter, and addRoute skips both spellings anyway — so the drop happens once, here, where the caller can be shown it did. */
 
 func TestNewRequirements_DropsARequirementMissingEitherHalf(t *testing.T) {
     requirements := NewRequirements(
@@ -77,8 +73,6 @@ func TestNewRequirements_OfNothingIsAnEmptyMapRatherThanNil(t *testing.T) {
     }
 }
 
-/* @info the four shorthands are the names an application actually writes, and each has to name its own character class: a shorthand pointing at the wrong constant would widen or narrow a route constraint silently — RequireAlphaLowercase accepting uppercase is the sharpest, because a path matched case-insensitively reaches a handler that was promised lowercase. */
-
 func TestRequireShorthands_EachNamesItsOwnCharacterClass(t *testing.T) {
     for _, testCase := range []struct {
         name            string
@@ -103,8 +97,6 @@ func TestRequireShorthands_EachNamesItsOwnCharacterClass(t *testing.T) {
         t.Fatalf("the numeric and the alphanumeric constraints must differ")
     }
 }
-
-/* @info the constraints are only worth anything if the router enforces them, so the shorthands are driven through a registered route: the value the class admits reaches the handler and the value it refuses does not match the route at all. A constraint that never reached the router would read as configured on every request whose parameter happened to be well formed. */
 
 func TestRequireShorthands_AreEnforcedByTheRouter(t *testing.T) {
     router := NewRouter()
@@ -135,8 +127,6 @@ func TestRequireShorthands_AreEnforcedByTheRouter(t *testing.T) {
     }
 }
 
-/* @info the lowercase class refuses an uppercase spelling. The router folds nothing about a parameter value, so this is the one place the distinction is made — and a slug constraint that admitted "Admin" beside "admin" would hand a handler two spellings of what it treats as one key. */
-
 func TestRequireAlphaLowercase_RefusesAnUppercaseSpelling(t *testing.T) {
     router := NewRouter()
 
@@ -165,8 +155,6 @@ func TestRequireAlphaLowercase_RefusesAnUppercaseSpelling(t *testing.T) {
         t.Fatalf("expected an uppercase slug to be refused by the lowercase constraint")
     }
 }
-
-/* @info the constraint is anchored to the WHOLE value by addRoute, which wraps it in a non-capturing group first. A constraint spelled as an alternation is where that matters — "^en|de|fr$" without the group is read as (^en)|(de)|(fr$) and matches "aden" — so a locale whitelist written the obvious way has to refuse a value that merely contains one of its members. */
 
 func TestRequirement_IsAnchoredToTheWholeParameterValue(t *testing.T) {
     router := NewRouter()

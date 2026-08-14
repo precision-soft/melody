@@ -6,7 +6,6 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
 )
 
-/* @info the DEFAULTS are the contract here, and nothing had named them: a registration made without options registers its type AND does so strictly, which is what makes two names sharing a type a boot failure rather than a lottery at resolution. A default flipped to lenient would turn every such collision into whichever provider the map yielded first, silently and differently between runs. */
 func TestApplyRegisterServiceOptions_DefaultsToAStrictTypeRegistration(t *testing.T) {
     option := applyRegisterServiceOptions(nil)
 
@@ -23,7 +22,6 @@ func TestApplyRegisterServiceOptions_DefaultsToAStrictTypeRegistration(t *testin
     }
 }
 
-/* @info the three options are the only way a caller changes those defaults, and each one has to move exactly its own field: an option that also cleared a neighbour would disarm a guard the caller never asked to disarm. */
 func TestRegisterOptions_EachMovesExactlyItsOwnField(t *testing.T) {
     withoutType := applyRegisterServiceOptions([]containercontract.RegisterOption{WithoutTypeRegistration()})
     if true == withoutType.AlsoRegisterType {
@@ -55,7 +53,6 @@ func TestRegisterOptions_EachMovesExactlyItsOwnField(t *testing.T) {
     }
 }
 
-/* @info the options are folded left to right, so the last one wins and a caller can undo a default a helper applied for it; a nil option is SKIPPED rather than called, because an option chosen by a condition whose other branch produced nothing is a wiring mistake and a nil function call would take the boot down instead. */
 func TestApplyRegisterServiceOptions_FoldsInOrderAndSkipsANilOption(t *testing.T) {
     option := applyRegisterServiceOptions([]containercontract.RegisterOption{
         WithoutTypeRegistration(),

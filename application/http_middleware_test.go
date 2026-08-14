@@ -20,7 +20,6 @@ func newHttpMiddlewareUnderTest(t *testing.T) *HttpMiddleware {
     )
 }
 
-/* @info a factory that yields nil used to be dropped from the pipeline without a trace — not even the inactive report carried it — so the operator who registered a rate limiter ran every request without one; the build refuses it now, naming the definition. */
 func TestHttpMiddlewareAll_RefusesAFactoryThatYieldsNil(t *testing.T) {
     middleware := newHttpMiddlewareUnderTest(t)
 
@@ -46,7 +45,6 @@ func TestHttpMiddlewareAll_RefusesAFactoryThatYieldsATypedNil(t *testing.T) {
     }, "failed to build middleware pipeline")
 }
 
-/* @info the registration gate reads through the interface: a nil function value inside a non-nil interface passed the plain nil comparison and panicked per request instead of at the boot line that declares it */
 func TestHttpMiddlewareUse_RefusesATypedNilMiddleware(t *testing.T) {
     middleware := newHttpMiddlewareUnderTest(t)
 
@@ -57,7 +55,6 @@ func TestHttpMiddlewareUse_RefusesATypedNilMiddleware(t *testing.T) {
     }, "middleware is nil in use with priority")
 }
 
-/* @info the control: a healthy factory stays in the chain and the pipeline builds */
 func TestHttpMiddlewareAll_BuildsWithAHealthyFactory(t *testing.T) {
     middleware := newHttpMiddlewareUnderTest(t)
 

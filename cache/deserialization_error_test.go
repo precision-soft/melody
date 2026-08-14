@@ -6,7 +6,6 @@ import (
     "testing"
 )
 
-/* @info the type is the contract: Remember tells a corrupt payload from a failed cache by it, through arbitrary wrapping */
 func TestDeserializationError_IsFoundThroughWrapping(t *testing.T) {
     causeErr := errors.New("unexpected byte")
 

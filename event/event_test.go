@@ -40,7 +40,6 @@ func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime 
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
-/* @info the clock is read through the interface: a typed nil passes a plain comparison and the failure would surface one frame later, inside Now(), naming the event constructor instead of the wiring that handed over a nil clock */
 func TestNewEvent_RefusesATypedNilClock(t *testing.T) {
     var clockInstance *testTypedNilClock
 
@@ -93,13 +92,12 @@ func TestEvent_Constructors_PanicOnEmptyName(t *testing.T) {
         NewEventWithTimestamp("", nil, time.Now())
     }, "event name may not be empty")
 
-    /* @info the source event carries the empty name rather than being built with one: NewEventWithTimestamp("", ...) panics while the argument is being evaluated, so writing it inline never enters NewEventFromEvent at all and only repeats the assertion above. An event with no name cannot be built through the constructors, which is the point — it can still arrive as a foreign implementation of the contract, and this is the path that rejects it. */
+    /* the source is the zero value rather than a constructed event: NewEventWithTimestamp("", ...) panics while the argument is being evaluated, so writing it inline never enters NewEventFromEvent at all. In production the state arrives only through a foreign implementation of the contract. */
     testhelper.AssertPanicsWithError(t, func() {
         NewEventFromEvent(&Event{})
     }, "event name may not be empty")
 }
 
-/* @info a nil event reaches its own guard before anything is read off it, and a typed nil has to reach it too: the parameter is an interface, so a (*Event)(nil) is not equal to nil and would otherwise dereference inside Name(). */
 func TestEvent_Constructors_PanicOnNilEvent(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         NewEventFromEvent(nil)
@@ -110,7 +108,6 @@ func TestEvent_Constructors_PanicOnNilEvent(t *testing.T) {
     }, "event value may not be nil")
 }
 
-/* @info the stop is part of what the event says about itself, and a copy that dropped it told a listener the propagation was live when it had already been stopped */
 func TestNewEventFromEvent_CarriesTheStoppedPropagation(t *testing.T) {
     original := NewEventWithTimestamp("e", nil, time.Unix(123, 0))
     original.StopPropagation()
@@ -122,7 +119,6 @@ func TestNewEventFromEvent_CarriesTheStoppedPropagation(t *testing.T) {
     }
 }
 
-/* @info an event that was never stopped must not be copied into one that claims it was */
 func TestNewEventFromEvent_KeepsALivePropagationLive(t *testing.T) {
     original := NewEventWithTimestamp("e", nil, time.Unix(123, 0))
 

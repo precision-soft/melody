@@ -42,7 +42,6 @@ func TestBagDuration_ConversionsAndErrors(t *testing.T) {
     }
 }
 
-/* @info a name the bag does not hold is unset, not a zero duration: a caller reading a timeout that was never configured must be able to tell "nobody said" from "somebody said zero", which is the difference between applying a default and applying no timeout at all */
 func TestBagDuration_AnAbsentNameIsUnsetRatherThanZero(t *testing.T) {
     parameterBag := NewParameterBag()
 

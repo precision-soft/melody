@@ -15,7 +15,7 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return "", false
     }
 
-    /* @important a present-but-nil value reports as unset, matching what the typed accessors report for the same state; otherwise Has and String would agree while String and Int contradicted each other */
+    /* a present-but-nil value reports as unset, matching what the typed accessors report for the same state; otherwise Has and String would agree while String and Int contradicted each other */
     if nil == value {
         return "", false
     }
@@ -25,7 +25,7 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return stringValue, true
     }
 
-    /* @important a string slice read as one string is refused loudly, never guessed at: the request bags keep the single and the repeated key apart by type, so what lands here is a genuine array, and answering with the empty string silently lost the value while answering with one element silently hid the rest. The slice is read with StringSlice or StringAt. */
+    /* a string slice read as one string is refused loudly, never guessed at: the request bags keep the single and the repeated key apart by type, so what lands here is a genuine array. The empty string would lose the value and one element would hide the rest; the slice is read with StringSlice or StringAt. */
     if _, isSlice := value.([]string); true == isSlice {
         exception.Panic(
             exception.NewError(

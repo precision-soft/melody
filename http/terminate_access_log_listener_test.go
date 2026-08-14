@@ -68,8 +68,6 @@ func newAccessLogRuntime(recordingLogger *accessLogRecordingLogger) runtimecontr
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
-/* @info the access log listener sat at 1.9% coverage — every branch that reads a field off the request was unexecuted, so the one record that says a request happened at all was carried by code nothing ran. A field silently dropped here is invisible until an incident needs it. */
-
 func TestRegisterKernelTerminateAccessLogListener_RecordsTheRequestItCompleted(t *testing.T) {
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
@@ -139,8 +137,6 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsTheRequestItCompleted(t
     }
 }
 
-/* @info the scheme is read from the attribute the kernel published, which is the one the forwarded-headers policy resolved. Re-detecting it here would log http for every request behind a proxy that terminates TLS, while the kernel served the very same request as https — two answers to one question, and the log is the one an incident reads. */
-
 func TestRegisterKernelTerminateAccessLogListener_PrefersTheSchemeTheKernelResolved(t *testing.T) {
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
@@ -174,8 +170,6 @@ func TestRegisterKernelTerminateAccessLogListener_PrefersTheSchemeTheKernelResol
     }
 }
 
-/* @info with no published attribute the listener falls back to detectScheme, which trusts no forwarded header at all: a plain request logs http even when a client claims otherwise, so a forged X-Forwarded-Proto cannot rewrite the access log of a deployment that never configured a trusted proxy. */
-
 func TestRegisterKernelTerminateAccessLogListener_FallsBackToTheUntrustedSchemeDetection(t *testing.T) {
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
@@ -205,8 +199,6 @@ func TestRegisterKernelTerminateAccessLogListener_FallsBackToTheUntrustedSchemeD
         t.Fatalf("expected an unclaimed scheme to read as http rather than trust the header, got: %v", loggedContext["scheme"])
     }
 }
-
-/* @info a request served over real TLS reads as https without any header at all — the one signal detectScheme does trust, because it comes from the connection rather than from the client. */
 
 func TestRegisterKernelTerminateAccessLogListener_DetectsTlsFromTheConnection(t *testing.T) {
     recordingLogger := &accessLogRecordingLogger{}
@@ -238,8 +230,6 @@ func TestRegisterKernelTerminateAccessLogListener_DetectsTlsFromTheConnection(t 
     }
 }
 
-/* @info an event carrying something other than a terminate payload is ignored rather than misread. The dispatcher is shared, so any listener registered on the same name receives every payload dispatched under it, and reading the wrong one would panic inside a listener that runs after the response has already gone. */
-
 func TestRegisterKernelTerminateAccessLogListener_IgnoresAForeignPayload(t *testing.T) {
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
@@ -255,8 +245,6 @@ func TestRegisterKernelTerminateAccessLogListener_IgnoresAForeignPayload(t *test
         t.Fatalf("expected no access log record for a foreign payload")
     }
 }
-
-/* @info a response the kernel never produced — a request whose connection died before anything was written — logs a zero status rather than dereferencing what is not there. The listener runs after the response has gone, outside the kernel's recovery, so a dereference here takes down the process. */
 
 func TestRegisterKernelTerminateAccessLogListener_RecordsAZeroStatusWithoutAResponse(t *testing.T) {
     recordingLogger := &accessLogRecordingLogger{}

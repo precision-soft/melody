@@ -8,7 +8,6 @@ import (
     "github.com/precision-soft/melody/exception"
 )
 
-/* @info the constructor copies on the way in and Context copies on the way out to keep the map private; ToExceptionError handed out the live map, so a consumer mutating the exception's context mutated the validation error through it */
 func TestValidationError_ToExceptionErrorDoesNotAliasTheContext(t *testing.T) {
     validationError := NewValidationError("field", "message", "code", map[string]any{"actual": 42})
 
@@ -31,7 +30,6 @@ func TestValidationError_ToExceptionErrorDoesNotAliasTheContext(t *testing.T) {
     }
 }
 
-/* @info decizie user 08-01: the collection marshals as the array it is, each element through its own marshaler, so a log record carrying it says the same thing the http response body says — the flattened Error() string was the only form the log ever saw */
 func TestValidationErrors_MarshalJsonRendersTheStructure(t *testing.T) {
     validationErrors := ValidationErrors{
         NewValidationError("name", "is required", "required", nil),
@@ -61,7 +59,6 @@ func TestValidationErrors_MarshalJsonRendersTheStructure(t *testing.T) {
     }
 }
 
-/* @info a validation error carrying no context answers nil rather than an empty map, and the two are not the same to a json encoder — the marshaler omits an empty context, so a getter that fabricated one would put "context":{} into every field of every 400 response body. */
 func TestValidationError_AnErrorWithoutContextAnswersNothingRatherThanAnEmptyMap(t *testing.T) {
     validationError := NewValidationError("field", "message", "code", nil)
 
@@ -79,7 +76,6 @@ func TestValidationError_AnErrorWithoutContextAnswersNothingRatherThanAnEmptyMap
     }
 }
 
-/* @info an empty collection renders as the empty string, not as a stray separator or a nil dereference. It is the shape the exception listener is handed whenever validation was asked for and found nothing wrong, and its Error() is what a log line prints. */
 func TestValidationErrors_AnEmptyCollectionRendersAsNothing(t *testing.T) {
     var empty ValidationErrors
 
@@ -92,7 +88,6 @@ func TestValidationErrors_AnEmptyCollectionRendersAsNothing(t *testing.T) {
     }
 }
 
-/* @info the collection renders its members in a stable order regardless of the order the walk found them in, because a log line that changes shape between two identical requests cannot be grouped by anything reading it. */
 func TestValidationErrors_RenderTheirMembersInAStableOrder(t *testing.T) {
     forward := ValidationErrors{
         NewValidationError("zebra", "last", "code", nil),

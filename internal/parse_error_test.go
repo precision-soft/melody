@@ -6,7 +6,6 @@ import (
     "github.com/precision-soft/melody/exception"
 )
 
-/* @info the refused value enters the context for the scalar shapes an operator acts on — a numeric refusal that named neither the value nor its magnitude could not be acted on; non-scalar shapes stay out */
 func TestParseError_CarriesScalarValuesInContext(t *testing.T) {
     for _, probe := range []struct {
         value    any
@@ -31,7 +30,6 @@ func TestParseError_CarriesScalarValuesInContext(t *testing.T) {
     }
 }
 
-/* @info the refusal has to name the parameter it refused, or an operator reading a boot failure knows a conversion went wrong without knowing which key produced it — every caller of this constructor reports about a named parameter. */
 func TestParseError_NamesTheParameterItRefused(t *testing.T) {
     parseErr := ParseError("database.port", "int", "not-a-number", nil)
 

@@ -15,7 +15,6 @@ type registerScopedOtherProbe struct {
     value string
 }
 
-/* @info the typed front door is what an application actually calls to declare a scoped service, and until now nothing executed it at all: the whole of RegisterScoped[T] — its two guards and its delegation — could have been deleted and the suite would have stayed green. It has to reach the registrar and produce a service the scope builds. */
 func TestRegisterScopedGeneric_RegistersAServiceEveryScopeBuildsOnItsOwn(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -48,7 +47,6 @@ func TestRegisterScopedGeneric_RegistersAServiceEveryScopeBuildsOnItsOwn(t *test
     }
 }
 
-/* @info the registrar arrives from a hook signature, so a nil one is a wiring mistake rather than a caller error, and it has to be named at the declaration line instead of dereferenced there. */
 func TestRegisterScopedGeneric_NilRegistrarIsRefusedByName(t *testing.T) {
     registerScopedErr := RegisterScoped[*registerScopedProbe](
         nil,
@@ -66,7 +64,7 @@ func TestRegisterScopedGeneric_NilRegistrarIsRefusedByName(t *testing.T) {
     }
 }
 
-/* @info a scoped service declared as any would be filed under the empty interface, which every value satisfies, so the first resolution by type would answer with whichever registration reached the map first. The refusal belongs to the type registration and has to be told apart from the provider contract's own refusal of an any-returning provider — opting the type registration out reaches that second one, and the two must not share a message. */
+/* the refusal belongs to the type registration and has to be told apart from the provider contract's own refusal of an any-returning provider: opting the type registration out is what reaches that second one. */
 func TestRegisterScopedGeneric_AnyServiceTypeIsRefusedForTheTypeRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -102,7 +100,6 @@ func TestRegisterScopedGeneric_AnyServiceTypeIsRefusedForTheTypeRegistration(t *
     }
 }
 
-/* @info the panicking form is the one a boot hook uses, where an error return has nowhere to go; it has to carry its own message so the failure names the declaration rather than surfacing as whatever the registrar happened to answer. */
 func TestMustRegisterScopedGeneric_PanicNamesTheDeclarationThatFailed(t *testing.T) {
     defer func() {
         recoveredValue := recover()
@@ -129,7 +126,6 @@ func TestMustRegisterScopedGeneric_PanicNamesTheDeclarationThatFailed(t *testing
     )
 }
 
-/* @info the happy path of the panicking form has to register, not merely not panic: a wrapper that swallowed its delegation would pass a panic-only assertion. */
 func TestMustRegisterScopedGeneric_RegistersOnTheHappyPath(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -154,7 +150,6 @@ func TestMustRegisterScopedGeneric_RegistersOnTheHappyPath(t *testing.T) {
     }
 }
 
-/* @info the by-type door derives the name itself and forces the type registration on, which is the whole of what it adds over its named sibling: the service has to answer by type from inside a scope, and the derived name has to be the one the container filed it under. */
 func TestRegisterScopedTypeGeneric_DerivesTheNameAndAnswersByType(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -185,7 +180,6 @@ func TestRegisterScopedTypeGeneric_DerivesTheNameAndAnswersByType(t *testing.T) 
     }
 }
 
-/* @info without WithTypeRegistration forced on, RegisterScopedType would declare a service reachable only under a name nobody spells by hand — the option it prepends is the point of the door, and it has to survive the caller's own options being appended after it. */
 func TestRegisterScopedTypeGeneric_CallerOptionsCannotSilentlyDisarmTheTypeRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -211,7 +205,6 @@ func TestRegisterScopedTypeGeneric_CallerOptionsCannotSilentlyDisarmTheTypeRegis
     }
 }
 
-/* @info the panicking by-type form carries its own message too, and the two must differ: a boot failure has to say whether the declaration named the service or derived it. */
 func TestMustRegisterScopedTypeGeneric_PanicNamesTheDeclarationThatFailed(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -246,7 +239,6 @@ func TestMustRegisterScopedTypeGeneric_PanicNamesTheDeclarationThatFailed(t *tes
     )
 }
 
-/* @info the happy path of the panicking by-type form has to register, for the reason its named sibling does. */
 func TestMustRegisterScopedTypeGeneric_RegistersOnTheHappyPath(t *testing.T) {
     serviceContainer := NewContainer()
 

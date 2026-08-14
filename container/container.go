@@ -598,5 +598,6 @@ func (instance *container) Container() containercontract.Container {
 
 var (
     _ containercontract.Container        = (*container)(nil)
+    _ containercontract.ScopedRegistrar  = (*container)(nil)
     _ containercontract.ContainerCarrier = (*container)(nil)
 )

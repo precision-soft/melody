@@ -29,7 +29,6 @@ func (instance *Alphanumeric) Validate(value any, field string) validationcontra
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        /* @important fail closed on a type the character rule can never hold: alphanumeric on a non-string field silently enforced nothing, while the numeric constraints refuse the types they cannot interpret */
         return NewValidationError(field, "value must be a string", ConstraintAlphanumericErrorNotAlphanumeric, nil)
     }
 

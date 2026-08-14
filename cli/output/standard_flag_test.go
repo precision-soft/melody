@@ -151,7 +151,6 @@ func TestDebugFlags_DefaultQuietToFalse(t *testing.T) {
     t.Fatalf("expected a quiet flag among the debug flags")
 }
 
-/* @info a negative value is refused at parsing, naming the flag: the option normalization clamps a negative to zero, and zero means unlimited for the limit and "from the start" for the offset — an argument asking for less than nothing silently delivered everything */
 func TestStandardFlags_RefuseNegativeIntegerValues(t *testing.T) {
     for _, flagName := range []string{FlagNameVerbosity, FlagNameLimit, FlagNameOffset, FlagNameTableMaxWidth} {
         validator := findIntFlagValidator(t, flagName)

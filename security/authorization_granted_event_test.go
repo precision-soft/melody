@@ -18,7 +18,6 @@ func TestAuthorizationGrantedEvent_CarriesTheRequestAndTheAttributes(t *testing.
     }
 }
 
-/* @info the event owns its attribute list on both sides: a listener editing what it read must not reach the decision that was recorded, nor the caller's slice */
 func TestAuthorizationGrantedEvent_OwnsItsAttributes(t *testing.T) {
     callerAttributes := []string{"ROLE_ADMIN"}
 

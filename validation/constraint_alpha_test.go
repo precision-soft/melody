@@ -16,7 +16,6 @@ func TestAlpha_PointerToStringInvalidIsRejected(t *testing.T) {
     }
 }
 
-/* @info the character rule can never hold in a non-string; the skip silently unenforced the rule */
 func TestAlpha_NonStringIsRejected(t *testing.T) {
     constraint := &Alpha{}
 
@@ -27,7 +26,6 @@ func TestAlpha_NonStringIsRejected(t *testing.T) {
     }
 }
 
-/* @info the four exits a character constraint takes before it ever runs its pattern each mean something different, and only the refusals were pinned: an absent value and a nil pointer are "nothing was supplied", which is optionality and must pass; an empty string is the same optionality expressed inline; a non-string is a declaration mistake and fails closed. A constraint that collapsed any two of them would either enforce nothing on a whole class of fields or refuse every optional one. */
 func TestAlpha_TheFourExitsTakenBeforeThePatternRuns(t *testing.T) {
     assertCharacterConstraintExits(t, &Alpha{}, "letters", ConstraintAlphaErrorNotAlpha)
 }

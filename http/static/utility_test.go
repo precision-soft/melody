@@ -217,7 +217,7 @@ func TestHasExcludedPathPrefix_EmptyEntryExcludesEverything(t *testing.T) {
     }
 }
 
-/* @info the fs.FS contract names the served root ".", and the file server itself never asks for it that way — it hands over a real file name — so this is the door a caller outside the package uses. The substitution to the empty name is inert for the outcome: joining "." onto the base resolves back to the base, so removing it opens the very same directory. What it is not inert for is the inversion, which empties every name that is not "." and answers the root for a request that named a file; that is where it is proved. */
+/* the substitution of "." for the empty name is inert for the outcome — joining "." onto the base resolves back to the base — so this test does not prove it on position; the inversion does, by emptying every name that is not "." and answering the root for a request that named a file. */
 func TestDirFileSystem_OpenDotNamesTheServedDirectory(t *testing.T) {
     directory := t.TempDir()
 
@@ -239,7 +239,7 @@ func TestDirFileSystem_OpenDotNamesTheServedDirectory(t *testing.T) {
     }
 }
 
-/* @info the fallback that keeps the configured base when the base itself does not resolve is LATENT, and this is the measurement rather than the claim. Resolving the target resolves the base as its prefix, so the base cannot fail while the target succeeds, and the target's own failure is answered above it — which is what this asserts. Measured in the container: a missing base, a base that is a dangling symlink and a base with mode 000 all fail on the target first, and the suite runs as root, so no permission denies a search. Only the base being removed between the two resolutions could enter it, which no in-process state forces. */
+/* the fallback that keeps the configured base when the base itself does not resolve is LATENT: resolving the target resolves the base as its prefix, so the base cannot fail while the target succeeds, and the target's own failure is answered above it — which is what this asserts. Only the base disappearing between the two resolutions could enter that branch, which no in-process state forces. */
 func TestDirFileSystem_ABaseThatDoesNotResolveIsRefusedOnTheTargetFirst(t *testing.T) {
     directory := t.TempDir()
 

@@ -58,7 +58,6 @@ func TestNewError_CopiesContextInConstructor(t *testing.T) {
     }
 }
 
-/* @info the four named constructors differ in exactly one thing — the level the record is filed under — and the level is what a production threshold reads: a warning constructor that files at error escalates every one of its records, and nothing else in the value says so */
 func TestNamedConstructors_CarryTheirLevel(t *testing.T) {
     constructorList := []struct {
         name        string

@@ -14,7 +14,6 @@ func TestRegex_PointerToStringMismatchIsRejected(t *testing.T) {
     }
 }
 
-/* @info the empty pattern compiles to a regular expression that matches every string, so regex= silently enforced nothing */
 func TestRegex_WithParamsRefusesEmptyPattern(t *testing.T) {
     constraint := NewRegex(`^[0-9]$`)
 
@@ -30,7 +29,6 @@ func TestRegex_WithParamsRefusesEmptyPattern(t *testing.T) {
     }
 }
 
-/* @info a pattern can never run against a non-string: []byte and interface fields silently bypassed the rule written for them */
 func TestRegex_NonStringIsRejected(t *testing.T) {
     constraint := NewRegex(`^[A-Za-z0-9]+$`)
 
@@ -41,7 +39,6 @@ func TestRegex_NonStringIsRejected(t *testing.T) {
     }
 }
 
-/* @info the regex constraint's optionality exits and its three accessors. The accessors had never been executed by anything, and they are the only way anything outside the package can tell a constraint that refused its pattern from one that compiled it: a Compiled that answered non-nil for a refused pattern, or an Error that answered nil, would make an introspection report a rule as armed while every value it sees is refused. */
 func TestRegex_OptionalityExitsAndTheAccessorsThatDescribeThePattern(t *testing.T) {
     constraint := NewRegex(`^[0-9]{3}$`)
 
@@ -67,7 +64,7 @@ func TestRegex_OptionalityExitsAndTheAccessorsThatDescribeThePattern(t *testing.
     }
 }
 
-/* @info a pattern that does not compile arms nothing, and every value it is asked about is refused by name rather than passed. The instance is reachable — NewRegex keeps the failure instead of panicking — so this is the state a hand-registered constraint sits in, and a Validate that fell through would enforce nothing on the field while the tag says it does. */
+/* the state under test is reachable: NewRegex keeps the compilation failure instead of panicking, so a hand-registered constraint can sit in it. */
 func TestRegex_AnUncompilablePatternRefusesEveryValueItIsAsked(t *testing.T) {
     constraint := NewRegex(`^[0-9`)
 

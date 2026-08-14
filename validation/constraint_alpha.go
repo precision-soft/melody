@@ -29,7 +29,6 @@ func (instance *Alpha) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        /* @important fail closed on a type the character rule can never hold: alpha on a non-string field silently enforced nothing, while the numeric constraints refuse the types they cannot interpret */
         return NewValidationError(field, "value must be a string", ConstraintAlphaErrorNotAlpha, nil)
     }
 

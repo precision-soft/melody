@@ -6,14 +6,12 @@ import (
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
-/* @info the package-level helper is what a handler calls; without a runtime there is nothing to read the context off, and the answer is not-granted rather than a dereference */
 func TestIsGranted_RefusesWithoutARuntime(t *testing.T) {
     if true == IsGranted(nil, "ROLE_USER") {
         t.Fatalf("expected a nil runtime to grant nothing")
     }
 }
 
-/* @info a runtime whose scope never received a security context — a console command, or a request that matched no firewall — answers not-granted rather than failing */
 func TestIsGranted_RefusesWithoutASecurityContext(t *testing.T) {
     runtimeInstance := newTestRuntime()
 
@@ -22,7 +20,6 @@ func TestIsGranted_RefusesWithoutASecurityContext(t *testing.T) {
     }
 }
 
-/* @info with a context in scope the helper answers exactly what the context answers, hierarchy included: this is the whole path from a handler's IsGranted call to the expanded roles */
 func TestIsGranted_DelegatesToTheSecurityContextInScope(t *testing.T) {
     runtimeInstance := newTestRuntime()
 

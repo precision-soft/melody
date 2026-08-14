@@ -18,7 +18,6 @@ func TestNewFirewallManager_NilConfigurationPanics(t *testing.T) {
     )
 }
 
-/* @info the manager indexes the firewalls by name so a caller can ask for one directly, which is how a login handler finds the firewall it belongs to */
 func TestFirewallManager_FirewallAnswersTheNamedFirewall(t *testing.T) {
     firewallMain := newTestCompiledFirewallWithRoleHierarchy("main", nil)
     firewallApi := newTestCompiledFirewallWithRoleHierarchy("api", nil)
@@ -37,7 +36,6 @@ func TestFirewallManager_FirewallAnswersTheNamedFirewall(t *testing.T) {
     }
 }
 
-/* @info an empty name is a caller mistake, not a lookup: answering the first firewall, or a nil one, would let a miswired handler authorize against whatever happened to be registered */
 func TestFirewallManager_FirewallRefusesAnEmptyName(t *testing.T) {
     manager := NewFirewallManager(
         NewCompiledConfiguration(
@@ -60,7 +58,6 @@ func TestFirewallManager_FirewallRefusesAnEmptyName(t *testing.T) {
     }
 }
 
-/* @info a name nobody registered is refused with the name in the error context, which is what turns a miswiring into a readable log line rather than a nil dereference downstream */
 func TestFirewallManager_FirewallRefusesAnUnknownName(t *testing.T) {
     manager := NewFirewallManager(
         NewCompiledConfiguration(
@@ -84,7 +81,6 @@ func TestFirewallManager_FirewallRefusesAnUnknownName(t *testing.T) {
     }
 }
 
-/* @info a nil entry in the compiled list is skipped rather than indexed: indexed, it would be handed to a caller as a live firewall and dereferenced on the request path */
 func TestNewFirewallManager_SkipsNilFirewalls(t *testing.T) {
     firewallMain := newTestCompiledFirewallWithRoleHierarchy("main", nil)
 
@@ -102,7 +98,6 @@ func TestNewFirewallManager_SkipsNilFirewalls(t *testing.T) {
     }
 }
 
-/* @info a firewall compiled without a name is skipped too, so it can never be reached by the empty-name lookup the method refuses one line earlier */
 func TestNewFirewallManager_SkipsUnnamedFirewalls(t *testing.T) {
     manager := NewFirewallManager(
         NewCompiledConfiguration(
@@ -117,7 +112,6 @@ func TestNewFirewallManager_SkipsUnnamedFirewalls(t *testing.T) {
     }
 }
 
-/* @info the last firewall registered under a name wins, deterministically: the index is built in list order */
 func TestNewFirewallManager_LastFirewallWinsOnADuplicateName(t *testing.T) {
     firewallFirst := newTestCompiledFirewallWithRoleHierarchy("main", nil)
     firewallSecond := newTestCompiledFirewallWithRoleHierarchy("main", NewRoleHierarchy(nil))

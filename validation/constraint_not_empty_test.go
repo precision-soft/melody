@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info notEmpty is the constraint an application reaches for on a required collection, and nothing had ever driven it: it walks through pointers and interfaces before it measures, which is what lets a *[]string declared optional-but-present be judged on what it points at rather than on the pointer being non-nil. */
 func TestNotEmpty_MeasuresThroughPointersAndInterfaces(t *testing.T) {
     constraint := NewNotEmpty()
 
@@ -31,7 +30,6 @@ func TestNotEmpty_MeasuresThroughPointersAndInterfaces(t *testing.T) {
     }
 }
 
-/* @info the four measurable kinds are the whole of what the constraint accepts, and each has to be refused when it is empty — a kind quietly falling through to the accepting branch would declare a required field satisfied by nothing. */
 func TestNotEmpty_RefusesEveryEmptyMeasurableKind(t *testing.T) {
     constraint := NewNotEmpty()
 
@@ -57,7 +55,6 @@ func TestNotEmpty_RefusesEveryEmptyMeasurableKind(t *testing.T) {
     }
 }
 
-/* @info a nil — untyped, or a nil pointer, or a nil interface — is the absence the constraint exists to refuse, and it must be refused as EMPTY rather than as the wrong type: a required field left out and a required field filled with a number are different mistakes, and the code is what a client acts on. */
 func TestNotEmpty_EveryShapeOfNilIsRefusedAsEmpty(t *testing.T) {
     constraint := NewNotEmpty()
 
@@ -77,7 +74,6 @@ func TestNotEmpty_EveryShapeOfNilIsRefusedAsEmpty(t *testing.T) {
     }
 }
 
-/* @info a kind that cannot be measured is refused by NAME rather than accepted, which is the symmetry the validation session established across the constraints: a number handed to a collection constraint is a declaration mistake and has to say so, not pass. */
 func TestNotEmpty_AnUnmeasurableKindIsRefusedForWhatItIs(t *testing.T) {
     constraint := NewNotEmpty()
 

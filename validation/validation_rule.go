@@ -90,7 +90,7 @@ func splitByTopLevelComma(valueString string) []string {
     return parts
 }
 
-/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named class ([:alpha:], [:^digit:], ...) opens on a '[' immediately followed by ':' and only ends on the ':]' pair, so the ']' that terminates the POSIX element is not mistaken for the enclosing class close. */
+/* charClassScanner tracks whether the scan is inside a regex character class [...], so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal rather than a close when it is the class's first content character — the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named class ([:alpha:], [:^digit:], ...) opens on a '[' immediately followed by ':' and ends only on the ':]' pair, so the ']' that terminates the POSIX element is not mistaken for the enclosing class close. */
 type charClassScanner struct {
     inClass          bool
     contentSeen      bool
@@ -309,7 +309,7 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
     return parts
 }
 
-/* @important parseIntStrict accepts only a string that is an integer in its entirety, so a malformed numeric constraint parameter is rejected at constraint creation rather than silently becoming a different bound: a leading-integer parse would turn lessThan=-0.5 into a bound of 0 — accepting -0.2, which the tag as written refuses — and 1e3 into a bound of 1. */
+/* parseIntStrict accepts only a string that is an integer in its entirety, so a malformed numeric constraint parameter is refused at constraint creation rather than becoming a different bound: a leading-integer parse reads lessThan=-0.5 as a bound of 0, which accepts -0.2, and 1e3 as a bound of 1. */
 func parseIntStrict(valueString string) (int, bool) {
     result, err := strconv.Atoi(valueString)
     if nil != err {

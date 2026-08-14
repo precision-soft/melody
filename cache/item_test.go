@@ -5,7 +5,6 @@ import (
     "time"
 )
 
-/* @info an item is handed to every caller of the in-memory backend and held by the sweep at the same time, so both ends copy: the payload the constructor is given and the payload it hands back are each a copy, and so is the expiry. Nothing had ever built one — eight accessors and two defensive copies were never executed — and an aliased payload is a caller rewriting what every later reader of the same key gets, with no write path anywhere near it. */
 func TestNewItem_CopiesThePayloadAndTheExpiryAtBothEnds(t *testing.T) {
     createdAt := time.Unix(100, 0)
     expiresAt := time.Unix(200, 0)
@@ -43,7 +42,6 @@ func TestNewItem_CopiesThePayloadAndTheExpiryAtBothEnds(t *testing.T) {
     }
 }
 
-/* @info an item without an expiry lives forever, and the absence has to travel as a nil rather than as a zero time — a zero time read as a deadline is a deadline already past, which would evict every immortal entry on the first sweep. */
 func TestNewItem_AnItemWithoutAnExpiryCarriesNoneRatherThanAZeroTime(t *testing.T) {
     item := NewItem("app.key", nil, time.Unix(100, 0), nil)
 
@@ -56,7 +54,6 @@ func TestNewItem_AnItemWithoutAnExpiryCarriesNoneRatherThanAZeroTime(t *testing.
     }
 }
 
-/* @info the access marks are what the eviction orders its candidates by, and the item is touched from every request goroutine that reads its key while the sweep reads the same marks — which is why they are atomics rather than plain fields. The constructor seeds the last access with the creation time so a never-read entry is not the oldest thing in the store by accident. */
 func TestItem_TouchAdvancesTheAccessMarkAndCountsTheHit(t *testing.T) {
     createdAt := time.Unix(100, 0)
 

@@ -10,7 +10,6 @@ import (
     "github.com/uptrace/bun/schema"
 )
 
-/* @info the identity block is fetched only for the dialects with a fetcher; any other dialect answers a nil identity with no error, and every call site skips the block on nil */
 func TestFetchDatabaseIdentity_AnswersNilForADialectWithoutAFetcher(t *testing.T) {
     database, _ := newFakeBunDatabase()
 
@@ -39,7 +38,6 @@ func (instance dialectNamedAs) Name() dialect.Name {
     return instance.name
 }
 
-/* @info the identity block is the operator's confirmation that a migration is about to hit the database they think it is; pgsql answered a nil identity, so the block was silently absent exactly where the confirmation matters */
 func TestFetchDatabaseIdentity_DispatchesPerDialect(t *testing.T) {
     testCases := []struct {
         name          string

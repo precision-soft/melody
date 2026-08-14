@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info the listener that reacts to a sign-in reads both fields off this event; each accessor is pinned to its OWN field, because a copy-paste between the four security events would be invisible to every other test in the package */
 func TestLoginSuccessEvent_CarriesTheRequestAndTheToken(t *testing.T) {
     request := newFirewallTestRequest("/login")
     token := NewAuthenticatedToken("u1", []string{"ROLE_USER"})

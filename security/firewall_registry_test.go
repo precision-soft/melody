@@ -152,7 +152,6 @@ func TestNewFirewallRegistry_NilConfigurationPanics(t *testing.T) {
     )
 }
 
-/* @info a nil request matches no firewall: without this the walk would hand a nil request to every matcher, and a matcher written outside this package is under no obligation to survive one */
 func TestFirewallRegistry_MatchRefusesANilRequest(t *testing.T) {
     registry := NewFirewallRegistry(
         NewCompiledConfiguration(
@@ -171,7 +170,6 @@ func TestFirewallRegistry_MatchRefusesANilRequest(t *testing.T) {
     }
 }
 
-/* @info a request no firewall claims is not an error: the access control listener falls back to the global policy, which is the shape a global-only configuration compiles to */
 func TestFirewallRegistry_MatchAnswersNotMatchedWhenNoFirewallClaims(t *testing.T) {
     registry := NewFirewallRegistry(
         NewCompiledConfiguration(
@@ -212,7 +210,7 @@ func TestFirewallRegistry_GlobalAccessControlIsAnswered(t *testing.T) {
     }
 }
 
-/* @info the nil-request refusal needs an observable of its OWN: with the matchers this package ships, a nil request is declined by the matcher too, so removing the registry's guard changes nothing. Against a matcher that claims everything — the first matcher an application writes — the guard is the only thing between a nil request and a firewall selected for it. */
+/* the registry's nil-request refusal is SHADOWED by the matchers this package ships, which decline a nil request themselves; the matcher below claims everything, which is what makes the registry's own guard observable. */
 func TestFirewallRegistry_MatchRefusesANilRequestEvenAgainstAClaimingMatcher(t *testing.T) {
     registry := NewFirewallRegistry(
         NewCompiledConfiguration(

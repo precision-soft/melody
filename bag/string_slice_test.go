@@ -214,7 +214,6 @@ func (instance *contractOnlyParameterBag) All() map[string]any {
 
 var _ bagcontract.ParameterBag = (*contractOnlyParameterBag)(nil)
 
-/* @info a bag that is not melody's own takes the contract fallback, which has to answer the same way the concrete one does on every shape: an absent name, a name holding nil, a slice, a single string, and a value that is neither — the last refused by naming the type it found, because appending a string to it would mean deciding what the stored value meant */
 func TestAppendString_ContractFallbackCoversEveryStoredShape(t *testing.T) {
     parameterBag := newContractOnlyParameterBag()
 
@@ -266,7 +265,6 @@ func TestAppendString_ContractFallbackCoversEveryStoredShape(t *testing.T) {
     }
 }
 
-/* @info appending a whole list keeps every value and keeps their order, which is what a repeated query parameter is: the sibling test above pins the refusal, this one pins that the ordinary path actually lands all of them */
 func TestAppendStringSlice_KeepsEveryValueInOrder(t *testing.T) {
     parameterBag := NewParameterBag()
 

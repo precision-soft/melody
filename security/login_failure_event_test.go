@@ -5,7 +5,6 @@ import (
     "testing"
 )
 
-/* @info a failed sign-in carries the reason it failed: a listener that records the attempt reads it, and an audit trail written from the request alone would say nothing about why */
 func TestLoginFailureEvent_CarriesTheRequestAndTheError(t *testing.T) {
     request := newFirewallTestRequest("/login")
     failureErr := errors.New("invalid credentials")

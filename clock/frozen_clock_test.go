@@ -76,7 +76,7 @@ func TestFrozenClockNewTicker_ReflectsTravelToOnNextTick(t *testing.T) {
 
     clockInstance.TravelTo(targetTime)
 
-    /* @info a tick fired before TravelTo can already sit in the buffered ticker channel carrying the pre-travel time, so drain any stale ticks and assert the ticker eventually reflects the traveled time instead of reading exactly one tick, which races the 1ms interval. */
+    /* a tick fired before TravelTo can already sit in the buffered channel carrying the pre-travel time, so the stale ticks are drained: reading exactly one tick would race the 1ms interval */
     deadline := time.After(250 * time.Millisecond)
     for {
         select {
@@ -90,7 +90,6 @@ func TestFrozenClockNewTicker_ReflectsTravelToOnNextTick(t *testing.T) {
     }
 }
 
-/* @info Advance is forward-only: a negative duration silently moved the frozen clock backwards and broke the monotonic invariants the code under test relies on; TravelTo remains the deliberate door for backwards motion */
 func TestFrozenClockAdvance_RefusesNegativeDuration(t *testing.T) {
     clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))
 
@@ -134,7 +133,6 @@ func TestFrozenClockNewTicker_PanicsOnInvalidInterval(t *testing.T) {
     )
 }
 
-/* @info Stop returns only after the relay goroutine has exited, so a timestamp sampled AFTER Stop can never land in the channel: the asynchronous form let a pending runtime tick be taken after Stop returned, its timestamp read after a TravelTo the caller did next — a tick minted after teardown, from a stopped ticker. The 1ns interval keeps a tick pending at the instant of every Stop, and each round asserts no post-Stop instant is ever delivered. */
 func TestFrozenTickerStop_NoTickMintedAfterStop(t *testing.T) {
     for round := 0; round < 200; round++ {
         initialTime := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
@@ -165,7 +163,7 @@ func TestFrozenTickerStop_NoTickMintedAfterStop(t *testing.T) {
     }
 }
 
-/* @info the property behind the drain test, proven directly: Stop returns only after the relay goroutine has exited, witnessed by the done channel the relay closes on its way out. The pass side is deterministic — the synchronous Stop always finds the channel closed; the asynchronous form returns while the relay is still parked in its send, and the immediate probe finds the channel open. Each round first parks the relay by letting the buffer fill, so the exit path is the one Stop must wait out. */
+/* each round first parks the relay by letting the buffer fill, so the exit path is the one Stop must wait out; the done channel the relay closes on its way out is what makes the wait observable rather than timed. */
 func TestFrozenTickerStop_WaitsForTheRelayGoroutine(t *testing.T) {
     for round := 0; round < 100; round++ {
         clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))

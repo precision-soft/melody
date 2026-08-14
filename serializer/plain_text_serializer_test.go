@@ -61,7 +61,6 @@ func TestPlainTextSerializer_Deserialize_NilTarget(t *testing.T) {
     }
 }
 
-/* @info a typed-nil pointer target passes the plain nil comparison, matches its case and dereferences nil on the assignment line — it must be refused with the same error the untyped nil gets, not answered with a panic on a method that promises an error */
 func TestPlainTextSerializer_Deserialize_TypedNilTarget(t *testing.T) {
     serializer := NewPlainTextSerializer()
 
@@ -78,7 +77,6 @@ func TestPlainTextSerializer_Deserialize_TypedNilTarget(t *testing.T) {
     }
 }
 
-/* @info the serialized payload is a snapshot the caller owns: a byte-slice value must be copied, not aliased, so a caller that reuses its buffer after Serialize cannot rewrite the bytes it believes it captured */
 func TestPlainTextSerializer_Serialize_CopiesTheBytePayload(t *testing.T) {
     serializer := NewPlainTextSerializer()
 
@@ -96,7 +94,6 @@ func TestPlainTextSerializer_Serialize_CopiesTheBytePayload(t *testing.T) {
     }
 }
 
-/* @info the deserialized value owns its bytes: the payload must be copied into a byte-slice target, as the string case already does, so the caller reusing its read buffer cannot mutate the value it deserialized */
 func TestPlainTextSerializer_Deserialize_CopiesThePayloadIntoTheTarget(t *testing.T) {
     serializer := NewPlainTextSerializer()
 
@@ -125,7 +122,6 @@ func TestPlainTextSerializer_Deserialize_UnsupportedTarget(t *testing.T) {
     }
 }
 
-/* @info the default branch renders anything that is neither a string nor a byte slice through %v. It is the branch a handler returning a struct, an int or a nil takes, and its only pin was indirect — a round-trip through another package — so a branch that returned an empty payload would have left every non-string plain-text response silently blank. */
 func TestPlainTextSerializer_Serialize_RendersAnyOtherValue(t *testing.T) {
     serializer := NewPlainTextSerializer()
 

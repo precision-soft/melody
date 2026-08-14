@@ -573,8 +573,9 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 }
 
 var (
-    _ bunorm.Provider               = (*Provider)(nil)
-    _ bunorm.MigrationProvider      = (*Provider)(nil)
-    _ bunorm.ContextOpener          = (*Provider)(nil)
-    _ bunorm.MigrationContextOpener = (*Provider)(nil)
+    _ bunorm.Provider                = (*Provider)(nil)
+    _ bunorm.MigrationProvider       = (*Provider)(nil)
+    _ bunorm.ContextOpener           = (*Provider)(nil)
+    _ bunorm.MigrationContextOpener  = (*Provider)(nil)
+    _ bunorm.SecretParameterProvider = (*Provider)(nil)
 )

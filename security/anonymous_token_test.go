@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info the anonymous token is the fallback every resolution path falls back to; its three answers are what "nobody is signed in" means to the voters and to the access control listener */
 func TestAnonymousToken_IsNobody(t *testing.T) {
     token := NewAnonymousToken()
 

@@ -26,7 +26,6 @@ func TestNotBlank_PointerToWhitespaceIsRejected(t *testing.T) {
     }
 }
 
-/* @info blankness is a property of a string: the fmt rendering of anything else is never blank, so false, 0, an empty slice and an empty map all passed a rule the developer wrote to require presence */
 func TestNotBlank_NonStringIsRejected(t *testing.T) {
     constraint := &NotBlank{}
 

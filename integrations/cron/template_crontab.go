@@ -258,4 +258,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
     ), nil
 }
 
-var _ Template = (*CrontabTemplate)(nil)
+var (
+    _ Template      = (*CrontabTemplate)(nil)
+    _ OwnedTemplate = (*CrontabTemplate)(nil)
+)

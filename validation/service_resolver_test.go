@@ -28,7 +28,6 @@ func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
     _ = ValidatorMustFromContainer(serviceContainer)
 }
 
-/* @info the soft resolver hands back the registered validator. Only its miss was pinned, and the two answers are told apart by nothing else — a resolver that answered nil for a healthy container would make every caller skip validation silently, which is the one failure mode a validator must never have. */
 func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
     serviceContainer := container.NewContainer()
 

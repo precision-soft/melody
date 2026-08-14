@@ -15,7 +15,6 @@ import (
     serializercontract "github.com/precision-soft/melody/serializer/contract"
 )
 
-/* @info the soft resolvers answer nil on failure even when the logger cannot be resolved either: the reporting branch goes through the soft logger resolver, so a runtime broken enough to lose both services costs an emergency record instead of a panic inside the very branch that reports the failure */
 func TestSoftResolvers_AnswerNilWhenTheLoggerIsMissingToo(t *testing.T) {
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -31,7 +30,7 @@ func TestSoftResolvers_AnswerNilWhenTheLoggerIsMissingToo(t *testing.T) {
     }
 }
 
-/* @info a factory handing back a typed nil is refused by the container itself with an error, and the resolver answers nil with the failure recorded — the pin covers the whole path; the resolver's own typed-nil branch stays as latent defense for a resolution path without the container's refusal */
+/* the container itself refuses a factory handing back a typed nil, so the resolver's own typed-nil branch is LATENT: this pins the whole path, not that branch. */
 func TestSerializerFromRuntime_RefusesATypedNilSerializer(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -53,7 +52,6 @@ func TestSerializerFromRuntime_RefusesATypedNilSerializer(t *testing.T) {
     }
 }
 
-/* @info the success return of each soft resolver is what every handler on the response path actually gets; only the failure halves were pinned, so a resolver that answered nil for a healthy container — the shape that turns every response into a 500 while the boot logs nothing — would have kept the suite green. */
 func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -96,7 +94,7 @@ func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
     }
 }
 
-/* @info when the logger IS resolvable the failure has to reach it: the empty-container pin above proves only that the reporting branch does not panic, and a resolver that answered nil without recording anything would look identical from the caller's side while the operator loses the one line naming the missing service. */
+/* the empty-container pin above proves only that the reporting branch does not panic: a resolver that answered nil without recording anything looks identical from the caller's side, which is why the record is asserted here against a resolvable logger. */
 func TestSoftResolvers_RecordTheResolutionFailureThroughTheLogger(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -134,7 +132,6 @@ func TestSoftResolvers_RecordTheResolutionFailureThroughTheLogger(t *testing.T) 
     }
 }
 
-/* @info the Must doors are the ones an application calls when the absence of a serializer is a boot-time mistake, not a request-time condition; both were never entered by anything, so neither the panic nor the value it hands back on success was pinned. */
 func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -177,7 +174,7 @@ func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
     }
 }
 
-/* @info both doors panic with the same message, so the message alone cannot tell them apart — a Must facade wired to the wrong service name would keep a message-only assertion green while the application resolved somebody else's service. The name it asked for travels in the context, and that is what each test reads. */
+/* both doors panic with the same message, so a message-only assertion is SHADOWED: the service name asked for travels in the context, and that is what each test reads. */
 func TestSerializerMustFromRuntime_PanicsNamingTheServiceItAskedFor(t *testing.T) {
     assertMustResolverPanicsForService(t, ServiceSerializer, func(runtimeInstance runtimecontract.Runtime) {
         _ = SerializerMustFromRuntime(runtimeInstance)

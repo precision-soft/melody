@@ -33,7 +33,6 @@ func TestRoleVoter_GrantsWhenRolePresent(t *testing.T) {
     }
 }
 
-/* @info an unauthenticated token that still carries roles must never be granted: the HTTP path refuses it before the vote, but a direct caller of the decision manager reaches the voter and the roles alone must not decide */
 func TestRoleVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
     voter := NewRoleVoter()
 
@@ -43,7 +42,6 @@ func TestRoleVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
     }
 }
 
-/* @info the ordinary refusal: an authenticated token that simply does not hold the attribute. Reached only through the listener until now, so the branch that decides every unprivileged request had no test of its own. */
 func TestRoleVoter_DeniesWhenRoleAbsent(t *testing.T) {
     voter := NewRoleVoter()
 
@@ -53,7 +51,6 @@ func TestRoleVoter_DeniesWhenRoleAbsent(t *testing.T) {
     }
 }
 
-/* @info an authenticated token with no roles at all is denied, not abstained: an abstain would leave the decision to the strategy arithmetic instead of refusing outright */
 func TestRoleVoter_DeniesATokenWithoutRoles(t *testing.T) {
     voter := NewRoleVoter()
 
@@ -63,7 +60,6 @@ func TestRoleVoter_DeniesATokenWithoutRoles(t *testing.T) {
     }
 }
 
-/* @info the role voter weighs every attribute it is offered — it is the fallback voter, and a Supports that filtered would silently hand attributes to nobody */
 func TestRoleVoter_SupportsEveryAttribute(t *testing.T) {
     voter := NewRoleVoter()
 
@@ -76,7 +72,6 @@ func TestRoleVoter_SupportsEveryAttribute(t *testing.T) {
     }
 }
 
-/* @info the comparison is exact: a role that merely contains the attribute is not the attribute */
 func TestRoleVoter_MatchesTheRoleExactly(t *testing.T) {
     voter := NewRoleVoter()
 

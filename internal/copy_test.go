@@ -203,7 +203,7 @@ func TestCopyAnyMap_DeepCopiesTypedSliceOfTypedSlices(t *testing.T) {
 }
 
 func TestCopyAnyMap_CyclicValueDoesNotStackOverflow(t *testing.T) {
-    /* @important a self-referential value reached through the deep copy must terminate via the depth bound rather than recurse until the goroutine stack overflows (a fatal error no recover() can catch); the test completing is the assertion. */
+    /* the test completing is the assertion: a stack overflow is a fatal error no recover() can catch, so the depth bound cannot be observed any other way */
     cyclic := map[string]any{}
     cyclic["self"] = cyclic
     cyclic["name"] = "value"
@@ -219,7 +219,7 @@ func TestCopyAnyMap_CyclicValueDoesNotStackOverflow(t *testing.T) {
 }
 
 func TestCopyAnySlice_CyclicValueDoesNotStackOverflow(t *testing.T) {
-    /* @important same bound for a self-referential slice reached through an interface element. */
+    /* the test completing is the assertion here too */
     cyclic := make([]any, 2)
     cyclic[0] = cyclic
     cyclic[1] = "value"
@@ -234,7 +234,6 @@ func TestCopyAnySlice_CyclicValueDoesNotStackOverflow(t *testing.T) {
     }
 }
 
-/* @info the traversal must be linear in distinct nodes: bounded by depth alone it was exponential for any value reaching one node through two edges — a 28-level two-edge chain is 2^28 visits and never finished, with the caller's lock held — while the depth guard, watching only depth, never fired */
 func TestCopyAnySlice_SharedSubstructureCompletes(t *testing.T) {
     leaf := "x"
     node := []any{leaf}
@@ -255,7 +254,6 @@ func TestCopyAnySlice_SharedSubstructureCompletes(t *testing.T) {
     }
 }
 
-/* @info a cycle closes onto its own copy: the depth-only form burned ten thousand levels and then planted an alias to the LIVE original inside the copy — an isolation breach exactly where isolation was promised */
 func TestCopyAnyMap_CycleClosesOnTheCopy(t *testing.T) {
     cyclic := map[string]any{}
     cyclic["self"] = cyclic
@@ -281,7 +279,6 @@ func TestCopyAnyMap_CycleClosesOnTheCopy(t *testing.T) {
     }
 }
 
-/* @info two edges into one node stay two edges into ONE copied node: expanded into two independent copies, a caller mutating through one edge no longer saw the change through the other, silently changing the shape of the data */
 func TestCopyAnyMap_PreservesSharing(t *testing.T) {
     shared := map[string]any{"key": "value"}
     original := map[string]any{
@@ -303,7 +300,6 @@ func TestCopyAnyMap_PreservesSharing(t *testing.T) {
     }
 }
 
-/* @info the reflect paths memoize too: a typed map reached through two edges stays one copied node */
 func TestCopyAnyMap_PreservesSharingOfTypedMaps(t *testing.T) {
     shared := map[string]int{"count": 1}
     original := map[string]any{
@@ -346,7 +342,6 @@ func TestCopyAnyMap_PreservesSharingOfTypedSlices(t *testing.T) {
     }
 }
 
-/* @info the nil map answers an empty one rather than nil: every caller writes into what it receives, and handing back the nil would turn the first write into "assignment to entry in nil map" at a site that only asked for a copy */
 func TestCopyStringMap_NilInputAnswersAWritableEmptyMap(t *testing.T) {
     copied := CopyStringMap[string](nil)
 
@@ -363,7 +358,6 @@ func TestCopyStringMap_NilInputAnswersAWritableEmptyMap(t *testing.T) {
     }
 }
 
-/* @info a zero-length slice is copied rather than handed back: its backing pointer is not a stable identity so it stays out of the visited map, but the caller's spare capacity still belongs to the caller — returned as-is, one append through the copy overwrites the element the caller had trimmed off */
 func TestCopyAnySlice_ZeroLengthSliceDoesNotShareTheCallersCapacity(t *testing.T) {
     backing := make([]any, 1, 4)
     backing[0] = "kept"
@@ -384,7 +378,6 @@ func TestCopyAnySlice_ZeroLengthSliceDoesNotShareTheCallersCapacity(t *testing.T
     }
 }
 
-/* @info at the depth bound the value is returned as-is rather than copied further: the bound is a safety net against a stack overflow no recover() can catch, and the alias it hands back is the documented price. Without it a genuinely deep value would ride the recursion past the goroutine stack instead of stopping. */
 func TestCopyAnyMap_AtTheDepthBoundTheValueIsAliased(t *testing.T) {
     const chainLength = maxCopyDepth + 2
 
@@ -413,7 +406,6 @@ func TestCopyAnyMap_AtTheDepthBoundTheValueIsAliased(t *testing.T) {
     }
 }
 
-/* @info a typed nil slice stays nil through the copy: materialized into an empty non-nil slice it would answer false to the nil test every caller distinguishing "absent" from "empty" writes */
 func TestCopyAnyMap_TypedNilSliceStaysNil(t *testing.T) {
     original := map[string]any{
         "roles": []string(nil),
@@ -430,7 +422,6 @@ func TestCopyAnyMap_TypedNilSliceStaysNil(t *testing.T) {
     }
 }
 
-/* @info the same for a typed nil map — and here materializing it would be worse than cosmetic: an empty non-nil map accepts the writes a nil one refuses, so the copy would silently take a mutation the original could never have carried */
 func TestCopyAnyMap_TypedNilMapStaysNil(t *testing.T) {
     original := map[string]any{
         "flags": map[string]int(nil),
@@ -447,7 +438,6 @@ func TestCopyAnyMap_TypedNilMapStaysNil(t *testing.T) {
     }
 }
 
-/* @info an interface element holding nothing is written as the element type's zero: reflect.ValueOf(nil) is the zero Value, and Set refuses it with a panic raised inside the copy — a value the caller only asked to duplicate would take down the request */
 func TestCopyAnyMap_NilElementOfANamedSliceIsCopiedAsTheZeroValue(t *testing.T) {
     original := map[string]any{
         "list": copyTestAnySlice{nil, "value"},
@@ -470,7 +460,6 @@ func TestCopyAnyMap_NilElementOfANamedSliceIsCopiedAsTheZeroValue(t *testing.T) 
     }
 }
 
-/* @info the map half of the same clause, on the entry a json document produces for `"key": null` */
 func TestCopyAnyMap_NilValueOfANamedMapIsCopiedAsTheZeroValue(t *testing.T) {
     original := map[string]any{
         "document": copyTestAnyMap{"absent": nil, "present": "value"},
@@ -498,7 +487,6 @@ func TestCopyAnyMap_NilValueOfANamedMapIsCopiedAsTheZeroValue(t *testing.T) {
     }
 }
 
-/* @info the reflect paths key slices by backing pointer AND length: two slices over one array with different lengths are different nodes, and memoizing on the pointer alone would hand the copy of one to a reader of the other */
 func TestCopyAnyMap_SubslicesOfOneArrayStayDistinct(t *testing.T) {
     backing := []string{"a", "b", "c"}
     original := map[string]any{

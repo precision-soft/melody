@@ -14,7 +14,6 @@ func TestNumeric_PointerToStringInvalidIsRejected(t *testing.T) {
     }
 }
 
-/* @info numeric validates the digits of a string; a number typed as int silently bypassed it — greaterThan/lessThan are the numeric-range constraints */
 func TestNumeric_NonStringIsRejected(t *testing.T) {
     constraint := &Numeric{}
 

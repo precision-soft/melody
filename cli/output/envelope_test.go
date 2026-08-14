@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info the envelope is what every command answers with, and its two mutators had never been called: warnings ACCUMULATE — a command that gathered three and reported one would hide two — while the error is a single slot, because a command fails once and the last failure is the one that ended it. */
 func TestEnvelope_AddWarningAccumulatesInTheOrderTheyWereRaised(t *testing.T) {
     envelope := Envelope{}
 
@@ -28,7 +27,6 @@ func TestEnvelope_AddWarningAccumulatesInTheOrderTheyWereRaised(t *testing.T) {
     }
 }
 
-/* @info the error slot is REPLACED rather than accumulated, and it starts empty: a command that succeeded must answer with no error at all, because a client reads that slot to decide whether to act on the data beside it. */
 func TestEnvelope_SetErrorReplacesTheSingleSlot(t *testing.T) {
     envelope := Envelope{}
 

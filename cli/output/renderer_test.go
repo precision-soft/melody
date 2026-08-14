@@ -85,7 +85,6 @@ func TestRender_ReturnsNilForAnEnvelopeCarryingOnlyWarnings(t *testing.T) {
     }
 }
 
-/* @info the error is returned unmarked so the exit path writes it to the application log: the rendered report lives only on the output streams, and a run that failed used to be invisible to anything reading the log file */
 func TestRender_ReturnsTheEnvelopeFailureUnmarked(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.SetError("cmd.failed", "the command failed", nil, nil)
@@ -107,7 +106,6 @@ func TestRender_ReturnsTheEnvelopeFailureUnmarked(t *testing.T) {
     }
 }
 
-/* @info a detail filed under no name is left out of the reported context: carried over it becomes an "" key beside a value, which the log renderer prints as a nameless pair and no operator can read — while the two reserved names stay the framework's, so a command cannot overwrite which command failed */
 func TestRender_LeavesTheUnnamedAndReservedDetailsOutOfTheReportedContext(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.SetError(
@@ -152,7 +150,6 @@ func (instance *failingRenderWriter) Write(payload []byte) (int, error) {
     return 0, errors.New("disk full")
 }
 
-/* @info the envelope's own failure must survive a printing that did not: the print error alone replaced the reason the command failed with the reason the report could not be written, and the failure the envelope carried existed nowhere else */
 func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.SetError("cmd.failed", "the business failure", nil, nil)
@@ -174,7 +171,6 @@ func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
     }
 }
 
-/* @info a printing failure without an envelope failure keeps its own report: there is nothing else to preserve */
 func TestRender_ReturnsThePrintFailureAloneWhenTheEnvelopeCarriesNoError(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
 

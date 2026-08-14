@@ -5,7 +5,6 @@ import (
     "testing"
 )
 
-/* @info the denial event carries the attributes that were refused AND the decision error; a listener that alerts on refusals reads all three, and the sibling granted event deliberately carries no error */
 func TestAuthorizationDeniedEvent_CarriesTheRequestAttributesAndError(t *testing.T) {
     request := newFirewallTestRequest("/admin")
     decisionErr := errors.New("forbidden")

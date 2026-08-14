@@ -22,7 +22,6 @@ func runWithSubstituteT(callback func(substituteT *testing.T)) *testing.T {
     return substituteT
 }
 
-/* @info the three refusals at the head guard the helper's own wiring, and each one has to be named: without them a nil t makes the deferred t.Fatalf dereference nil — inside a recover, so the failure surfaces as a crash in this file rather than as the miswired call — a nil callback reports "got no panic" for a test that never ran anything, and an empty expected message turns the substring match into one that accepts every panic, including the crash the guard under test was supposed to prevent. */
 func TestAssertPanicsWithError_RefusesANilTestingT(t *testing.T) {
     assertRefusal(t, "testing t may not be nil", func() {
         AssertPanicsWithError(nil, func() {}, "boom")
@@ -119,7 +118,6 @@ func TestAssertPanicsWithError_FailsWhenThePanicValueIsNotAnError(t *testing.T) 
     }
 }
 
-/* @info a typed-nil error passes the error assertion and its Error() dereferences the nil receiver; the helper must fail the test naming the shape instead of crashing the binary at its own line */
 func TestAssertPanicsWithError_FailsWhenThePanicValueIsATypedNilError(t *testing.T) {
     substituteT := runWithSubstituteT(func(substituteT *testing.T) {
         AssertPanicsWithError(

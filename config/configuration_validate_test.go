@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* @info the resolver fails on anything placeholder-shaped it cannot resolve, so the post-resolution hook has nothing left to check and must never fail a boot on a value whose percents are data */
 func TestValidate_PassesAfterResolution(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},

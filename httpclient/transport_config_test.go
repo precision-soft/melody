@@ -91,7 +91,6 @@ func TestHttpClientConfigWithTransportRoundTrips(t *testing.T) {
     }
 }
 
-/* @info four of the eight overrides had only ever been asserted through their INHERIT branch — the one taken when the caller names nothing — so the four that actually apply a caller's value were never entered: a transport tuned in configuration would have silently kept the defaults, and the only symptom is a timeout that fires at the wrong moment under load. */
 func TestResolveTransportConfig_TheRemainingFourOverridesAreApplied(t *testing.T) {
     resolved := resolveTransportConfig(&TransportConfig{
         IdleConnTimeout:       11 * time.Second,

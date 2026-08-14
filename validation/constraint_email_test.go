@@ -34,7 +34,6 @@ func TestEmail_PointerToStringValidPasses(t *testing.T) {
     }
 }
 
-/* @info an email format can never hold in a non-string; the skip silently unenforced the rule */
 func TestEmail_NonStringIsRejected(t *testing.T) {
     constraint := &Email{}
 
@@ -45,7 +44,6 @@ func TestEmail_NonStringIsRejected(t *testing.T) {
     }
 }
 
-/* @info the email constraint takes the same optionality exits as its character siblings — an absent value and a nil pointer are "nothing was supplied", not "not an email" — and neither had a test: a constraint that refused them would make every optional email field unfillable. */
 func TestEmail_AnAbsentValueIsOptionalityRatherThanAMalformedAddress(t *testing.T) {
     constraint := &Email{}
 
