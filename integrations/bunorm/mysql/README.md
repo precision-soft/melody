@@ -67,3 +67,21 @@ provider := mysql.NewProvider(
     }),
 )
 ```
+
+## Where bun's own diagnostics go
+
+Bun reports the developer's declaration mistakes — an unknown struct tag option, an unknown `on_update` or `on_delete` rule on a relation, a query carrying arguments and no placeholders — through a package-level logger of its own. Opening a connection through this provider routes that logger into the application's journal, once per process, so those arrive as `warning` records under the message `bun diagnostic` with the line in the context. Without it they are written to standard error as unstructured text, which a deployment whose journal is a json file never sees. The pgsql provider does the same; the first of the two to open wins the setting, and an application has one journal either way.
+
+One line does **not** travel that way. When the mysql dialect cannot read the server version it writes
+
+```
+can't discover MySQL version: <error>
+```
+
+through the **standard library's** default logger, not through bun's, so nothing this provider sets can reach it. Routing it means `log.SetOutput`, which replaces the destination of the standard logger for the whole process — every dependency that logs through it, and your own `log` calls with it. That is the application's decision, not this package's, so if you want it, take it in your composition root:
+
+```go
+log.SetOutput(logging.NewStandardErrorLogger(logger, "standard logger"))
+```
+
+In practice the line is redundant wherever container stderr is already collected into the same place as the journal, and the melody record written microseconds later carries strictly more: the level, the connection context and the cause.

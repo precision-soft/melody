@@ -453,8 +453,8 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
             if runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
                 var allowErr error
                 allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
-                if nil != allowErr {
-                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. */
+                if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
+                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. A limiter that filed its own record marks it, and then this is the second copy rather than the only one. */
                     logger := logging.LoggerFromRuntime(runtimeInstance)
                     if nil != logger {
                         if true == errors.Is(allowErr, context.Canceled) {

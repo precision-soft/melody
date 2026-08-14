@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/clock"
     "github.com/precision-soft/melody/container"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
@@ -1270,4 +1271,52 @@ func (instance *rateLimitCaptureLogger) Warning(message string, context loggingc
 
 func (instance *rateLimitCaptureLogger) Error(message string, context loggingcontract.Context) {
     instance.errorCalls++
+}
+
+type alreadyReportingRuntimeLimiter struct{}
+
+func (instance *alreadyReportingRuntimeLimiter) Allow(key string) bool {
+    return true
+}
+
+func (instance *alreadyReportingRuntimeLimiter) Reset(key string) {
+}
+
+func (instance *alreadyReportingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+    return true, exception.MarkLogged(
+        exception.NewError("rate limiter store failure", exceptioncontract.Context{"key": "actor"}, nil),
+    )
+}
+
+/* a limiter that filed its own record marks it, and the middleware then writes nothing beside it. The limiter knows the key and the failure mode and has doors with no error return at all, so it is the honest place to file from; without the mark being read here, arming its default turned every refused request during an outage into two identical records — at the moment the journal is under the most load. */
+func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain(t *testing.T) {
+    capture := &rateLimitCaptureLogger{}
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    middleware := RateLimitMiddleware(NewRateLimitConfig(&alreadyReportingRuntimeLimiter{}, nil, nil))
+
+    handler := middleware(
+        func(
+            innerRuntime runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
+    _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    if 0 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf(
+            "a failure the limiter already recorded must not be recorded a second time, got %d warnings %d errors",
+            capture.warningCalls,
+            capture.errorCalls,
+        )
+    }
 }

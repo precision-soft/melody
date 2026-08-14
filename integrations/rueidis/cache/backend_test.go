@@ -1025,3 +1025,62 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
         t.Fatal("expected the single-batch operation to keep the batch report as its own")
     }
 }
+
+/* the caller's own mistakes are named the way the in-memory backend names them, because the shared contract makes the grammar of a refusal part of the promise. Three distinct mistakes used to arrive under one message that is also the message of a store outage, so neither the operator nor the application could tell a bug in the call from redis being down. Redis refuses all three itself — what was missing was never the refusal but its name. */
+func TestBackend_CounterRefusalsAreNamedTheWayTheInMemorySiblingNamesThem(t *testing.T) {
+    for _, testCase := range []struct {
+        name    string
+        cause   error
+        message string
+    }{
+        {
+            name:    "a delta that overflows when negated",
+            cause:   errors.New("ERR decrement would overflow"),
+            message: "delta overflows int64 when negated",
+        },
+        {
+            name:    "a counter driven past the int64 ceiling",
+            cause:   errors.New("ERR increment or decrement would overflow"),
+            message: "cache increment overflow",
+        },
+        {
+            name:    "a payload that is not a canonical number",
+            cause:   errors.New("ERR value is not an integer or out of range"),
+            message: "cache value is not a valid int64",
+        },
+        {
+            name:    "anything else is the store failing, and now really means it",
+            cause:   errors.New("LOADING Redis is loading the dataset in memory"),
+            message: "cache counter operation failed",
+        },
+        {
+            name:    "no cause at all stays on the generic message",
+            cause:   nil,
+            message: "cache counter operation failed",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            refusal := counterError("probe-key", testCase.cause)
+
+            if testCase.message != refusal.Error() {
+                t.Fatalf("message = %q, want %q", refusal.Error(), testCase.message)
+            }
+
+            if nil != testCase.cause && false == errors.Is(refusal, testCase.cause) {
+                t.Fatal("the redis error must survive as the cause in every branch")
+            }
+        })
+    }
+}
+
+/* the fragments are matched inside whatever prefix the server or a script wraps them in, and case does not decide */
+func TestBackend_CounterRefusalsAreMatchedInsideTheServersOwnWrapping(t *testing.T) {
+    refusal := counterError(
+        "probe-key",
+        errors.New("ERR Error running script (call to f_abc): @user_script:4: VALUE IS NOT AN INTEGER OR OUT OF RANGE"),
+    )
+
+    if "cache value is not a valid int64" != refusal.Error() {
+        t.Fatalf("message = %q, want the payload refusal", refusal.Error())
+    }
+}

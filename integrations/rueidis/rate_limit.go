@@ -8,6 +8,8 @@ import (
 
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/logging"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/redis/rueidis"
 )
@@ -47,7 +49,7 @@ func WithRateLimiterFailureMode(mode RateLimiterFailureMode) RateLimiterOption {
     }
 }
 
-/* WithRateLimiterOnError observes store failures from the plain Allow path, which has no error return; AllowWithRuntime reports them to the caller as well. */
+/* WithRateLimiterOnError observes store failures from the plain Allow path, which has no error return; AllowWithRuntime reports them to the caller as well. It replaces the record the limiter writes when no observer is given, rather than adding to it: an observer may be a metric rather than a journal, so the failure is handed over untouched and unmarked and whatever the caller does with the error stays what it was. An observer that wants both writes both. */
 func WithRateLimiterOnError(onError func(error)) RateLimiterOption {
     return func(instance *RateLimiter) {
         instance.onError = onError
@@ -116,7 +118,7 @@ func (instance *RateLimiter) Allow(key string) bool {
 
     allowed, allowErr := instance.allow(callContext, key)
     if nil != allowErr {
-        instance.reportError(allowErr)
+        instance.reportError(nil, allowErr)
     }
 
     return allowed
@@ -129,20 +131,23 @@ func (instance *RateLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Ru
 
     allowed, allowErr := instance.allow(callContext, key)
     if nil != allowErr {
-        instance.reportError(allowErr)
+        allowErr = instance.reportError(logging.LoggerFromRuntime(runtimeInstance), allowErr)
     }
 
     return allowed, allowErr
 }
 
-/* Reset drops the counter for one key best-effort; a store failure only reports through the error observer, matching the interface's void signature. */
+/* Reset drops the counter for one key best-effort. The signature returns nothing, so a store failure reports through the error observer, and through a record when no observer was given: a successful login is meant to clear an account's lockout, and against a dead store the DEL fails, the account stays locked and nothing anywhere marks the attempt. */
 func (instance *RateLimiter) Reset(key string) {
     callContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
     defer cancel()
 
     command := instance.client.B().Del().Key(instance.prefix + key).Build()
     if resultErr := instance.client.Do(callContext, command).Error(); nil != resultErr {
-        instance.reportError(exception.NewError("redis rate limiter reset failed", map[string]any{"key": key}, resultErr))
+        instance.reportError(
+            nil,
+            exception.NewError("redis rate limiter reset failed", map[string]any{"key": key}, resultErr),
+        )
     }
 }
 
@@ -173,12 +178,34 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
     return count <= int64(instance.limit), nil
 }
 
-func (instance *RateLimiter) reportError(err error) {
-    if nil == instance.onError {
-        return
+/* reportError delivers a store failure and answers the error the caller should carry on with.
+
+An observer given by the application is the application's channel and gets the failure untouched — it may be a counter rather than a journal, so nothing is recorded here and nothing is marked, leaving whatever the caller does with the error exactly as it was.
+
+With no observer the failure is recorded here, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage refused every call and reached no channel whatsoever — no record, no error, no metric — and the shipped default is precisely that, since the reference application wires no observer. The record carries the level the http middleware picks for the same failure: a caller's own cancellation is not an outage and would page an operator for a client that hung up.
+
+The error is then marked already-logged and handed back, so the reader above files nothing a second time — the framework's own mark, which the exception listener and the five sites in the http kernel already honour. That is what lets the record be filed here, at the one place that knows the key and the failure mode, without the middleware writing its own beside it. */
+func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err error) error {
+    if nil != instance.onError {
+        instance.onError(err)
+
+        return err
     }
 
-    instance.onError(err)
+    if nil == logger {
+        logger = logging.EmergencyLogger()
+    }
+
+    /* the key and the failure mode already travel in the error's own context, put there where the call was made */
+    recordContext := exception.LogContext(err)
+
+    if true == errors.Is(err, context.Canceled) {
+        logger.Warning("rate limiter call cancelled", recordContext)
+    } else {
+        logger.Error("rate limiter store failure", recordContext)
+    }
+
+    return exception.MarkLogged(err)
 }
 
 /* floorPositiveMilliseconds guarantees a positive window never collapses to a 0 PEXPIRE argument, which Redis rejects. */

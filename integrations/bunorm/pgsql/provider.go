@@ -264,6 +264,8 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
         logger = logging.EmergencyLogger()
     }
 
+    bunorm.RouteDiagnostics(logger)
+
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts
     if 0 == maxAttempts {

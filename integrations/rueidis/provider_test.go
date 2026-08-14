@@ -366,3 +366,41 @@ func TestProviderOpen_TheRefusalNamesTheParameterAndTheDeadlines(t *testing.T) {
         t.Fatalf("expected the credential to stay out of the record, got %v", errorContext)
     }
 }
+
+/* the refusal reports the deadline that GOVERNED the dial, not the one that was configured. The custom dialer is installed only for a positive value, so a zero or negative DialTimeout — the footgun of a partial ClientConfig literal — ran under the library's own five seconds while the record said "0s", and an operator reads that as no dial bound at all and goes looking for a deadline that never existed. Measured against an unroutable address: the dial failed after five seconds under it. */
+func TestProvider_TheReportedDialTimeoutIsTheOneThatGovernedTheDial(t *testing.T) {
+    for _, testCase := range []struct {
+        name        string
+        dialTimeout time.Duration
+        expected    string
+    }{
+        {name: "a configured timeout is reported as itself", dialTimeout: 2 * time.Second, expected: "2s"},
+        {name: "zero is the library default, and says so", dialTimeout: 0, expected: "5s (library default)"},
+        {name: "a negative value is the library default too", dialTimeout: -1 * time.Second, expected: "5s (library default)"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            clientConfig := DefaultClientConfig()
+            clientConfig.DialTimeout = testCase.dialTimeout
+
+            if testCase.expected != resolveDialTimeoutDescription(clientConfig) {
+                t.Fatalf("dialTimeout = %q, want %q", resolveDialTimeoutDescription(clientConfig), testCase.expected)
+            }
+        })
+    }
+}
+
+/* the value travels into the diagnostic context every refusal of this provider carries, beside the connect timeout it mirrors */
+func TestProvider_TheConnectionContextCarriesTheGoverningDialTimeout(t *testing.T) {
+    clientConfig := DefaultClientConfig()
+    clientConfig.DialTimeout = 0
+
+    connectionContext := newTestProvider().connectionContext(
+        NewConnectionConfig("127.0.0.1:6379", "", ""),
+        clientConfig,
+        DefaultTimeoutConfig(),
+    )
+
+    if "5s (library default)" != connectionContext["dialTimeout"] {
+        t.Fatalf("dialTimeout = %v, want the governing value", connectionContext["dialTimeout"])
+    }
+}

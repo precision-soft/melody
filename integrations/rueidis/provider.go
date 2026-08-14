@@ -158,11 +158,23 @@ func (instance *Provider) connectionContext(
     connectionContext["connectTimeout"] = resolveConnectTimeout(timeoutConfig).String()
 
     if nil != clientConfig {
-        connectionContext["dialTimeout"] = clientConfig.DialTimeout.String()
+        connectionContext["dialTimeout"] = resolveDialTimeoutDescription(clientConfig)
         connectionContext["selectDb"] = clientConfig.SelectDb
     }
 
     return connectionContext
+}
+
+/* libraryDefaultDialTimeout is rueidis's own, applied whenever this provider installs no dialer of its own. */
+const libraryDefaultDialTimeout = 5 * time.Second
+
+/* resolveDialTimeoutDescription reports the deadline that GOVERNED the dial, not the one that was configured, which is what the rest of this context already does one line above for the connect timeout. The custom dialer is installed only for a positive value, so a zero or negative DialTimeout — the footgun of a partial ClientConfig literal — ran under the library's own five seconds while the record said "0s". An operator reads that as no dial bound at all and goes looking for a deadline that never existed; measured, the dial failed after five seconds under it. */
+func resolveDialTimeoutDescription(clientConfig *ClientConfig) string {
+    if 0 < clientConfig.DialTimeout {
+        return clientConfig.DialTimeout.String()
+    }
+
+    return libraryDefaultDialTimeout.String() + " (library default)"
 }
 
 /* resolveConnectTimeout bounds the boot ping. A non-positive value takes the default rather than removing the bound, the way Ping reads its own zero and the way this package's options read theirs: a TimeoutConfig that names only the command timeout would otherwise run the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. */

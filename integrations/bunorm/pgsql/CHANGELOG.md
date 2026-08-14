@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- opening a connection routes bun's own diagnostic channel into the application's journal, once per process, through `bunorm.RouteDiagnostics`: bun's reports of a declaration mistake — an unknown struct tag option, an unknown `on_update` or `on_delete` rule on a relation, a query carrying arguments and no placeholders — arrive as warning records instead of unstructured lines on standard error. See the `bunorm` changelog for the door itself. The pgsql dialect, unlike the mysql one, writes nothing through the standard library's logger, so this covers everything bun reports here
+
 - `Provider.OpenForMigrationContext` — the provider implements `bunorm.MigrationContextOpener`: the migration open runs under the caller's context, so an already-cancelled migration is refused before the attempt and a cancellation arriving mid-attempt is honoured at the next cancellable step instead of sleeping out the retry budget. `OpenForMigration` is the same call under `context.Background()`, so no existing call site changes
 
 - `Provider.OpenForMigration` — the provider implements `bunorm.MigrationProvider`, the door its mysql sibling already had: the same database with the driver deadlines lifted, a two-connection pool and no mid-run recycling. Without it the migrate commands fell back to the request pool, where pgdriver's own default read deadline — 10 seconds, configured by nothing in this package — cut any DDL statement that legitimately ran past it, measured with an 11-second statement dying at 10.004s with an i/o timeout

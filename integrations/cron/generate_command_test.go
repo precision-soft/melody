@@ -1,6 +1,7 @@
 package cron
 
 import (
+    "bytes"
     "encoding/json"
     "context"
     "errors"
@@ -8,7 +9,9 @@ import (
     "os"
     "path/filepath"
     "strings"
+    "syscall"
     "testing"
+    "time"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"
@@ -3108,5 +3111,120 @@ func TestErrorCauseOf_StartsAtTheFailureAndCarriesTheChain(t *testing.T) {
 func TestErrorCauseOf_AnswersNothingForAFailureWithoutACause(t *testing.T) {
     if nil != errorCauseOf(nil) {
         t.Fatal("expected no cause for a nil failure")
+    }
+}
+
+type noUserColumnTemplate struct{}
+
+func (instance *noUserColumnTemplate) Name() string {
+    return "kubernetes-probe"
+}
+
+func (instance *noUserColumnTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    lines := []string{instance.OwnershipMarker()}
+    for _, entry := range entries {
+        lines = append(lines, entry.Name+" "+strings.Join(entry.Command, " "))
+    }
+
+    return strings.Join(lines, "\n") + "\n", nil
+}
+
+func (instance *noUserColumnTemplate) OwnershipMarker() string {
+    return "# melody-cron-probe"
+}
+
+func (instance *noUserColumnTemplate) RendersUserColumn() bool {
+    return false
+}
+
+/* a registered dialect that renders no user column places its heartbeat without one, the way the builtin that renders none always has. Judged by name alone, the readme's own kubernetes example was refused for a crontab user it would never have rendered. */
+func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *testing.T) {
+    directory := t.TempDir()
+
+    _, runErr := runGenerateCommandWithRegistrar(
+        t,
+        []clicontract.Command{newFakeCommandWithSchedule("job:probe", &testSchedule{Minute: "0", Hour: "*"})},
+        []string{
+            "--out", filepath.Join(directory, "crontab"),
+            "--logs-dir", directory,
+            "--binary", "/usr/bin/app",
+            "--template", "kubernetes-probe",
+            "--heartbeat-path", filepath.Join(directory, "heartbeat.crontab"),
+        },
+        func(command *GenerateCommand) {
+            command.RegisterTemplate(&noUserColumnTemplate{})
+        },
+    )
+
+    if nil != runErr {
+        t.Fatalf("a dialect that renders no user column must not demand a user, got: %v", runErr)
+    }
+}
+
+/* a run that fails part way through still names what it already did, on the text rendering as well as the json one. Emptying a destination is irreversible and the sweep hands back what it emptied beside its failure, so returning without printing left the operator of a broken deploy with manifests blanked and not one line saying which — neither a "pruned" line nor the "wrote" lines of the writes that had succeeded.
+
+It is driven through the report door rather than through a sweep made to fail, because what can still fail a sweep is now filesystem trivia: the candidates it will open are regular files only, and as the process that wrote them it can read them. The state is constructed instead of waited for. */
+func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testing.T) {
+    var stdout bytes.Buffer
+    commandContext := &clicontract.CommandContext{Writer: &stdout}
+
+    runErr := NewGenerateCommand(NewConfiguration()).reportWrites(
+        commandContext,
+        output.Option{Format: output.FormatTable},
+        time.Now(),
+        []destinationWrite{{Destination: "/etc/cron.d/app", Entries: 3}},
+        []string{"/etc/cron.d/app-retired", "/etc/cron.d/app-moved"},
+        "",
+        errors.New("the sweep stopped part way through"),
+    )
+
+    if nil == runErr {
+        t.Fatal("the run's own failure must stay the verdict")
+    }
+
+    rendered := stdout.String()
+
+    for _, expected := range []string{
+        "pruned /etc/cron.d/app-retired",
+        "pruned /etc/cron.d/app-moved",
+        "wrote 3 entries to /etc/cron.d/app",
+    } {
+        if false == strings.Contains(rendered, expected) {
+            t.Fatalf("the failed run does not report %q, got: %q", expected, rendered)
+        }
+    }
+}
+
+/* the sweep considers only regular files. It used to skip directories and open everything else, and opening a fifo with no writer never returns: one named pipe beside the destinations wedged the generator with no deadline and no diagnostic. */
+func TestGenerateCommand_TheSweepDoesNotOpenANamedPipe(t *testing.T) {
+    directory := t.TempDir()
+
+    if fifoErr := syscall.Mkfifo(filepath.Join(directory, "a-fifo.crontab"), 0o644); nil != fifoErr {
+        t.Skipf("this platform has no fifo: %v", fifoErr)
+    }
+
+    completed := make(chan error, 1)
+    go func() {
+        _, runErr := runGenerateCommand(
+            t,
+            []clicontract.Command{newFakeCommandWithSchedule("job:probe", &testSchedule{Minute: "0", Hour: "*"})},
+            []string{
+                "--out", filepath.Join(directory, "current.crontab"),
+                "--logs-dir", directory,
+                "--binary", "/usr/bin/app",
+                "--user", "root",
+                "--prune",
+            },
+        )
+        completed <- runErr
+    }()
+
+    select {
+    case runErr := <-completed:
+        if nil != runErr {
+            t.Fatalf("the fifo must be skipped, not fail the run: %v", runErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatal("the generator is wedged opening the fifo")
     }
 }

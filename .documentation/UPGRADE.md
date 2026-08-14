@@ -82,6 +82,38 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None for the ordinary case, which is the one this repairs: a component that drains through a lazily-resolved handle at `Close` now finds it alive. If a service genuinely must close after another, express it as a dependency by resolving that other service inside its provider.
 
+### Rueidis: the rate limiter reports a store failure by default
+
+**What changed.** `rueidis.RateLimiter` writes a record when the store fails and no error observer was given. `Allow` returns a bool and `Reset` returns nothing, so under the fail-closed default a redis outage refused every call and reached no channel at all — measured against a dead store: no record, no error, no metric, and a successful login that should have cleared an account's lockout left it locked with no trace. The record goes through the request's own logger where there is one and through the emergency logger otherwise, at error for a store failure and warning for the caller's own cancellation, and the error is marked already-logged so the http middleware and listener do not file a second copy.
+
+**Symptom.** A deployment whose redis goes down now sees `rate limiter store failure` records where it previously saw silence — one per call, which during an outage is one per request. That is the point of the change, but it is a volume an operator should know about before it arrives. Nothing else changes: the refusals themselves, the failure mode and the returned values are exactly what they were.
+
+**Remedy.** None required. To route these somewhere of your own instead — a counter, a sampled channel — pass `WithRateLimiterOnError`, which replaces the record rather than adding to it and leaves the error unmarked, restoring the previous behaviour of the http path exactly.
+
+### Rueidis: the counter refusals of the cache backend are named
+
+**What changed.** On an open backend with a valid key, three distinct mistakes by the caller — a delta that overflows when negated, a counter driven past the int64 ceiling, an increment over a payload that is not a canonical number — used to arrive under one message, `cache counter operation failed`, which is also the answer to a genuine store outage. They now carry the same three messages the in-memory backend has always used: `delta overflows int64 when negated`, `cache increment overflow`, `cache value is not a valid int64`. The redis error stays the cause, and a store error matching none of them keeps the generic message.
+
+**Symptom.** Code matching on the text of a counter refusal sees the specific message instead of the generic one. `errors.Is` and `errors.As` over the redis error are unaffected — the cause chain is unchanged.
+
+**Remedy.** Match on the specific message, or better, on the cause. The generic message from here on means what it says: the store failed.
+
+### Bunorm migrate: the held-lock refusal names the resource and the remedy
+
+**What changed.** `<prefix>:migrate` wraps bun's lock error in a melody error naming the manager label, the lock table and the `<prefix>:unlock` command, with bun's error kept as the cause. It previously travelled as bun's own error, carrying no melody context at all.
+
+**Symptom.** Code matching the refusal on the text `already locked` no longer matches at the top of the chain: `Error()` answers `migrate: the migration lock is held; another migration is running, or a crashed one left it behind`.
+
+**Remedy.** Match through the chain — `errors.Is` and `errors.As` reach bun's error exactly as before — or read the `manager`, `locksTable` and `unlockCommand` keys of the context, which is what the wrap exists to provide.
+
+### Bunorm: bun's own diagnostics go to the journal
+
+**What changed.** Opening a connection through the mysql or pgsql provider routes bun's package-level logger into the application's journal, once per process, through the new `bunorm.RouteDiagnostics`. Bun's reports of a declaration mistake — an unknown struct tag option, an unknown `on_update` or `on_delete` rule, a query carrying arguments and no placeholders — arrive as warning records under the message `bun diagnostic` with the line in the context.
+
+**Symptom.** Those lines stop appearing on standard error and start appearing in the journal. An operator or a test grepping standard error for `WARN: bun:` finds nothing.
+
+**Remedy.** Read them from the journal, filtering on the `bun diagnostic` message. One line is deliberately unaffected and stays on standard error: the mysql dialect writes `can't discover MySQL version` through the **standard library's** default logger rather than bun's, so routing it would mean taking `log.SetOutput` for the whole process — every dependency and your own `log` calls with it. That is the application's decision; take it in your composition root if you want it, as the mysql readme shows.
+
 ### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
 
 **What changed.** Every module of the `bunorm` family — the manager, `mysql`, `pgsql` and the three `migrate` modules — requires `github.com/uptrace/bun v1.2.17` and, where they carry one, `dialect/mysqldialect`, `dialect/pgdialect` or `driver/pgdriver` at the same version. v1.2.16 swallowed the failure of a migration read from a `.sql` file: the deferred `conn.Close()` / `tx.Rollback()` overwrote the exec error with its own nil return, so `db:migrate` printed `[success]`, exited 0 and marked a migration applied that never ran.

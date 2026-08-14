@@ -211,8 +211,8 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.template = template
 
-    /* the crontab-no-user dialect renders no user column at all (busybox crond and per-user crontabs reject one), so a user is never needed to place the heartbeat line — demanding one turned a valid configuration into a hard error */
-    templateRendersUserColumn := TemplateNameCrontabNoUser != template.Name()
+    /* a dialect that renders no user column at all (busybox crond and per-user crontabs reject one) never needs a user to place the heartbeat line — demanding one turns a valid configuration into a hard error */
+    rendersUserColumn := templateRendersUserColumn(template)
 
     outputPath := resolveDefaultPath(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
     if "" == outputPath {
@@ -290,12 +290,13 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.heartbeatEnabled = 0 < len(options.heartbeatCommand) || "" != options.heartbeatPath
     options.prune = commandContext.Bool(flagNamePrune)
 
-    if true == options.heartbeatEnabled && true == templateRendersUserColumn && "" == options.defaultUserName {
+    if true == options.heartbeatEnabled && true == rendersUserColumn && "" == options.defaultUserName {
         return nil, exception.NewError(
             "cron: heartbeat is configured but no user is set; pass --user, register the melody.cron.user parameter, or remove the heartbeat",
             exceptioncontract.Context{
                 "flag":      flagNameDefaultUser,
                 "parameter": ParameterUser,
+                "template":  template.Name(),
             },
             ErrHeartbeatUserMissing,
         )
@@ -486,7 +487,8 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
     pruned := make([]string, 0)
 
     for _, directoryEntry := range directoryEntries {
-        if true == directoryEntry.IsDir() {
+        /* only a regular file is a candidate. Skipping directories alone left the sweep opening whatever else the directory held, and opening a fifo with no writer blocks forever: one named pipe beside the destinations wedged the generator inside os.Open with no deadline and no diagnostic. A device, a socket and a symlink are refused for the same reason — this generator wrote none of them, so none of them can be one of its own. */
+        if false == directoryEntry.Type().IsRegular() {
             continue
         }
 
@@ -591,7 +593,11 @@ func (instance *GenerateCommand) reportWrites(
         return renderErr
     }
 
+    /* a run that fails part way through still names what it already did, the way the json branch beside it does. Emptying a destination is irreversible and the sweep returns the destinations it emptied beside its failure, so returning here without printing them left the operator of a failed deploy with no record at all of which manifests had just been blanked — not one "pruned" line, not even the "wrote" lines of the writes that had succeeded. */
     if nil != runErr {
+        printDestinationWrites(commandContext, writes)
+        printPrunedDestinations(commandContext, pruned)
+
         return runErr
     }
 
@@ -603,6 +609,14 @@ func (instance *GenerateCommand) reportWrites(
         return nil
     }
 
+    printDestinationWrites(commandContext, writes)
+
+    printPrunedDestinations(commandContext, pruned)
+
+    return nil
+}
+
+func printDestinationWrites(commandContext *clicontract.CommandContext, writes []destinationWrite) {
     for _, write := range writes {
         if true == write.HeartbeatOnly {
             _, _ = fmt.Fprintf(commandContext.Writer, "wrote heartbeat-only crontab to %s\n", write.Destination)
@@ -610,10 +624,6 @@ func (instance *GenerateCommand) reportWrites(
             _, _ = fmt.Fprintf(commandContext.Writer, "wrote %d entries to %s\n", write.Entries, write.Destination)
         }
     }
-
-    printPrunedDestinations(commandContext, pruned)
-
-    return nil
 }
 
 func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned []string) {

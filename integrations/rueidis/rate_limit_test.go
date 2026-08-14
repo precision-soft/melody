@@ -2,12 +2,15 @@ package rueidis
 
 import (
     "context"
+    "errors"
     "os"
     "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/container"
+    "github.com/precision-soft/melody/exception"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
     "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/redis/rueidis"
@@ -287,5 +290,113 @@ func TestRateLimiter_ReArmsTheWindowOnAKeyThatLostItsExpiry(t *testing.T) {
 
     if 0 >= remaining {
         t.Fatalf("expected the window to be re-armed on a key carrying no expiry, got a ttl of %d", remaining)
+    }
+}
+
+type capturingLimiterLogger struct {
+    records []capturedLimiterRecord
+}
+
+type capturedLimiterRecord struct {
+    level   loggingcontract.Level
+    message string
+}
+
+func (instance *capturingLimiterLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.records = append(instance.records, capturedLimiterRecord{level: level, message: message})
+}
+
+func (instance *capturingLimiterLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *capturingLimiterLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *capturingLimiterLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *capturingLimiterLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *capturingLimiterLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage refused every call and reached no channel whatsoever. The mark is what lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
+func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T) {
+    for _, testCase := range []struct {
+        name    string
+        cause   error
+        level   loggingcontract.Level
+        message string
+    }{
+        {
+            name:    "a store outage",
+            cause:   errors.New("connection refused"),
+            level:   loggingcontract.LevelError,
+            message: "rate limiter store failure",
+        },
+        {
+            name:    "the caller's own cancellation is not an outage",
+            cause:   context.Canceled,
+            level:   loggingcontract.LevelWarning,
+            message: "rate limiter call cancelled",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            limiter := &RateLimiter{}
+            logger := &capturingLimiterLogger{}
+
+            failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, testCase.cause)
+
+            reported := limiter.reportError(logger, failure)
+
+            if 1 != len(logger.records) {
+                t.Fatalf("expected exactly one record, got %d: %v", len(logger.records), logger.records)
+            }
+
+            if testCase.message != logger.records[0].message {
+                t.Fatalf("message = %q, want %q", logger.records[0].message, testCase.message)
+            }
+
+            if testCase.level != logger.records[0].level {
+                t.Fatalf("level = %v, want %v", logger.records[0].level, testCase.level)
+            }
+
+            if false == exception.IsAlreadyLogged(reported) {
+                t.Fatal("the failure must come back marked, or the http sites file it a second time")
+            }
+        })
+    }
+}
+
+/* an observer given by the application is the application's channel: it may be a counter rather than a journal, so the failure is handed over untouched and unmarked and whatever the caller does with it stays what it was */
+func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t *testing.T) {
+    observed := make([]error, 0)
+    logger := &capturingLimiterLogger{}
+
+    limiter := &RateLimiter{}
+    WithRateLimiterOnError(func(err error) {
+        observed = append(observed, err)
+    })(limiter)
+
+    failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
+
+    reported := limiter.reportError(logger, failure)
+
+    if 1 != len(observed) {
+        t.Fatalf("the observer must receive the failure, got %d", len(observed))
+    }
+
+    if 0 != len(logger.records) {
+        t.Fatalf("a given observer replaces the record rather than adding to it, got %v", logger.records)
+    }
+
+    if true == exception.IsAlreadyLogged(reported) {
+        t.Fatal("a failure handed to the application's own observer must not be marked as journalled")
     }
 }

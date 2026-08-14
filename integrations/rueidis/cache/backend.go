@@ -568,16 +568,47 @@ func (instance *Backend) Close() error {
     return nil
 }
 
-/* counterError wraps a counter refusal with the key it happened on: the raw store error names neither, and the counter path is the one a caller most often logs verbatim. */
+/* counterError wraps a counter refusal with the key it happened on: the raw store error names neither, and the counter path is the one a caller most often logs verbatim.
+
+The caller's own mistakes are named the way the in-memory sibling names them, because the shared contract makes the grammar of a refusal part of the promise: on an open backend with a valid key, three distinct mistakes used to arrive here under one message that is also the message of a store outage, so neither the operator nor the application could tell a bug in the call from redis being down. Redis refuses all three natively — the guard exists, it is redis's, and it answers in redis's words — so what was missing was never the refusal but its name. A store error matching none of them keeps the generic message, which from here on really does mean the store failed. The redis error stays the cause in every branch, so nothing that reads through the chain loses anything. */
 func counterError(key string, causeErr error) error {
     return exception.NewError(
-        "cache counter operation failed",
+        counterErrorMessage(causeErr),
         exceptioncontract.Context{
             "key": key,
         },
         causeErr,
     )
 }
+
+/* counterRefusalMessages maps redis's own wording onto the message the in-memory backend answers for the same mistake. The match is on a fragment rather than the whole line because a redis error carries a prefix that varies by server version and by whether the command travelled through a script.
+
+The order is load-bearing and the list is walked in it: redis answers a DECRBY that cannot be negated with "decrement would overflow" and a counter driven past the int64 ceiling with "increment or decrement would overflow", and the first of those two is a substring of the second. Written the other way round every ceiling overflow would be reported as a delta that cannot be negated. */
+var counterRefusalMessages = []struct {
+    fragment string
+    message  string
+}{
+    {fragment: "increment or decrement would overflow", message: "cache increment overflow"},
+    {fragment: "decrement would overflow", message: "delta overflows int64 when negated"},
+    {fragment: "not an integer or out of range", message: "cache value is not a valid int64"},
+}
+
+func counterErrorMessage(causeErr error) string {
+    if nil == causeErr {
+        return counterStoreFailureMessage
+    }
+
+    causeText := strings.ToLower(causeErr.Error())
+    for _, refusal := range counterRefusalMessages {
+        if true == strings.Contains(causeText, refusal.fragment) {
+            return refusal.message
+        }
+    }
+
+    return counterStoreFailureMessage
+}
+
+const counterStoreFailureMessage = "cache counter operation failed"
 
 /* negativeTtlError refuses the already-lapsed duration the in-memory backend refuses too. Without it a negative ttl falls into the branch that writes no expiry at all, so the one value the caller meant to be unreadable is the one value stored forever. Zero keeps meaning no expiry, as both backends document. */
 func negativeTtlError(ttl time.Duration) error {

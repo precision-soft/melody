@@ -618,43 +618,11 @@ func (instance *RunnerCommand) dispatchDue(
             })
             failureMutex.Unlock()
 
-            if nil != invokeErr {
-                /* a command that watched its context and unwound when the shutdown cancelled it did exactly what the runner's own GoDoc asks of it: that is the clean stop, not a job failure. Counted as one, every SIGTERM with a job in flight filed an error record and failed the --once run, indistinguishable from a genuinely broken job — so the parent's cancellation is recorded at warning, named, and kept out of the failure aggregate. A deadline the entry asked for stays a failure. */
-                if true == isShutdownCancellation(runtimeInstance, invokeErr) {
-                    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-                        logger.Warning(
-                            "cron: scheduled command cancelled by shutdown",
-                            exception.LogContext(
-                                invokeErr,
-                                exceptioncontract.Context{
-                                    "commandName": launchedEntry.commandName,
-                                    "cronRunId":   runId,
-                                },
-                            ),
-                        )
-                    }
-
-                    return
-                }
-
+            if true == instance.reportRunOutcome(runtimeInstance, launchedEntry, runId, invokeErr, cancelled) {
                 failureMutex.Lock()
                 failedCommands = append(failedCommands, launchedEntry.commandName)
                 failures = append(failures, invokeErr)
                 failureMutex.Unlock()
-
-                /* the record carries the cronRunId the run's own records carry: the id is minted precisely so overlapping runs of one entry stay distinguishable, and a failure record tied to neither stream defeated it at the one moment it matters */
-                if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-                    logger.Error(
-                        "cron runner command failed",
-                        exception.LogContext(
-                            invokeErr,
-                            exceptioncontract.Context{
-                                "commandName": launchedEntry.commandName,
-                                "cronRunId":   runId,
-                            },
-                        ),
-                    )
-                }
             }
         }(entry)
     }
@@ -1010,6 +978,46 @@ func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling e
     merged[prefix+"CauseChain"] = causeChain
 
     return merged
+}
+
+/* reportRunOutcome files the record one dispatched run leaves behind and answers whether it counts towards the minute's failure aggregate. A command that watched its context and unwound when the shutdown cancelled it did exactly what the runner's GoDoc asks of it: that is a clean stop, recorded at warning, named, and kept out of the aggregate. A deadline the entry asked for stays a failure.
+
+It is handed the classification instead of computing its own, and that is the whole point of the parameter: the document row a few lines above is built from the same answer, and computing it twice read the runtime's context twice. A shutdown landing between the two reads made the row report failed while this branch treated the same run as a clean stop and returned early — one run with two verdicts, a document saying a job failed and a process exiting 0 over it. The window is microseconds wide and cannot be produced from the outside, which is why this is a function: a test hands it the two answers separately. */
+func (instance *RunnerCommand) reportRunOutcome(
+    runtimeInstance runtimecontract.Runtime,
+    entry *scheduledRunEntry,
+    runId string,
+    invokeErr error,
+    cancelled bool,
+) bool {
+    if nil == invokeErr {
+        return false
+    }
+
+    /* the record carries the cronRunId the run's own records carry: the id is minted precisely so overlapping runs of one entry stay distinguishable, and a failure record tied to neither stream defeated it at the one moment it matters */
+    recordContext := exception.LogContext(
+        invokeErr,
+        exceptioncontract.Context{
+            "commandName": entry.commandName,
+            "cronRunId":   runId,
+        },
+    )
+
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+
+    if true == cancelled {
+        if nil != logger {
+            logger.Warning("cron: scheduled command cancelled by shutdown", recordContext)
+        }
+
+        return false
+    }
+
+    if nil != logger {
+        logger.Error("cron runner command failed", recordContext)
+    }
+
+    return true
 }
 
 /* isShutdownCancellation classifies a run's failure as the runner's own shutdown reaching it: the runner's context is cancelled and the outcome is the cancellation, not an entry deadline. Only the parent's cancellation qualifies — a deadline the entry asked for stays a failure whatever the shutdown is doing. */

@@ -3244,3 +3244,69 @@ func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
         }
     }
 }
+
+/* the classification the row is built from is the classification the record is filed under, because reportRunOutcome takes it instead of computing a second one. It is driven here with a LIVE runtime context and a cancellation error: recomputing would answer "not a shutdown" for both calls, so the run reported cancelled would be filed as a failure and counted as one — which is exactly what a SIGTERM landing between the two reads used to produce, a document saying failed over a process exiting 0. */
+func TestRunnerCommand_ReportRunOutcomeTakesTheClassificationItIsGiven(t *testing.T) {
+    runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
+    entry := &scheduledRunEntry{commandName: "job:probe"}
+
+    for _, testCase := range []struct {
+        name            string
+        cancelled       bool
+        countsAsFailure bool
+        message         string
+    }{
+        {
+            name:            "a run classified as cancelled is a clean stop",
+            cancelled:       true,
+            countsAsFailure: false,
+            message:         "cron: scheduled command cancelled by shutdown",
+        },
+        {
+            name:            "a run classified as failed is counted",
+            cancelled:       false,
+            countsAsFailure: true,
+            message:         "cron runner command failed",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
+
+            if nil != runtimeInstance.Context().Err() {
+                t.Fatal("the runtime context must be live, or the two classifications cannot disagree")
+            }
+
+            countsAsFailure := runner.reportRunOutcome(runtimeInstance, entry, "run-probe", context.Canceled, testCase.cancelled)
+
+            if testCase.countsAsFailure != countsAsFailure {
+                t.Fatalf("counts towards the failure aggregate = %v, want %v", countsAsFailure, testCase.countsAsFailure)
+            }
+
+            if 1 != len(captured.entries) {
+                t.Fatalf("expected exactly one record, got %d: %v", len(captured.entries), captured.entries)
+            }
+
+            if testCase.message != captured.entries[0].message {
+                t.Fatalf("record = %q, want %q", captured.entries[0].message, testCase.message)
+            }
+
+            if "run-probe" != captured.entries[0].context["cronRunId"] {
+                t.Fatalf("the record does not carry the run id: %v", captured.entries[0].context)
+            }
+        })
+    }
+}
+
+/* a run that did not fail leaves no record and counts as nothing */
+func TestRunnerCommand_ReportRunOutcomeIsSilentForASuccessfulRun(t *testing.T) {
+    runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
+    runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
+
+    if true == runner.reportRunOutcome(runtimeInstance, &scheduledRunEntry{commandName: "job:probe"}, "run-probe", nil, false) {
+        t.Fatal("a successful run must not count towards the failure aggregate")
+    }
+
+    if 0 != len(captured.entries) {
+        t.Fatalf("a successful run must leave no record, got %v", captured.entries)
+    }
+}
