@@ -2,13 +2,13 @@ package service
 
 import (
     "context"
-    "crypto/subtle"
     "fmt"
     "strings"
 
     "github.com/precision-soft/melody/.example/entity"
     "github.com/precision-soft/melody/.example/event"
     "github.com/precision-soft/melody/.example/repository"
+    "github.com/precision-soft/melody/.example/security"
     melodycache "github.com/precision-soft/melody/cache"
     melodycachecontract "github.com/precision-soft/melody/cache/contract"
     "github.com/precision-soft/melody/container"
@@ -144,10 +144,10 @@ func (instance *UserService) Create(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
     username string,
-    passwordSha256Hex string,
+    passwordHash string,
     roles []string,
 ) (*entity.User, error) {
-    user := entity.NewUser(userId, username, passwordSha256Hex, roles)
+    user := entity.NewUser(userId, username, passwordHash, roles)
 
     createErr := instance.userRepository.Create(runtimeInstance.Context(), user)
     if nil != createErr {
@@ -171,7 +171,7 @@ func (instance *UserService) Update(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
     username string,
-    passwordSha256Hex string,
+    passwordHash string,
     roles []string,
 ) (*entity.User, bool, error) {
     ctx := runtimeInstance.Context()
@@ -186,7 +186,7 @@ func (instance *UserService) Update(
     }
 
     user.Username = username
-    user.Password = passwordSha256Hex
+    user.Password = passwordHash
     user.Roles = roles
 
     updated, updateErr := instance.userRepository.Update(ctx, user)
@@ -246,16 +246,16 @@ func (instance *UserService) DeleteById(
     return true, nil
 }
 
-func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
+func (instance *UserService) AuthenticateByUsernameAndPassword(
     username string,
-    passwordSha256Hex string,
+    password string,
 ) (*entity.User, bool, error) {
     normalizedUsername := strings.TrimSpace(username)
     if "" == normalizedUsername {
         return nil, false, nil
     }
 
-    if "" == strings.TrimSpace(passwordSha256Hex) {
+    if "" == password {
         return nil, false, nil
     }
 
@@ -267,8 +267,7 @@ func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
         return nil, false, nil
     }
 
-    /* the digests are compared in constant time. The two are the same length and an attacker cannot steer the digest of a password they submit, so the leak this closes is narrow — but a credential comparison is the one place an example is read from to be copied, and the idiom worth copying is this one. */
-    if 1 != subtle.ConstantTimeCompare([]byte(passwordSha256Hex), []byte(user.Password)) {
+    if false == security.PasswordMatches(user.Password, password) {
         return nil, false, nil
     }
 

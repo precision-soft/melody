@@ -33,7 +33,24 @@ func TestSessionTokenResolverAnswersTheSignedInIdentity(t *testing.T) {
     }
 }
 
-/* Every guard below answers the SAME anonymous token, so each is driven on its own: a table that fused them would let one guard cover for a sibling that had been disarmed. The eight are the whole fail-closed surface between a request and an identity — anything the session cannot supply exactly leaves the request anonymous rather than partly authenticated. */
+/* A file-backed session storage snapshots through json and answers the role list as []any; the resolver accepts that spelling when every element is a string, which is what keeps a signed-in session signed in across a process restart. */
+func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
+    request, sessionInstance := requestCarryingSession(t)
+    sessionInstance.Set(SessionKeySecurityUserId, "user-2")
+    sessionInstance.Set(SessionKeySecurityRoles, []any{"ROLE_USER", "ROLE_EDITOR"})
+
+    token := SessionTokenResolver()(request)
+
+    if false == token.IsAuthenticated() {
+        t.Fatalf("a restored role list left the request anonymous")
+    }
+
+    if 2 != len(token.Roles()) || "ROLE_USER" != token.Roles()[0] || "ROLE_EDITOR" != token.Roles()[1] {
+        t.Fatalf("unexpected roles: %v", token.Roles())
+    }
+}
+
+/* Every guard below answers the SAME anonymous token, so each is driven on its own: a table that fused them would let one guard cover for a sibling that had been disarmed. Together they are the whole fail-closed surface between a request and an identity — anything the session cannot supply exactly leaves the request anonymous rather than partly authenticated. */
 func TestSessionTokenResolverFailsClosed(t *testing.T) {
     for name, request := range map[string]func(*testing.T) melodysecuritycontract.Token{
         "no request at all": func(t *testing.T) melodysecuritycontract.Token {
@@ -76,6 +93,20 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
         },
         "an empty role list": func(t *testing.T) melodysecuritycontract.Token {
             return signedIn(t, "user-1", []string{})
+        },
+        "a restored role list carrying a non-string": func(t *testing.T) melodysecuritycontract.Token {
+            request, sessionInstance := requestCarryingSession(t)
+            sessionInstance.Set(SessionKeySecurityUserId, "user-1")
+            sessionInstance.Set(SessionKeySecurityRoles, []any{"ROLE_USER", 7})
+
+            return SessionTokenResolver()(request)
+        },
+        "an empty restored role list": func(t *testing.T) melodysecuritycontract.Token {
+            request, sessionInstance := requestCarryingSession(t)
+            sessionInstance.Set(SessionKeySecurityUserId, "user-1")
+            sessionInstance.Set(SessionKeySecurityRoles, []any{})
+
+            return SessionTokenResolver()(request)
         },
     } {
         t.Run(name, func(t *testing.T) {

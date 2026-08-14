@@ -40,7 +40,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         validationErrors := validatorInstance.Validate(dto)
         if nil != validationErrors {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, validationErrors.Error()), nil
+            return presenter.ApiValidationError(runtimeInstance, request, validationErrors), nil
         }
 
         productService := service.MustGetProductService(runtimeInstance.Container())

@@ -86,10 +86,11 @@ func seedCurrencyList() []*entity.Currency {
     }
 }
 
+/* seedUserList hashes at every call, so two calls answer different bytes for the same credentials — bcrypt salts anew. Nothing may compare seeded hashes across calls; the seeded PASSWORDS are the stable contract, and the e2e credentials depend on them. */
 func seedUserList() []*entity.User {
     return []*entity.User{
-        entity.NewUser("user-1", "user", security.Sha256Hex("user"), []string{entity.RoleUser}),
-        entity.NewUser("user-2", "editor", security.Sha256Hex("editor"), []string{entity.RoleUser, entity.RoleEditor}),
-        entity.NewUser("user-3", "admin", security.Sha256Hex("admin"), []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin}),
+        entity.NewUser("user-1", "user", security.MustHashPassword("user"), []string{entity.RoleUser}),
+        entity.NewUser("user-2", "editor", security.MustHashPassword("editor"), []string{entity.RoleUser, entity.RoleEditor}),
+        entity.NewUser("user-3", "admin", security.MustHashPassword("admin"), []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin}),
     }
 }

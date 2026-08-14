@@ -63,6 +63,14 @@
 # EXAMPLE OVER HTTP section measures on the supervised application is never spent by them; v3's per-major run
 # leaves the demos alone for the same reason. Clearing REDIS_ADDRESS or MYSQL_DSN skips the out-of-band
 # verification, not the application's behaviour — the example still wires the integration and still serves it.
+#
+# The v1 section also proves the showcase wirings only that example carries (.dev/e2e/exampleshowcase.go):
+# the cors preflight answered 204 before routing and security, the 401 that still carries the cors headers,
+# the api-key firewall on /products/api (the key alone reads the catalogue, a wrong key is 401, cookie flows
+# keep working), the gzip-compressed listing inflated back to its identity twin, the two-mistake payload
+# refused 400 with one errors entry per field, and a throttled write carrying X-Forwarded-For budgeted against
+# the forwarded address — read back out of the redis rate-limit key. It then restarts the process and proves
+# the pre-restart session cookie still admits, which only the file-backed session storage can make true.
 
 set -euo pipefail
 IFS=$'\n\t'

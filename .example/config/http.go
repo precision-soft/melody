@@ -17,6 +17,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router := kernelInstance.HttpRouter()
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
+    kernelInstance.HttpKernel().SetForwardedHeadersPolicy(exampleForwardedHeadersPolicy())
 
     router.HandleNamed("example.health", "GET", "/health", handler.HealthHandler())
 
@@ -60,8 +61,23 @@ func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyht
     }
 
     rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(instance.redisRateLimiter, nil, nil)
+    rateLimitConfig.SetClientIpResolver(melodyhttpmiddleware.NewForwardedClientIpResolver(exampleForwardedHeadersPolicy()))
 
     return melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)(next)
+}
+
+/* exampleForwardedHeadersPolicy is the ONE trust list of the example, read by the kernel for the scheme and by the limiter for the client address, so the two cannot disagree about which peer is an edge. Loopback is on it because the development stack and the live harness reach the application directly; a forwarded proto from those peers becomes believable too, which is the price of one list and is fine for a showcase that never terminates tls. */
+func exampleForwardedHeadersPolicy() melodyhttpcontract.ForwardedHeadersPolicy {
+    return melodyhttpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList: []string{
+            "127.0.0.0/8",
+            "::1/128",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+        },
+    }
 }
 
 /* registerCatalogReportRoute declares the one reading the nomenclature publishes. It needs no backend of its own: with a cache it is served from the reading the scheduled refresh left there, and without one it is computed on the spot. */

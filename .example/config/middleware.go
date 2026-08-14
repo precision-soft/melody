@@ -7,12 +7,16 @@ import (
     melodyapplicationcontract "github.com/precision-soft/melody/application/contract"
     melodyclockcontract "github.com/precision-soft/melody/clock/contract"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/kernel/contract"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.HttpMiddlewareRegistrar) {
     registrar.Use(NewTimingMiddleware(kernelInstance.Clock()))
+
+    /* a nil config reads as the framework default: gzip at the default level, bodies of at least a kilobyte, media types that are already compressed excluded */
+    registrar.Use(melodyhttpmiddleware.CompressionMiddleware(nil))
 }
 
 /* NewTimingMiddleware measures how long a request took and reports it in a header.

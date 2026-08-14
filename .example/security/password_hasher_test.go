@@ -1,27 +1,67 @@
 package security
 
-import "testing"
+import (
+    "strings"
+    "testing"
+)
 
-/* The known answer is what ties this function to the seeded accounts: the seed writes the hash of "user" into the catalogue and the login handler hashes what the form submitted, so a change of algorithm or encoding here locks every seeded account out with no other symptom than a refused password. */
-func TestSha256HexAnswersTheKnownDigest(t *testing.T) {
-    for value, expected := range map[string]string{
-        "user":   "04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb",
-        "editor": "1553cc62ff246044c683a61e203e65541990e7fcd4af9443d22b9557ecc9ac54",
-        "admin":  "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
-        "":       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    } {
-        if expected != Sha256Hex(value) {
-            t.Fatalf("digest of %q: got %q, want %q", value, Sha256Hex(value), expected)
-        }
+/* Two hashes of one password differing is the property the whole change was made for: the seeded rows carry salted hashes, so equality lives in PasswordMatches and nowhere else. */
+func TestHashPasswordSaltsEveryCall(t *testing.T) {
+    first, firstErr := HashPassword("editor")
+    if nil != firstErr {
+        t.Fatalf("hash the password: %v", firstErr)
+    }
+
+    second, secondErr := HashPassword("editor")
+    if nil != secondErr {
+        t.Fatalf("hash the password again: %v", secondErr)
+    }
+
+    if first == second {
+        t.Fatalf("two hashes of the same password are identical, so the hash is not salted")
+    }
+
+    if false == PasswordMatches(first, "editor") || false == PasswordMatches(second, "editor") {
+        t.Fatalf("a fresh hash refused the password that produced it")
     }
 }
 
-func TestSha256HexIsStable(t *testing.T) {
-    if Sha256Hex("user") != Sha256Hex("user") {
-        t.Fatalf("the digest of one value differs between two calls")
+func TestPasswordMatchesRefusesAWrongPassword(t *testing.T) {
+    passwordHash := MustHashPassword("admin")
+
+    if true == PasswordMatches(passwordHash, "admin-but-wrong") {
+        t.Fatalf("a wrong password was accepted")
     }
 
-    if Sha256Hex("user") == Sha256Hex("User") {
-        t.Fatalf("the digest ignores case, so two distinct passwords collide")
+    if true == PasswordMatches(passwordHash, "") {
+        t.Fatalf("an empty password was accepted")
     }
+}
+
+func TestPasswordMatchesRefusesAMalformedHash(t *testing.T) {
+    if true == PasswordMatches("not-a-bcrypt-hash", "user") {
+        t.Fatalf("a malformed stored hash was accepted")
+    }
+
+    if true == PasswordMatches("", "user") {
+        t.Fatalf("an empty stored hash was accepted")
+    }
+}
+
+/* bcrypt refuses input past 72 bytes instead of truncating silently, and the two doors answer it differently on purpose: the handler path gets an error to present, the seeding path has no caller to answer and panics. */
+func TestHashPasswordRefusesAPasswordOverTheBcryptLimit(t *testing.T) {
+    oversized := strings.Repeat("a", 73)
+
+    _, hashErr := HashPassword(oversized)
+    if nil == hashErr {
+        t.Fatalf("a 73 byte password was hashed")
+    }
+
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("MustHashPassword did not panic on a 73 byte password")
+        }
+    }()
+
+    MustHashPassword(oversized)
 }

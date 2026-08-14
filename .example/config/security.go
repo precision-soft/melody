@@ -55,6 +55,8 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         accessDeniedHandler,
     )
 
+    instance.registerApiKeyFirewall(builder)
+
     override := melodysecurityconfig.NewFirewallOverrideConfiguration()
 
     builder.AddFirewall(
@@ -67,6 +69,30 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         security.NewSessionLoginHandler(),
         security.NewSessionLogoutHandler(),
         override,
+    )
+}
+
+/* registerApiKeyFirewall declares the stateless door APP_API_TOKEN promises: a client presenting X-Api-Key on /products/api is authenticated by the key alone, no session involved. The matcher claims only requests that PRESENT the header, so the browser's cookie traffic keeps falling through to "main" — and the declaration order matters, because firewall matching is first-registered-wins and "main" matches every path. A wrong key authenticates as nobody and the global entry point answers the refusal. An empty token leaves the door unwired — the guard is also what keeps the authenticator's own refusal of an empty expected value from ending the boot. */
+func (instance *Module) registerApiKeyFirewall(builder *melodysecurityconfig.Builder) {
+    if "" == instance.apiToken {
+        return
+    }
+
+    builder.AddStatelessFirewall(
+        "api",
+        security.NewApiKeyRequestMatcher(route.ProductsPrefix+"/api", security.ApiKeyHeaderName),
+        []melodysecuritycontract.Rule{},
+        melodysecurity.NewAuthenticatorTokenSource(
+            melodysecurity.NewAuthenticatorManager(
+                melodysecurity.NewApiKeyHeaderAuthenticator(
+                    security.ApiKeyHeaderName,
+                    instance.apiToken,
+                    "api-client",
+                    []string{entity.RoleUser, entity.RoleEditor},
+                ),
+            ),
+        ),
+        melodysecurityconfig.NewFirewallOverrideConfiguration(),
     )
 }
 

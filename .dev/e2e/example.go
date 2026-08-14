@@ -45,10 +45,16 @@ type exampleMajor struct {
     EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running
     the demos here as well would spend a budget another section is counting. */
     integrationDemos bool
+    /* showcaseProbes and sessionRestartProbe gate the wirings only the v1 example carries — cors, gzip,
+    the api-key firewall, per-field validation errors, the trusted-proxy client address and the file-backed
+    session storage. The three examples deliberately do not mirror each other, so these are per-major
+    capabilities like integrationDemos, not shared surface. */
+    showcaseProbes      bool
+    sessionRestartProbe bool
 }
 
 var exampleMajorCatalog = []exampleMajor{
-    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true},
+    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true},
     {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true},
     {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false},
 }
@@ -152,9 +158,64 @@ func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDs
 
     runExampleHttpAssertions(major, application, redisAddress, mysqlDsn)
     runExampleCliAssertions(major, workspace)
+
+    if true == major.sessionRestartProbe {
+        application = assertExampleSessionSurvivesRestart(major, workspace, application, &stopApplicationOnFailure)
+    }
+
     assertExampleGracefulShutdown(major, application)
 
     stopApplicationOnFailure()
+}
+
+/* assertExampleSessionSurvivesRestart proves the file-backed session storage the v1 example configures through
+APP_SESSION_FILE: a fresh client signs in, the process is stopped through the same graceful-shutdown assertion
+the section ends with, a NEW process is started over the same workspace, and the same cookie jar must still
+admit the protected route — which can only hold if the session outlived the process on disk. The caller's
+failure-cleanup slot is swapped to the new process, and the new handle is returned so the closing shutdown
+assertion drives the process that is actually serving. */
+func assertExampleSessionSurvivesRestart(
+    major exampleMajor,
+    workspace string,
+    application *exampleApplication,
+    stopApplicationOnFailure *func(),
+) *exampleApplication {
+    client := newExampleClient(major)
+
+    signedIn := client.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
+    if http.StatusOK != signedIn.statusCode {
+        fail("[%s] the restart probe could not sign in (%d): %s", major.label, signedIn.statusCode, exampleTruncate(signedIn.body))
+    }
+    if nil == client.sessionCookie() {
+        fail("[%s] the restart probe holds no session cookie after login", major.label)
+    }
+
+    granted := client.call("GET", exampleUserRoute, "", "", "")
+    if http.StatusOK != granted.statusCode {
+        fail("[%s] %s answered %d to the fresh session before the restart, wanted 200", major.label, exampleUserRoute, granted.statusCode)
+    }
+
+    assertExampleGracefulShutdown(major, application)
+    (*stopApplicationOnFailure)()
+
+    restarted := startExampleApplication(major, workspace)
+    *stopApplicationOnFailure = pushFailureCleanup(restarted.kill)
+
+    waitForExampleReadiness(major, restarted)
+
+    replayed := client.call("GET", exampleUserRoute, "", "", "")
+    if http.StatusOK != replayed.statusCode {
+        fail(
+            "[%s] %s answered %d to the pre-restart session cookie, wanted 200 — the session did not survive the process (file-backed storage)\n%s",
+            major.label,
+            exampleUserRoute,
+            replayed.statusCode,
+            restarted.logTail(20),
+        )
+    }
+    pass("[%s] the session cookie issued before the restart still admits after it (file-backed session storage)", major.label)
+
+    return restarted
 }
 
 /* prepareExampleWorkspace assembles the runnable copy: the built binary, the example's own .env, its public
@@ -409,12 +470,20 @@ type exampleResponse struct {
     location   string
     body       string
     cookieList []*http.Cookie
+    headerList http.Header
 }
 
 /* call issues one request against the running example. The path is joined to the base url as a raw string so an
 encoded traversal attempt ("%2e%2e") reaches the application still encoded instead of being folded away by the
 client. */
 func (instance *exampleClient) call(method string, path string, accept string, contentType string, body string) exampleResponse {
+    return instance.callWithHeaderList(method, path, accept, contentType, nil, body)
+}
+
+/* callWithHeaderList is call with arbitrary request headers on top, which is what the cors, gzip, api-key and
+forwarded-address probes speak through: an explicit Accept-Encoding also switches off the Go transport's
+transparent gunzip, so the wire bytes arrive as the server sent them. */
+func (instance *exampleClient) callWithHeaderList(method string, path string, accept string, contentType string, headerList map[string]string, body string) exampleResponse {
     var reader io.Reader
     if "" != body {
         reader = strings.NewReader(body)
@@ -430,6 +499,9 @@ func (instance *exampleClient) call(method string, path string, accept string, c
     }
     if "" != contentType {
         request.Header.Set("Content-Type", contentType)
+    }
+    for headerName, headerValue := range headerList {
+        request.Header.Set(headerName, headerValue)
     }
 
     response, responseErr := instance.client.Do(request)
@@ -450,6 +522,7 @@ func (instance *exampleClient) call(method string, path string, accept string, c
         location:   response.Header.Get("Location"),
         body:       string(payload),
         cookieList: response.Cookies(),
+        headerList: response.Header,
     }
 }
 
@@ -518,6 +591,12 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
     assertExampleAnonymousRejection(major, client)
     assertExampleLoginFlow(major, client)
     assertExampleStaticTraversal(major, client)
+
+    /* the showcase probes run BEFORE the integration demos on purpose: the throttled writes they spend are
+    reset by the rate-limit subsection in there, which clears the counters before its exact count */
+    if true == major.showcaseProbes {
+        runExampleShowcaseAssertions(major, application, redisAddress)
+    }
 
     /* the demo routes sit under the example's ROLE_USER catch-all, so they are driven here — between the
     login and the logout — with the session the login flow established */

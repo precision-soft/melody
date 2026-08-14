@@ -19,6 +19,10 @@ const (
     ParameterRedisAddress  = "app.redis.address"
     ParameterRedisUser     = "app.redis.user"
     ParameterRedisPassword = "app.redis.password"
+
+    ParameterApiToken         = "app.api_token"
+    ParameterCorsAllowOrigins = "app.cors.allow_origins"
+    ParameterSessionFile      = "app.session_file"
 )
 
 type Module struct {
@@ -29,6 +33,9 @@ type Module struct {
     redisClient       rueidis.Client
     redisCacheBackend *melodyrueidiscache.BackendService
     redisRateLimiter  *melodyrueidis.RateLimiter
+
+    /* the api token is captured at service registration, because RegisterSecurity receives only the builder and the firewall declaration still needs the configured value */
+    apiToken string
 }
 
 func NewExampleModule() *Module {

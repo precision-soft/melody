@@ -46,11 +46,16 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
         }
 
+        passwordHash, hashErr := security.HashPassword(normalizedPassword)
+        if nil != hashErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
+        }
+
         user, createErr := userService.Create(
             runtimeInstance,
             "",
             normalizedUsername,
-            security.Sha256Hex(normalizedPassword),
+            passwordHash,
             normalizeRoles(dto.Roles),
         )
         if nil != createErr {

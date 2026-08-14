@@ -11,9 +11,9 @@ It is **not** a full production product. Its purpose is to demonstrate how Melod
 Conceptually, the example models a minimal admin-style catalog application:
 
 - Product listing and detail pages
-- Login / logout flow based on sessions
+- Login / logout flow based on sessions, with an api-key firewall beside it for machine clients
 - A simple role system (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`)
-- HTML pages backed by JSON endpoints (consumed via jQuery)
+- HTML pages backed by JSON endpoints (driven by the TypeScript bundle in `assets/`)
 - CLI commands that demonstrate Melody’s CLI conventions and container/runtime usage
 
 ---
@@ -25,6 +25,11 @@ For convenience, the example ships with a few predefined users:
 - `user` / `user` — `ROLE_USER`
 - `editor` / `editor` — `ROLE_USER`, `ROLE_EDITOR`
 - `admin` / `admin` — `ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`
+
+Passwords are stored as **bcrypt hashes** ([`security/password_hasher.go`](./security/password_hasher.go)):
+`security.HashPassword` at seeding and in the user handlers, `security.PasswordMatches`
+(`bcrypt.CompareHashAndPassword`) at login. The hash is salted, so the same password produces a different
+stored value on every boot; the credentials above are the stable contract, not the bytes in the table.
 
 ---
 
@@ -66,13 +71,13 @@ The [`config/`](./config/) package keeps [`main.go`](./main.go) small by groupin
 
 - [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module, whose hooks below contribute everything else, plus two integration module facades — the cron module (which registers `melody:cron:generate` and the in-process `melody:cron:run`) and the bunorm/migrate module (which registers the `db:*` command family over the example's migration set)
 - [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + interface assertions for the module hooks the example implements
-- [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
-- [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
+- [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, and the two firewalls — the stateless api-key firewall on `/products/api` and the session firewall behind it
+- [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs, plus the forwarded-headers trust policy the kernel and the rate limiter share
 - [`cli.go`](./config/cli.go) — `RegisterCliCommands`: the example's own CLI commands; the cron and `db:*` commands come from the two module facades registered in `configure.go`
-- [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers
-- [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers `melody.cron.*` parameters from `APP_CRON_*` env vars plus the example's own `app.*` parameters
-- [`service.go`](./config/service.go) — `registerServices`: container wiring for repositories, services, and the cache serializer
-- [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`)
+- [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers and the cors listeners when `APP_CORS_ALLOW_ORIGINS` names any origin
+- [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers `melody.cron.*` parameters from `APP_CRON_*` env vars plus the example's own `app.*` parameters, the showcase switches included
+- [`service.go`](./config/service.go) — `registerServices`: container wiring for repositories, services, the cache serializer, and the file-backed session storage when `APP_SESSION_FILE` names a file
+- [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`) plus the framework's `CompressionMiddleware`
 - [`cron.go`](./config/cron.go) — the `cron.Configuration` both cron commands share (which command runs on which schedule, and as which system user), plus `cronRunnerCommands`, the instantiated commands the in-process runner invokes
 - [`database.go`](./config/database.go) — the bun manager registry and the MySQL provider, built only when the configuration published a host; an unset host leaves the registry nil and every repository falls back to its in-memory twin
 - [`redis.go`](./config/redis.go) — the rueidis client, the cache backend bound to `cache.ServiceCacheBackend`, and the rate limiter the write routes are put behind; an unset address leaves all three absent
@@ -148,6 +153,25 @@ Two details are worth reading in the source rather than guessed at:
   That is what makes the `X-Example-Duration-Ms` header assertable at all — a frozen clock advanced by the
   handler underneath lets [`config/middleware_test.go`](./config/middleware_test.go) demand an exact value,
   which no test can do against `time.Now`.
+
+### Security and HTTP showcase wirings
+
+Beside the integrations, the example wires several framework doors that need no backend at all. Each follows
+the same switch convention as the integrations — the value ships in [`.env`](./.env), and an empty or removed
+value leaves that door unwired:
+
+| wiring | switch | what it shows |
+|---|---|---|
+| api-key firewall | `APP_API_TOKEN` | a stateless firewall on `/products/api` ([`config/security.go`](./config/security.go)): `X-Api-Key` with the configured token authenticates as an editor-role client, no session involved. The firewall's matcher ([`security/api_key_request_matcher.go`](./security/api_key_request_matcher.go)) claims only requests that PRESENT the header, so browser cookie traffic keeps falling through to the session firewall on the same paths |
+| cors listeners | `APP_CORS_ALLOW_ORIGINS` | the [`http/cors`](../http/cors/) LISTENERS rather than the middleware ([`config/event.go`](./config/event.go)): a preflight is answered before routing and before the security chain can refuse it, and the security refusals themselves carry the cors headers — responses the middleware chain never sees |
+| compression | always on | the framework's `CompressionMiddleware` with its defaults ([`config/middleware.go`](./config/middleware.go)): gzip for bodies of at least a kilobyte, already-compressed media excluded, `Vary: Accept-Encoding` added |
+| trusted proxies | always on | one `ForwardedHeadersPolicy` ([`config/http.go`](./config/http.go)) read by the http kernel for the scheme and by the rate limiter's client-ip resolver for the budget key, so a write arriving through a trusted proxy is budgeted against the `X-Forwarded-For` address rather than the proxy's |
+| file-backed sessions | `APP_SESSION_FILE` | `session.NewFileStorageFromPath` registered under the framework's storage service id ([`config/service.go`](./config/service.go)), so a signed-in session survives a process restart; a relative path is anchored to the project directory. Empty keeps the framework's in-memory default |
+
+The session token resolver ([`security/session_token_resolver.go`](./security/session_token_resolver.go))
+accepts the role list in the two spellings a session can carry: the `[]string` the login handler writes, and
+the `[]any` the file storage answers after a restart — its snapshot round-trips through json, which keeps no
+element type.
 
 ### Database migrations
 
@@ -276,7 +300,9 @@ Every JSON endpoint answers through the same envelope, built in [`presenter/erro
 
 - `success` — a boolean, so a caller branches on the envelope rather than on the status code
 - `payload` — the answer itself, `null` on a failure
-- `errors` — a list of messages, empty on success rather than absent
+- `errors` — a list of messages, empty on success rather than absent. A validation refusal carries **one
+  entry per violated field**, each spelled `field: message` (`presenter.ApiValidationError`), so a client
+  attaches every message to the input that earned it instead of splitting a joined string
 - `context` — present only when the kernel environment enables debug material
 - `trace` — likewise
 

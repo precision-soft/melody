@@ -38,6 +38,18 @@ func requestAcceptingLines(t *testing.T, acceptLineList ...string) melodyhttpcon
     return melodyhttp.NewRequest(httpRequest, nil, nil, nil)
 }
 
+/* requestAtPathWithHeader builds a request at the path the caller names, carrying one header when the value is not empty — the two coordinates the api-key matcher reads. */
+func requestAtPathWithHeader(t *testing.T, path string, headerName string, headerValue string) melodyhttpcontract.Request {
+    t.Helper()
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, path, nil)
+    if "" != headerValue {
+        httpRequest.Header.Set(headerName, headerValue)
+    }
+
+    return melodyhttp.NewRequest(httpRequest, nil, nil, nil)
+}
+
 /* requestCarryingSession hands back a request whose attribute bag holds the session, the way the http kernel publishes it, together with the session itself so the caller can write into it. A real session is used rather than a double: the token resolver reads the values back through the typed getters, and a double would let the test agree with itself about what a session stores. */
 func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodysessioncontract.Session) {
     t.Helper()

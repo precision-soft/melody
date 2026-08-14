@@ -74,7 +74,12 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         normalizedPassword := strings.TrimSpace(dto.Password)
         if "" != normalizedPassword {
-            targetUser.Password = security.Sha256Hex(normalizedPassword)
+            passwordHash, hashErr := security.HashPassword(normalizedPassword)
+            if nil != hashErr {
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
+            }
+
+            targetUser.Password = passwordHash
         }
 
         targetUser.Roles = normalizeRoles(dto.Roles)

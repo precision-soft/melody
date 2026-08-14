@@ -58,7 +58,11 @@ sent-count delta). METRICS runs last of the group because its assertions are exa
 The per-major EXAMPLE APPLICATION sections build each major's .example into its own workspace, boot it on its own
 port and drive it end to end: a public route, the login flow through a real cookie jar, the protected route before
 and after login, logout, encoded path-traversal containment, a 404, three command-line invocations and a graceful
-shutdown on one SIGINT. MELODY_E2E_MAJORS selects which majors run and defaults to all three.
+shutdown on one SIGINT. The v1 section additionally proves its example's showcase wirings (exampleshowcase.go) —
+the cors preflight and the decorated 401, the api-key firewall, gzip compression, per-field validation errors and
+the trusted-proxy client address read back out of the rate-limit key — and restarts the process to prove the
+file-backed session storage still admits the pre-restart cookie. MELODY_E2E_MAJORS selects which majors run and
+defaults to all three.
 
 Clear-to-skip recipes beyond the backend variables above:
 
