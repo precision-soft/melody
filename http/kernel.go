@@ -7,6 +7,7 @@ import (
     "runtime/debug"
     "sort"
     "strings"
+    "sync/atomic"
     "time"
 
     "github.com/precision-soft/melody/config"
@@ -69,6 +70,13 @@ type Kernel struct {
     notFoundHandler httpcontract.Handler
     errorHandler    httpcontract.ErrorHandler
     options         KernelOptions
+    /* the number of request scopes opened and not yet closed, which is the only thing a shutdown can measure about a hijacked connection: Shutdown does not wait for one — the connection stopped being the server's the moment the handler took it — so a websocket still being served left the process reporting a clean stop it had not obtained. Atomic because it is written by every serving goroutine and read by the shutdown one. */
+    openRequestScopes atomic.Int64
+}
+
+/* OpenRequestScopes reports how many request scopes are open right now: one per request being served, hijacked connections included, because the scope belongs to ServeHttp rather than to the connection. A shutdown reads it to tell a drained server from one that still has work inside it — net/http's own Shutdown cannot answer for a connection it has handed away. */
+func (instance *Kernel) OpenRequestScopes() int64 {
+    return instance.openRequestScopes.Load()
 }
 
 /* Use appends middlewares to the chain the kernel builds around the matched handler. The chain decorates the handler path only: a response produced by an event listener — a security refusal, an error page — is dispatched through kernel.response and written before the chain is built, so cross-cutting response decoration belongs to kernel.response listeners; the cors package pairs its two doors that way. */
@@ -125,12 +133,17 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         scope := serviceContainer.NewScope()
 
+        /* counted the instant the scope exists and released in the same defer that closes it, so the two can never disagree: what the counter reports is exactly the set of scopes a teardown would find open. It is the shutdown's only measure of a hijacked connection, which net/http stops accounting for the moment the handler takes it. */
+        instance.openRequestScopes.Add(1)
+
         /* the scope is closed before anything that can fail, so a panic during request-logger setup cannot leak it; the logger is captured by reference and nil-guarded for the pre-setup failure path.
 
         The report falls back to the emergency logger rather than being dropped: the request logger is read after the scope it was installed into has closed, which is safe only because it is an override and Close leaves overrides alone. A close failure is the one thing that must never go unreported, so the path that has no request logger to name still says what happened. */
         var requestLogger loggingcontract.Logger
         var requestId string
         defer func() {
+            defer instance.openRequestScopes.Add(-1)
+
             scopeCloseErr := scope.Close()
             if nil == scopeCloseErr {
                 return

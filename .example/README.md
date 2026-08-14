@@ -35,7 +35,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ```
 .example/
 ├── cache/            # cache serializer for the example container
-├── cli/              # CLI commands (app:info, product:list)
+├── cli/              # CLI commands (app:info, product:list, catalog:journal, catalog:report:refresh)
 ├── config/           # application wiring; one file per module hook
 ├── entity/           # domain entities (Category, Currency, Product, User)
 ├── event/            # domain event types
@@ -47,7 +47,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── security/         # session auth wiring (login/logout handlers, entry point, token resolver, password hasher)
 ├── service/          # application services (CategoryService, CurrencyService, ProductService, UserService)
 ├── subscriber/       # event subscribers
-├── url/              # URL generation + route registry adapters
+├── url/              # route registry adapters: the route manifest every page is given
 ├── public/           # static assets (CSS / JS)
 ├── embedded_*.go     # build-tag–controlled embedding for env and static assets
 ├── main.go           # application entry point
@@ -60,7 +60,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 
 The [`config/`](./config/) package keeps [`main.go`](./main.go) small by grouping all setup and integration logic in a single place, with each module hook in its own file:
 
-- [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers services, the example module, and the HTTP middleware
+- [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module, whose hooks below contribute everything else
 - [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + interface assertions for the module hooks the example implements
 - [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
 - [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
@@ -72,12 +72,17 @@ The [`config/`](./config/) package keeps [`main.go`](./main.go) small by groupin
 
 ### Cron integration
 
-The example demonstrates Melody's [`integrations/cron`](../integrations/cron/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cli.go`](./config/cli.go) through a `cron.Configuration` registry:
+The example demonstrates Melody's [`integrations/cron`](../integrations/cron/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cron.go`](./config/cron.go) through a `cron.Configuration` registry:
 
 ```go
 cronConfiguration := cron.NewConfiguration().
+    Schedule(cron.CommandName(cli.NewCatalogReportRefreshCommand), &cron.EntryConfig{
+        Schedule: &cron.Schedule{Minute: "0", Hour: "*"},
+        User:     productUser,
+    }).
     Schedule(cron.CommandName(cli.NewProductListCommand), &cron.EntryConfig{
         Schedule: &cron.Schedule{Minute: "0", Hour: "*/6"},
+        User:     productUser,
     }).
     Schedule(cron.CommandName(cli.NewAppInfoCommand), &cron.EntryConfig{
         Schedule: &cron.Schedule{Minute: "0", Hour: "12"},
@@ -86,7 +91,7 @@ cronConfiguration := cron.NewConfiguration().
 
 `cron.CommandName` is a generic helper that instantiates a constructor and returns the command name, so the schedule references commands by constructor instead of hardcoded strings.
 
-Cron defaults (user, logs directory, destination file, template, heartbeat) come from the parameter system in [`config/parameter.go`](./config/parameter.go). The user is sourced from `APP_CRON_USER`, and the heartbeat is enabled via the `APP_CRON_HEARTBEAT_AUTO_ENABLED` opt-in (which auto-derives `<logs-dir>/heartbeat.crontab` from `melody.cron.logs_dir`) — both env vars live in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `product:list` schedule, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries.
+Cron defaults (user, logs directory, destination file, template, heartbeat) come from the parameter system in [`config/parameter.go`](./config/parameter.go). The user is sourced from `APP_CRON_USER`, and the heartbeat is enabled via the `APP_CRON_HEARTBEAT_AUTO_ENABLED` opt-in (which auto-derives `<logs-dir>/heartbeat.crontab` from `melody.cron.logs_dir`) — both env vars live in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `catalog:report:refresh` and `product:list` schedules, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries. The third entry, `app:info`, declares no user and falls back to `melody.cron.user`.
 
 ### Live integrations: database, cache and clock
 
@@ -165,6 +170,11 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
+The application also answers `GET /health` without a session, which is the route a monitoring system or a
+container orchestrator probes. It is public on purpose: everything else in the example falls under the
+`^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate
+would be answered with a redirect to the login page instead of the readiness of the process.
+
 ### Frontend bundle
 
 The pages are server-rendered HTML driven by a small TypeScript bundle: every link, form action and `fetch` target is built from a **route name** rather than a hardcoded path, against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
@@ -197,14 +207,14 @@ cd .example
 go run . -h
 ```
 
-Among the commands you will find `melody:cron:generate` from the cron integration. To generate a crontab fragment from the `cron.Configuration` registered in [`config/cli.go`](./config/cli.go):
+Among the commands you will find `melody:cron:generate` from the cron integration. To generate a crontab fragment from the `cron.Configuration` declared in [`config/cron.go`](./config/cron.go):
 
 ```bash
 cd .example
 go run . melody:cron:generate --out ./generated_conf/cron/crontab
 ```
 
-The example registers two scheduled commands in [`config/cli.go`](./config/cli.go) (`product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
+The example schedules three commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
 
 ---
 

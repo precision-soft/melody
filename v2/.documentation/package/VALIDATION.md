@@ -104,6 +104,11 @@ func validateInput(input CreateUserInput) error {
 - [`validation.NewValidator()`](../../validation/validator.go)
 - [`validation.NewValidationError(field, message, code string, context map[string]any)`](../../validation/error.go)
 
+### Registration
+
+- [`(*Validator).RegisterConstraint(name string, constraint validationcontract.Constraint)`](../../validation/validator.go) — adds a constraint under the name a `validate` tag spells. It refuses an empty or untrimmed name, a nil constraint, and a **name already taken** — all four with a panic, since all four are declaration mistakes. The last means a name is claimed once: a builtin cannot be replaced by registering over it, so a custom rule needs a name of its own. A parameterized constraint is registered as a **template**: the registered instance is never used as a fallback configuration, only as the receiver of `WithParams`.
+  **Where to call it.** No module hook can reach a framework service — the container is built after the module phases, so a hook body that resolves the validator finds an empty container. The two places that work are the **composition root between `Boot()` and `Run()`**, resolving through `ValidatorMustFromContainer(kernel.ServiceContainer())`, and a **service provider** the module registers, which resolves the validator at resolution time and registers the constraint then; that door only fires if something resolves the provider's service. The registry is mutex-guarded, so registering after `Boot()` is safe for concurrency — but not after serving starts, since a request validating against a name registered mid-flight sees one answer before and another after.
+
 ### Container access (validation)
 
 - [`const ServiceValidator`](../../validation/const.go)

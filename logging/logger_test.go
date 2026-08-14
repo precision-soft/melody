@@ -4,6 +4,7 @@ import (
     "bytes"
     "errors"
     "fmt"
+    "io"
     "log"
     "strings"
     "testing"
@@ -532,5 +533,24 @@ func TestLogError_KeepsCallerSetCauseKeysOnAForeignError(t *testing.T) {
 
     if "caller context chain" != capture.lastContext["causeContextChain"] {
         t.Fatalf("expected the caller's cause context chain to be kept, got %v", capture.lastContext["causeContextChain"])
+    }
+}
+
+/* LevelEnabled is the single door onto the capability, and its answer for a logger that does not carry it is TRUE: the fallback is the reporting floor, so a site that spelled it the other way would stop recording against most loggers there are. Every caller asks through here rather than writing its own assertion, which is what keeps the rule in one place. */
+func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
+    if false == LevelEnabled(&captureLogger{}, loggingcontract.LevelDebug) {
+        t.Fatalf("expected a logger without the capability to be reported enabled")
+    }
+
+    if false == LevelEnabled(NewJsonLogger(io.Discard, loggingcontract.LevelDebug), loggingcontract.LevelDebug) {
+        t.Fatalf("expected a debug-level json logger to report debug enabled")
+    }
+
+    if true == LevelEnabled(NewJsonLogger(io.Discard, loggingcontract.LevelError), loggingcontract.LevelDebug) {
+        t.Fatalf("expected an error-level json logger to report debug disabled")
+    }
+
+    if true == LevelEnabled(NewNopLogger(), loggingcontract.LevelEmergency) {
+        t.Fatalf("expected the no-op logger to report nothing enabled")
     }
 }

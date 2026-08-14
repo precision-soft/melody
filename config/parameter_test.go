@@ -386,8 +386,47 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
     if false == errors.As(foreignErr, &foreignExceptionErr) {
         t.Fatalf("expected an exception error")
     }
-    if nil != foreignExceptionErr.CauseErr() {
-        t.Fatalf("expected no parser cause for a value the parser never saw")
+
+    /* the cause is the parser's, and it names what the refusal is about: the outer message says only that a conversion failed, which told an operator holding a parameter registered as a number that something went wrong and nothing about what */
+    foreignCause := foreignExceptionErr.CauseErr()
+    if nil == foreignCause {
+        t.Fatalf("expected the shared parser's cause to be carried")
+    }
+
+    var foreignCauseErr *exception.Error
+    if false == errors.As(foreignCause, &foreignCauseErr) {
+        t.Fatalf("expected the cause to be an exception error, got %v", foreignCause)
+    }
+
+    causeContext := foreignCauseErr.Context()
+    if "APP_FEATURE" != causeContext["parameterName"] {
+        t.Fatalf("expected the cause to name the parameter, got %#v", causeContext["parameterName"])
+    }
+    if "bool" != causeContext["expectedType"] {
+        t.Fatalf("expected the cause to name the target type, got %#v", causeContext["expectedType"])
+    }
+    if nil == causeContext["value"] {
+        t.Fatalf("expected the cause to carry the value it refused, got %#v", causeContext)
+    }
+}
+
+/* a secret keeps its value out of the diagnostic on this door too: the shared parser stamps the value it refused into the cause context, and delegating to it would have published a secret's contents through the very chain that exists to explain the refusal */
+func TestParameter_Bool_KeepsASecretValueOutOfTheCause(t *testing.T) {
+    secretParameter := NewParameter("APP_SECRET", 12, 12, false)
+    secretParameter.isSecret.Store(true)
+
+    _, secretErr := secretParameter.Bool()
+    if nil == secretErr {
+        t.Fatalf("expected the refusal")
+    }
+
+    var secretExceptionErr *exception.Error
+    if false == errors.As(secretErr, &secretExceptionErr) {
+        t.Fatalf("expected an exception error")
+    }
+
+    if nil != secretExceptionErr.CauseErr() {
+        t.Fatalf("expected a secret's parser cause to be withheld, got %v", secretExceptionErr.CauseErr())
     }
 }
 

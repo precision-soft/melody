@@ -163,10 +163,19 @@ func (instance *kernelConfiguration) validateProcessRole() error {
     )
 }
 
+/* validateEnvironment names the key and the files a refusal is about, because the emptiness it refuses is READ somewhere else and read differently: the dotenv source answers "dev" for a present-but-empty MELODY_ENV and goes on to load .env.dev, so a deployment template rendering `MELODY_ENV=` boots far enough to read the development files and then dies here. Told only that "environment may not be empty", an operator has neither the key to search for nor the reason the development values were the ones loaded. */
 func (instance *kernelConfiguration) validateEnvironment() error {
     environment := instance.Env()
     if "" == environment {
-        return exception.NewError("environment may not be empty", nil, nil)
+        return exception.NewError(
+            "environment may not be empty",
+            exceptioncontract.Context{
+                "environmentKey": EnvKey,
+                "parameterName":  KernelEnv,
+                "hint":           "remove " + EnvKey + " from .env or .env.local, or give it a value: an empty one still selects the .env." + EnvDevelopment + " files",
+            },
+            nil,
+        )
     }
 
     switch environment {
@@ -177,7 +186,9 @@ func (instance *kernelConfiguration) validateEnvironment() error {
     return exception.NewError(
         "environment is not supported",
         exceptioncontract.Context{
-            "environment": environment,
+            "environment":    environment,
+            "environmentKey": EnvKey,
+            "parameterName":  KernelEnv,
         },
         nil,
     )

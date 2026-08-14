@@ -2,6 +2,8 @@ package validation
 
 import (
     "testing"
+
+    "github.com/precision-soft/melody/internal/testhelper"
 )
 
 func TestMinLength_PointerToShortStringIsRejected(t *testing.T) {
@@ -24,7 +26,7 @@ func TestMinLength_PointerToValidStringPasses(t *testing.T) {
     }
 }
 
-/* @info a length constraint measures a string, not a Go rendering: an empty slice passed min=1 because its rendering [] is two runes long */
+/* a length constraint measures a string, not a Go rendering: an empty slice passed min=1 because its rendering [] is two runes long */
 func TestMinLength_NonStringIsRejected(t *testing.T) {
     constraint := NewMinLength(1)
 
@@ -35,7 +37,7 @@ func TestMinLength_NonStringIsRejected(t *testing.T) {
     }
 }
 
-/* @info a length is never negative, so a negative bound is a typo that would make the rule a silent no-op */
+/* a length is never negative, so a negative bound is a typo that would make the rule a silent no-op */
 func TestMinLength_WithParamsRefusesNegativeBound(t *testing.T) {
     constraint := NewMinLength(1)
 
@@ -46,7 +48,27 @@ func TestMinLength_WithParamsRefusesNegativeBound(t *testing.T) {
     }
 }
 
-/* @info the lower bound refuses a non-string for the same reason the upper one does, and its accessor was equally unentered: a min that read back as zero would report every field as unbounded to whoever asked. */
+/* the constructor refuses what the tag door beside it has always refused: a negative minimum built a constraint that accepted every value in silence — a declaration that reads as enforced, validates nothing, and leaves no record anywhere that it does not */
+func TestMinLength_TheConstructorRefusesANegativeBound(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewMinLength(-1)
+        },
+        "min length constraint may not be negative",
+    )
+}
+
+/* zero is a bound and not a mistake: it is the one non-negative value that reads like one, and the sibling refusal must not swallow it */
+func TestMinLength_ZeroIsABoundRatherThanAMistake(t *testing.T) {
+    constraint := NewMinLength(0)
+
+    if nil != constraint.Validate("", "field") {
+        t.Fatalf("expected the empty string to satisfy a zero bound")
+    }
+}
+
+/* the lower bound refuses a non-string for the same reason the upper one does, and its accessor was equally unentered: a min that read back as zero would report every field as unbounded to whoever asked. */
 func TestMinLength_MeasuresStringsAndRefusesEverythingElse(t *testing.T) {
     constraint := NewMinLength(3)
 

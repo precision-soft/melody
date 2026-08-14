@@ -2627,3 +2627,73 @@ func TestLogHandlerError_AGenuineFieldRefusalStaysAtWarning(t *testing.T) {
         t.Fatalf("expected the field refusal at warning, got warnings %v and errors %v", capture.warningMessages, capture.errorMessages)
     }
 }
+
+/* the counter is what a shutdown reads to tell a drained server from one that still has work inside it, so it must rise for the whole time a request is being served and fall exactly when the scope closes. The proof holds the handler open and reads the count from another goroutine: reading it after the request returned would pass just as well against a counter that was never incremented at all. */
+func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeCloses(t *testing.T) {
+    handlerEntered := make(chan struct{})
+    releaseHandler := make(chan struct{})
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/slow",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            close(handlerEntered)
+            <-releaseHandler
+
+            return TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    kernelInstance := NewKernel(router)
+
+    if 0 != kernelInstance.OpenRequestScopes() {
+        t.Fatalf("expected no open scope before anything is served, got %d", kernelInstance.OpenRequestScopes())
+    }
+
+    handler := kernelInstance.ServeHttp(serviceContainer)
+
+    served := make(chan struct{})
+    go func() {
+        defer close(served)
+
+        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/slow", nil))
+    }()
+
+    <-handlerEntered
+
+    if 1 != kernelInstance.OpenRequestScopes() {
+        t.Fatalf("expected one open scope while the handler runs, got %d", kernelInstance.OpenRequestScopes())
+    }
+
+    close(releaseHandler)
+    <-served
+
+    if 0 != kernelInstance.OpenRequestScopes() {
+        t.Fatalf("expected the scope to be released when the request returned, got %d", kernelInstance.OpenRequestScopes())
+    }
+}
+
+/* the release rides the same defer as the close rather than the handler's return, so a request whose handler panics — the path with its own recovery defers above this one — still gives its scope back. A leaked count would make every later shutdown wait out its whole budget and then report a drain failure for a server with nothing in it. */
+func TestKernel_OpenRequestScopesIsReleasedWhenTheHandlerPanics(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/boom",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            panic("boom")
+        },
+    )
+
+    kernelInstance := NewKernel(router)
+
+    handler := kernelInstance.ServeHttp(newHttpTestContainer())
+
+    handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/boom", nil))
+
+    if 0 != kernelInstance.OpenRequestScopes() {
+        t.Fatalf("expected the panicking request to release its scope, got %d", kernelInstance.OpenRequestScopes())
+    }
+}

@@ -35,6 +35,8 @@ A `Configuration` instance is created early (typically at application bootstrap)
 
 The environment name is resolved from `MELODY_ENV` inside the loaded `.env` values (defaults to `"dev"` when missing or empty). See [`EnvKey`](../../config/environment.go) and [`EnvironmentSource`](../../config/environment_source.go).
 
+**A present-but-empty `MELODY_ENV` selects the `.env.dev` files and then fails the boot.** The default above applies to the *file selection* — an empty value picks `dev` and `.env.dev` / `.env.dev.local` are loaded — but the parameter itself keeps the empty value it was given, and the kernel configuration refuses it: `environment may not be empty`, naming `MELODY_ENV`, `kernel.environment`, and the files the emptiness already selected. The two readers deliberately disagree, because an empty value is an accident of a rendered deployment template rather than a request to run in development, and the alternative — booting on the development files because a variable came out blank — is the failure mode worth refusing. Either remove the key or give it a value.
+
 ### Empty string semantics
 
 A present key with an empty string value is considered **present** (it is a valid value for string parameters). Typed conversions for non-string getters treat empty strings as invalid, by design.

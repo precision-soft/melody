@@ -20,6 +20,18 @@ type logEntry struct {
     Context map[string]any             `json:"context"`
 }
 
+/* LevelEnabled asks a logger whether a record at this level would survive its threshold, and answers true for one that cannot be asked. It is the single door onto loggingcontract.LevelReporter, so the "absent means enabled" rule lives in one place rather than being restated at each caller — a site that spelled the fallback the other way would silently stop recording against every logger that does not implement the capability, which is most of them.
+
+Ask it only where the answer saves work that is otherwise thrown away: a context map assembled at the call site, a name resolved through reflection. A record whose arguments already exist costs nothing to hand over, and gating it here would only add a second place where a level decision is made. */
+func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bool {
+    levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
+    if false == isReporter {
+        return true
+    }
+
+    return levelReporter.Enabled(level)
+}
+
 /* LogError writes one record for the error it is given, or none when the error is nil — including a typed nil, which would otherwise panic on the very lines that render it — or when the error was already logged. The mark is read at the depth exception.MarkLogged writes it, the nearest AlreadyLogged implementer in the chain, so marking a wrapping http exception suppresses this record the way the mark promises; the previous read searched for the nearest *exception.Error instead and disagreed with the writer on every chain whose markable link is not that type. The record is anchored on the error the caller handed over: a top-level *exception.Error contributes its own level, message and enriched context, while any other error — a wrapper included — is logged at error level under its full message, with the context of the nearest provider and the cause chain walked from its own wrap link; anchoring on the nearest *exception.Error buried in the chain logged that error's message at that error's level, which dropped the wrapper's framing entirely and let a low-level cause file the whole record below the logger's threshold. A nil logger falls back to the process default logger under the same rules. */
 func LogError(logger loggingcontract.Logger, err error) {
     if nil == err || true == internal.IsNilInterface(err) {

@@ -472,7 +472,13 @@ func (instance *exampleClient) sessionCookie() *http.Cookie {
 ({,v2/,v3/}.example/route/route.go and config/http.go) rather than assumed:
 
   - /routes/ is public in every major and lists the route table, which makes it the readiness probe;
-  - /health is public in v3 but falls under the ROLE_USER catch-all in v1 and v2, so it is NOT probed here;
+  - /health is the monitoring probe and is public in every major. It used to be public in v3 alone while
+    v1 and v2 left it to the ROLE_USER catch-all, so a monitoring system asking those two for the process's
+    readiness was answered with a redirect to the login page. Probing it anonymously here is what keeps the
+    three from drifting apart again;
+  - /index.html is the same resource "/" serves, through MELODY_STATIC_INDEX_FILE, and carries the same
+    public policy. The root rule is anchored at "^/$", so the explicit spelling needs its own rule and used
+    to fall to the catch-all: two spellings of one page under two different policies;
   - /categories/api/read/ is the ROLE_USER route, /users/api/read/ the ROLE_ADMIN one, and the seeded "user"
     account holds ROLE_USER only — which is what separates the 401 of an anonymous request from the 403 of an
     authenticated one without the role. */
@@ -482,6 +488,8 @@ const (
     exampleMissingRoute       = "/routes/no-such-route/"
     exampleLoginRoute         = "/login/"
     exampleLogoutRoute        = "/logout/"
+    exampleHealthRoute        = "/health"
+    exampleIndexFileRoute     = "/index.html"
     exampleUserRoute          = "/categories/api/read/"
     exampleAdminRoute         = "/users/api/read/"
     exampleStaticAsset        = "/assets/app.css"
@@ -553,6 +561,38 @@ func assertExamplePublicRoutes(major exampleMajor, client *exampleClient) {
         fail("[%s] %s answered %d, wanted 404 from the not-found handler", major.label, exampleMissingRoute, missing.statusCode)
     }
     pass("[%s] an unrouted path under a public prefix answered 404", major.label)
+
+    /* the monitoring probe is asked the way a monitoring system asks: anonymously, and without claiming to be a
+       browser. Both spellings of the answer it used to get are failures here — the 302 an html-accepting client
+       received through the entry point, and the 401 everything else received — and the body is read because a
+       200 alone is also what an error page carries. */
+    health := client.call("GET", exampleHealthRoute, "", "", "")
+    if http.StatusOK != health.statusCode {
+        fail(
+            "[%s] %s answered %d to an anonymous probe, wanted 200: a monitoring system cannot authenticate, so the readiness route has to sit outside the catch-all",
+            major.label,
+            exampleHealthRoute,
+            health.statusCode,
+        )
+    }
+    if false == strings.Contains(health.body, "\"status\"") {
+        fail("[%s] %s answered 200 without the health payload in it: %s", major.label, exampleHealthRoute, exampleTruncate(health.body))
+    }
+    pass("[%s] the monitoring probe answered %s anonymously", major.label, exampleHealthRoute)
+
+    /* the index file and the root are one resource under two spellings, so they must carry one policy. The root
+       rule is anchored at "^/$", which is why the explicit spelling needs its own rule and used to be answered
+       by the ROLE_USER catch-all while "/" was public. */
+    indexFile := client.call("GET", exampleIndexFileRoute, "", "", "")
+    if http.StatusOK != indexFile.statusCode {
+        fail(
+            "[%s] %s answered %d while / is public: the two spellings of one page must carry one policy",
+            major.label,
+            exampleIndexFileRoute,
+            indexFile.statusCode,
+        )
+    }
+    pass("[%s] %s carries the same public policy as the root it serves", major.label, exampleIndexFileRoute)
 }
 
 func assertExampleAnonymousRejection(major exampleMajor, client *exampleClient) {

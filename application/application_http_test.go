@@ -7,11 +7,15 @@ import (
     nethttp "net/http"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/config"
+    configcontract "github.com/precision-soft/melody/config/contract"
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/event"
+    eventcontract "github.com/precision-soft/melody/event/contract"
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
@@ -21,6 +25,8 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
     "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/session"
+    sessioncontract "github.com/precision-soft/melody/session/contract"
 )
 
 func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
@@ -424,7 +430,7 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
         cancelledContext, cancel := context.WithCancel(context.Background())
         cancel()
 
-        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second)
+        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter()))
         if nil == endErr {
             t.Fatalf("expected the serve error to be reported instead of a clean shutdown (iteration %d)", iteration)
         }
@@ -566,7 +572,7 @@ func TestAwaitHttpServerEnd_CutsTheShutdownAtTheConfiguredBudget(t *testing.T) {
     cancel()
 
     shutdownStartedAt := time.Now()
-    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond)
+    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, http.NewKernel(http.NewRouter()))
     elapsed := time.Since(shutdownStartedAt)
 
     close(releaseHandler)
@@ -591,7 +597,7 @@ func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second)
+    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter()))
     if nil != endErr {
         t.Fatalf("expected a clean shutdown for the server's own closed signal, got: %v", endErr)
     }
@@ -738,5 +744,230 @@ func TestRunHttp_RegistersNoKernelListeners(t *testing.T) {
 
     if nil != exceptionEvent.Response() {
         t.Fatalf("expected runHttp to register no listener; the boot-end registration owns them")
+    }
+}
+
+/* countingHttpKernel is the errorHandlerless kernel plus the one door the shutdown drain reads, so a test can drive the drain against a count it controls rather than against a live server. */
+type countingHttpKernel struct {
+    errorHandlerlessKernel
+    openScopes atomic.Int64
+}
+
+func (instance *countingHttpKernel) OpenRequestScopes() int64 {
+    return instance.openScopes.Load()
+}
+
+var _ httpcontract.Kernel = (*countingHttpKernel)(nil)
+
+/* the drain holds the exit until the last request scope closes. Shutdown answers only for the connections the server still owns, so a hijacked one — a websocket — returns it immediately and the process used to announce a clean stop with that handler still running under a container that was closing. */
+func TestAwaitOpenRequestScopes_WaitsUntilTheLastScopeCloses(t *testing.T) {
+    httpKernel := &countingHttpKernel{}
+    httpKernel.openScopes.Store(2)
+
+    go func() {
+        time.Sleep(60 * time.Millisecond)
+        httpKernel.openScopes.Store(1)
+        time.Sleep(60 * time.Millisecond)
+        httpKernel.openScopes.Store(0)
+    }()
+
+    startedAt := time.Now()
+
+    drainErr := awaitOpenRequestScopes(context.Background(), httpKernel, &warningRecordingLogger{})
+    if nil != drainErr {
+        t.Fatalf("expected the drain to succeed once the scopes closed, got: %v", drainErr)
+    }
+
+    if elapsed := time.Since(startedAt); 100*time.Millisecond > elapsed {
+        t.Fatalf("expected the drain to have waited for the scopes, returned after %v", elapsed)
+    }
+}
+
+/* a drain that does not finish inside the budget is an error and not a warning, for the reason the shutdown overrun beside it is one: the process exits non-zero, which is how the operator is told that requests were still inside the server when it stopped. The count travels in the context, because "how many" is the whole of what the operator can act on. */
+func TestAwaitOpenRequestScopes_ReportsTheScopesStillOpenWhenTheBudgetRunsOut(t *testing.T) {
+    httpKernel := &countingHttpKernel{}
+    httpKernel.openScopes.Store(3)
+
+    budgetContext, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+    defer cancel()
+
+    logger := &warningRecordingLogger{}
+
+    drainErr := awaitOpenRequestScopes(budgetContext, httpKernel, logger)
+    if nil == drainErr {
+        t.Fatalf("expected the undrained scopes to be reported as a failure")
+    }
+
+    if "http shutdown left request scopes open" != drainErr.Error() {
+        t.Fatalf("unexpected message: %q", drainErr.Error())
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(drainErr, &exceptionErr) {
+        t.Fatalf("expected an exception error, got %T", drainErr)
+    }
+
+    if int64(3) != exceptionErr.Context()["openRequestScopes"] {
+        t.Fatalf("expected the count in the context, got %#v", exceptionErr.Context()["openRequestScopes"])
+    }
+
+    if false == errors.Is(drainErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the expired budget to stay reachable in the chain, got: %v", drainErr)
+    }
+}
+
+/* a kernel that cannot be asked is not waited on at all: the absent door means "no measurement", and waiting on a number nobody maintains would hang every shutdown of a replacement kernel for its whole budget and then report a failure that never happened. */
+func TestAwaitOpenRequestScopes_DoesNotWaitOnAKernelThatCannotBeAsked(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    drainErr := awaitOpenRequestScopes(cancelledContext, &errorHandlerlessKernel{}, &warningRecordingLogger{})
+    if nil != drainErr {
+        t.Fatalf("expected no drain for a kernel with no counter, got: %v", drainErr)
+    }
+}
+
+/* the whole chain, end to end and through runHttp itself: a handler hijacks its connection, the kernel's request scope stays open behind it, and the shutdown must refuse to report a stop it did not obtain. net/http's Shutdown returns immediately for a hijacked connection — it stopped being the server's the moment the handler took it — so before the scope was counted this exact shape answered nil in no time at all while the handler ran on and the container closed under it. */
+func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *testing.T) {
+    handlerHijacked := make(chan struct{})
+    releaseHandler := make(chan struct{})
+
+    kernelInstance := newTestKernel()
+
+    kernelInstance.httpRouter.Handle(
+        nethttp.MethodGet,
+        "/upgrade",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            hijacker, ok := writer.(nethttp.Hijacker)
+            if false == ok {
+                close(handlerHijacked)
+
+                return http.TextResponse(nethttp.StatusOK, "no hijacker"), nil
+            }
+
+            connection, _, hijackErr := hijacker.Hijack()
+            if nil != hijackErr {
+                close(handlerHijacked)
+
+                return http.TextResponse(nethttp.StatusOK, "hijack failed"), nil
+            }
+
+            close(handlerHijacked)
+            <-releaseHandler
+
+            _ = connection.Close()
+
+            return http.TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.HttpAddressKey:         "127.0.0.1:34521",
+                config.HttpShutdownTimeoutKey: "200ms",
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        kernel:               kernelInstance,
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return &warningRecordingLogger{}, nil
+        },
+    )
+
+    applicationInstance.registerCache()
+
+    /* the request path resolves these on its way to the handler, and the bare test container carries none of them: without the configuration the kernel answers 500 before routing, and the hijack this test is about never happens */
+    kernelInstance.serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return configuration, nil
+        },
+    )
+    kernelInstance.serviceContainer.MustRegister(
+        session.ServiceSessionManager,
+        func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
+            return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
+        },
+    )
+    kernelInstance.serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return kernelInstance.eventDispatcher, nil
+        },
+    )
+
+    runContext, cancelRun := context.WithCancel(context.Background())
+    defer cancelRun()
+
+    runResult := make(chan error, 1)
+    go func() {
+        runResult <- applicationInstance.runHttp(runContext)
+    }()
+
+    for attempt := 0; attempt < 200; attempt++ {
+        probeConnection, dialErr := net.Dial("tcp", "127.0.0.1:34521")
+        if nil == dialErr {
+            _ = probeConnection.Close()
+
+            break
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+
+    go func() {
+        /* the request ends in EOF by construction: the handler takes the connection and closes it, so there is no response to read. What the test observes is the shutdown, not this. */
+        response, requestErr := nethttp.Get("http://127.0.0.1:34521/upgrade")
+        if nil == requestErr {
+            _ = response.Body.Close()
+        }
+    }()
+
+    select {
+    case <-handlerHijacked:
+
+    case <-time.After(4 * time.Second):
+        t.Fatalf("the hijacking handler was never reached")
+    }
+
+    cancelRun()
+
+    var runErr error
+    select {
+    case runErr = <-runResult:
+
+    case <-time.After(4 * time.Second):
+        close(releaseHandler)
+
+        t.Fatalf("expected runHttp to return within the configured budget; it is still waiting")
+    }
+
+    close(releaseHandler)
+
+    if nil == runErr {
+        t.Fatalf("expected the undrained request scope to be reported instead of a clean stop")
+    }
+
+    if false == strings.Contains(runErr.Error(), "http shutdown left request scopes open") {
+        t.Fatalf("expected the undrained scopes in the failure, got %q", runErr.Error())
     }
 }

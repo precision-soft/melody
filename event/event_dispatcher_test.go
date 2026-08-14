@@ -1903,3 +1903,174 @@ func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.
         }
     }
 }
+
+/* debugGateLogger records what it is handed and answers the level question the way a configured journal
+would: against a THRESHOLD, not with one answer for every level. A double that answered the same for all
+five would shadow the guard it is here to prove — asking about the wrong level would get the right answer
+by accident, and a dispatch gating on emergency instead of debug would pass (§5.16). */
+type debugGateLogger struct {
+    debugMessages []string
+    minLevel      loggingcontract.Level
+}
+
+func debugGateLevelPriority(level loggingcontract.Level) int {
+    switch level {
+    case loggingcontract.LevelDebug:
+        return 0
+    case loggingcontract.LevelInfo:
+        return 1
+    case loggingcontract.LevelWarning:
+        return 2
+    case loggingcontract.LevelError:
+        return 3
+    case loggingcontract.LevelEmergency:
+        return 4
+    }
+
+    return 0
+}
+
+func (instance *debugGateLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *debugGateLogger) Debug(message string, context loggingcontract.Context) {
+    instance.debugMessages = append(instance.debugMessages, message)
+}
+
+func (instance *debugGateLogger) Info(message string, context loggingcontract.Context) {}
+
+func (instance *debugGateLogger) Warning(message string, context loggingcontract.Context) {}
+
+func (instance *debugGateLogger) Error(message string, context loggingcontract.Context) {}
+
+func (instance *debugGateLogger) Emergency(message string, context loggingcontract.Context) {}
+
+func (instance *debugGateLogger) Enabled(level loggingcontract.Level) bool {
+    return debugGateLevelPriority(level) >= debugGateLevelPriority(instance.minLevel)
+}
+
+var _ loggingcontract.LevelReporter = (*debugGateLogger)(nil)
+
+/* the dispatch asks the journal once and builds nothing it would throw away: at least three events travel per request, and every debug record below assembles a context map at the call site — plus, for one of them, a listener name resolved through reflect and runtime.FuncForPC per listener per dispatch. A logger that says the level is off must receive nothing at all; the same dispatch under a logger that says it is on must receive every record it always did, which is what tells the gate apart from a deletion. */
+func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testing.T) {
+    for _, testCase := range []struct {
+        name            string
+        minLevel        loggingcontract.Level
+        expectedRecords int
+    }{
+        {"the journal discards debug", loggingcontract.LevelError, 0},
+        {"the journal keeps debug", loggingcontract.LevelDebug, 3},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            logger := &debugGateLogger{minLevel: testCase.minLevel}
+
+            dispatcher := NewEventDispatcher(clock.NewSystemClock())
+
+            _ = dispatcher.AddListener(
+                "gate.event",
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                100,
+            )
+
+            _, dispatchErr := dispatcher.DispatchName(testRuntimeWithLogger(t, logger), "gate.event", nil)
+            if nil != dispatchErr {
+                t.Fatalf("unexpected error: %v", dispatchErr)
+            }
+
+            if testCase.expectedRecords != len(logger.debugMessages) {
+                t.Fatalf(
+                    "expected %d debug records under a %q journal, got %d: %v",
+                    testCase.expectedRecords,
+                    testCase.minLevel,
+                    len(logger.debugMessages),
+                    logger.debugMessages,
+                )
+            }
+        })
+    }
+}
+
+/* the listener name is resolved where it is USED, so the paths that need it must still carry it with the journal at a level that builds no debug record at all: the failure wrapper's context and the required-listener refusal are what an operator reads when a dispatch goes wrong, and a name resolved only inside the debug branch would leave both saying "-" exactly when they matter. */
+func TestEventDispatcher_NamesTheListenerOnTheFailurePathWithDebugOff(t *testing.T) {
+    logger := &debugGateLogger{minLevel: loggingcontract.LevelError}
+
+    dispatcher := NewEventDispatcher(clock.NewSystemClock())
+
+    _ = dispatcher.AddListener(
+        "gate.failure",
+        failingGateListener,
+        100,
+    )
+
+    _, dispatchErr := dispatcher.DispatchName(testRuntimeWithLogger(t, logger), "gate.failure", nil)
+    if nil == dispatchErr {
+        t.Fatalf("expected the listener failure to be reported")
+    }
+
+    if 0 != len(logger.debugMessages) {
+        t.Fatalf("expected no debug record under a journal that discards them, got %v", logger.debugMessages)
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(dispatchErr, &exceptionErr) {
+        t.Fatalf("expected an exception error, got %T", dispatchErr)
+    }
+
+    listenerName, ok := exceptionErr.Context()["listenerName"].(string)
+    if false == ok {
+        t.Fatalf("expected the failure context to name the listener, got %#v", exceptionErr.Context()["listenerName"])
+    }
+
+    if false == strings.Contains(listenerName, "failingGateListener") {
+        t.Fatalf("expected the listener's own name in the failure, got %q", listenerName)
+    }
+}
+
+func failingGateListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    return errors.New("the listener refused")
+}
+
+/* which listener stopped propagation travels as the LISTENER and is named only when the refusal is built, so the required-listener refusal must still say who stopped it. Resolving the name per iteration paid the reflection for an answer almost no dispatch asks for; resolving it nowhere would leave this message blaming "-". */
+func TestEventDispatcher_NamesTheStoppingListenerInTheRequiredRefusalWithDebugOff(t *testing.T) {
+    logger := &debugGateLogger{minLevel: loggingcontract.LevelError}
+
+    dispatcher := NewEventDispatcher(clock.NewSystemClock())
+
+    _ = dispatcher.AddListener("gate.stop", stoppingGateListener, 200)
+
+    requiredRegistration := dispatcher.AddListener(
+        "gate.stop",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        100,
+    )
+    dispatcher.MarkListenerRequired(requiredRegistration)
+
+    _, dispatchErr := dispatcher.DispatchName(testRuntimeWithLogger(t, logger), "gate.stop", nil)
+    if nil == dispatchErr {
+        t.Fatalf("expected the skipped required listener to be refused")
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(dispatchErr, &exceptionErr) {
+        t.Fatalf("expected an exception error, got %T", dispatchErr)
+    }
+
+    stoppedBy, ok := exceptionErr.Context()["stoppedByListener"].(string)
+    if false == ok {
+        t.Fatalf("expected the refusal to name the stopping listener, got %#v", exceptionErr.Context())
+    }
+
+    if false == strings.Contains(stoppedBy, "stoppingGateListener") {
+        t.Fatalf("expected the stopping listener's own name, got %q", stoppedBy)
+    }
+}
+
+func stoppingGateListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    eventValue.StopPropagation()
+
+    return nil
+}

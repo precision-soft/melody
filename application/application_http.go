@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/cache"
     "github.com/precision-soft/melody/config"
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
@@ -79,6 +80,26 @@ func kernelHasErrorHandler(httpKernel httpcontract.Kernel) bool {
     }
 
     return reporter.HasErrorHandler()
+}
+
+/* openRequestScopeReporter is the door through which the shutdown asks a kernel how many requests are
+still inside it. It sits beside the contract rather than in it, like the error-handler door above: a
+replacement kernel that cannot answer is not interrogated, and the shutdown reports exactly what it
+did before. */
+type openRequestScopeReporter interface {
+    OpenRequestScopes() int64
+}
+
+/* openRequestScopeCount answers the number of request scopes still open, and -1 for a kernel that cannot
+be asked — which is not zero: zero is the answer "everything drained", and handing that back for a kernel
+that never counted would report a drain nobody measured. */
+func openRequestScopeCount(httpKernel httpcontract.Kernel) int64 {
+    reporter, ok := httpKernel.(openRequestScopeReporter)
+    if false == ok {
+        return -1
+    }
+
+    return reporter.OpenRequestScopes()
 }
 
 func (instance *Application) bootHttp() {
@@ -153,16 +174,19 @@ func (instance *Application) runHttp(
         errorChannel <- listenAndServeErr
     }()
 
-    return awaitHttpServerEnd(ctx, httpServer, errorChannel, logger, configuration.Http().ShutdownTimeout())
+    return awaitHttpServerEnd(ctx, httpServer, errorChannel, logger, configuration.Http().ShutdownTimeout(), httpKernel)
 }
 
-/* awaitHttpServerEnd waits for whichever ends the serving first: the cancelled context or the server's own failure. The serve error is read even on the shutdown branch — when the listen fails in the same instant the context is cancelled, the select's choice of branch is arbitrary, and taking the shutdown branch used to discard the real failure, so a process that never served a byte reported a clean shutdown. Shutdown closes the listeners before it returns, so the serve goroutine has already been released and the receive is bounded. A shutdown that outlives its configured budget surfaces the deadline error and the process exits non-zero on purpose: the overrun is the operator's signal that draining hung, not a success to smooth over. */
+/* awaitHttpServerEnd waits for whichever ends the serving first: the cancelled context or the server's own failure. The serve error is read even on the shutdown branch — when the listen fails in the same instant the context is cancelled, the select's choice of branch is arbitrary, and taking the shutdown branch used to discard the real failure, so a process that never served a byte reported a clean shutdown. Shutdown closes the listeners before it returns, so the serve goroutine has already been released and the receive is bounded. A shutdown that outlives its configured budget surfaces the deadline error and the process exits non-zero on purpose: the overrun is the operator's signal that draining hung, not a success to smooth over.
+
+Shutdown answers for the connections the server still owns, and only for those: a handler that hijacked its connection took it out of the server's accounting, so Shutdown returns immediately and reports success while that handler runs on. The request scopes the kernel opened are what remains measurable about them, and they are drained under the same budget for the same reason the budget exists. */
 func awaitHttpServerEnd(
     ctx context.Context,
     httpServer *nethttp.Server,
     errorChannel chan error,
     logger loggingcontract.Logger,
     shutdownTimeout time.Duration,
+    httpKernel httpcontract.Kernel,
 ) error {
     select {
     case <-ctx.Done():
@@ -190,6 +214,11 @@ func awaitHttpServerEnd(
             return markHttpRunErrorLogged(shutdownErr)
         }
 
+        drainErr := awaitOpenRequestScopes(shutdownContext, httpKernel, logger)
+        if nil != drainErr {
+            return markHttpRunErrorLogged(drainErr)
+        }
+
         return nil
 
     case err := <-errorChannel:
@@ -203,6 +232,50 @@ func awaitHttpServerEnd(
         }
 
         return nil
+    }
+}
+
+/* awaitOpenRequestScopesInterval is how often the drain re-reads the counter. It is short enough that an ordinary drain adds no perceptible delay to the exit and long enough that the wait is not a spin: the loop exists to bound a wait, not to time it precisely. */
+const awaitOpenRequestScopesInterval = 20 * time.Millisecond
+
+/* awaitOpenRequestScopes holds the exit until every request scope the kernel opened has closed, or until the shutdown budget the caller already opened runs out. It is what makes the stop melody reports the stop it obtained: Shutdown drains the connections the server owns and returns nil for a hijacked one, so a websocket still being served — its request scope, its session, everything it holds — used to sit under a container that was closing while the process announced a clean stop and exited zero.
+
+An expiry is an error rather than a warning, for the reason the budget overrun above is one: a drain that did not finish is the operator's signal, and the process exiting non-zero is how they receive it. A kernel that cannot be asked is not waited on at all — the answer -1 means "no measurement", and waiting on a number nobody maintains would hang every shutdown of a replacement kernel. */
+func awaitOpenRequestScopes(
+    ctx context.Context,
+    httpKernel httpcontract.Kernel,
+    logger loggingcontract.Logger,
+) error {
+    if 0 > openRequestScopeCount(httpKernel) {
+        return nil
+    }
+
+    ticker := time.NewTicker(awaitOpenRequestScopesInterval)
+    defer ticker.Stop()
+
+    for {
+        openScopes := openRequestScopeCount(httpKernel)
+        if 0 >= openScopes {
+            return nil
+        }
+
+        select {
+        case <-ctx.Done():
+            drainErr := exception.NewError(
+                "http shutdown left request scopes open",
+                exceptioncontract.Context{
+                    "openRequestScopes": openScopes,
+                    "reason":            "a hijacked connection is not drained by the http server's own shutdown, so its handler is still running",
+                },
+                ctx.Err(),
+            )
+
+            logger.Error("http server shutdown error", exception.LogContext(drainErr))
+
+            return drainErr
+
+        case <-ticker.C:
+        }
     }
 }
 

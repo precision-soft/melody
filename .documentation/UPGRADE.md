@@ -18,6 +18,22 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Application: a shutdown that leaves request scopes open exits non-zero
+
+**What changed.** After `Shutdown` returns, melody waits — under the same `MELODY_HTTP_SHUTDOWN_TIMEOUT` budget — for every request scope the http kernel opened to close. A drain that does not finish is recorded as `http shutdown left request scopes open`, carrying the count, and `Run` ends non-zero.
+
+**Symptom.** A process that serves **hijacked** connections — a websocket, or any handler that takes the socket itself — now takes up to the shutdown budget to exit and leaves a non-zero status, where it used to exit immediately and report a clean stop.
+
+**Remedy.** Close those connections from a shutdown hook so the drain has something to succeed at; a hub that stops accepting and closes its clients when the process is stopping is the shape the v3 example uses. If the wait is unwelcome, `MELODY_HTTP_SHUTDOWN_TIMEOUT` bounds it — but the exit status is the point: `net/http`'s own `Shutdown` does not track a connection a handler hijacked, so the clean stop reported before was one melody had not obtained. The handler was still running, and the container was closing under it.
+
+### Validation: a negative length bound is refused at construction
+
+**What changed.** `validation.NewMinLength` and `validation.NewMaxLength` panic on a negative bound, naming it. The tag door (`validate:"min=-1"`) already refused the same value and is unchanged.
+
+**Symptom.** A call passing a negative bound — almost always a computed value that came out wrong — now fails at construction instead of returning a constraint.
+
+**Remedy.** Clamp the value at the call site if it can legitimately be negative: `max(0, bound)`. What the refusal replaces is worse than a panic in both directions — `NewMinLength(-1)` built a rule that accepted every value in silence, reading as enforced while validating nothing and leaving no record anywhere, and `NewMaxLength(-1)` built one that refused every value including the empty string with `this field must not exceed -1 characters`, which the client was handed.
+
 ### CLI: `--format=json` writes one document per line
 
 **What changed.** The json printer no longer indents. Every melody command's `--format=json` envelope — the framework's `debug:*` family, the integrations' `melody:cron:*` and `db:*` — is now one compact line terminated by a newline, where it used to be a block of indented lines. `--format=json-pretty` is the same document with the indentation back.

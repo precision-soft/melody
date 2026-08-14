@@ -91,6 +91,16 @@ func (instance *requestLogger) Closed() bool {
     return closedChecker.Closed()
 }
 
+/* Enabled forwards the level question to the base logger, and the forwarding is what makes the capability worth anything on the request path: this decorator is what every handler and every listener holds, installed as a scope override, so a caller asking the logger it was handed asks THIS one. Answering "enabled" from here would report every level enabled for a journal configured at error, which is the exact opposite of what the caller is asking for. A base that does not implement the capability is reported enabled, which is the contract's floor. */
+func (instance *requestLogger) Enabled(level loggingcontract.Level) bool {
+    levelReporter, isReporter := instance.base.(loggingcontract.LevelReporter)
+    if false == isReporter {
+        return true
+    }
+
+    return levelReporter.Enabled(level)
+}
+
 /* mergeContextWithRequestId writes the real correlation id under the context key unconditionally: the id this logger was built with is the one trustworthy correlation there is, and a value already sitting under the key would otherwise break the chain every reader of the log greps by. What happens to that value is the constructor's policy: on the request path a different non-empty string claim survives under "...Claimed" — letting it win would let whatever the client wrote forge the correlation of the record — while on the console path the caller's value survives verbatim under "...Provided", whatever its type, because the console caller is trusted and its data is displaced, not suspected. */
 func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract.Context, requestId string) map[string]any {
     if "" == requestId {
@@ -122,3 +132,4 @@ func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract
 }
 
 var _ loggingcontract.Logger = (*requestLogger)(nil)
+var _ loggingcontract.LevelReporter = (*requestLogger)(nil)

@@ -141,33 +141,18 @@ func (instance *Parameter) MustString() string {
     return ""
 }
 
+/* Bool reads the value through the same parser its sibling accessors use, the last typed door that used to carry a grammar of its own. What it accepts and refuses is unchanged — the hand-written branches recognised exactly the shapes internal.Bool recognises — and what changes is what a refusal SAYS: a parameter holding a number, which is what RegisterRuntime("feature.flag", 1) hands over, was refused with a nil cause and a context carrying only the key, so the operator learned that something failed and nothing about what, while every sibling answered with a ParseError naming the parameter, the target type and the value. */
 func (instance *Parameter) Bool() (bool, error) {
-    value := instance.loadValue()
-
-    boolValue, ok := value.(bool)
-    if true == ok {
-        return boolValue, nil
+    boolValue, isSet, boolErr := internal.Bool(instance.loadValue(), instance.conversionName())
+    if nil != boolErr || false == isSet {
+        return false, exception.NewError(
+            "cannot convert parameter value to bool",
+            instance.diagnosticContext(),
+            instance.conversionCause(boolErr),
+        )
     }
 
-    stringValue, ok := value.(string)
-    if true == ok {
-        parsedValue, boolFromStringErr := internal.BoolFromString(stringValue)
-        if nil != boolFromStringErr {
-            return false, exception.NewError(
-                "cannot convert parameter value to bool",
-                instance.diagnosticContext(),
-                instance.conversionCause(boolFromStringErr),
-            )
-        }
-
-        return parsedValue, nil
-    }
-
-    return false, exception.NewError(
-        "cannot convert parameter value to bool",
-        instance.diagnosticContext(),
-        nil,
-    )
+    return boolValue, nil
 }
 
 /* Int reads the value through the same parser its sibling accessors use, so one grammar answers for every typed reading of a parameter: an int64 registered at runtime — what a caller writing RegisterRuntime("app.batch_size", int64(500)) hands over — converted through Float and refused through Int, on a value that is plainly a whole number. The one thing this door adds is the narrowing: internal.Int answers an int64 while an int is what a caller asked for, so a value outside the int range is refused by name rather than truncated, which is the silent corruption the shared parser already refuses for a float64 too wide to hold. */

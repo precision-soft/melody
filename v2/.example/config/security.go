@@ -12,12 +12,17 @@ import (
 
 func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) {
     accessControl := melodysecurity.NewAccessControl(
+        /* the index file is the same resource the root serves, so it carries the same policy: MELODY_STATIC_INDEX_FILE makes "/" and "/index.html" two spellings of one page, and anchoring the public rule at "^/$" left the explicit spelling to the ROLE_USER catch-all below */
         melodysecurity.NewAccessControlRegexRule("^/$", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/index\\.html$", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/login", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/logout", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/routes", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/assets", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/favicon", melodysecuritycontract.AttributePublicAccess),
+
+        /* the monitoring probe answers before there is anyone to authenticate: registered as a route by config/http.go and left to the catch-all below, it answered a monitoring system with a 302 to the login page, or a 401 to one that does not ask for html */
+        melodysecurity.NewAccessControlRegexRule("^/health", melodysecuritycontract.AttributePublicAccess),
 
         melodysecurity.NewAccessControlRule(route.ProductsPrefix, entity.RoleEditor),
         melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),

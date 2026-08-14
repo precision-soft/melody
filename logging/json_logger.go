@@ -180,7 +180,22 @@ func (instance *jsonLogger) Closed() bool {
     return instance.closed.Load()
 }
 
+/* Enabled answers the same question Log asks itself first, and answers it with the same arithmetic: a level below the configured threshold is dropped, and an invalid level weighs as error rather than as the lowest priority for the reason written at that branch. A closed logger writes nothing at all, so it reports nothing enabled — the caller asking is about to build a record, and a record built for a logger that has stopped writing is pure waste. */
+func (instance *jsonLogger) Enabled(level loggingcontract.Level) bool {
+    if true == instance.closed.Load() {
+        return false
+    }
+
+    effectivePriority := priorityForLevel(level)
+    if false == IsValidLevel(level) {
+        effectivePriority = priorityForLevel(loggingcontract.LevelError)
+    }
+
+    return effectivePriority >= priorityForLevel(instance.minLevel)
+}
+
 var _ loggingcontract.Logger = (*jsonLogger)(nil)
+var _ loggingcontract.LevelReporter = (*jsonLogger)(nil)
 
 /* normalizeJsonContextMaxDepth bounds the recursive normalization: the shapes this package itself nests — a cause context chain holding provider maps holding error values — sit two or three levels down, and the cap keeps a pathological self-referencing structure from recursing without end. A value below the cap is passed to the encoder as it is. */
 const normalizeJsonContextMaxDepth = 6

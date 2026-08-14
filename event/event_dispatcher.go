@@ -356,12 +356,7 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
 
             listenerId := fmt.Sprintf("%d", entry.listenerId)
 
-            listenerName := "-"
-            listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
-            function := runtime.FuncForPC(listenerProgramCounter)
-            if nil != function {
-                listenerName = function.Name()
-            }
+            listenerName := listenerNameOf(entry.listener)
 
             registeredListenerList = append(
                 registeredListenerList,
@@ -463,18 +458,23 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
 
     logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
+    /* asked once per dispatch rather than per record: the kernel dispatches at least three events per request, and each of the debug records below assembles a context map at the call site that a journal above debug throws away unread. The listener name behind the second one costs a reflect.Value and a runtime.FuncForPC per listener per dispatch on top of that, which is why it is resolved through listenerNameOf where it is used rather than ahead of every branch. A logger that cannot answer the question reports enabled, so a dispatch logs exactly what it always did. */
+    debugEnabled := logging.LevelEnabled(logger, loggingcontract.LevelDebug)
+
     dispatchStartedAt := time.Now()
 
-    logger.Debug(
-        "event dispatch started",
-        loggingcontract.Context{
-            "eventName":      eventName,
-            "listenersCount": len(listenerList),
-        },
-    )
+    if true == debugEnabled {
+        logger.Debug(
+            "event dispatch started",
+            loggingcontract.Context{
+                "eventName":      eventName,
+                "listenersCount": len(listenerList),
+            },
+        )
+    }
 
     listenerIndex := 0
-    stoppedByListenerName := "-"
+    stoppedByListener := eventcontract.EventListener(nil)
     stoppedByListenerMaySkip := false
 
     for listenerIndex = 0; listenerIndex < len(listenerList); listenerIndex++ {
@@ -487,33 +487,29 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
 
         listenerStartedAt := time.Now()
 
-        listenerName := "-"
-        listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
-        function := runtime.FuncForPC(listenerProgramCounter)
-        if nil != function {
-            listenerName = function.Name()
+        if true == debugEnabled {
+            logger.Debug(
+                "event listener started",
+                loggingcontract.Context{
+                    "eventName":        eventName,
+                    "listenerName":     listenerNameOf(entry.listener),
+                    "listenerPriority": entry.priority,
+                },
+            )
         }
-
-        logger.Debug(
-            "event listener started",
-            loggingcontract.Context{
-                "eventName":        eventName,
-                "listenerName":     listenerName,
-                "listenerPriority": entry.priority,
-            },
-        )
 
         err := instance.callListenerSafely(
             runtimeInstance,
             eventName,
             eventValue,
             entry.listener,
-            listenerName,
             entry.priority,
             listenerStartedAt,
             logger,
         )
         if nil != err {
+            listenerName := listenerNameOf(entry.listener)
+
             /* a listener that fails ends the dispatch exactly as decisively as one that stops propagation: the listeners behind it — a required access-control listener among them — never ran. Returning the listener's own failure first would hide that, so the skip is reported ahead of it, and the failure travels as the cause on both branches: with the stop's own refusal where the listener also stopped propagation, with the abort refusal where the failure alone ended the dispatch — a listener that failed while also producing a response would otherwise have that response served with access control never consulted, and the failure returned unlogged would reach no log at all behind a causeless refusal. */
             requiredErr := refuseSkippedRequiredListeners(
                 eventName,
@@ -532,7 +528,8 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
             return eventValue, err
         }
 
-        stoppedByListenerName = listenerName
+        /* the listener travels rather than its name: which one stopped propagation is read only by the refusal below, on the dispatches that stop, so resolving the name on every iteration paid the reflection for an answer almost nobody asks for */
+        stoppedByListener = entry.listener
         stoppedByListenerMaySkip = entry.maySkipRequiredListeners
     }
 
@@ -540,30 +537,48 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
         requiredErr := refuseSkippedRequiredListeners(
             eventName,
             listenerList[listenerIndex:],
-            stoppedByListenerName,
+            listenerNameOf(stoppedByListener),
             stoppedByListenerMaySkip,
         )
         if nil != requiredErr {
             return eventValue, requiredErr
         }
 
+        if true == debugEnabled {
+            logger.Debug(
+                "event dispatch propagation stopped",
+                loggingcontract.Context{
+                    "eventName": eventName,
+                },
+            )
+        }
+    }
+
+    if true == debugEnabled {
         logger.Debug(
-            "event dispatch propagation stopped",
+            "event dispatch finished",
             loggingcontract.Context{
-                "eventName": eventName,
+                "eventName":  eventName,
+                "durationMs": time.Since(dispatchStartedAt).Milliseconds(),
             },
         )
     }
 
-    logger.Debug(
-        "event dispatch finished",
-        loggingcontract.Context{
-            "eventName":  eventName,
-            "durationMs": time.Since(dispatchStartedAt).Milliseconds(),
-        },
-    )
-
     return eventValue, nil
+}
+
+/* listenerNameOf answers the qualified function name of a listener, and the dash for one the runtime cannot name — a method value, a closure the compiler inlined away. It is called where the name is USED rather than ahead of the branches that might use it: on the ordinary dispatch, where nothing fails and nothing stops and the journal sits above debug, the answer is needed nowhere and the reflect.Value plus runtime.FuncForPC behind it were pure waste, once per listener per dispatch on the hottest path the framework has. A nil listener answers the dash too, which is what an empty dispatch's stopper reads as. */
+func listenerNameOf(listener eventcontract.EventListener) string {
+    if nil == listener {
+        return "-"
+    }
+
+    function := runtime.FuncForPC(reflect.ValueOf(listener).Pointer())
+    if nil == function {
+        return "-"
+    }
+
+    return function.Name()
 }
 
 /* refuseSkippedRequiredListeners answers the error a stop owes when a listener marked required sits among the listeners it skipped. A listener that stops propagation before a required listener behind it has run would silently skip that listener — the security access-control listener, for instance — and the caller would proceed as if it had run; the dispatch fails closed instead, unless the stopping listener is explicitly allowed to skip required listeners. Both marks default off, so an unmarked dispatch behaves exactly as before. */
@@ -594,7 +609,6 @@ func (instance *EventDispatcher) callListenerSafely(
     eventName string,
     eventValue eventcontract.Event,
     listener eventcontract.EventListener,
-    listenerName string,
     priority int,
     listenerStartedAt time.Time,
     logger loggingcontract.Logger,
@@ -619,7 +633,7 @@ func (instance *EventDispatcher) callListenerSafely(
         baseContext := internal.NewEventListenerContext(
             eventName,
             eventType,
-            listenerName,
+            listenerNameOf(listener),
             listenerType,
             priority,
             durationMs,
@@ -666,7 +680,7 @@ func (instance *EventDispatcher) callListenerSafely(
     exceptionContext := internal.NewEventListenerContext(
         eventName,
         eventType,
-        listenerName,
+        listenerNameOf(listener),
         listenerType,
         priority,
         durationMs,
