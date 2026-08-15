@@ -2759,3 +2759,33 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
         t.Fatalf("the handler did not run for a canonical path")
     }
 }
+
+/* a multipart upload past the body limit surfaces as a handler's *MaxBytesError, which is not an HttpException and so was rendered 500 at error level while the urlencoded and json paths answered 413; the normalizer maps it onto a 413 HttpException so the three body paths agree, and leaves any other error untouched. */
+func TestNormalizeBodyLimitError_MapsMaxBytesErrorTo413(t *testing.T) {
+    maxBytesError := &nethttp.MaxBytesError{Limit: 1048576}
+
+    normalized := normalizeBodyLimitError(maxBytesError)
+
+    httpException := exception.AsHttpException(normalized)
+    if nil == httpException {
+        t.Fatalf("expected the max-bytes error to become an HttpException, got %T", normalized)
+    }
+    if nethttp.StatusRequestEntityTooLarge != httpException.StatusCode() {
+        t.Fatalf("expected status %d, got %d", nethttp.StatusRequestEntityTooLarge, httpException.StatusCode())
+    }
+    if false == errors.Is(normalized, maxBytesError) {
+        t.Fatalf("expected the original max-bytes error to stay in the cause chain")
+    }
+}
+
+func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
+    plainErr := errors.New("some handler failure")
+
+    if plainErr != normalizeBodyLimitError(plainErr) {
+        t.Fatalf("expected a non-body-limit error to be returned unchanged")
+    }
+
+    if nil != normalizeBodyLimitError(nil) {
+        t.Fatalf("expected nil to stay nil")
+    }
+}

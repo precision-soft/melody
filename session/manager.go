@@ -1,6 +1,8 @@
 package session
 
 import (
+    "crypto/sha256"
+    "encoding/hex"
     "errors"
     "sync"
     "time"
@@ -204,7 +206,7 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         return exception.NewError(
             "session id is invalid in save session",
             map[string]any{
-                "sessionId": sessionId,
+                "sessionRef": sessionIdLogReference(sessionId),
             },
             nil,
         )
@@ -221,7 +223,7 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         return exception.NewError(
             "session was deleted and cannot be saved again",
             map[string]any{
-                "sessionId": sessionId,
+                "sessionRef": sessionIdLogReference(sessionId),
             },
             ErrSessionDeleted,
         )
@@ -247,6 +249,13 @@ func (instance *Manager) DeleteSession(sessionId string) error {
     instance.buryTombstone(sessionId)
 
     return instance.storage.Delete(sessionId)
+}
+
+/* sessionIdLogReference answers a short one-way reference to a session id for an error context that may be logged: a truncated SHA-256, enough to correlate records without carrying the id itself, so a log reader cannot present it as a cookie. The http response path folds a live id the same way; this one covers the ids the manager itself names in refusals. */
+func sessionIdLogReference(sessionId string) string {
+    digest := sha256.Sum256([]byte(sessionId))
+
+    return hex.EncodeToString(digest[:])[:16]
 }
 
 /* sessionMutexOf answers the lock a session id belongs to. The mapping is a pure function of the id, which is the whole requirement: two calls naming the same session must land on the same lock, or the check and the write stop being one section. */

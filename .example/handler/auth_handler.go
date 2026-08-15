@@ -76,8 +76,14 @@ func LoginHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "session is not available"), nil
         }
 
-        sessionInstance.Set(security.SessionKeySecurityUserId, user.Id)
-        sessionInstance.Set(security.SessionKeySecurityRoles, user.Roles)
+        /* rotate the session id before writing the authenticated identity, the defence against session fixation: a pre-login id the client already held — one an attacker could have seeded and planted — must not survive into the authenticated session. RegenerateRequestSession republishes the rotated session on the request, so the identity is written to the id the response emits. */
+        rotatedSession, regenerateErr := melodyhttp.RegenerateRequestSession(request)
+        if nil != regenerateErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "session rotation failed", regenerateErr), nil
+        }
+
+        rotatedSession.Set(security.SessionKeySecurityUserId, user.Id)
+        rotatedSession.Set(security.SessionKeySecurityRoles, user.Roles)
 
         redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(route.ProductsListPageName, nil)
 

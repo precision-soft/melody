@@ -42,8 +42,34 @@ func normalizeAccessControlAttributes(attributes []string) []string {
     return normalizedAttributes
 }
 
+/* NewAccessControlRule builds a rule bounded to a path SEGMENT: pathPrefix matches the path itself and any descendant under a "/" boundary, never a path that merely begins with the same letters — "/admin" governs "/admin" and "/admin/panel" but not "/administrator". This is the rule a caller reaches for by default, so the plain name is the bounded one; a rule that must reach across segment boundaries is the explicit exception, NewAccessControlRawPrefixRule. An empty prefix is refused rather than made a catch-all, and PUBLIC_ACCESS is allowed here because a segment-bounded public rule cannot shadow a bounded denial the way a raw one can. */
 func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
-    /* a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that merely begins with the prefix and, being the longest match, shadows a correctly bounded rule that would have denied. A public path is declared through a segment prefix (AllowAnonymous), an exact rule, or a regex rule, none of which reach past their own boundary. */
+    normalizedPrefix := normalizePathPrefix(pathPrefix)
+
+    /* reject an empty prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so a rule declared for one section would silently govern every unmatched path. A genuinely global rule declares an explicit "/" prefix. */
+    if "" == normalizedPrefix {
+        exception.Panic(
+            exception.NewError("access control segment prefix may not be empty", nil, nil),
+        )
+    }
+
+    if "/" != normalizedPrefix && true == strings.HasSuffix(normalizedPrefix, "/") {
+        normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
+    }
+
+    normalizedAttributes := normalizeAccessControlAttributes(attributes)
+
+    return AccessControlRule{
+        pathPrefix:      normalizedPrefix,
+        attributes:      normalizedAttributes,
+        isExact:         false,
+        isRegex:         false,
+        isSegmentPrefix: true,
+    }
+}
+
+/* NewAccessControlRawPrefixRule builds a rule that matches across segment boundaries: pathPrefix matches every path that begins with it, so "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". It is the sharp tool, kept behind an explicit name because, being the longest match, a raw rule shadows a correctly bounded rule that would have denied — which is why PUBLIC_ACCESS is refused on it: a raw public rule opens every path that merely begins with the prefix. Reach for NewAccessControlRule unless a cross-segment reach is exactly what the rule means. */
+func NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string) AccessControlRule {
     for _, attribute := range attributes {
         if securitycontract.AttributePublicAccess == strings.TrimSpace(attribute) {
             exception.Panic(
@@ -125,29 +151,9 @@ func NewAccessControlRegexRule(pattern string, attributes ...string) AccessContr
     return rule
 }
 
+/* Deprecated: use NewAccessControlRule, which now builds the segment-prefix rule this constructor always built. Kept as an alias so existing callers continue to compile. */
 func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string) AccessControlRule {
-    normalizedPrefix := normalizePathPrefix(pathPrefix)
-
-    /* reject an empty segment prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so AllowAnonymous("") would silently open every unmatched path to anonymous access. A genuinely public service declares an explicit "/" prefix. */
-    if "" == normalizedPrefix {
-        exception.Panic(
-            exception.NewError("access control segment prefix may not be empty", nil, nil),
-        )
-    }
-
-    if "/" != normalizedPrefix && true == strings.HasSuffix(normalizedPrefix, "/") {
-        normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
-    }
-
-    normalizedAttributes := normalizeAccessControlAttributes(attributes)
-
-    return AccessControlRule{
-        pathPrefix:      normalizedPrefix,
-        attributes:      normalizedAttributes,
-        isExact:         false,
-        isRegex:         false,
-        isSegmentPrefix: true,
-    }
+    return NewAccessControlRule(pathPrefix, attributes...)
 }
 
 type AccessControlRule struct {
@@ -178,14 +184,14 @@ func NewAccessControl(rules ...AccessControlRule) *AccessControl {
         if true == rule.isSegmentPrefix {
             normalizedRules = append(
                 normalizedRules,
-                NewAccessControlRuleWithSegmentPrefix(rule.pathPrefix, rule.attributes...),
+                NewAccessControlRule(rule.pathPrefix, rule.attributes...),
             )
             continue
         }
 
         normalizedRules = append(
             normalizedRules,
-            NewAccessControlRule(rule.pathPrefix, rule.attributes...),
+            NewAccessControlRawPrefixRule(rule.pathPrefix, rule.attributes...),
         )
     }
 

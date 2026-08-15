@@ -22,7 +22,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed("example.health", "GET", "/health", handler.HealthHandler())
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
-    router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, handler.LoginHandler())
+    router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, instance.throttledWrite(handler.LoginHandler()))
     router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler())
 
     router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
@@ -52,7 +52,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.UsersApiDeleteName, "DELETE", route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()))
 }
 
-/* throttledWrite puts an endpoint that changes the nomenclature behind the shared per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage.
+/* throttledWrite puts an endpoint behind the shared per-address budget. The catalogue writes go behind it because it is the writes that a runaway script turns into damage; the login submit goes behind it too, because an unthrottled credential door is a password-guessing and username-timing surface a browsed read is not. The reads are left alone deliberately: a catalogue is meant to be browsed.
 
 Without redis there is no limiter and the handler is returned untouched, which is the same rule the rest of the example follows — an integration the environment did not give it is absent rather than broken. */
 func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {

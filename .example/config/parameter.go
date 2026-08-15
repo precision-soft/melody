@@ -32,6 +32,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter(ParameterDatabaseName, "%env(default::MYSQL_DATABASE)%")
     registrar.RegisterParameter(ParameterDatabaseUser, "%env(default::MYSQL_USER)%")
     registrar.RegisterParameter(ParameterDatabasePassword, "%env(default::MYSQL_PASSWORD)%")
+    registrar.RegisterParameter(ParameterDatabaseInsecure, "%env(default::MYSQL_INSECURE)%")
 
     registrar.RegisterParameter("app.journal_database.default_port", "5432")
     registrar.RegisterParameter(ParameterJournalDatabaseHost, "%env(default::PGSQL_HOST)%")

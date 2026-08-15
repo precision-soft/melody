@@ -184,14 +184,15 @@ func TestRegisterRequestListener_FallsThroughForAnOptionsRequestWithoutARequeste
     }
 }
 
-func TestRegisterRequestListener_LeavesAnAnsweredRequestAlone(t *testing.T) {
+/* a preflight from an allowed origin that a listener ahead of this one already answered — the rate limiter's 429 among them — is decorated with the cross-origin headers rather than left opaque: the earlier listener's status stands, but a browser can now read the refusal as a rate limit instead of a bare cors failure. */
+func TestRegisterRequestListener_DecoratesAnAlreadyAnsweredPreflight(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
     RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
 
     requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/api/item")))
 
-    alreadySetResponse := http.JsonErrorResponse(nethttp.StatusServiceUnavailable, "maintenance")
+    alreadySetResponse := http.JsonErrorResponse(nethttp.StatusTooManyRequests, "rate limited")
     requestEvent.SetResponse(alreadySetResponse)
 
     _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent)
@@ -200,7 +201,18 @@ func TestRegisterRequestListener_LeavesAnAnsweredRequestAlone(t *testing.T) {
     }
 
     if alreadySetResponse != requestEvent.Response() {
-        t.Fatalf("expected the already-set response to stay, got %#v", requestEvent.Response())
+        t.Fatalf("expected the earlier listener's response object to stay, got %#v", requestEvent.Response())
+    }
+
+    if nethttp.StatusTooManyRequests != requestEvent.Response().StatusCode() {
+        t.Fatalf("expected the earlier listener's 429 status to stand, got %d", requestEvent.Response().StatusCode())
+    }
+
+    if "" == requestEvent.Response().Headers().Get("Access-Control-Allow-Methods") {
+        t.Fatalf("expected the already-answered preflight to be decorated with the allow-methods header")
+    }
+    if "" == requestEvent.Response().Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the already-answered preflight to be decorated with the allow-origin header")
     }
 }
 

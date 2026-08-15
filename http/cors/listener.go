@@ -40,16 +40,23 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
                 return nil
             }
 
-            if nil != requestEvent.Response() {
-                return nil
-            }
-
             origin := service.RequestOrigin(requestEvent.Request())
             if "" == origin || false == service.OriginAllowed(origin) {
                 return nil
             }
 
             if false == service.IsPreflight(requestEvent.Request()) {
+                return nil
+            }
+
+            /* a listener ahead of this one already answered the preflight — the rate limiter at priority 200 answering a 429 among them. A browser reads a preflight refusal only if it carries the cross-origin headers, so decorate that refusal with them rather than leaving it opaque and letting the page report a bare network failure it cannot distinguish from a rate limit; the status the earlier listener chose is left untouched. */
+            if existingResponse := requestEvent.Response(); nil != existingResponse {
+                if nil == existingResponse.Headers() {
+                    existingResponse.SetHeaders(make(nethttp.Header))
+                }
+
+                service.ApplyPreflightHeaders(origin, existingResponse.Headers())
+
                 return nil
             }
 

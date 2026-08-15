@@ -98,9 +98,9 @@ Userland code must treat `token.IsAuthenticated()` as the canonical guard for ac
 `AccessControl.Match(path)` selects attributes based on the following priority:
 
 1. **Exact match** (`NewAccessControlExactRule`)
-2. **Prefix match** (`NewAccessControlRule` / `NewAccessControlRuleWithSegmentPrefix`) with **longest prefix wins**
+2. **Prefix match** (`NewAccessControlRule`, the segment-bounded rule, or `NewAccessControlRawPrefixRule`, the cross-segment one) with **longest prefix wins**. `NewAccessControlRule("/admin", …)` governs `/admin` and its descendants under a `/` boundary — `/admin`, `/admin/panel` — but not `/administrator`, which only shares the prefix text; `NewAccessControlRawPrefixRule` reaches across the boundary and governs `/administrator` too, which is why `PUBLIC_ACCESS` is refused on it. Reach for `NewAccessControlRule` unless the cross-segment reach is exactly what the rule means.
 3. **Regex match** (`NewAccessControlRegexRule`) with **first match wins** (declaration order). The pattern is **unanchored** — it matches as a substring of the canonicalized path, so `"/public"` also matches `/admin/public-notes`. Anchor a rule that names one section: `"^/public(/|$)"`. This is the opposite of a route requirement, which melody anchors for you.
-4. **Fallback** rule with an empty prefix (if present)
+4. **Fallback** rule with an empty prefix, which only `NewAccessControlRawPrefixRule("")` can declare — `NewAccessControlRule` refuses an empty prefix
 
 This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).
 
@@ -328,10 +328,11 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 ### Constructors
 
 - [`NewAccessControl(rules...)`](../../security/access_control.go)
-- [`NewAccessControlRule(pathPrefix string, attributes ...string)`](../../security/access_control.go)
+- [`NewAccessControlRule(pathPrefix string, attributes ...string)`](../../security/access_control.go) — segment-bounded prefix rule (the default; refuses an empty prefix, permits `PUBLIC_ACCESS`)
+- [`NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string)`](../../security/access_control.go) — cross-segment prefix rule (refuses `PUBLIC_ACCESS`)
 - [`NewAccessControlExactRule(path string, attributes ...string)`](../../security/access_control.go)
 - [`NewAccessControlRegexRule(pattern string, attributes ...string)`](../../security/access_control.go)
-- [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go)
+- [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go) — deprecated alias of `NewAccessControlRule`
 - [`NewRoleHierarchy(inheritedRolesByRole map[string][]string)`](../../security/role_hierarchy.go)
 - [`NewAnonymousToken()`](../../security/anonymous_token.go)
 - [`NewAuthenticatedToken(userIdentifier string, roles []string)`](../../security/authenticated_token.go)

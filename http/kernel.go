@@ -807,6 +807,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         response, finalHandlerErr := finalHandler(runtimeInstance, writer, melodyRequest)
 
+        /* a body-limit overflow a handler surfaced is answered 413 like every other oversized body, not 500. A handler that calls ParseMultipartForm on an upload past MaxRequestBodyBytes receives a *MaxBytesError — multipart is the one body path the kernel does not pre-read, so its refusal arrives here rather than at the pre-handler urlencoded/BindJson mapping. Left raw it is not an HttpException and renders 500 at error level; wrapped, the exception listener reads its 413 and logHandlerError files it at warning, symmetric with the other two paths. */
+        finalHandlerErr = normalizeBodyLimitError(finalHandlerErr)
+
         /* the response the chain produced is published to the recovery defer here rather than after the error branch below: it may own an open file (FileResponse/ServeReader through the static middleware) and the defer closes only what it can see through finalResponse. Everything between this line and that assignment can panic — the exception dispatch re-raises a listener panic, and PrefersHtml reads the request — and the defer would then find the nil it closed over and leak the descriptor for the life of the process. */
         finalResponse = response
 
@@ -942,6 +945,20 @@ func (instance *Kernel) requestIdLogger(
 A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure.
 
 The reported error is the value the caller must put on the exception event: a handler's plain errors.New carries no AlreadyLogged implementer for the mark to live on, so it comes back wrapped in a marked carrier keeping the original as its cause. The caller's own error is what still reaches the application's error handler. */
+/* normalizeBodyLimitError maps a *MaxBytesError a handler surfaced onto a 413 HttpException so it renders as "payload too large" at warning, the way the pre-handler urlencoded and BindJson paths already answer an oversized body. Any other error is returned untouched. */
+func normalizeBodyLimitError(handlerErr error) error {
+    if nil == handlerErr {
+        return handlerErr
+    }
+
+    var maxBytesError *nethttp.MaxBytesError
+    if true == errors.As(handlerErr, &maxBytesError) {
+        return exception.NewHttpExceptionWithCause(nethttp.StatusRequestEntityTooLarge, "payload too large", handlerErr)
+    }
+
+    return handlerErr
+}
+
 func logHandlerError(requestLogger loggingcontract.Logger, message string, handlerErr error, httpRequest *nethttp.Request) error {
     if true == exception.IsAlreadyLogged(handlerErr) {
         return handlerErr

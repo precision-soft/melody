@@ -1602,7 +1602,7 @@ func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinat
         &stubSessionManager{
             saveErr: exception.NewError(
                 "session was deleted and cannot be saved again",
-                map[string]any{"sessionId": "session-123"},
+                map[string]any{"sessionRef": sessionIdLogReference("session-123")},
                 session.ErrSessionDeleted,
             ),
         },
@@ -1623,14 +1623,19 @@ func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinat
         t.Fatalf("unexpected message: %q", record.message)
     }
 
-    for key, expected := range map[string]any{"sessionId": "session-123", "method": nethttp.MethodPost, "path": "/account/settings"} {
+    /* the record names the session through a one-way reference, never the raw id */
+    if nil != record.context["sessionId"] {
+        t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
+    }
+
+    for key, expected := range map[string]any{"sessionRef": sessionIdLogReference("session-123"), "method": nethttp.MethodPost, "path": "/account/settings"} {
         if expected != record.context[key] {
             t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
         }
     }
 }
 
-/* a storage outage keeps the error level it deserves, and it too names the session and the route: only the deleted-session record ever carried a session id, and that by accident, through its cause's own context. */
+/* a storage outage keeps the error level it deserves, and it too names the session — through a one-way reference, never the raw id — and the route. */
 func TestWriteResponse_ASaveOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1655,7 +1660,11 @@ func TestWriteResponse_ASaveOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *t
         t.Fatalf("unexpected message: %q", record.message)
     }
 
-    for key, expected := range map[string]any{"sessionId": "session-456", "method": nethttp.MethodPost, "path": "/account/settings"} {
+    if nil != record.context["sessionId"] {
+        t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
+    }
+
+    for key, expected := range map[string]any{"sessionRef": sessionIdLogReference("session-456"), "method": nethttp.MethodPost, "path": "/account/settings"} {
         if expected != record.context[key] {
             t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
         }
@@ -1687,7 +1696,11 @@ func TestWriteResponse_ADeleteOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t 
         t.Fatalf("unexpected message: %q", record.message)
     }
 
-    for key, expected := range map[string]any{"sessionId": "session-789", "method": nethttp.MethodPost, "path": "/account/settings"} {
+    if nil != record.context["sessionId"] {
+        t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
+    }
+
+    for key, expected := range map[string]any{"sessionRef": sessionIdLogReference("session-789"), "method": nethttp.MethodPost, "path": "/account/settings"} {
         if expected != record.context[key] {
             t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
         }
@@ -1741,5 +1754,38 @@ func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
         if false == requestPathIsCanonical(target) {
             t.Fatalf("expected non-path target %q to be left to the router", target)
         }
+    }
+}
+
+/* the session cookie names one client, so a response carrying it must not be stored by a shared cache under its url and replayed to another; the guard drops a public token and adds private, keeps an already-restrictive directive, and marks an undirected response private. */
+func TestMarkResponsePrivateForSessionCookie(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        existing string
+        expected string
+    }{
+        {"public becomes private keeping max-age", "public, max-age=3600", "max-age=3600, private"},
+        {"absent becomes private", "", "private"},
+        {"already private is left", "private, max-age=60", "private, max-age=60"},
+        {"no-store is left, public dropped", "public, no-store", "no-store"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            response := NewResponse(nethttp.StatusOK, nil)
+            if "" != testCase.existing {
+                response.Headers().Set("Cache-Control", testCase.existing)
+            }
+
+            markResponsePrivateForSessionCookie(response)
+
+            got := response.Headers().Get("Cache-Control")
+            if testCase.expected != got {
+                t.Fatalf("expected Cache-Control %q, got %q", testCase.expected, got)
+            }
+
+            lower := strings.ToLower(got)
+            if true == strings.Contains(lower, "public") {
+                t.Fatalf("a session-cookie response must never stay publicly cacheable, got %q", got)
+            }
+        })
     }
 }

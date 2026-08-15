@@ -1,6 +1,8 @@
 package http
 
 import (
+    "crypto/sha256"
+    "encoding/hex"
     "errors"
     "fmt"
     "io"
@@ -393,6 +395,8 @@ func writeResponse(
                     }
 
                     SetCookie(response, cookie)
+                    /* the id the cookie now carries names this one client, so the response must not be stored by a shared cache and replayed to another: a listener that modified the session on a response some layer marked Cache-Control: public — a static asset among them — would otherwise leak this session id to the next client the cache serves */
+                    markResponsePrivateForSessionCookie(response)
                 }
             }
         }
@@ -585,7 +589,8 @@ func logSessionPersistenceEvent(
     recordContext := exceptioncontract.Context{}
 
     if "" != sessionId {
-        recordContext["sessionId"] = sessionId
+        /* the id is a live bearer credential: on a failed delete the store still holds the session, and on a failed save the id is one the client presented — logging it verbatim hands anyone with log-read access a cookie value they can present as that user. A one-way reference correlates the records of one session across a request without carrying the credential itself. */
+        recordContext["sessionRef"] = sessionIdLogReference(sessionId)
     }
 
     if nil != request && nil != request.HttpRequest() {
@@ -600,6 +605,62 @@ func logSessionPersistenceEvent(
     }
 
     logger.Error(message, exception.LogContext(err, recordContext))
+}
+
+/* markResponsePrivateForSessionCookie keeps a response that carries the session cookie out of a shared cache. The session cookie names one client, so a response stored under its URL alone by a shared cache and replayed to another client would hand that client the first one's session id — the leak a static or handler response marked Cache-Control: public invites the moment a listener or middleware modifies the session on it. The public token is dropped and private added, so a shared cache does not store it while a private browser cache still may; an already-private or no-store response is left as it is. */
+func markResponsePrivateForSessionCookie(response httpcontract.Response) {
+    if true == internal.IsNilInterface(response) {
+        return
+    }
+
+    headers := response.Headers()
+    if nil == headers {
+        return
+    }
+
+    existing := headers.Get("Cache-Control")
+    if "" == existing {
+        headers.Set("Cache-Control", "private")
+
+        return
+    }
+
+    rebuilt := make([]string, 0)
+    hasPrivate := false
+    hasNoStore := false
+
+    for _, token := range strings.Split(existing, ",") {
+        trimmed := strings.TrimSpace(token)
+        if "" == trimmed {
+            continue
+        }
+
+        lower := strings.ToLower(trimmed)
+        if "public" == lower {
+            continue
+        }
+        if "private" == lower {
+            hasPrivate = true
+        }
+        if "no-store" == lower {
+            hasNoStore = true
+        }
+
+        rebuilt = append(rebuilt, trimmed)
+    }
+
+    if false == hasPrivate && false == hasNoStore {
+        rebuilt = append(rebuilt, "private")
+    }
+
+    headers.Set("Cache-Control", strings.Join(rebuilt, ", "))
+}
+
+/* sessionIdLogReference answers a short one-way reference to a session id for the log: a truncated SHA-256, enough to correlate the records of one session within a request but not to reconstruct the id, so a log reader cannot present it as a cookie. */
+func sessionIdLogReference(sessionId string) string {
+    digest := sha256.Sum256([]byte(sessionId))
+
+    return hex.EncodeToString(digest[:])[:16]
 }
 
 func closeDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {

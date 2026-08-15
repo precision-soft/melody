@@ -46,15 +46,15 @@ func databaseWiringFromHosts(catalogHost string, journalHost string) databaseWir
 }
 
 /*
-journalDialIsInsecure reads the transport switch. The pgsql provider
-negotiates a verified TLS handshake by default; the development compose
-postgres speaks plain TCP, so the shipped .env arms the insecure dial
-explicitly — the decision is visible in configuration rather than buried in
-the wiring. The spelling is exact: any value but "true" keeps the verified
+dialIsInsecure reads a transport switch. Both providers negotiate a verified
+TLS handshake by default; the development compose mysql and postgres both
+speak plain TCP, so the shipped .env arms the insecure dial explicitly for
+each — the decision is visible in configuration rather than buried in the
+wiring. The spelling is exact: any value but "true" keeps the verified
 handshake, because a credential-bearing dial downgrades only on an
 unambiguous instruction.
 */
-func journalDialIsInsecure(insecureValue string) bool {
+func dialIsInsecure(insecureValue string) bool {
     return "true" == insecureValue
 }
 
@@ -71,12 +71,18 @@ func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel
     definitionList := make([]melodybunorm.ProviderDefinition, 0, 2)
 
     if true == wiring.catalog {
+        catalogOptionList := []melodymysql.ProviderOption{}
+        if true == dialIsInsecure(parameterValue(kernelInstance, ParameterDatabaseInsecure)) {
+            catalogOptionList = append(catalogOptionList, melodymysql.WithInsecure(true))
+        }
+
         provider := melodymysql.NewProvider(
             ParameterDatabaseHost,
             ParameterDatabasePort,
             ParameterDatabaseName,
             ParameterDatabaseUser,
             ParameterDatabasePassword,
+            catalogOptionList...,
         ).
             WithPoolConfig(melodymysql.NewPoolConfig(10, 2, 5*time.Minute, time.Minute)).
             WithRetryConfig(melodymysql.NewRetryConfig(10, time.Second, 5*time.Second, 2.0))
@@ -90,7 +96,7 @@ func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel
 
     if true == wiring.journal {
         journalOptionList := []melodypgsql.ProviderOption{}
-        if true == journalDialIsInsecure(parameterValue(kernelInstance, ParameterJournalDatabaseInsecure)) {
+        if true == dialIsInsecure(parameterValue(kernelInstance, ParameterJournalDatabaseInsecure)) {
             journalOptionList = append(journalOptionList, melodypgsql.WithInsecure(true))
         }
 

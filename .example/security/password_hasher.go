@@ -33,3 +33,11 @@ func MustHashPassword(plaintextPassword string) string {
 func PasswordMatches(passwordHash string, plaintextPassword string) bool {
     return nil == bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(plaintextPassword))
 }
+
+/* dummyPasswordHash is one bcrypt hash at the default cost, computed once at load. It is the material DummyPasswordMatch compares against so a login for a username that does not exist spends the same bcrypt time as one whose password is merely wrong. */
+var dummyPasswordHash = MustHashPassword("melody-example-absent-user-timing-equalizer")
+
+/* DummyPasswordMatch runs a full bcrypt comparison against a fixed hash and always reports false. A login door that could not find the user calls it so the request pays the same comparison cost a found user's wrong password pays: without it, an absent username returns before any bcrypt work and its faster response is an existence oracle an attacker times to enumerate usernames. */
+func DummyPasswordMatch(plaintextPassword string) bool {
+    return PasswordMatches(dummyPasswordHash, plaintextPassword)
+}

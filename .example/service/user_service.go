@@ -271,6 +271,9 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
         return nil, false, findErr
     }
     if false == found {
+        /* spend a bcrypt comparison on an absent username too: the found path below runs one, and returning here without it would answer an unknown username faster than a wrong password, an existence oracle an attacker times to enumerate usernames */
+        security.DummyPasswordMatch(password)
+
         return nil, false, nil
     }
 

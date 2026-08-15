@@ -2,6 +2,7 @@ package mysql
 
 import (
     "context"
+    "crypto/tls"
     "database/sql"
     "errors"
     "fmt"
@@ -38,6 +39,8 @@ func NewProvider(
         timeoutConfig:         nil,
         retryConfig:           nil,
         postBuildHook:         nil,
+        insecure:              false,
+        tlsConfig:             nil,
     }
     for _, providerOption := range providerOptions {
         providerOption(provider)
@@ -66,6 +69,8 @@ func NewProviderWithConfig(
         timeoutConfig:         timeoutConfig,
         retryConfig:           retryConfig,
         postBuildHook:         nil,
+        insecure:              false,
+        tlsConfig:             nil,
     }
     for _, providerOption := range providerOptions {
         providerOption(provider)
@@ -84,6 +89,8 @@ type Provider struct {
     timeoutConfig *TimeoutConfig
     retryConfig   *RetryConfig
     postBuildHook PostBuildHook
+    insecure      bool
+    tlsConfig     *tls.Config
 
     /* the migration derivation means its zeroes: they lift the deadlines and the recycling on purpose, which is the one intent the resolution below must not read as an unset field */
     tunedForMigration bool
@@ -222,6 +229,8 @@ func (instance *Provider) migrationProvider() *Provider {
         timeoutConfig:         migrationTimeoutConfig(instance.timeoutConfig),
         retryConfig:           instance.retryConfig,
         postBuildHook:         instance.postBuildHook,
+        insecure:              instance.insecure,
+        tlsConfig:             instance.tlsConfig,
         tunedForMigration:     true,
     }
 }
@@ -360,6 +369,22 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
     }
 }
 
+/* connectionTlsConfig answers the TLS configuration the connector is built with, or nil for a plaintext connection. WithTlsConfig wins outright; WithInsecure means nil, the one plaintext path; the default is a VERIFYING config rather than the driver's convenience spellings — `TLSConfig = "skip-verify"` negotiates TLS but never checks the server certificate, and AllowFallbackToPlaintext would silently drop to an unencrypted session against a server that speaks no TLS, the very downgrade a secure default exists to refuse. The default is the system roots with the configured host as the name to verify against, so a server that speaks no TLS fails the dial and the operator arms WithInsecure deliberately rather than getting plaintext by surprise. */
+func (instance *Provider) connectionTlsConfig(host string) *tls.Config {
+    if nil != instance.tlsConfig {
+        return instance.tlsConfig
+    }
+
+    if true == instance.insecure {
+        return nil
+    }
+
+    return &tls.Config{
+        ServerName: host,
+        MinVersion: tls.VersionTLS12,
+    }
+}
+
 func (instance *Provider) open(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
     /* an already-cancelled context is refused before the attempt: the dialect handshake bun performs at construction queries the server outside any caller context, bounded by the connect timeout alone, so without this refusal a shutdown-cancelled lazy open still paid one full dial against a database that no longer matters. */
     if ctxErr := ctx.Err(); nil != ctxErr {
@@ -406,6 +431,9 @@ func (instance *Provider) open(ctx context.Context, resolver containercontract.R
     driverConfig.Timeout = timeoutConfig.ConnectTimeout
     driverConfig.ReadTimeout = timeoutConfig.ReadTimeout
     driverConfig.WriteTimeout = timeoutConfig.WriteTimeout
+
+    /* a nil result leaves the connection plaintext, which only WithInsecure produces; the default and WithTlsConfig both set a config, so the driver never falls back to an unencrypted session by omission */
+    driverConfig.TLS = instance.connectionTlsConfig(host)
 
     if nil != instance.postBuildHook {
         hookContext := ctx

@@ -37,9 +37,25 @@ Notes
 - Connection errors are returned as Melody exceptions with a safe context.
 - This module does not register services by itself; service registration is left to the consuming application.
 
+## Transport security
+
+The provider negotiates a **verified TLS handshake by default**: it builds a `tls.Config` from the system roots, verifies the server certificate against the configured host, and requires TLS 1.2 or higher. A server that speaks no TLS fails the dial rather than falling back to plaintext, and the driver's `skip-verify` spelling — TLS negotiated but the certificate never checked — is not used, because it is trivially machine-in-the-middled.
+
+Two options shape it:
+
+- [`mysql.WithInsecure(true)`](./provider_option.go) disables TLS entirely, leaving a plaintext connection. It is the deliberate opt-out for a database reached over a trusted network or one that speaks no TLS — the same option, spelled the same way, as the pgsql provider.
+- [`mysql.WithTlsConfig`](./provider_option.go) hands the connector an explicit `*tls.Config` — a pinned server certificate, a client certificate — taking precedence over both the default and `WithInsecure`.
+
+```go
+provider := mysql.NewProvider(
+    "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD",
+    mysql.WithInsecure(true), // plaintext, for a trusted network or a server without TLS
+)
+```
+
 ## Advanced connector customization
 
-If you need driver options that are not exposed by [`mysql.TimeoutConfig`](./timeout_config.go) or other typed configs, use a post-build hook.
+If you need driver options that are not exposed by [`mysql.TimeoutConfig`](./timeout_config.go), the TLS options above, or other typed configs, use a post-build hook.
 
 Provider constructors accept optional provider options:
 
@@ -62,7 +78,7 @@ provider := mysql.NewProvider(
     mysql.WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, driverConfig *driver.Config) error {
         _ = ctx
         _ = resolver
-        driverConfig.TLSConfig = "custom"
+        driverConfig.Collation = "utf8mb4_unicode_ci"
         return nil
     }),
 )

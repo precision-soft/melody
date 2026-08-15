@@ -18,6 +18,22 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Security: `NewAccessControlRule` now builds a segment-bounded rule
+
+**What changed.** The plain constructor `NewAccessControlRule` built a raw prefix rule that matched across segment boundaries — `NewAccessControlRule("/admin", …)` governed `/administrator` and `/admin-tools` as readily as `/admin/panel`, and being the longest match it shadowed a correctly bounded rule that would have denied. The plain name now builds the segment-bounded rule: `/admin` governs `/admin` and its descendants under a `/` boundary, never a path that merely shares the prefix text. The cross-segment reach moves to the explicit `NewAccessControlRawPrefixRule`; the previous long-named safe constructor `NewAccessControlRuleWithSegmentPrefix` stays as a deprecated alias of `NewAccessControlRule`. The signature of `NewAccessControlRule` is unchanged, so this is a behavioural change, not a compile break.
+
+**Symptom.** A rule declared with `NewAccessControlRule` matches fewer paths than before: a request whose path only shares the prefix text (`/administrator` under a `/admin` rule) is no longer governed by that rule. Where the rule protected such a path and no other rule covers it, the request is now decided by whatever rule does match — a catch-all, or none — which for a protect rule can mean the path is reached under a weaker decision. An empty prefix, previously a catch-all, now refuses at construction.
+
+**Remedy.** A rule that genuinely needs the cross-segment reach — one deliberately governing every path beginning with the text — moves to `NewAccessControlRawPrefixRule` and keeps its old behaviour exactly. A rule that meant a path segment (the common case) needs no change beyond the stricter, intended matching. An empty-prefix catch-all becomes an explicit `"/"` prefix or `NewAccessControlRawPrefixRule("")`. Audit every `NewAccessControlRule` call whose prefix is a bare mount an attacker could extend (`/admin`, `/internal`): under the old raw rule these governed sibling paths by accident, and the bounded rule is what most such rules always meant.
+
+### Bunorm mysql: the provider negotiates verified TLS by default
+
+**What changed.** The mysql provider set no TLS on its connector, so it connected in plaintext and offered no option to enable TLS. It now builds a verifying `tls.Config` by default — the system roots, the configured host as the name to verify against, `MinVersion` TLS 1.2 — the same posture its pgsql sibling already carried, and refuses the driver spellings that would downgrade silently.
+
+**Symptom.** A mysql server that speaks no TLS fails the dial where it previously connected in plaintext. The example's development mysql is such a server.
+
+**Remedy.** A database reached over a trusted network, or one that speaks no TLS, arms `mysql.WithInsecure(true)` on the provider — the deliberate opt-out spelled the same way as pgsql's. A database with a certificate needs no change; one needing a pinned or client certificate passes `mysql.WithTlsConfig`. The example arms the opt-out through a new `MYSQL_INSECURE` switch in its `.env`, mirroring `PGSQL_INSECURE`.
+
 ### HTTP: a request path that folds to a different spelling is refused with 400
 
 **What changed.** The kernel now refuses, with `400`, a request whose path is not canonical — one carrying a `..` or `.` segment, or an empty `//` segment — before it is routed or authorized. A trailing slash is not a fold and still routes as before (`/admin/` reaches the `/admin` route). The router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule: `GET /admin/x/../../login` reached a catch-all `/admin` handler while `/login`'s public rule granted it. The refusal closes that by keeping the router, the firewall matchers and the access control reading one spelling.

@@ -2,6 +2,7 @@ package mysql
 
 import (
     "context"
+    "crypto/tls"
     "errors"
     "fmt"
     "math"
@@ -177,13 +178,14 @@ func newStubResolver(host string, port string, database string, user string, pas
 }
 
 func newTestProvider(providerOptions ...ProviderOption) *Provider {
+    /* the development mysql these behavioural tests dial speaks plain TCP, so the helper arms the insecure opt-out the way the example's wiring does; the verifying default is proven on its own in TestConnectionTlsConfig, which builds its providers directly */
     return NewProvider(
         "database.host",
         "database.port",
         "database.name",
         "database.user",
         "database.password",
-        providerOptions...,
+        append([]ProviderOption{WithInsecure(true)}, providerOptions...)...,
     )
 }
 
@@ -1118,5 +1120,34 @@ func TestOpenWithRetry_TheRetryWarningCarriesTheDiagnosticShapeTheTerminalRecord
 
     if _, exists := retryContext["retryIn"]; false == exists {
         t.Fatalf("expected the retry warning to keep the delay it announces, got %v", retryContext)
+    }
+}
+
+/* the provider negotiates a verifying TLS session by default, disables TLS only on WithInsecure, and hands a caller's explicit config through WithTlsConfig — the connection is never plaintext by omission. */
+func TestConnectionTlsConfig(t *testing.T) {
+    defaultProvider := NewProvider("H", "P", "D", "U", "W")
+    tlsConfig := defaultProvider.connectionTlsConfig("db.example.com")
+    if nil == tlsConfig {
+        t.Fatalf("expected a verifying TLS config by default, got nil (plaintext)")
+    }
+    if "db.example.com" != tlsConfig.ServerName {
+        t.Fatalf("expected the host as the verified server name, got %q", tlsConfig.ServerName)
+    }
+    if tls.VersionTLS12 != tlsConfig.MinVersion {
+        t.Fatalf("expected a TLS 1.2 floor, got %d", tlsConfig.MinVersion)
+    }
+    if true == tlsConfig.InsecureSkipVerify {
+        t.Fatalf("the default config must verify the server certificate")
+    }
+
+    insecureProvider := NewProvider("H", "P", "D", "U", "W", WithInsecure(true))
+    if nil != insecureProvider.connectionTlsConfig("db.example.com") {
+        t.Fatalf("expected WithInsecure to disable TLS entirely (nil), got a config")
+    }
+
+    explicitConfig := &tls.Config{ServerName: "pinned.example.com"}
+    explicitProvider := NewProvider("H", "P", "D", "U", "W", WithTlsConfig(explicitConfig))
+    if explicitConfig != explicitProvider.connectionTlsConfig("db.example.com") {
+        t.Fatalf("expected WithTlsConfig to win outright")
     }
 }

@@ -376,3 +376,41 @@ func TestRestrictive_PreflightAdvertisesTheNarrowMethodList(t *testing.T) {
         t.Fatalf("unexpected advertised max age: %q", response.Headers().Get("Access-Control-Max-Age"))
     }
 }
+
+/* a streaming handler commits its headers straight to the writer and returns a response the write path discards, so the cross-origin headers applied to that response never reach the connection. The middleware places them on the writer before the handler runs, where the handler's own commit carries them. */
+func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) {
+    middleware := DefaultMiddleware()
+    recorder := httptest.NewRecorder()
+
+    originOnWriterWhenHandlerRan := ""
+    varyOnWriterWhenHandlerRan := ""
+
+    next := func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        originOnWriterWhenHandlerRan = writer.Header().Get("Access-Control-Allow-Origin")
+        varyOnWriterWhenHandlerRan = writer.Header().Get("Vary")
+
+        /* a streamed response returns nothing, having committed through the writer */
+        return nil, nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
+    request.Header.Set("Origin", "https://example.com")
+
+    _, err := handler(nil, recorder, testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "" == originOnWriterWhenHandlerRan {
+        t.Fatalf("expected the allow-origin header on the writer before the streaming handler committed, got none")
+    }
+    if "Origin" != varyOnWriterWhenHandlerRan {
+        t.Fatalf("expected Vary: Origin on the writer before the handler ran, got %q", varyOnWriterWhenHandlerRan)
+    }
+}

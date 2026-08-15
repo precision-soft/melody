@@ -39,7 +39,7 @@ func TestAccessControl_Match_LongestPrefixWins(t *testing.T) {
 
 func TestAccessControl_Match_FallbackRuleWhenPrefixEmpty(t *testing.T) {
     control := NewAccessControl(
-        NewAccessControlRule("", "ROLE_ANY"),
+        NewAccessControlRawPrefixRule("", "ROLE_ANY"),
         NewAccessControlRule("/admin", "ROLE_ADMIN"),
     )
 
@@ -194,8 +194,8 @@ func TestAccessControlMatch_RegexFirstMatchWinsInDeclarationOrder(t *testing.T) 
 
 func TestAccessControlMatch_FallbackEmptyPrefixIsUsedLast(t *testing.T) {
     accessControl := NewAccessControl(
-        NewAccessControlRuleWithSegmentPrefix("/login", "PUBLIC_ACCESS"),
-        NewAccessControlRule("", "ROLE_USER"),
+        NewAccessControlRule("/login", "PUBLIC_ACCESS"),
+        NewAccessControlRawPrefixRule("", "ROLE_USER"),
     )
 
     attributes, ok := accessControl.Match("/login")
@@ -310,10 +310,10 @@ func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *t
     _ = NewAccessControlRule("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
 }
 
-/* a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that begins with the prefix and shadows a bounded rule that would have denied; the constructor refuses it and a public path is declared through a segment prefix, exact, or regex rule instead */
-func TestNewAccessControlRule_PublicAccessOnRawPrefixIsRefused(t *testing.T) {
+/* a raw prefix rule matches across segment boundaries, so PUBLIC_ACCESS on it opens every path that begins with the prefix and shadows a bounded rule that would have denied; the constructor refuses it and a public path is declared through the default segment-prefix rule, an exact, or a regex rule instead */
+func TestNewAccessControlRawPrefixRule_PublicAccessIsRefused(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        NewAccessControlRule("/health", "PUBLIC_ACCESS")
+        NewAccessControlRawPrefixRule("/health", "PUBLIC_ACCESS")
     }, "access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule")
 }
 
@@ -370,7 +370,7 @@ func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testin
 that only matches the folded one is a rule the request walks past — and no rule matched means granted. */
 func TestAccessControl_MatchFoldsTheSpellingsACatchAllRouteAccepts(t *testing.T) {
     control := NewAccessControl(
-        NewAccessControlRule("/admin", "ROLE_ADMIN"),
+        NewAccessControlRawPrefixRule("/admin", "ROLE_ADMIN"),
     )
 
     for _, requestPath := range []string{
@@ -414,5 +414,61 @@ func TestAccessControl_MatchStillRefusesAPathThatOnlySharesThePrefixText(t *test
 
     if true == matched {
         t.Fatalf("expected the segment prefix rule not to match a longer segment")
+    }
+}
+
+/* the plain constructor is the bounded one: NewAccessControlRule("/admin") governs "/admin" and its descendants but not "/administrator", the property the raw constructor deliberately does not have. A rule meant to protect "/admin" that instead reached "/administrator" is the shadow the default name exists to avoid. */
+func TestNewAccessControlRule_GovernsItsSegmentAndNoLongerSegmentText(t *testing.T) {
+    control := NewAccessControl(
+        NewAccessControlRule("/admin", "ROLE_ADMIN"),
+    )
+
+    for _, matchingPath := range []string{"/admin", "/admin/", "/admin/panel"} {
+        if _, matched := control.Match(matchingPath); false == matched {
+            t.Fatalf("expected the segment rule to govern %q", matchingPath)
+        }
+    }
+
+    for _, nonMatchingPath := range []string{"/administrator", "/admin-tools", "/adminpanel"} {
+        if _, matched := control.Match(nonMatchingPath); true == matched {
+            t.Fatalf("expected the segment rule NOT to govern %q, which only shares the prefix text", nonMatchingPath)
+        }
+    }
+}
+
+/* the raw constructor is the sharp tool: it reaches across the segment boundary the plain rule stops at, so "/admin" governs "/administrator" too — the exact behaviour that must be asked for by its explicit name rather than delivered by default. */
+func TestNewAccessControlRawPrefixRule_ReachesAcrossTheSegmentBoundary(t *testing.T) {
+    control := NewAccessControl(
+        NewAccessControlRawPrefixRule("/admin", "ROLE_ADMIN"),
+    )
+
+    for _, matchingPath := range []string{"/admin", "/administrator", "/admin-tools", "/admin/panel"} {
+        if _, matched := control.Match(matchingPath); false == matched {
+            t.Fatalf("expected the raw prefix rule to govern %q", matchingPath)
+        }
+    }
+}
+
+/* the default name refuses an empty prefix, so a rule declared for one section cannot silently become a catch-all governing every unmatched path; a genuinely global rule declares an explicit "/" or reaches for the raw constructor. */
+func TestNewAccessControlRule_EmptyPrefixRefused(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewAccessControlRule("", "ROLE_ADMIN")
+    }, "access control segment prefix may not be empty")
+}
+
+/* PUBLIC_ACCESS is allowed on the default bounded rule, because a segment-bounded public rule cannot shadow a bounded denial the way a raw one can — the reason the raw constructor refuses it and this one does not. */
+func TestNewAccessControlRule_LonePublicAccessAllowed(t *testing.T) {
+    defer func() {
+        if nil != recover() {
+            t.Fatalf("a lone PUBLIC_ACCESS attribute must not panic on the default bounded rule")
+        }
+    }()
+
+    rule := NewAccessControlRule("/health", "PUBLIC_ACCESS")
+    if false == rule.isSegmentPrefix {
+        t.Fatalf("expected the default constructor to build a segment-prefix rule")
+    }
+    if 1 != len(rule.attributes) || "PUBLIC_ACCESS" != rule.attributes[0] {
+        t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.attributes)
     }
 }

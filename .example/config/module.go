@@ -15,6 +15,7 @@ const (
     ParameterDatabaseName     = "app.database.name"
     ParameterDatabaseUser     = "app.database.user"
     ParameterDatabasePassword = "app.database.password"
+    ParameterDatabaseInsecure = "app.database.insecure"
 
     ParameterJournalDatabaseHost     = "app.journal_database.host"
     ParameterJournalDatabasePort     = "app.journal_database.port"
