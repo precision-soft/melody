@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- the readme's retry fill-in rule states the multiplier's real floor: it claimed every listed value fills in when the supplied field is zero or non-positive, while for `BackoffMultiplier` the code replaces any supplied value below `1`, `NaN` included, with the default `2.0`, and keeps exactly `1` as a valid constant backoff — so a configured `0.5` was documented as honoured and was not
 - bun's diagnostics are routed into the journal on the retry-less open path too: the `bunorm.RouteDiagnostics` call sat only in the retry loop, so the default provider — one built without a `RetryConfig` — opened its connection and left bun's declaration mistakes as unstructured lines on standard error, exactly the state the routing was added to end. The call now lives in the one open funnel every door shares — `Open`, `OpenContext`, the retry loop and the migration door alike
 
 ### Changed

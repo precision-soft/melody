@@ -95,11 +95,11 @@ func (instance *demoModule) RegisterConfigurations(registrar applicationcontract
 	registrar.RegisterConfiguration(
 		loggingcontract.LoggingConfigurationName,
 		logging.NewLoggingConfiguration(loggingcontract.LevelLabels{
-			loggingcontract.LevelDebug:     "100",
-			loggingcontract.LevelInfo:      "200",
-			loggingcontract.LevelWarning:   "300",
-			loggingcontract.LevelError:     "400",
-			loggingcontract.LevelEmergency: "500",
+			loggingcontract.LevelDebug:     loggingcontract.LevelLabelFromInt(100),
+			loggingcontract.LevelInfo:      loggingcontract.LevelLabelFromInt(200),
+			loggingcontract.LevelWarning:   loggingcontract.LevelLabelFromInt(300),
+			loggingcontract.LevelError:     loggingcontract.LevelLabelFromInt(400),
+			loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
 		}),
 	)
 }

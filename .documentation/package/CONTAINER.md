@@ -93,7 +93,6 @@ func registerServices(
 		func(resolver containercontract.Resolver) (Logger, error) {
 			return &StdLogger{}, nil
 		},
-		container.WithTypeRegistration(true),
 	)
 
 	container.MustRegister[string](

@@ -24,7 +24,7 @@ The three bindings share the same core exported API and behavior; they differ in
 
 ## Binary resolution
 
-The crontab entries reference the **built application binary** itself (resolved via `os.Executable()` at run time, or overridden with `--binary` / `melody.cron.binary`). Run `melody:cron:generate` from the production binary — invoking it through `go run` resolves the binary to a temporary build path that disappears once the process exits, which is almost never what you want in `crontab`.
+The crontab entries reference the **built application binary** itself (resolved via `os.Executable()` at run time, or overridden with `--binary` / `melody.cron.binary`). Run `melody:cron:generate` from the production binary — invoking it through `go run` resolves the binary to a temporary build path that disappears once the process exits, which is almost never what you want in `crontab`. The fallback also resolves symlinks: `os.Executable()` reads the running binary's real path, so on a deployment that publishes releases behind a `current` symlink the entries pin the release directory the generator ran from — the manifest keeps executing that release's binary for as long as the directory survives, and answers `No such file or directory` once it is pruned. On that deployment shape, pass the symlinked path explicitly through `--binary` or `melody.cron.binary`.
 
 ## Install
 
@@ -490,6 +490,16 @@ Producing:
 # GENERATED FILE
 # DO NOT EDIT LOCALLY
 #
+# owned by melody:cron:generate
+#############################################################################
+# Example of job definition:
+# .---------------- minute (0 - 59)
+# |  .------------- hour (0 - 23)
+# |  |  .---------- day of month (1 - 31)
+# |  |  |  .------- month (1 - 12) OR jan,feb,mar,apr ...
+# |  |  |  |  .---- day of week (0 - 6) (Sunday=0 or 7) OR sun,mon,tue,wed,thu,fri,sat
+# |  |  |  |  |
+# *  *  *  *  * user-name command to be executed
 #############################################################################
 0 3 * * * www-data /abs/path/app product:list >> '/abs/path/var/log/cron/product-list.log' 2>&1
 

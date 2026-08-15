@@ -80,7 +80,7 @@ Implementation detail: see [`wrapControllerWithContainer`](../../http/router_uti
 
 ## Request body limits
 
-The HTTP kernel wraps `request.Body` with `http.MaxBytesReader` when `Http().MaxRequestBodyBytes()` is set to a positive value in the configuration (see [`kernel.go`](../../http/kernel.go)). A read past that limit fails, and net/http answers `413 Request Entity Too Large` and closes the connection, so an oversized body is never fully delivered to a controller.
+The HTTP kernel wraps `request.Body` with `http.MaxBytesReader` when `Http().MaxRequestBodyBytes()` is set to a positive value in the configuration (see [`kernel.go`](../../http/kernel.go)). A read past that limit fails with `*http.MaxBytesError` and net/http closes the connection, so an oversized body is never fully delivered to a controller. The `413 Request Entity Too Large` is Melody's answer, on the two paths where Melody itself reads the body: the kernel's automatic form parsing and [`BindJson`](../../http/request_body.go) both recognize the overrun and answer `413` with `payload too large`. A controller that reads the raw body itself receives the error from the read and answers for it on its own — returned unhandled, it takes the generic handler-error path, not the `413`.
 
 ## Form parsing
 
@@ -132,7 +132,7 @@ router.HandleWithOptions(
 router.HandleNamed("product.show", nethttp.MethodGet, "/products/:id?", showProductHandler)
 ```
 
-Two routes may share one **pattern** as long as the matcher can tell them apart. Collisions are checked twice at registration ([`registerRoute`](../../http/route_registry.go)): a duplicate name panics with `route name already exists`, and a route identical to a registered one in everything the matcher discriminates on — pattern, methods, host, schemes, locales, requirements and priority — panics with `route already registered`, because the later one could never be dispatched and would be shadowed silently. The name and the defaults are not part of that identity: neither participates in matching, so two differently named but otherwise identical routes are still refused. Routes sharing a pattern under different methods, hosts, requirements or priorities are legitimately distinct and stay accepted; at equal specificity the higher priority wins and, at equal priority, the first registered.
+Two routes may share one **pattern** as long as the matcher can tell them apart. Collisions are checked twice at registration ([`registerRoute`](../../http/route_registry.go)): a duplicate name, and a route identical to a registered one in everything the matcher discriminates on — pattern, methods, host, schemes, locales, requirements and priority — because the later one could never be dispatched and would be shadowed silently. How a collision is answered depends on when it happens. During application boot the registry's collision recorder is armed: every duplicate is recorded — the first registration wins, and on a name collision the route itself stays registered and dispatchable, only the name keeps pointing at the first claimant — and boot fails afterward with one aggregated panic, `duplicate registrations detected at boot`, naming them all, so a wiring mistake reports every collision at once instead of dying at the first. Outside that window — a registry used directly, or a route added after boot — the registration site panics immediately, with `route name already exists` or with the refusal naming the identical pattern, methods, host, schemes, locales, requirements and priority. The name and the defaults are not part of the dispatch identity: neither participates in matching, so two differently named but otherwise identical routes are still refused. Routes sharing a pattern under different methods, hosts, requirements or priorities are legitimately distinct and stay accepted; at equal specificity the higher priority wins and, at equal priority, the first registered.
 
 ### Locale-restricted routes
 
@@ -515,7 +515,7 @@ Where the list itself comes from is the application's business — a constant as
     * [`DefaultCompressionConfig`](../../http/middleware/compression.go)
     * [`CompressionMiddleware`](../../http/middleware/compression.go)
     * [`DefaultCompressionMiddleware`](../../http/middleware/compression.go)
-    * Honors `Accept-Encoding` q-values (RFC 7231), emits `Vary: Accept-Encoding`, and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) so response bodies never fully land in memory.
+    * Honors `Accept-Encoding` q-values (RFC 7231), emits `Vary: Accept-Encoding`, and buffers at most `MinSize` bytes of the body to decide whether compression pays: a response below the threshold is served whole from that buffer, while one at or above it keeps only the peeked head in memory and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) — `MinSize` carries no upper bound, so the buffered class is as large as the operator sizes it.
 
 * Rate limiting:
     * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go)

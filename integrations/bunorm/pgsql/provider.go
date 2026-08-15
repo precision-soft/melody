@@ -123,7 +123,7 @@ func (instance *Provider) SecretParameterNames() []string {
     return []string{instance.passwordParameterName}
 }
 
-/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The one step outside its reach is the dialect handshake bun performs at construction, which queries the server under no caller context and is bounded by the connect timeout alone — so a cancellation arriving mid-attempt is honoured at the next cancellable step rather than instantly. A nil context reads as context.Background(), which is exactly Open. */
+/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The dialect performs no server round trip at construction — pgdialect's Init is empty, unlike its mysql twin — so the first packet on the wire is the boot ping's dial, made under the caller's context and bounded by the connect timeout. A nil context reads as context.Background(), which is exactly Open. */
 func (instance *Provider) OpenContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
     if nil == ctx {
         ctx = context.Background()
@@ -370,7 +370,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
 }
 
 func (instance *Provider) open(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
-    /* an already-cancelled context is refused before the attempt: the dialect handshake bun performs at construction queries the server outside any caller context, bounded by the connect timeout alone, so without this refusal a shutdown-cancelled lazy open still paid one full dial against a database that no longer matters. */
+    /* an already-cancelled context is refused before the attempt: nothing below dials outside the caller's context — pgdialect performs no construction-time query, unlike its mysql twin — but without this refusal a shutdown-cancelled lazy open still built the connector, ran the configuration hook and surfaced the cancellation as "database connection failed" naming the database, rather than as the shutdown that caused it. */
     if ctxErr := ctx.Err(); nil != ctxErr {
         return nil, exception.NewError(
             "database open cancelled before the attempt",
