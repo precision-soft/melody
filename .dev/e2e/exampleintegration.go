@@ -6,6 +6,8 @@ import (
     "fmt"
     "net/http"
     "time"
+
+    "github.com/uptrace/bun"
 )
 
 /* The seeded editor account. The nomenclature's write endpoints sit behind ROLE_EDITOR, so the section's own
@@ -73,6 +75,27 @@ func exampleJournalTable(major exampleMajor) string {
     return "melody_example_" + major.label + "_catalog_journal"
 }
 
+/* exampleJournalDsn answers the DSN of the database one major keeps its journal in, together with the
+environment variable that carries it — the name is what a skip message must say when the value is cleared.
+The v1 example runs its journal on postgres beside a mysql catalogue; the later majors keep both in mysql. */
+func exampleJournalDsn(major exampleMajor, mysqlDsn string, postgresDsn string) (string, string) {
+    if true == major.journalOnPostgres {
+        return postgresDsn, "POSTGRES_DSN"
+    }
+
+    return mysqlDsn, "MYSQL_DSN"
+}
+
+/* openExampleJournal opens the journal database through the door its engine requires: the postgres handle
+is a DSN connector, the mysql one goes through the framework's own provider like every other mysql read. */
+func openExampleJournal(major exampleMajor, journalDsn string) *bun.DB {
+    if true == major.journalOnPostgres {
+        return openPostgres(journalDsn)
+    }
+
+    return openMysql(major.label, journalDsn)
+}
+
 /* decodeExampleData pulls the payload out of the example's response envelope. The presenter wraps every api
 answer, so a decode straight into the payload type would silently yield a zero value and turn a broken
 assertion into a passing one. */
@@ -113,16 +136,17 @@ func runExampleIntegrationAssertions(
     application *exampleApplication,
     redisAddress string,
     mysqlDsn string,
+    postgresDsn string,
 ) {
     editor := exampleEditorClient(major, application)
 
     assertExampleCatalogReport(major, client)
     createdProductId := assertExampleProductPersisted(major, editor, application, mysqlDsn)
-    assertExampleListingCached(major, editor, application, redisAddress, mysqlDsn)
-    assertExampleJournalRecordedTheWrite(major, editor, createdProductId, mysqlDsn)
+    assertExampleListingCached(major, editor, application, redisAddress, mysqlDsn, postgresDsn)
+    assertExampleJournalRecordedTheWrite(major, editor, createdProductId, mysqlDsn, postgresDsn)
     assertExampleWritesAreRateLimited(major, editor, redisAddress)
 
-    removeExampleProbeRows(major, createdProductId, mysqlDsn)
+    removeExampleProbeRows(major, createdProductId, mysqlDsn, postgresDsn)
 }
 
 /* exampleEditorClient signs in a second client under the account that may change the nomenclature. The
@@ -295,6 +319,7 @@ func assertExampleListingCached(
     application *exampleApplication,
     redisAddress string,
     mysqlDsn string,
+    postgresDsn string,
 ) {
     if "" == redisAddress {
         skip("[%s] the listing cache was not verified: REDIS_ADDRESS is cleared, so the key cannot be read out of band", major.label)
@@ -362,19 +387,22 @@ func assertExampleListingCached(
 
     pass("[%s] the listing was cached under %q and the write dropped it, both read out of band", major.label, storedKey)
 
-    removeExampleProbeRows(major, invalidated.Id, mysqlDsn)
+    removeExampleProbeRows(major, invalidated.Id, mysqlDsn, postgresDsn)
 }
 
-/* assertExampleJournalRecordedTheWrite reads the journal straight out of mysql. The entry is not exposed by
-the route that created it, so this half of the check cannot be satisfied by the same code path that wrote it. */
-func assertExampleJournalRecordedTheWrite(major exampleMajor, editor *exampleClient, productId string, mysqlDsn string) {
-    if "" == mysqlDsn {
-        skip("[%s] the journal was not read out of band: MYSQL_DSN is cleared", major.label)
+/* assertExampleJournalRecordedTheWrite reads the journal straight out of its own database. The entry is not
+exposed by the route that created it, so this half of the check cannot be satisfied by the same code path that
+wrote it — and for the first major the door is postgres, which is also what proves the second live connection
+carried the write while the catalogue's mysql half carried the product. */
+func assertExampleJournalRecordedTheWrite(major exampleMajor, editor *exampleClient, productId string, mysqlDsn string, postgresDsn string) {
+    journalDsn, journalDsnVariable := exampleJournalDsn(major, mysqlDsn, postgresDsn)
+    if "" == journalDsn {
+        skip("[%s] the journal was not read out of band: %s is cleared", major.label, journalDsnVariable)
 
         return
     }
 
-    database := openMysql(major.label, mysqlDsn)
+    database := openExampleJournal(major, journalDsn)
     defer func() {
         _ = database.Close()
     }()
@@ -467,10 +495,32 @@ func assertExampleWritesAreRateLimited(major exampleMajor, editor *exampleClient
     )
 }
 
-/* removeExampleProbeRows takes this run's rows away again. The three example applications share one database in
-development, and a probe left behind would be counted by the next run's catalogue reading. */
-func removeExampleProbeRows(major exampleMajor, productId string, mysqlDsn string) {
-    if "" == mysqlDsn || "" == productId {
+/* removeExampleProbeRows takes this run's rows away again. The example applications share their development
+backends, and a probe left behind would be counted by the next run's catalogue reading. The journal rows live
+in the journal's own database, which for the first major is not the one holding the product. */
+func removeExampleProbeRows(major exampleMajor, productId string, mysqlDsn string, postgresDsn string) {
+    if "" == productId {
+        return
+    }
+
+    journalDsn, _ := exampleJournalDsn(major, mysqlDsn, postgresDsn)
+    if "" != journalDsn {
+        journalDatabase := openExampleJournal(major, journalDsn)
+
+        _, journalErr := journalDatabase.
+            NewDelete().
+            Table(exampleJournalTable(major)).
+            Where("subject_id = ?", productId).
+            Exec(context.Background())
+
+        _ = journalDatabase.Close()
+
+        if nil != journalErr {
+            fail("[%s] the journal rows this run created could not be removed (%v)", major.label, journalErr)
+        }
+    }
+
+    if "" == mysqlDsn {
         return
     }
 
@@ -478,15 +528,6 @@ func removeExampleProbeRows(major exampleMajor, productId string, mysqlDsn strin
     defer func() {
         _ = database.Close()
     }()
-
-    _, journalErr := database.
-        NewDelete().
-        Table(exampleJournalTable(major)).
-        Where("subject_id = ?", productId).
-        Exec(context.Background())
-    if nil != journalErr {
-        fail("[%s] the journal rows this run created could not be removed (%v)", major.label, journalErr)
-    }
 
     _, productErr := database.
         NewDelete().

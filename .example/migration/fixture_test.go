@@ -92,6 +92,10 @@ func isExampleCreateTable(query string) bool {
     return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "melody_example_v1_")
 }
 
+func isJournalCreateTable(query string) bool {
+    return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "melody_example_v1_catalog_journal")
+}
+
 /*
 appliedStatusRows answers the status select as if every registered migration
 had already been applied, which is how a process that lost the lock race

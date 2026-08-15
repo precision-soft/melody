@@ -33,12 +33,21 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter(ParameterDatabaseUser, "%env(default::MYSQL_USER)%")
     registrar.RegisterParameter(ParameterDatabasePassword, "%env(default::MYSQL_PASSWORD)%")
 
+    registrar.RegisterParameter("app.journal_database.default_port", "5432")
+    registrar.RegisterParameter(ParameterJournalDatabaseHost, "%env(default::PGSQL_HOST)%")
+    registrar.RegisterParameter(ParameterJournalDatabasePort, "%env(default:app.journal_database.default_port:PGSQL_PORT)%")
+    registrar.RegisterParameter(ParameterJournalDatabaseName, "%env(default::PGSQL_DATABASE)%")
+    registrar.RegisterParameter(ParameterJournalDatabaseUser, "%env(default::PGSQL_USER)%")
+    registrar.RegisterParameter(ParameterJournalDatabasePassword, "%env(default::PGSQL_PASSWORD)%")
+    registrar.RegisterParameter(ParameterJournalDatabaseInsecure, "%env(default::PGSQL_INSECURE)%")
+
     registrar.RegisterParameter(ParameterRedisAddress, "%env(default::REDIS_ADDRESS)%")
     registrar.RegisterParameter(ParameterRedisUser, "%env(default::REDIS_USER)%")
     registrar.RegisterParameter(ParameterRedisPassword, "%env(default::REDIS_PASSWORD)%")
 
     registrar.MarkParameterSecret("APP_API_TOKEN")
     registrar.MarkParameterSecret("MYSQL_PASSWORD")
+    registrar.MarkParameterSecret("PGSQL_PASSWORD")
     registrar.MarkParameterSecret("REDIS_PASSWORD")
 }
 

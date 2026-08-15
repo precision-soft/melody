@@ -12,8 +12,9 @@ import (
 )
 
 const (
-    migrationLocksTable    = "bun_migration_locks"
-    migrationUnlockCommand = "db:unlock"
+    migrationLocksTable           = "bun_migration_locks"
+    migrationUnlockCommand        = "db:unlock"
+    journalMigrationUnlockCommand = "db:journal:unlock"
 )
 
 /* the unlock must not ride the caller's context: an interrupted resolution cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
@@ -25,17 +26,23 @@ var (
     migrationLockRetryInterval = 250 * time.Millisecond
 )
 
+/* the memoization is keyed by handle and set together: the catalog and the journal database are distinct handles, but nothing in the funnel forbids one handle carrying both sets, and a shared key would let the first set answer for the second */
+type migratedSetKey struct {
+    database     *bun.DB
+    migrationSet *migrate.Migrations
+}
+
 var (
     ensureMutex          sync.Mutex
-    migratedDatabaseList = map[*bun.DB]struct{}{}
+    migratedDatabaseList = map[migratedSetKey]struct{}{}
 )
 
 /*
-EnsureMigrated applies the Migrations set to the database, once per handle and
-per process. The repository providers call it at first resolution, which is
-what keeps a freshly recreated volume usable without an operator step: the
-tables appear when the first request reaches a repository, exactly as they did
-when each repository owned its own create statement.
+EnsureMigrated applies the Migrations set to the catalog database, once per
+handle and per process. The catalog repository providers call it at first
+resolution, which is what keeps a freshly recreated volume usable without an
+operator step: the tables appear when the first request reaches a repository,
+exactly as they did when each repository owned its own create statement.
 
 Only a success is recorded; a failed attempt is retried at the next
 resolution. The mutex serializes the providers of one process, and the bun
@@ -43,6 +50,20 @@ migration lock serializes processes sharing the database — several example
 applications race here whenever a volume starts empty.
 */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
+    return ensureMigratedSet(ctx, database, Migrations, migrationUnlockCommand)
+}
+
+/*
+EnsureJournalMigrated applies the JournalMigrations set to the journal
+database, through the same funnel EnsureMigrated runs — only the set and the
+unlock remedy differ, because the journal's lock lives in the journal's own
+database and is cleared by db:journal:unlock, not db:unlock.
+*/
+func EnsureJournalMigrated(ctx context.Context, database *bun.DB) error {
+    return ensureMigratedSet(ctx, database, JournalMigrations, journalMigrationUnlockCommand)
+}
+
+func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migrations, unlockCommand string) error {
     if nil == database {
         return melodyexception.NewError("migration: bun database is nil", nil, nil)
     }
@@ -50,13 +71,14 @@ func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     ensureMutex.Lock()
     defer ensureMutex.Unlock()
 
-    if _, alreadyMigrated := migratedDatabaseList[database]; true == alreadyMigrated {
+    memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
+    if _, alreadyMigrated := migratedDatabaseList[memoizationKey]; true == alreadyMigrated {
         return nil
     }
 
     migrator := migrate.NewMigrator(
         database,
-        Migrations,
+        migrationSet,
         migrate.WithMarkAppliedOnSuccess(true),
     )
 
@@ -64,18 +86,18 @@ func EnsureMigrated(ctx context.Context, database *bun.DB) error {
         return initErr
     }
 
-    locked, lockErr := acquireMigrationLock(ctx, migrator)
+    locked, lockErr := acquireMigrationLock(ctx, migrator, unlockCommand)
     if nil != lockErr {
         return lockErr
     }
 
     if true == locked {
-        if migrateErr := migrateWhileLocked(ctx, migrator); nil != migrateErr {
+        if migrateErr := migrateWhileLocked(ctx, migrator, unlockCommand); nil != migrateErr {
             return migrateErr
         }
     }
 
-    migratedDatabaseList[database] = struct{}{}
+    migratedDatabaseList[memoizationKey] = struct{}{}
 
     return nil
 }
@@ -85,7 +107,7 @@ acquireMigrationLock answers whether the lock was taken. A false with a nil
 error means another process applied the whole set while this one waited, so
 there is nothing left to run and the lock was never held here.
 */
-func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator) (bool, error) {
+func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, unlockCommand string) (bool, error) {
     startedAt := time.Now()
 
     for {
@@ -106,7 +128,7 @@ func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator) (bool
                 "migration: the migration lock is held; another migration is running, or a crashed one left it behind",
                 melodyexceptioncontract.Context{
                     "locksTable":    migrationLocksTable,
-                    "unlockCommand": migrationUnlockCommand,
+                    "unlockCommand": unlockCommand,
                 },
                 lockErr,
             )
@@ -135,7 +157,7 @@ row that survives refuses every later migration on every process. The unlock
 failure becomes the verdict only when the migration itself succeeded; a failed
 migration keeps its own error.
 */
-func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator) (migrateErr error) {
+func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockCommand string) (migrateErr error) {
     defer func() {
         unlockContext, cancelUnlock := context.WithTimeout(
             context.WithoutCancel(ctx),
@@ -149,7 +171,7 @@ func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator) (migrat
                 "migration: the migration lock could not be released",
                 melodyexceptioncontract.Context{
                     "locksTable":    migrationLocksTable,
-                    "unlockCommand": migrationUnlockCommand,
+                    "unlockCommand": unlockCommand,
                 },
                 unlockErr,
             )

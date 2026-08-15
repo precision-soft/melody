@@ -16,6 +16,13 @@ const (
     ParameterDatabaseUser     = "app.database.user"
     ParameterDatabasePassword = "app.database.password"
 
+    ParameterJournalDatabaseHost     = "app.journal_database.host"
+    ParameterJournalDatabasePort     = "app.journal_database.port"
+    ParameterJournalDatabaseName     = "app.journal_database.name"
+    ParameterJournalDatabaseUser     = "app.journal_database.user"
+    ParameterJournalDatabasePassword = "app.journal_database.password"
+    ParameterJournalDatabaseInsecure = "app.journal_database.insecure"
+
     ParameterRedisAddress  = "app.redis.address"
     ParameterRedisUser     = "app.redis.user"
     ParameterRedisPassword = "app.redis.password"
@@ -26,8 +33,9 @@ const (
 )
 
 type Module struct {
-    /* the database is held as its registry rather than as a *bun.DB: the registry opens on first use — after the framework's own services exist — and its Close reaches the pool, which a bare handle on a module field would never get. */
+    /* the databases are held as one registry rather than as *bun.DB handles: the registry opens each connection on first use — after the framework's own services exist — and its Close reaches every pool, which bare handles on module fields would never get. The wiring beside it remembers which of the two connections the environment armed, because the registry alone cannot say whether its default is the catalog or a lone journal. */
     databaseRegistry *melodybunorm.ManagerRegistry
+    databaseWiring   databaseWiring
 
     /* redis is opened while the modules are wired, because the rate-limit middleware needs a live limiter at the moment a route is declared. The asymmetry with the database is the point: each integration is wired the way its own API allows. */
     redisClient       rueidis.Client

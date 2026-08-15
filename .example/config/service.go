@@ -10,6 +10,7 @@ import (
     melodycache "github.com/precision-soft/melody/cache"
     melodycachecontract "github.com/precision-soft/melody/cache/contract"
     melodyclock "github.com/precision-soft/melody/clock"
+    melodycontainer "github.com/precision-soft/melody/container"
     melodycontainercontract "github.com/precision-soft/melody/container/contract"
     melodyevent "github.com/precision-soft/melody/event"
     melodykernelcontract "github.com/precision-soft/melody/kernel/contract"
@@ -150,31 +151,32 @@ func resolvedSessionFilePath(sessionFilePath string, projectDirectory string) st
     return sessionFilePath
 }
 
-/* registerCatalogJournalService wires the journal against whatever the environment gave the example. Without a database there is nowhere to keep a record of the changes, and the service is registered all the same with nothing behind it: the writes still succeed, and the report shows a journal of zero rather than the application refusing to change anything. */
+/* registerCatalogJournalService wires the journal against whatever the environment gave the example. Without a journal database there is nowhere to keep a record of the changes, and the service is registered all the same with nothing behind it: the writes still succeed, and the report shows a journal of zero rather than the application refusing to change anything. */
 func (instance *Module) registerCatalogJournalService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    hasDatabase := nil != instance.databaseRegistry
+    hasJournal := instance.databaseWiring.journal
 
     registrar.RegisterService(
         service.ServiceCatalogJournalService,
         func(resolver melodycontainercontract.Resolver) (*service.CatalogJournalService, error) {
             clockInstance := melodyclock.ClockMustFromResolver(resolver)
 
-            if false == hasDatabase {
+            if false == hasJournal {
                 return service.NewCatalogJournalService(nil, clockInstance), nil
             }
 
+            /* the handle is built over this provider's resolver, which records the teardown edge; nothing dials the journal database until the first recorded change resolves through it */
             return service.NewCatalogJournalService(
-                repository.MustGetCatalogJournalRepository(resolver),
+                melodycontainer.Lazy[repository.CatalogJournalRepository](resolver, repository.ServiceCatalogJournalRepository),
                 clockInstance,
             ), nil
         },
     )
 }
 
-/* registerCatalogReportService wires the report against whatever the environment gave the example: the redis backend when one was built, and the journal when a database was configured. Both are optional, and the service degrades to what it can actually reach rather than being absent. */
+/* registerCatalogReportService wires the report against whatever the environment gave the example: the redis backend when one was built, and the journal when its database was configured. Both are optional, and the service degrades to what it can actually reach rather than being absent. */
 func (instance *Module) registerCatalogReportService(registrar melodyapplicationcontract.ServiceRegistrar) {
     cacheBackend := instance.redisCacheBackend
-    hasDatabase := nil != instance.databaseRegistry
+    hasJournal := instance.databaseWiring.journal
 
     registrar.RegisterService(
         service.ServiceCatalogReportService,
@@ -187,7 +189,7 @@ func (instance *Module) registerCatalogReportService(registrar melodyapplication
                 backend = cacheBackend
             }
 
-            if false == hasDatabase {
+            if false == hasJournal {
                 return service.NewCatalogReportService(clockInstance, backend, productRepository, nil), nil
             }
 

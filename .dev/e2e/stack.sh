@@ -82,7 +82,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=64
+EXPECTED_CHECK_COUNT_INTEGER=71
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -966,11 +966,12 @@ check_section_end "V1 CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
 check_section_start "V1 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 
-# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops the five v1 example tables of the shared
-# melody_example database. Every later step exists to put the state back — the second migrate restores the
-# schema, and the two resolutions after it reseed the catalogue and the user directory — so the section must
-# run to its end whatever the intermediate verdicts, which check_fail already guarantees. The dev-supervised
-# v1 application keeps working through it: its resolved repositories hold only the *bun.DB handle
+# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops the four v1 catalog tables of the shared
+# melody_example database — the journal lives in its own postgres database and has a section of its own
+# below. Every later step exists to put the state back — the second migrate restores the schema, and the two
+# resolutions after it reseed the catalogue and the user directory — so the section must run to its end
+# whatever the intermediate verdicts, which check_fail already guarantees. The dev-supervised v1 application
+# keeps working through it: its resolved repositories hold only the *bun.DB handle
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:init >/dev/null 2>&1; echo status=\$?"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
     check_pass "v1 db:init is idempotent over the existing bookkeeping tables"
@@ -996,14 +997,14 @@ fi
 
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:rollback 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qi 'rolled back'; then
-    check_pass "v1 db:rollback reverted the last group (the five live tables are dropped until the next step)"
+    check_pass "v1 db:rollback reverted the last group (the four live catalog tables are dropped until the next step)"
 else
     check_fail "v1 db:rollback did not report the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
 
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:migrate 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'applied 5 migrations'; then
-    check_pass "v1 db:migrate re-applied the five migrations the rollback reverted"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'applied 4 migrations'; then
+    check_pass "v1 db:migrate re-applied the four catalog migrations the rollback reverted"
 else
     check_fail "v1 db:migrate did not re-apply the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
@@ -1028,6 +1029,65 @@ else
 fi
 
 check_section_end "V1 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V1 JOURNAL DATABASE MIGRATIONS — the db:journal:* context family runs the journal set on postgres
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V1 JOURNAL DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
+
+# the journal is the v1 example's second live database: one process, the catalogue on mysql and the journal
+# on postgres, each with its own migration set and its own command family. The rollback here drops the live
+# journal table of the shared melody_test database; the migrate after it puts the schema back, and the
+# journal is append-only with no seeds, so an empty journal IS the restored state.
+run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:journal:init >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v1 db:journal:init is idempotent over the journal database's bookkeeping tables"
+else
+    check_fail "v1 db:journal:init failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:journal:migrate >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v1 db:journal:migrate answers success over the set the journal provider already applied"
+else
+    check_fail "v1 db:journal:migrate failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:journal:status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V1_JOURNAL_STATUS_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${V1_JOURNAL_STATUS_OUTPUT_STRING}" | grep -q '0 pending' && printf '%s' "${V1_JOURNAL_STATUS_OUTPUT_STRING}" | grep -q '20260814000005'; then
+    check_pass "v1 db:journal:status reports the applied journal set by name with nothing pending"
+else
+    check_fail "v1 db:journal:status does not report the applied journal set (${V1_JOURNAL_STATUS_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:journal:rollback 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qi 'rolled back'; then
+    check_pass "v1 db:journal:rollback reverted the journal group (the live journal table is dropped until the next step)"
+else
+    check_fail "v1 db:journal:rollback did not report the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:journal:migrate 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'applied 1 migration'; then
+    check_pass "v1 db:journal:migrate re-applied the journal migration the rollback reverted"
+else
+    check_fail "v1 db:journal:migrate did not re-apply the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# the restored table must actually answer: catalog:journal reads it through the same lazy handle a live
+# write dials, so a success here proves the postgres connection and the recreated schema end to end
+run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . catalog:journal --format=json 2>/dev/null"
+V1_JOURNAL_RESTORED_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+if printf '%s' "${V1_JOURNAL_RESTORED_JSON_STRING}" | grep -q '"command":"catalog:journal"'; then
+    check_pass "v1 catalog:journal reads the restored journal table over postgres"
+else
+    check_fail "v1 catalog:journal did not answer over the restored journal table (${V1_JOURNAL_RESTORED_JSON_STRING:-<empty>})"
+fi
+
+check_section_end "V1 JOURNAL DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # V1 DEBUG COMMANDS — the dev-registered family answers from the v1 example
@@ -1077,10 +1137,20 @@ else
 fi
 
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --limit=0 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'service.example.product.repository'; then
+V1_CONTAINER_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V1_CONTAINER_OUTPUT_STRING}" | grep -q 'service.example.product.repository'; then
     check_pass "v1 debug:container lists the example's registered services"
 else
-    check_fail "v1 debug:container did not list the example services (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+    check_fail "v1 debug:container did not list the example services (${V1_CONTAINER_OUTPUT_STRING:-<empty>})"
+fi
+
+# the scoped registration is the console-visible half of the request-scoped attribution: debug:container
+# renders scoped definitions in a block of their own, so the name appearing here proves the example's
+# RegisterScopedServices hook ran and the definition reached the container
+if printf '%s' "${V1_CONTAINER_OUTPUT_STRING}" | grep -q 'app.example.change.attribution'; then
+    check_pass "v1 debug:container lists the request-scoped change attribution"
+else
+    check_fail "v1 debug:container does not list the scoped change attribution (${V1_CONTAINER_OUTPUT_STRING:-<empty>})"
 fi
 
 check_section_end "V1 DEBUG COMMANDS" "${TAG_VALIDATE}" "e2e"

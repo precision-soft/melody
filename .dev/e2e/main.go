@@ -290,7 +290,7 @@ func main() {
 
     for _, major := range exampleMajors {
         section(fmt.Sprintf("EXAMPLE APPLICATION %s (live, built from %s)", major.label, major.relativeDirectory))
-        runExampleApplicationCheck(major, redisAddress, os.Getenv("MYSQL_DSN"))
+        runExampleApplicationCheck(major, redisAddress, os.Getenv("MYSQL_DSN"), os.Getenv("POSTGRES_DSN"))
         sections++
     }
 

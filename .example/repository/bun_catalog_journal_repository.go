@@ -21,7 +21,7 @@ type catalogJournalRow struct {
     Action     string    `bun:"action,notnull"`
     Subject    string    `bun:"subject,notnull"`
     SubjectId  string    `bun:"subject_id,notnull"`
-    RecordedAt time.Time `bun:"recorded_at,notnull,type:datetime(6)"`
+    RecordedAt time.Time `bun:"recorded_at,notnull,type:timestamptz(6)"`
 }
 
 func newCatalogJournalRow(entry *CatalogJournalEntry) *catalogJournalRow {
@@ -120,7 +120,7 @@ func (instance *BunCatalogJournalRepository) Count(ctx context.Context) (int, er
         Count(ctx)
 }
 
-/* CatalogJournalRepositoryProvider resolves the database by the name the configuration published it under, so the repository stays unaware of how the connection was wired. The migration set runs here rather than on the path that writes to it, because a journal whose table only exists once somebody has already changed something would be missing exactly the entry it was created for. */
+/* CatalogJournalRepositoryProvider resolves the journal database by the name the configuration published it under, so the repository stays unaware of how the connection was wired. The journal migration set runs here rather than on the path that writes to it, because a journal whose table only exists once somebody has already changed something would be missing exactly the entry it was created for. */
 func CatalogJournalRepositoryProvider(databaseServiceName string) func(resolver melodycontainercontract.Resolver) (CatalogJournalRepository, error) {
     return func(resolver melodycontainercontract.Resolver) (CatalogJournalRepository, error) {
         database, databaseErr := melodycontainer.FromResolver[*bun.DB](resolver, databaseServiceName)
@@ -128,7 +128,7 @@ func CatalogJournalRepositoryProvider(databaseServiceName string) func(resolver 
             return nil, databaseErr
         }
 
-        if migrateErr := migration.EnsureMigrated(context.Background(), database); nil != migrateErr {
+        if migrateErr := migration.EnsureJournalMigrated(context.Background(), database); nil != migrateErr {
             return nil, migrateErr
         }
 

@@ -43,7 +43,7 @@ type catalogJournalListItem struct {
 func (instance *CatalogJournalCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     if false == runtimeInstance.Container().Has(repository.ServiceCatalogJournalRepository) {
         return melodyexception.NewError(
-            "the example has no database configured, so no journal of the changes is kept",
+            "the example has no journal database configured, so no journal of the changes is kept",
             nil,
             nil,
         )

@@ -40,8 +40,8 @@ func TestEnsureMigratedRunsInitLockMigrateUnlockInOrder(t *testing.T) {
         )
     }
 
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
-        t.Fatalf("expected all five example tables to be created, got %d", createCount)
+    if createCount := recorder.countMatching(isExampleCreateTable); 4 != createCount {
+        t.Fatalf("expected all four catalog tables to be created, got %d", createCount)
     }
 }
 
@@ -53,7 +53,7 @@ func TestEnsureMigratedRunsOncePerHandle(t *testing.T) {
     }
 
     /* the first resolution must have DONE the work: without this the test cannot tell once-then-skipped apart from never-at-all, and a guard inverted to skip the first run answers both calls with silence */
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 4 != createCount {
         t.Fatalf("expected the first resolution to apply the set, got %d creates", createCount)
     }
 
@@ -156,7 +156,7 @@ func TestEnsureMigratedRefusesAfterTheRetryWindowNamingTheRemedy(t *testing.T) {
     if retryErr := EnsureMigrated(context.Background(), database); nil != retryErr {
         t.Fatalf("expected the retried resolution to succeed, got %v", retryErr)
     }
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 4 != createCount {
         t.Fatalf("expected the retried resolution to migrate, got %d creates", createCount)
     }
 }
@@ -213,7 +213,72 @@ func TestEnsureMigratedSerializesConcurrentResolutions(t *testing.T) {
     if lockCount := recorder.countMatching(isMigrationLockInsert); 1 != lockCount {
         t.Fatalf("expected exactly one lock acquisition across the resolutions, got %d", lockCount)
     }
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 4 != createCount {
         t.Fatalf("expected the set to be applied exactly once, got %d creates", createCount)
+    }
+}
+
+func TestEnsureJournalMigratedAppliesTheJournalSet(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    if ensureErr := EnsureJournalMigrated(context.Background(), database); nil != ensureErr {
+        t.Fatalf("expected the journal migration run to succeed, got %v", ensureErr)
+    }
+
+    if journalCount := recorder.countMatching(isJournalCreateTable); 1 != journalCount {
+        t.Fatalf("expected exactly the journal table to be created, got %d", journalCount)
+    }
+    if createCount := recorder.countMatching(isExampleCreateTable); 1 != createCount {
+        t.Fatalf("expected no catalog table beside the journal one, got %d creates", createCount)
+    }
+}
+
+func TestEnsureJournalMigratedRefusesNamingItsOwnRemedy(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    previousWindow := migrationLockRetryWindow
+    migrationLockRetryWindow = 0
+    defer func() {
+        migrationLockRetryWindow = previousWindow
+    }()
+
+    lockHeld := errors.New("lock row exists")
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return lockHeld
+        }
+
+        return nil
+    }
+
+    ensureErr := EnsureJournalMigrated(context.Background(), database)
+    if nil == ensureErr {
+        t.Fatal("expected the exhausted retry window to refuse")
+    }
+
+    var refusal *melodyexception.Error
+    if false == errors.As(ensureErr, &refusal) {
+        t.Fatalf("expected a melody exception, got %T", ensureErr)
+    }
+    if journalMigrationUnlockCommand != refusal.Context()["unlockCommand"] {
+        t.Fatalf("expected the refusal to name the journal unlock command, got %v", refusal.Context())
+    }
+}
+
+func TestEnsureMigratedSetsAreMemoizedIndependentlyOnOneHandle(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    if ensureErr := EnsureMigrated(context.Background(), database); nil != ensureErr {
+        t.Fatalf("expected the catalog migration run to succeed, got %v", ensureErr)
+    }
+
+    /* a memoization keyed by handle alone would answer the journal set with the catalog set's recorded success and never apply it */
+    recorder.reset()
+
+    if ensureErr := EnsureJournalMigrated(context.Background(), database); nil != ensureErr {
+        t.Fatalf("expected the journal migration run to succeed, got %v", ensureErr)
+    }
+    if journalCount := recorder.countMatching(isJournalCreateTable); 1 != journalCount {
+        t.Fatalf("expected the journal set to be applied on the already-memoized handle, got %d", journalCount)
     }
 }

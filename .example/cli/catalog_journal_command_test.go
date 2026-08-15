@@ -21,7 +21,7 @@ func TestCatalogJournalRefusesWithoutADatabase(t *testing.T) {
     if nil == runErr {
         t.Fatal("expected the missing journal to be refused")
     }
-    if false == strings.Contains(runErr.Error(), "no database configured") {
+    if false == strings.Contains(runErr.Error(), "no journal database configured") {
         t.Fatalf("expected the refusal to say why, got %v", runErr)
     }
 }

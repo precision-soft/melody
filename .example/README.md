@@ -52,7 +52,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── repository/       # repository interfaces with an in-memory and a database-backed implementation each, plus the seed data and the helpers both share
 ├── route/            # named route constants and patterns
 ├── security/         # session auth wiring (login/logout handlers, entry point, access denied handler, token resolver, password hasher)
-├── service/          # application services (Category, Currency, Product, User, plus the catalog journal and the catalog report)
+├── service/          # application services (Category, Currency, Product, User, plus the catalog journal, the request-scoped change attribution and the catalog report)
 ├── subscriber/       # event subscribers
 ├── url/              # route registry adapters: the route manifest every page is given
 ├── public/           # static assets; app.css and index.html are committed, the icons and app.js are produced by the assets/ build
@@ -118,7 +118,9 @@ Cron defaults (user, logs directory, destination file, template, heartbeat) come
 ### Live integrations: database, cache and clock
 
 Beside cron, the example wires [`integrations/bunorm`](../integrations/bunorm/) with its
-[mysql provider](../integrations/bunorm/mysql/), [`integrations/rueidis`](../integrations/rueidis/) with its
+[mysql provider](../integrations/bunorm/mysql/) **and** its [pgsql provider](../integrations/bunorm/pgsql/) —
+two live databases in one process, each with its own function — plus
+[`integrations/rueidis`](../integrations/rueidis/) with its
 [cache backend](../integrations/rueidis/cache/), and the framework's own [`clock`](../clock/).
 
 Each one is gated on an endpoint parameter, and an unset endpoint leaves the integration unwired: no service,
@@ -133,6 +135,7 @@ what it does is visible in what the application does:
 | integration | what carries it |
 |---|---|
 | `bunorm` + mysql provider | products, categories, currencies and users are kept in mysql when one is configured, and in memory when it is not |
+| `bunorm` + pgsql provider | the write journal is kept in postgres when one is configured, and absent when it is not — the writes still succeed, unjournalled. The two switches are independent (`MYSQL_HOST` and `PGSQL_HOST`), so all four combinations boot. The compose postgres speaks plain TCP, so `.env` arms `PGSQL_INSECURE=true`; the provider verifies the TLS handshake on any other value |
 | `rueidis` cache backend | the product listing is served from redis and dropped from it on every write |
 | `rueidis` rate limiter | the nomenclature's write endpoints share a per-address budget; the reads stay open |
 | `clock` | every write is stamped by the injected clock rather than by the wall, in the services and in the timing middleware |
@@ -142,6 +145,15 @@ once the scheduled refresh has warmed it, and computable with no backend at all.
 
 The `catalog:journal` command prints the latest entries of the write journal over the same repository the
 listeners write it through, so the record is reachable from the command line as well as from a request.
+
+The journal is also where the example demonstrates the container's request scope and lazy resolution. Who is
+behind a request's changes is resolved ONCE per request, by the scoped
+[`service.ChangeAttribution`](./service/change_attribution.go) registered through the module's
+`RegisterScopedServices` hook ([`config/scoped_service.go`](./config/scoped_service.go)); its provider refuses
+any scope without a request context, which is how a console run — whose scope carries a process context
+instead — falls back to per-call attribution through the same fold, so the verdicts cannot drift. The journal
+service holds its repository as a [`container.Lazy`](../container/lazy.go) handle: nothing dials postgres
+until the first recorded change, so the process boots and serves the catalogue with the journal database down.
 
 Two details are worth reading in the source rather than guessed at:
 
@@ -167,6 +179,7 @@ value leaves that door unwired:
 | compression | always on | the framework's `CompressionMiddleware` with its defaults ([`config/middleware.go`](./config/middleware.go)): gzip for bodies of at least a kilobyte, already-compressed media excluded, `Vary: Accept-Encoding` added |
 | trusted proxies | always on | one `ForwardedHeadersPolicy` ([`config/http.go`](./config/http.go)) read by the http kernel for the scheme and by the rate limiter's client-ip resolver for the budget key, so a write arriving through a trusted proxy is budgeted against the `X-Forwarded-For` address rather than the proxy's |
 | file-backed sessions | `APP_SESSION_FILE` | `session.NewFileStorageFromPath` registered under the framework's storage service id ([`config/service.go`](./config/service.go)), so a signed-in session survives a process restart; a relative path is anchored to the project directory. Empty keeps the framework's in-memory default |
+| static cache | `MELODY_STATIC_ENABLE_CACHE` | the framework's static file server with its validators armed (`.env` ships `true` and `MELODY_STATIC_CACHE_MAX_AGE=3600`): assets answer with a strong `ETag`, `Last-Modified` and `Cache-Control: public, max-age=3600`, a replayed validator is answered `304`, and `If-None-Match` silences `If-Modified-Since`, as the precedence demands |
 
 The session token resolver ([`security/session_token_resolver.go`](./security/session_token_resolver.go))
 accepts the role list in the two spellings a session can carry: the `[]string` the login handler writes, and
@@ -175,25 +188,29 @@ element type.
 
 ### Database migrations
 
-The database schema is owned by a migration set, [`migration/`](./migration/): five DDL migrations, one per
-table, registered on a shared `migrate.Migrations` collection (the bun migration primitive). Two doors run the
-same set, so neither can drift from the other:
+The database schemas are owned by two migration sets in [`migration/`](./migration/), one per database: the
+catalog set (`migration.Migrations`, four mysql DDL migrations, one per catalog table) and the journal set
+(`migration.JournalMigrations`, one postgres DDL migration). Two doors run each set, so neither can drift from
+the other:
 
-- the **repository providers** call `migration.EnsureMigrated` at first resolution and then seed an empty table.
-  That is what keeps a freshly recreated mysql volume usable with no operator step — the tables appear when the
-  first request reaches a repository — and it is why every `CREATE TABLE` in the set carries `IF NOT EXISTS`:
-  several example processes share one database and may apply the set at the same time, serialized by bun's
-  migration lock with a bounded retry;
+- the **repository providers** call `migration.EnsureMigrated` (catalog) or `migration.EnsureJournalMigrated`
+  (journal) at first resolution, and the catalog providers then seed an empty table. That is what keeps a
+  freshly recreated volume usable with no operator step — the tables appear when the first request reaches a
+  repository — and it is why every `CREATE TABLE` in both sets carries `IF NOT EXISTS`: several example
+  processes share the databases and may apply a set at the same time, serialized by bun's migration lock with
+  a bounded retry;
 - the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`)
-  comes from the [`integrations/bunorm/migrate`](../integrations/bunorm/migrate/) module facade registered in
-  [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service
-  (`service.example.database.registry`).
+  runs the catalog set, and the **`db:journal:*` context family** — same six verbs — runs the journal set;
+  both come from the [`integrations/bunorm/migrate`](../integrations/bunorm/migrate/) module facade registered
+  in [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service
+  (`service.example.database.registry`). The base family is pinned to the catalog manager by name, so a
+  journal-only environment refuses it cleanly instead of aiming mysql DDL at postgres.
 
-The module is registered whether or not the database is configured, so the command surface does not change
-between environments; without a configured database every `db:*` command fails at `Run` with the container
-refusal naming the registry service. The bun bookkeeping tables (`bun_migrations`, `bun_migration_locks`) keep
-their default, major-unprefixed names — only this example ships a migration set today, so nothing else writes
-them.
+The module is registered whether or not a database is configured, so the command surface does not change
+between environments; without one every `db:*` command fails at `Run` with the container refusal naming the
+registry service. The bun bookkeeping tables (`bun_migrations`, `bun_migration_locks`) keep their default,
+major-unprefixed names in both databases — bookkeeping is per database, and within each one only the set that
+lives there uses bun's migrator.
 
 ### [`main.go`](./main.go) (why it stays small)
 
@@ -214,7 +231,7 @@ All wiring and integration logic lives outside `main.go`.
 
 ## Running locally
 
-The example is a standalone Go module (`.example/go.mod`) that depends on Melody and its cron, bunorm (with the mysql provider and the migrate command family) and rueidis integrations. From the repository root:
+The example is a standalone Go module (`.example/go.mod`) that depends on Melody and its cron, bunorm (with the mysql and pgsql providers and the migrate command family) and rueidis integrations. From the repository root:
 
 ```bash
 cd .example
@@ -271,7 +288,7 @@ cd .example
 go run . -h
 ```
 
-Among the commands you will find the cron pair (`melody:cron:generate` and `melody:cron:run`) and the `db:*` migration family from the two module facades. To generate a crontab fragment from the `cron.Configuration` declared in [`config/cron.go`](./config/cron.go):
+Among the commands you will find the cron pair (`melody:cron:generate` and `melody:cron:run`) and the two migration families (`db:*` for the catalog set on mysql, `db:journal:*` for the journal set on postgres) from the two module facades. To generate a crontab fragment from the `cron.Configuration` declared in [`config/cron.go`](./config/cron.go):
 
 ```bash
 cd .example

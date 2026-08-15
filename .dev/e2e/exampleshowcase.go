@@ -31,6 +31,75 @@ func runExampleShowcaseAssertions(major exampleMajor, application *exampleApplic
     assertExampleGzipCompression(major)
     assertExampleValidationAnswersPerField(major, application)
     assertExampleForwardedAddressKeysTheLimiter(major, application, redisAddress)
+    assertExampleStaticCacheValidators(major)
+}
+
+/* assertExampleStaticCacheValidators proves the static cache the v1 example arms in its .env
+(MELODY_STATIC_ENABLE_CACHE): a tracked asset answers with the validators and the cache policy, a client
+replaying the ETag is answered 304 with no body, a stale ETag gets the bytes again, and the two validators
+keep their precedence — If-Modified-Since is consulted only when no If-None-Match was offered, so a mismatched
+ETag wins over a matching date. The values are read from the live answer rather than assumed, because the
+workspace copy does not preserve the source tree's modification times. */
+func assertExampleStaticCacheValidators(major exampleMajor) {
+    client := newExampleClient(major)
+
+    first := client.call("GET", exampleStaticAsset, "", "", "")
+    if http.StatusOK != first.statusCode {
+        fail("[%s] %s answered %d, wanted 200 with the asset", major.label, exampleStaticAsset, first.statusCode)
+    }
+
+    etag := first.headerList.Get("ETag")
+    lastModified := first.headerList.Get("Last-Modified")
+    cacheControl := first.headerList.Get("Cache-Control")
+
+    if "" == etag {
+        fail("[%s] %s carries no ETag while the static cache is armed", major.label, exampleStaticAsset)
+    }
+    if "" == lastModified {
+        fail("[%s] %s carries no Last-Modified while served from the filesystem", major.label, exampleStaticAsset)
+    }
+    if "public, max-age=3600" != cacheControl {
+        fail("[%s] %s carries Cache-Control %q, wanted the armed policy \"public, max-age=3600\"", major.label, exampleStaticAsset, cacheControl)
+    }
+    pass("[%s] %s answers with ETag, Last-Modified and the cache policy", major.label, exampleStaticAsset)
+
+    replayed := client.callWithHeaderList("GET", exampleStaticAsset, "", "", map[string]string{
+        "If-None-Match": etag,
+    }, "")
+    if http.StatusNotModified != replayed.statusCode {
+        fail("[%s] replaying the ETag answered %d, wanted 304", major.label, replayed.statusCode)
+    }
+    if "" != replayed.body {
+        fail("[%s] the 304 carried %d bytes of body", major.label, len(replayed.body))
+    }
+    pass("[%s] a replayed ETag is answered 304 with no body", major.label)
+
+    stale := client.callWithHeaderList("GET", exampleStaticAsset, "", "", map[string]string{
+        "If-None-Match": `"not-the-etag"`,
+    }, "")
+    if http.StatusOK != stale.statusCode {
+        fail("[%s] a stale ETag answered %d, wanted the asset again", major.label, stale.statusCode)
+    }
+    pass("[%s] a stale ETag is answered the asset again", major.label)
+
+    dated := client.callWithHeaderList("GET", exampleStaticAsset, "", "", map[string]string{
+        "If-Modified-Since": lastModified,
+    }, "")
+    if http.StatusNotModified != dated.statusCode {
+        fail("[%s] replaying Last-Modified answered %d, wanted 304", major.label, dated.statusCode)
+    }
+    pass("[%s] a replayed Last-Modified is answered 304", major.label)
+
+    /* the negative that separates the precedence from a date-only implementation: the date says unchanged,
+    the ETag says stale, and an implementation consulting the date despite the offered ETag answers 304 here */
+    precedence := client.callWithHeaderList("GET", exampleStaticAsset, "", "", map[string]string{
+        "If-None-Match":     `"not-the-etag"`,
+        "If-Modified-Since": lastModified,
+    }, "")
+    if http.StatusOK != precedence.statusCode {
+        fail("[%s] a stale ETag beside a matching date answered %d, wanted 200 — If-Modified-Since was consulted despite the offered ETag", major.label, precedence.statusCode)
+    }
+    pass("[%s] the offered ETag silences If-Modified-Since, as the precedence demands", major.label)
 }
 
 /* assertExampleCorsPreflight asks the browser's question before a cross-origin POST: OPTIONS with the origin

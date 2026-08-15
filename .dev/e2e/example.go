@@ -46,15 +46,19 @@ type exampleMajor struct {
     the demos here as well would spend a budget another section is counting. */
     integrationDemos bool
     /* showcaseProbes and sessionRestartProbe gate the wirings only the v1 example carries — cors, gzip,
-    the api-key firewall, per-field validation errors, the trusted-proxy client address and the file-backed
-    session storage. The three examples deliberately do not mirror each other, so these are per-major
-    capabilities like integrationDemos, not shared surface. */
+    the api-key firewall, per-field validation errors, the trusted-proxy client address, the file-backed
+    session storage and the static cache validators. The three examples deliberately do not mirror each
+    other, so these are per-major capabilities like integrationDemos, not shared surface. */
     showcaseProbes      bool
     sessionRestartProbe bool
+    /* journalOnPostgres names where the major keeps its catalog journal: the v1 example runs two live
+    databases in one process — the catalogue on mysql, the journal on postgres — so its out-of-band
+    journal reads go through the postgres door while the later majors keep reading mysql. */
+    journalOnPostgres bool
 }
 
 var exampleMajorCatalog = []exampleMajor{
-    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true},
+    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, journalOnPostgres: true},
     {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true},
     {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false},
 }
@@ -136,7 +140,7 @@ which is what keeps the coverage repeatable:
 The binary is built UNTAGGED on purpose: under melody_env_embedded the env files are baked in at build time from
 the example directory, so a .env.local written into the workspace afterwards would be ignored and the
 application would fight the supervised one for :8080. */
-func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDsn string) {
+func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDsn string, postgresDsn string) {
     workspace := filepath.Join(os.TempDir(), "melody-e2e-example-"+major.label)
 
     prepareExampleWorkspace(major, workspace)
@@ -156,7 +160,7 @@ func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDs
     waitForExampleReadiness(major, application)
     pass("[%s] built from %s and answered %s on port %d", major.label, major.relativeDirectory, exampleReadinessRoute, major.port)
 
-    runExampleHttpAssertions(major, application, redisAddress, mysqlDsn)
+    runExampleHttpAssertions(major, application, redisAddress, mysqlDsn, postgresDsn)
     runExampleCliAssertions(major, workspace)
 
     if true == major.sessionRestartProbe {
@@ -583,7 +587,7 @@ var exampleSyncedIconList = []string{
     "/assets/apple-touch-icon.png",
 }
 
-func runExampleHttpAssertions(major exampleMajor, application *exampleApplication, redisAddress string, mysqlDsn string) {
+func runExampleHttpAssertions(major exampleMajor, application *exampleApplication, redisAddress string, mysqlDsn string, postgresDsn string) {
     client := newExampleClient(major)
 
     assertExamplePublicRoutes(major, client)
@@ -601,7 +605,7 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
     /* the demo routes sit under the example's ROLE_USER catch-all, so they are driven here — between the
     login and the logout — with the session the login flow established */
     if true == major.integrationDemos {
-        runExampleIntegrationAssertions(major, client, application, redisAddress, mysqlDsn)
+        runExampleIntegrationAssertions(major, client, application, redisAddress, mysqlDsn, postgresDsn)
     }
 
     assertExampleLogout(major, client)

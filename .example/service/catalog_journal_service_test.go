@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/.example/repository"
     melodyclock "github.com/precision-soft/melody/clock"
     melodycontainer "github.com/precision-soft/melody/container"
+    melodycontainercontract "github.com/precision-soft/melody/container/contract"
     melodyruntime "github.com/precision-soft/melody/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/security"
@@ -36,6 +37,21 @@ func (instance *collectingJournalRepository) Latest(ctx context.Context, limit i
 
 func (instance *collectingJournalRepository) Count(ctx context.Context) (int, error) {
     return len(instance.entries), nil
+}
+
+/* lazyHandleOver wraps the stub in the same lazy handle production wiring hands the service, over a container that answers the stub by the journal's service name. */
+func lazyHandleOver(journalRepository repository.CatalogJournalRepository) *melodycontainer.LazyService[repository.CatalogJournalRepository] {
+    serviceContainer := melodycontainer.NewContainer()
+
+    melodycontainer.MustRegister[repository.CatalogJournalRepository](
+        serviceContainer,
+        repository.ServiceCatalogJournalRepository,
+        func(resolver melodycontainercontract.Resolver) (repository.CatalogJournalRepository, error) {
+            return journalRepository, nil
+        },
+    )
+
+    return melodycontainer.Lazy[repository.CatalogJournalRepository](serviceContainer, repository.ServiceCatalogJournalRepository)
 }
 
 /* runtimeWithToken hands back a runtime carrying the security context the http kernel publishes, holding the token the caller names. A nil token asks for a context that has one declared and none set, which is a shape the resolution path can produce and the actor has to answer for. */
@@ -93,7 +109,7 @@ func TestCatalogJournalServiceStampsTheEntryWithTheInjectedClockInUtc(t *testing
     frozen := time.Date(2026, time.August, 14, 3, 30, 0, 0, time.FixedZone("plus-three", 3*60*60))
 
     journalRepository := &collectingJournalRepository{}
-    journalService := NewCatalogJournalService(journalRepository, melodyclock.NewFrozenClock(frozen))
+    journalService := NewCatalogJournalService(lazyHandleOver(journalRepository), melodyclock.NewFrozenClock(frozen))
 
     err := journalService.Record(
         runtimeWithToken(t, melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"})),
@@ -134,7 +150,7 @@ func TestCatalogJournalServiceStampsTheEntryWithTheInjectedClockInUtc(t *testing
 
 func TestCatalogJournalServiceReportsAFailingAppend(t *testing.T) {
     journalRepository := &collectingJournalRepository{appendErr: errors.New("the journal is unreachable")}
-    journalService := NewCatalogJournalService(journalRepository, melodyclock.NewFrozenClock(time.Now()))
+    journalService := NewCatalogJournalService(lazyHandleOver(journalRepository), melodyclock.NewFrozenClock(time.Now()))
 
     err := journalService.Record(
         runtimeWithToken(t, melodysecurity.NewAuthenticatedToken("user-2", nil)),
@@ -182,5 +198,55 @@ func TestActorFromRuntimeNamesTheSignedInUser(t *testing.T) {
 
     if "user-3" != ActorFromRuntime(runtimeInstance) {
         t.Fatalf("unexpected actor: %q", ActorFromRuntime(runtimeInstance))
+    }
+}
+
+func TestCatalogJournalServiceReportsAFailingResolution(t *testing.T) {
+    serviceContainer := melodycontainer.NewContainer()
+    melodycontainer.MustRegister[repository.CatalogJournalRepository](
+        serviceContainer,
+        repository.ServiceCatalogJournalRepository,
+        func(resolver melodycontainercontract.Resolver) (repository.CatalogJournalRepository, error) {
+            return nil, errors.New("the journal database is unreachable")
+        },
+    )
+    handle := melodycontainer.Lazy[repository.CatalogJournalRepository](serviceContainer, repository.ServiceCatalogJournalRepository)
+
+    journalService := NewCatalogJournalService(handle, melodyclock.NewFrozenClock(time.Now()))
+
+    err := journalService.Record(
+        runtimeWithToken(t, melodysecurity.NewAuthenticatedToken("user-2", nil)),
+        repository.CatalogJournalActionCreated,
+        CatalogJournalSubjectProduct,
+        "prod-1",
+    )
+
+    if nil == err {
+        t.Fatal("a journal whose database refused the dial was reported as a success")
+    }
+}
+
+/* the scoped attribution and the runtime fallback answer the same actor on a real request by construction, so the preference is proven with a deliberately DIFFERENT scoped answer: only the scoped door can produce it, and the runtime door alone would answer user-2 */
+func TestRecordPrefersTheScopedAttributionOverTheRuntime(t *testing.T) {
+    runtimeInstance := runtimeWithToken(t, melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"}))
+    runtimeInstance.Scope().MustOverrideProtectedInstance(ServiceChangeAttribution, NewChangeAttribution("scoped-actor"))
+
+    journalRepository := &collectingJournalRepository{}
+    journalService := NewCatalogJournalService(lazyHandleOver(journalRepository), melodyclock.NewFrozenClock(time.Now()))
+
+    if err := journalService.Record(
+        runtimeInstance,
+        repository.CatalogJournalActionCreated,
+        CatalogJournalSubjectProduct,
+        "prod-1",
+    ); nil != err {
+        t.Fatalf("record the entry: %v", err)
+    }
+
+    if 1 != len(journalRepository.entries) {
+        t.Fatalf("expected one entry, got %d", len(journalRepository.entries))
+    }
+    if "scoped-actor" != journalRepository.entries[0].Actor {
+        t.Fatalf("expected the scoped attribution to win, got %q", journalRepository.entries[0].Actor)
     }
 }
