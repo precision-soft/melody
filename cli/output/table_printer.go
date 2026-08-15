@@ -7,7 +7,14 @@ import (
     "strings"
     "time"
     "unicode/utf8"
+
+    "github.com/precision-soft/melody/internal"
 )
+
+/* escapeLine keeps a single-line channel single-line and inert on a terminal: the summary lines, titles, warnings and error texts carry values an http client may have written earlier, and an embedded carriage return or escape sequence would repaint or forge what the report appears to say. The escaping is visible rather than silent — the operator reads \x1b where the terminal would have obeyed it. */
+func escapeLine(value string) string {
+    return internal.EscapeControlCharacters(value)
+}
 
 const TableRowSeparatorToken = "__melody_table_separator__"
 
@@ -62,7 +69,7 @@ func (instance *TablePrinter) Print(
     writer = tracking
 
     if false == option.Quiet {
-        _, _ = fmt.Fprintf(writer, "COMMAND: %s\n", envelope.Meta.Command)
+        _, _ = fmt.Fprintf(writer, "COMMAND: %s\n", escapeLine(envelope.Meta.Command))
         _, _ = fmt.Fprintf(
             writer,
             "STARTED AT: %s\n",
@@ -84,7 +91,7 @@ func (instance *TablePrinter) Print(
 
     if nil != envelope.Table {
         for _, line := range envelope.Table.SummaryLines {
-            _, _ = fmt.Fprintln(writer, line)
+            _, _ = fmt.Fprintln(writer, escapeLine(line))
         }
         if 0 != len(envelope.Table.SummaryLines) {
             _, _ = fmt.Fprintln(writer)
@@ -92,7 +99,7 @@ func (instance *TablePrinter) Print(
 
         for _, block := range envelope.Table.Blocks {
             if "" != block.Title {
-                _, _ = fmt.Fprintln(writer, block.Title)
+                _, _ = fmt.Fprintln(writer, escapeLine(block.Title))
             }
 
             instance.printTableBlock(writer, block)
@@ -105,7 +112,7 @@ func (instance *TablePrinter) Print(
     if 0 != len(envelope.Warnings) {
         _, _ = fmt.Fprintln(writer, "WARNINGS:")
         for _, warning := range envelope.Warnings {
-            _, _ = fmt.Fprintf(writer, "- %s\n", warning.Message)
+            _, _ = fmt.Fprintf(writer, "- %s\n", escapeLine(warning.Message))
 
             if true == option.Verbose && nil != warning.Details && 0 != len(warning.Details) {
                 keys := make([]string, 0, len(warning.Details))
@@ -115,7 +122,7 @@ func (instance *TablePrinter) Print(
                 sort.Strings(keys)
 
                 for _, key := range keys {
-                    _, _ = fmt.Fprintf(writer, "  %s: %v\n", key, warning.Details[key])
+                    _, _ = fmt.Fprintf(writer, "  %s: %s\n", escapeLine(key), escapeLine(fmt.Sprintf("%v", warning.Details[key])))
                 }
             }
         }
@@ -123,16 +130,16 @@ func (instance *TablePrinter) Print(
 
     /* the error is rendered whole, and regardless of quiet: this printer is the only presentation the default format has, and an envelope failure that renders nowhere leaves the red one-line echo as the entire report — the code, the details and the cause existed only here */
     if nil != envelope.Error {
-        _, _ = fmt.Fprintf(writer, "ERROR: %s\n", envelope.Error.Message)
+        _, _ = fmt.Fprintf(writer, "ERROR: %s\n", escapeLine(envelope.Error.Message))
 
         if "" != envelope.Error.Code {
-            _, _ = fmt.Fprintf(writer, "  code: %s\n", envelope.Error.Code)
+            _, _ = fmt.Fprintf(writer, "  code: %s\n", escapeLine(envelope.Error.Code))
         }
 
         instance.printSortedDetails(writer, envelope.Error.Details, "  ")
 
         if nil != envelope.Error.Cause {
-            _, _ = fmt.Fprintf(writer, "  cause: %s\n", envelope.Error.Cause.Message)
+            _, _ = fmt.Fprintf(writer, "  cause: %s\n", escapeLine(envelope.Error.Cause.Message))
             instance.printSortedDetails(writer, envelope.Error.Cause.Details, "    ")
         }
     }
@@ -156,11 +163,13 @@ func (instance *TablePrinter) printSortedDetails(writer io.Writer, details map[s
     sort.Strings(keys)
 
     for _, key := range keys {
-        _, _ = fmt.Fprintf(writer, "%s%s: %v\n", indent, key, details[key])
+        _, _ = fmt.Fprintf(writer, "%s%s: %s\n", indent, escapeLine(key), escapeLine(fmt.Sprintf("%v", details[key])))
     }
 }
 
 func (instance *TablePrinter) printTableBlock(writer io.Writer, block TableBlock) {
+    block = sanitizeTableBlock(block)
+
     columnWidths := instance.calculateColumnWidthsWithMaxWidth(block, instance.tableMaxWidth)
 
     instance.printRowWrapped(writer, block.Columns, columnWidths)
@@ -182,6 +191,35 @@ func (instance *TablePrinter) printTableBlock(writer io.Writer, block TableBlock
 
         instance.printRowWrapped(writer, row, columnWidths)
         previousWasSeparator = false
+    }
+}
+
+/* sanitizeTableBlock escapes the control characters of every column and cell before the widths are measured, so the escaped spelling is the one the width arithmetic counts and the one the wrap slices — escaping at print time instead would render wider than it measured. A newline stays a real line break, because a cell renders multi-line on purpose, and a separator row keeps its token so the separator detection still recognizes it. */
+func sanitizeTableBlock(block TableBlock) TableBlock {
+    sanitizedColumns := make([]string, len(block.Columns))
+    for index, column := range block.Columns {
+        sanitizedColumns[index] = internal.EscapeControlCharactersKeepingNewlines(column)
+    }
+
+    sanitizedRows := make([][]string, len(block.Rows))
+    for rowIndex, row := range block.Rows {
+        if 1 == len(row) && TableRowSeparatorToken == row[0] {
+            sanitizedRows[rowIndex] = row
+
+            continue
+        }
+
+        sanitizedRow := make([]string, len(row))
+        for cellIndex, cell := range row {
+            sanitizedRow[cellIndex] = internal.EscapeControlCharactersKeepingNewlines(cell)
+        }
+        sanitizedRows[rowIndex] = sanitizedRow
+    }
+
+    return TableBlock{
+        Title:   block.Title,
+        Columns: sanitizedColumns,
+        Rows:    sanitizedRows,
     }
 }
 

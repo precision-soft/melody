@@ -902,3 +902,65 @@ func TestAggregateCliErrors_ARealExitLinkKeepsItsCode(t *testing.T) {
         t.Fatalf("expected the command's exit code to survive the aggregation, got %d", exitError.ExitCode())
     }
 }
+
+/* the no-color run is the clean proof, because the colored branch writes the framework's own ansi codes around the data: under --no-color every escape byte in the output can only have come from the data, and the flag's comment promises a redirected file free of them. The negative assertions are what the eye cannot check — a raw \r and a raw escape byte render invisibly. */
+func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(callbackRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return errors.New("import failed for row \x1b[42m\x1b[2K\r====== [import:run] [finished] [success]")
+        },
+    }
+
+    written, runErr := runRegisteredCommandWithRuntime(
+        runtimeInstance,
+        command,
+        []string{"--format=table", "--no-color"},
+    )
+    if nil == runErr {
+        t.Fatalf("expected the failing command to surface its error")
+    }
+
+    if true == strings.Contains(written, "\x1b") {
+        t.Fatalf("expected no raw escape byte under --no-color, got %q", written)
+    }
+    if true == strings.Contains(written, "\r") {
+        t.Fatalf("expected no raw carriage return under --no-color, got %q", written)
+    }
+    if false == strings.Contains(written, `\x1b[42m\x1b[2K\r======`) {
+        t.Fatalf("expected the escaped spelling of the payload, got %q", written)
+    }
+}
+
+func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+
+    command := &testCommand{
+        nameValue:        "hello\x1b[2J",
+        descriptionValue: "hello command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(callbackRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    written, runErr := runRegisteredCommandWithRuntime(
+        runtimeInstance,
+        command,
+        []string{"--format=table", "--no-color"},
+    )
+    if nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if true == strings.Contains(written, "\x1b") {
+        t.Fatalf("expected no raw escape byte under --no-color, got %q", written)
+    }
+    if false == strings.Contains(written, `hello\x1b[2J`) {
+        t.Fatalf("expected the escaped command name spelling, got %q", written)
+    }
+}

@@ -2,6 +2,7 @@ package logging
 
 import (
     "errors"
+    "fmt"
     "log"
     "strings"
 
@@ -51,10 +52,11 @@ func LogError(logger loggingcontract.Logger, err error) {
         enrichedContext := enrichContextWithCause(exceptionValue)
 
         if nil == logger || true == internal.IsNilInterface(logger) {
+            /* the same one-record-one-line guarantee the default logger holds: this fallback writes through the raw standard logger, so the escaping is its own duty */
             if 0 < len(enrichedContext) {
-                log.Printf("[%s] %s context=%v", levelUpper, exceptionValue.Message(), enrichedContext)
+                log.Printf("[%s] %s context=%v", levelUpper, internal.EscapeControlCharacters(exceptionValue.Message()), internal.EscapeControlCharacters(fmt.Sprintf("%v", enrichedContext)))
             } else {
-                log.Printf("[%s] %s", levelUpper, exceptionValue.Message())
+                log.Printf("[%s] %s", levelUpper, internal.EscapeControlCharacters(exceptionValue.Message()))
             }
 
             return
@@ -68,9 +70,9 @@ func LogError(logger loggingcontract.Logger, err error) {
 
     if nil == logger || true == internal.IsNilInterface(logger) {
         if 0 < len(enrichedContext) {
-            log.Printf("[ERROR] %s context=%v", err.Error(), enrichedContext)
+            log.Printf("[ERROR] %s context=%v", internal.EscapeControlCharacters(err.Error()), internal.EscapeControlCharacters(fmt.Sprintf("%v", enrichedContext)))
         } else {
-            log.Printf("[ERROR] %s", err.Error())
+            log.Printf("[ERROR] %s", internal.EscapeControlCharacters(err.Error()))
         }
 
         return

@@ -5,6 +5,7 @@ import (
     "errors"
     "io/fs"
     "os"
+    "sync/atomic"
 
     applicationcontract "github.com/precision-soft/melody/application/contract"
     clicontract "github.com/precision-soft/melody/cli/contract"
@@ -45,6 +46,8 @@ type Application struct {
     unboundedDefaultCacheBackend bool
     /* set when the framework had to supply the session storage itself; paired with an unbounded session ttl it is the same unbounded growth, reached from the request path rather than from anything the application wrote */
     defaultInMemorySessionStorage bool
+    /* claimed by the one close that performs the teardown: the container's own closedness cannot answer "was it me", because two concurrent closes both probe it open before either enters Close, and both would then report the single failure as their own incident */
+    closePerformerClaimed atomic.Bool
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {

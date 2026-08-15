@@ -153,3 +153,25 @@ func TestNewDefaultLoggerWithLabels_CopiesTheLabelsTheCallerKeeps(t *testing.T) 
         t.Fatalf("expected the caller's later write not to reach the logger, got %q", written)
     }
 }
+
+/* one record stays one line: an unescaped line break would end the record and start a fully-formed fake one at whatever level the payload names, and a line-oriented shipper would ingest it as genuine. */
+func TestDefaultLogger_KeepsOneRecordOneLine(t *testing.T) {
+    logger := NewDefaultLogger()
+
+    written := captureStandardLog(func() {
+        logger.Info(
+            "login failed for user bob\n[EMERGENCY] authentication subsystem disabled",
+            loggingcontract.Context{"input": "a\rb"},
+        )
+    })
+
+    if 1 != strings.Count(written, "\n") {
+        t.Fatalf("expected exactly one line, got %q", written)
+    }
+    if true == strings.Contains(written, "\n[EMERGENCY]") {
+        t.Fatalf("expected the forged record to stay inside the real one, got %q", written)
+    }
+    if false == strings.Contains(written, `bob\n[EMERGENCY]`) || false == strings.Contains(written, `a\rb`) {
+        t.Fatalf("expected the escaped spellings, got %q", written)
+    }
+}

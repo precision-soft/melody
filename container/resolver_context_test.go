@@ -459,3 +459,90 @@ func TestResolverContext_CarriesTheContainerThroughTheCarrierDoor(t *testing.T) 
         t.Fatalf("expected the provider's resolver to carry the container, got %v", carried)
     }
 }
+
+type resolverContextGraphDependency struct{}
+
+type resolverContextGraphParent struct {
+    dependency *resolverContextGraphDependency
+}
+
+type resolverContextGraphControlParent struct {
+    dependency *resolverContextGraphDependency
+}
+
+/* the container's dependency graph is never pruned and its teardown walks only container-created representatives, so an edge recorded under a scoped parent would sit there unread for the life of the process — one permanent entry per distinct scoped name. The container-parent edge asserted beside it is the control that the filter removed only the scoped writes. */
+func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    serviceContainer.MustRegister(
+        "app.container.dependency",
+        func(resolver containercontract.Resolver) (*resolverContextGraphDependency, error) {
+            return &resolverContextGraphDependency{}, nil
+        },
+    )
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.parent",
+        func(resolver containercontract.Resolver) (*resolverContextGraphParent, error) {
+            dependency, getErr := resolver.Get("app.container.dependency")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            /* the by-type door runs the same filter at its own site, so both writes are exercised by the one scoped parent */
+            if _, getByTypeErr := resolver.GetByType(reflect.TypeOf((*resolverContextGraphDependency)(nil))); nil != getByTypeErr {
+                return nil, getByTypeErr
+            }
+
+            return &resolverContextGraphParent{dependency: dependency.(*resolverContextGraphDependency)}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+    defer scopeInstance.Close()
+
+    if _, getErr := scopeInstance.Get("app.scoped.parent"); nil != getErr {
+        t.Fatalf("unexpected scoped resolution error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    scopedKeys := make([]string, 0)
+    for dependentKey := range serviceContainer.dependencyGraph {
+        if true == isScopedNodeKey(dependentKey) {
+            scopedKeys = append(scopedKeys, dependentKey)
+        }
+    }
+    serviceContainer.mutex.Unlock()
+
+    if 0 != len(scopedKeys) {
+        t.Fatalf("expected the container graph to hold no scope-keyed dependent, got %v", scopedKeys)
+    }
+
+    serviceContainer.MustRegister(
+        "app.container.parent",
+        func(resolver containercontract.Resolver) (*resolverContextGraphControlParent, error) {
+            dependency, getErr := resolver.Get("app.container.dependency")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &resolverContextGraphControlParent{dependency: dependency.(*resolverContextGraphDependency)}, nil
+        },
+    )
+
+    if _, getErr := serviceContainer.Get("app.container.parent"); nil != getErr {
+        t.Fatalf("unexpected container resolution error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    containerParentDependencies, containerParentRecorded := serviceContainer.dependencyGraph["service:app.container.parent"]
+    _, containerEdgeRecorded := containerParentDependencies["service:app.container.dependency"]
+    serviceContainer.mutex.Unlock()
+
+    if false == containerParentRecorded || false == containerEdgeRecorded {
+        t.Fatalf("expected the container parent's edge to its dependency to be recorded")
+    }
+}

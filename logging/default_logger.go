@@ -5,6 +5,7 @@ import (
     "log"
     "sort"
 
+    "github.com/precision-soft/melody/internal"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
@@ -31,7 +32,13 @@ func (instance *defaultLogger) Log(level loggingcontract.Level, message string, 
         context = loggingcontract.Context{}
     }
 
-    log.Printf("[%s] %s %s", instance.levelLabels.LabelFor(level), message, instance.formatContext(context))
+    /* one record stays one line: the message and the context values regularly embed request-derived text, and an unescaped line break would end this record and start a fully-formed fake one at whatever level the payload names — the json sibling gets the same guarantee from its encoder */
+    log.Printf(
+        "[%s] %s %s",
+        instance.levelLabels.LabelFor(level),
+        internal.EscapeControlCharacters(message),
+        internal.EscapeControlCharacters(instance.formatContext(context)),
+    )
 }
 
 func (instance *defaultLogger) Debug(message string, context loggingcontract.Context) {

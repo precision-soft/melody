@@ -218,7 +218,8 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
     instance.containerInstance.mutex.Lock()
     defer instance.containerInstance.mutex.Unlock()
 
-    if "" != parentKey && false == isScopedNodeKey(nodeKey) {
+    /* a scoped parent writes no edge into the container's graph: the teardown walks that graph only over container-created representatives, so a scope-keyed dependent is skipped there, while the scope's own teardown reads only the scope's graph — the entry would never be consulted, and the container's graph is never pruned, so a live-scope registration under a request-derived name would leave one permanent entry per name for the life of the process */
+    if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
         instance.containerInstance.registerDependencyLocked(
             parentKey,
             nodeKey,
@@ -463,7 +464,8 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     instance.containerInstance.mutex.Lock()
     defer instance.containerInstance.mutex.Unlock()
 
-    if "" != parentKey && false == isScopedNodeKey(nodeKey) {
+    /* the same parent filter as the by-name path: a scope-keyed dependent is skipped by the container teardown and the entry is never pruned, so recording it would only grow the graph */
+    if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
         instance.containerInstance.registerDependencyLocked(
             parentKey,
             nodeKey,

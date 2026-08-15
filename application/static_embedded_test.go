@@ -180,3 +180,20 @@ func TestNewStaticFileServerOptions_PathOutsideTheExclusionIsStillServedFromTheB
         t.Fatalf("expected the embedded body, got %q", string(body))
     }
 }
+
+type staticTestTypedNilFs struct{}
+
+func (instance *staticTestTypedNilFs) Open(name string) (fs.File, error) {
+    return nil, fs.ErrNotExist
+}
+
+/* the assertion is on the refusal's own message, because a typed nil that passes the guard still panics downstream as an anonymous nil dereference — a test satisfied by any panic could not tell the named refusal from the crash it exists to replace */
+func TestNewStaticFileServerOptions_RefusesATypedNilFs(t *testing.T) {
+    configuration := newStaticExclusionTestConfiguration(t, map[string]string{})
+
+    var typedNilFs *staticTestTypedNilFs
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = newStaticFileServerOptions(typedNilFs, configuration)
+    }, "embedded public files are not provided")
+}

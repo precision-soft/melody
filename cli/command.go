@@ -121,6 +121,9 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 }
 
                 printGreenStatusLine := func(writer io.Writer, text string) {
+                    /* the text embeds the command's own error, which routinely echoes downstream and client-derived values: escaped here, an embedded carriage return or escape sequence cannot repaint the status line as another verdict, and the no-color branch keeps the promise above — no escape codes reach a redirected file through the data either */
+                    text = internal.EscapeControlCharacters(text)
+
                     if true == noColor {
                         _, _ = fmt.Fprintf(writer, "%s\n", text)
 
@@ -139,6 +142,8 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 }
 
                 printRedStatusLine := func(writer io.Writer, text string) {
+                    text = internal.EscapeControlCharacters(text)
+
                     if true == noColor {
                         _, _ = fmt.Fprintf(writer, "%s\n", text)
 

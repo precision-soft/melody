@@ -434,3 +434,92 @@ func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
         t.Fatalf("expected the first write failure, got %v", printErr)
     }
 }
+
+/* the negative assertions are the proof: a raw escape byte or carriage return in the output would be obeyed by the terminal, and both render identically to the eye in a green test that only checks the positive spelling. */
+func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope.SetError(
+        "cmd.failed",
+        "open failed: file\rERROR: disk gone\x1b[2J",
+        nil,
+        nil,
+    )
+    envelope.AddWarning("warning.code", "careful\x1b]0;pwned\x07", nil)
+    envelope.Table = &TableData{
+        SummaryLines: []string{"listing\rforged"},
+    }
+
+    buffer := &bytes.Buffer{}
+
+    printErr := NewDefaultTablePrinter().Print(buffer, envelope, DefaultOption())
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+
+    for _, forbidden := range []string{"\x1b", "\r", "\x07"} {
+        if true == strings.Contains(written, forbidden) {
+            t.Fatalf("expected no raw control character in the output, found %q in %q", forbidden, written)
+        }
+    }
+
+    for _, expected := range []string{`file\rERROR: disk gone\x1b[2J`, `careful\x1b]0;pwned\x07`, `listing\rforged`} {
+        if false == strings.Contains(written, expected) {
+            t.Fatalf("expected the escaped spelling %q in %q", expected, written)
+        }
+    }
+}
+
+/* the escaping runs before the widths are measured, so the escaped spelling is what the alignment counts — escaped at print time instead, the cell renders wider than it measured and the row breaks out of its column. */
+func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope.Table = &TableData{
+        Blocks: []TableBlock{
+            {
+                Columns: []string{"NAME", "NOTE"},
+                Rows: [][]string{
+                    {"widget\x1b[31m", "plain"},
+                    {"other", "row"},
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+
+    option := DefaultOption()
+    option.Quiet = true
+
+    printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+
+    if true == strings.Contains(written, "\x1b") {
+        t.Fatalf("expected no raw escape byte in the table, got %q", written)
+    }
+    if false == strings.Contains(written, `widget\x1b[31m`) {
+        t.Fatalf("expected the escaped cell spelling, got %q", written)
+    }
+
+    rowWidth := -1
+    for _, line := range strings.Split(written, "\n") {
+        if false == strings.HasPrefix(line, "|") {
+            continue
+        }
+
+        lineWidth := utf8.RuneCountInString(line)
+        if -1 == rowWidth {
+            rowWidth = lineWidth
+
+            continue
+        }
+
+        if rowWidth != lineWidth {
+            t.Fatalf("expected every table row to hold the same width, got %d and %d in %q", rowWidth, lineWidth, written)
+        }
+    }
+}

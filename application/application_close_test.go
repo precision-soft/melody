@@ -127,3 +127,48 @@ func TestApplicationClose_ATypedNilKernelHasNothingToTearDown(t *testing.T) {
         t.Fatalf("expected a typed-nil kernel to close cleanly, got %v", closeErr)
     }
 }
+
+/* two closes racing each other must present one teardown failure as one incident: the container's closedness probe alone cannot decide, because both callers read it open before either enters Close, and both then receive the memoized failure. The claim admits exactly one performer on every schedule, so the assertion that matters is the negative one — never two reports. */
+func TestApplicationClose_ConcurrentClosesReportOneFailureOnce(t *testing.T) {
+    kernelInstance := newTestKernel()
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.failing.close",
+        func(resolver containercontract.Resolver) (*failingCloseProbe, error) {
+            return &failingCloseProbe{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.failing.close"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    startLine := make(chan struct{})
+    results := make(chan error, 2)
+
+    for index := 0; 2 > index; index++ {
+        go func() {
+            <-startLine
+            results <- applicationInstance.close()
+        }()
+    }
+
+    close(startLine)
+
+    reportedFailures := 0
+    for index := 0; 2 > index; index++ {
+        if closeErr := <-results; nil != closeErr {
+            reportedFailures = reportedFailures + 1
+        }
+    }
+
+    if 1 != reportedFailures {
+        t.Fatalf("expected the one teardown failure to be reported exactly once, got %d reports", reportedFailures)
+    }
+}

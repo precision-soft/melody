@@ -21,6 +21,9 @@ func (instance *Application) close() error {
 
     serviceContainer := instance.kernel.ServiceContainer()
 
+    /* the claim decides between two closes of THIS application racing each other; the probe still decides against a container somebody else closed directly, which the claim cannot see. Two concurrent closes both probe the container open, so without the claim both would read the memoized failure as their own discovery. */
+    isClosePerformer := instance.closePerformerClaimed.CompareAndSwap(false, true)
+
     alreadyClosed := false
     closedChecker, isChecker := serviceContainer.(interface{ IsClosed() bool })
     if true == isChecker {
@@ -29,7 +32,7 @@ func (instance *Application) close() error {
 
     serviceContainerCloseErr := serviceContainer.Close()
 
-    if nil != serviceContainerCloseErr && false == alreadyClosed {
+    if nil != serviceContainerCloseErr && true == isClosePerformer && false == alreadyClosed {
         emergencyLogger.Emergency("failed to close service container", exception.LogContext(serviceContainerCloseErr))
 
         logging.CloseEmergencyLogger()
