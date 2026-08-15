@@ -508,6 +508,42 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
 
+        /* a request path that folds to a different spelling is refused before the security dispatch below runs and before the handler: the router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule. Refused here — not routed, not authorized, not handled — the router, the firewall matchers and the access control never disagree about which resource this is. A trailing slash is not a fold and is not refused; requestPathIsCanonical states the boundary exactly. */
+        if false == requestPathIsCanonical(request.URL.Path) {
+            requestLogger.Warning(
+                "request path refused before the handler",
+                loggingcontract.Context{
+                    "method": request.Method,
+                    "path":   request.URL.Path,
+                },
+            )
+
+            finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusBadRequest, "bad request", nil)
+
+            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
+            _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
+            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
+
+            /* the swapped-out response body is closed so a file-backed body is not leaked */
+            if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
+                closeDiscardedResponseBody(finalResponse, requestLogger)
+            }
+
+            finalResponse = kernelResponseEvent.Response()
+            finalResponse = writeResponse(
+                runtimeInstance,
+                melodyRequest,
+                writer,
+                finalResponse,
+                sessionManager,
+                sessionInstance,
+                instance.options.ForwardedHeadersPolicy,
+                instance.options.SessionCookiePolicy,
+            )
+
+            return
+        }
+
         /* a urlencoded body whose read or parse failed never populated the form, so the handler would see a syntactically valid request whose form is simply empty — an oversized or malformed submission processed as an empty one and answered 200. It is refused the way the json binding path refuses the identical condition: 413 when the size limit stopped the read, 400 for a body the client broke. */
         if nil != melodyRequest.bodyReadErr {
             requestLogger.Warning(

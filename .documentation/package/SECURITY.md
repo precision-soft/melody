@@ -99,7 +99,7 @@ Userland code must treat `token.IsAuthenticated()` as the canonical guard for ac
 
 1. **Exact match** (`NewAccessControlExactRule`)
 2. **Prefix match** (`NewAccessControlRule` / `NewAccessControlRuleWithSegmentPrefix`) with **longest prefix wins**
-3. **Regex match** (`NewAccessControlRegexRule`) with **first match wins** (declaration order)
+3. **Regex match** (`NewAccessControlRegexRule`) with **first match wins** (declaration order). The pattern is **unanchored** — it matches as a substring of the canonicalized path, so `"/public"` also matches `/admin/public-notes`. Anchor a rule that names one section: `"^/public(/|$)"`. This is the opposite of a route requirement, which melody anchors for you.
 4. **Fallback** rule with an empty prefix (if present)
 
 This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).

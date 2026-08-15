@@ -464,8 +464,8 @@ Where the list itself comes from is the application's business — a constant as
     * [`HtmlResponse`](../../http/response.go)
     * [`TextResponse`](../../http/response.go)
     * [`EmptyResponse`](../../http/response.go)
-    * [`FileResponse`](../../http/response.go)
-    * [`AttachmentResponse`](../../http/response.go)
+    * [`FileResponse`](../../http/response.go) — opens the path as given, with no containment check; never hand it a path built from client input without confining the name to a known directory first (see the GoDoc)
+    * [`AttachmentResponse`](../../http/response.go) — `FileResponse` plus a `Content-Disposition`; the same path-safety caveat applies
     * [`BuildContentDisposition`](../../http/response.go)
     * [`RedirectResponse`](../../http/response.go)
     * [`RedirectFound`](../../http/response.go)

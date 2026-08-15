@@ -60,11 +60,11 @@ func TestGenerateEtag_TheWeakFormDiffersOnlyByItsPrefix(t *testing.T) {
     strong := GenerateEtag(info, false)
     weak := GenerateEtag(info, true)
 
-    if `"1024-1754049600"` != strong {
+    if `"1024-1754049600000000000"` != strong {
         t.Fatalf("unexpected strong tag: %s", strong)
     }
 
-    if `W/"1024-1754049600"` != weak {
+    if `W/"1024-1754049600000000000"` != weak {
         t.Fatalf("unexpected weak tag: %s", weak)
     }
 
@@ -86,6 +86,18 @@ func TestGenerateEtag_ChangesWithEitherTheSizeOrTheModificationTime(t *testing.T
 
     if base == retouched {
         t.Fatalf("expected a different modification time to produce a different tag")
+    }
+}
+
+/* two rewrites within the same second that keep the same length must still produce different tags:
+at whole-second resolution they did not, so a deploy that swapped a bundle for one of the same size
+revalidated 304 and stayed served stale until its length or its second changed */
+func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
+    earlier := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 100000000)}, false)
+    later := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 900000000)}, false)
+
+    if earlier == later {
+        t.Fatalf("expected a sub-second modification-time change to produce a different tag, got %q for both", earlier)
     }
 }
 

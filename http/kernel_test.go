@@ -2697,3 +2697,65 @@ func TestKernel_OpenRequestScopesIsReleasedWhenTheHandlerPanics(t *testing.T) {
         t.Fatalf("expected the panicking request to release its scope, got %d", kernelInstance.OpenRequestScopes())
     }
 }
+
+func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
+    handlerRan := false
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/admin/*path...",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerRan = true
+            return TextResponse(nethttp.StatusOK, "admin"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    /* the path folds to "/login", which the access-control matcher would authorize as a different
+    rule than the admin handler the router reaches; the kernel must refuse it before either runs */
+    request := httptest.NewRequest(nethttp.MethodGet, "/admin/x/../../login", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusBadRequest != recorder.Code {
+        t.Fatalf("expected a non-canonical path to be refused with %d, got %d", nethttp.StatusBadRequest, recorder.Code)
+    }
+
+    if true == handlerRan {
+        t.Fatalf("the handler ran for a non-canonical path that should have been refused before routing to it")
+    }
+}
+
+func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
+    handlerRan := false
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/admin/*path...",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerRan = true
+            return TextResponse(nethttp.StatusOK, "admin"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/admin/secret", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected a canonical path to reach the handler with %d, got %d", nethttp.StatusOK, recorder.Code)
+    }
+
+    if false == handlerRan {
+        t.Fatalf("the handler did not run for a canonical path")
+    }
+}

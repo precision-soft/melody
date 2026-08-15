@@ -8,7 +8,9 @@ import (
     "github.com/precision-soft/melody/version"
 )
 
-/* GenerateEtag derives the entity tag from the size and the modification time, and from the size and the BUILD VERSION for a filesystem that carries no modification time. An embedded filesystem is that filesystem: every FileInfo it hands out reports the zero instant, so the size-and-time form degenerated into size alone — identical across every rebuild — and a redeployed asset that kept its length (a version string, a colour, a bundle that re-minified to the same size) revalidated 304 and stayed served stale for the life of the deployment. The build version is the coarser but honest stand-in: every asset revalidates once after a deploy and no asset of the previous build survives it. A filesystem that does report times is unaffected and keeps the per-file tag. */
+/* GenerateEtag derives the entity tag from the size and the modification time, and from the size and the BUILD VERSION for a filesystem that carries no modification time. An embedded filesystem is that filesystem: every FileInfo it hands out reports the zero instant, so the size-and-time form degenerated into size alone — identical across every rebuild — and a redeployed asset that kept its length (a version string, a colour, a bundle that re-minified to the same size) revalidated 304 and stayed served stale for the life of the deployment. The build version is the coarser but honest stand-in: every asset revalidates once after a deploy and no asset of the previous build survives it.
+
+The modification time is read at NANOSECOND resolution. At the whole second the Unix form used, two rewrites within the same second that kept the same length produced an identical tag — a deploy that swapped a bundle for one of the same size revalidated 304 and stayed served stale until its length or its second changed. If-None-Match carries this tag and takes precedence over If-Modified-Since, so the finer tag catches the change the second-resolution Last-Modified cannot. A filesystem whose FileInfo reports only whole seconds keeps the whole-second tag; nothing is lost. */
 func GenerateEtag(info fs.FileInfo, weak bool) string {
     if nil == info {
         return ""
@@ -18,7 +20,7 @@ func GenerateEtag(info fs.FileInfo, weak bool) string {
         return formatEtag(fmt.Sprintf("%d-%s", info.Size(), version.BuildVersion()), weak)
     }
 
-    return formatEtag(fmt.Sprintf("%d-%d", info.Size(), info.ModTime().Unix()), weak)
+    return formatEtag(fmt.Sprintf("%d-%d", info.Size(), info.ModTime().UnixNano()), weak)
 }
 
 func formatEtag(etag string, weak bool) string {

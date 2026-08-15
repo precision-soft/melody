@@ -18,6 +18,14 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### HTTP: a request path that folds to a different spelling is refused with 400
+
+**What changed.** The kernel now refuses, with `400`, a request whose path is not canonical — one carrying a `..` or `.` segment, or an empty `//` segment — before it is routed or authorized. A trailing slash is not a fold and still routes as before (`/admin/` reaches the `/admin` route). The router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule: `GET /admin/x/../../login` reached a catch-all `/admin` handler while `/login`'s public rule granted it. The refusal closes that by keeping the router, the firewall matchers and the access control reading one spelling.
+
+**Symptom.** A client — typically a non-browser one, since browsers fold before sending — that sends a path containing `..`, `.` or `//` is answered `400 bad request` where the request was previously routed to a handler.
+
+**Remedy.** Send the canonical path: the folded form the `..`/`.`/`//` resolves to is the resource the client meant. Browsers already do this; a hand-written client or a proxy that forwards a raw target should fold the path itself (Go's `net/http.ServeMux` does the same by redirecting). There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, so it is a defect, not a preference.
+
 ### Application: a shutdown that leaves request scopes open exits non-zero
 
 **What changed.** After `Shutdown` returns, melody waits — under the same `MELODY_HTTP_SHUTDOWN_TIMEOUT` budget — for every request scope the http kernel opened to close. A drain that does not finish is recorded as `http shutdown left request scopes open`, carrying the count, and `Run` ends non-zero.

@@ -8,6 +8,7 @@ import (
     "net"
     nethttp "net/http"
     "net/netip"
+    stdpath "path"
     "reflect"
     "strings"
     "syscall"
@@ -232,6 +233,36 @@ func splitNormalizedPath(value string) []string {
     }
 
     return strings.Split(normalizedPath, "/")
+}
+
+/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer
+reads the same. The router matches the path as sent — splitNormalizedPath drops trailing slashes but
+folds no dot or empty segment — while the access-control matcher folds "..", "." and "//" through
+path.Clean before it selects a rule, and the firewall matcher reads the raw path with neither fold.
+A path that folds to a different spelling therefore routes to one handler and is authorized against
+another rule, so a request that reaches a protected handler under its sent spelling can be granted the
+attributes of the folded spelling's rule — a different, possibly public one, or none at all. The
+static file server already refuses a non-canonical path for exactly this reason; refusing at the
+kernel keeps the router, the firewall matchers and the access control reading one spelling.
+
+A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route
+"/admin", so it is normalized away here before the comparison rather than refused. A target that does
+not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and
+is left to the router to answer. */
+func requestPathIsCanonical(path string) bool {
+    if false == strings.HasPrefix(path, "/") {
+        return true
+    }
+
+    trimmedPath := path
+    if 1 < len(trimmedPath) {
+        trimmedPath = strings.TrimRight(trimmedPath, "/")
+        if "" == trimmedPath {
+            trimmedPath = "/"
+        }
+    }
+
+    return stdpath.Clean(trimmedPath) == trimmedPath
 }
 
 /* writeResponse persists the session, emits the session cookie and writes the response, and returns the response it actually wrote: a session-storage outage on the save path replaces the caller's response with an empty 500, and the caller publishes the returned value — the terminate event and the access log then report the status the client received rather than the response the handler produced. The replacement is a fresh response, so headers a kernel.response listener set on the original do not survive onto it, and the session cookie is suppressed deliberately. */
