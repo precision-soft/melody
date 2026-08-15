@@ -999,6 +999,18 @@ func resolveEntryLogPath(
         )
     }
 
+    /* a LogFileName carrying a subdirectory ("nightly/report.log") stays within the logs dir and passes the guard above, but nothing else ever creates that subdirectory — and under system cron the shell aborts the whole command when the >> redirection cannot create its file, so the scheduled job silently never runs. The destination side already creates its parent the same way. */
+    if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
+        return "", exception.NewError(
+            "cron: could not create the log file directory",
+            exceptioncontract.Context{
+                "command":   commandName,
+                "directory": filepath.Dir(joined),
+            },
+            mkdirErr,
+        )
+    }
+
     return joined, nil
 }
 

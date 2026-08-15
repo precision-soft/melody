@@ -62,6 +62,10 @@ func (instance *UserService) List() ([]*entity.User, error) {
 }
 
 func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyUserById(id)
 
     cached, rememberErr := melodycache.Remember(
@@ -99,8 +103,9 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 }
 
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
+    /* CacheSafeIdentifier also refuses the empty spelling, so the blank-username answer travels through the same door */
     normalizedUsername := repository.NormalizedUsername(username)
-    if "" == normalizedUsername {
+    if false == CacheSafeIdentifier(normalizedUsername) {
         return nil, false, nil
     }
 
@@ -185,6 +190,8 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
+    previousUsername := user.Username
+
     user.Username = username
     user.Password = passwordHash
     user.Roles = roles
@@ -197,7 +204,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(user)
+    updatedEvent := event.NewUserUpdatedEvent(user, previousUsername)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,

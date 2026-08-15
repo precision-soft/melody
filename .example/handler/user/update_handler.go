@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/.example/entity"
     "github.com/precision-soft/melody/.example/presenter"
+    "github.com/precision-soft/melody/.example/repository"
     "github.com/precision-soft/melody/.example/security"
     "github.com/precision-soft/melody/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
@@ -54,6 +55,11 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         normalizedUsername := strings.TrimSpace(dto.Username)
         if "" != normalizedUsername {
+            /* the same spelling door the create handler holds: the username becomes a cache key component */
+            if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must not contain spaces or newlines and must stay within 255 bytes"), nil
+            }
+
             if normalizedUsername != targetUser.Username {
                 otherUser, otherExists, otherFindErr := userService.FindByUsername(normalizedUsername)
                 if nil != otherFindErr {
@@ -74,12 +80,20 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         normalizedPassword := strings.TrimSpace(dto.Password)
         if "" != normalizedPassword {
+            if security.PasswordMaximumBytes < len(normalizedPassword) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
+            }
+
             passwordHash, hashErr := security.HashPassword(normalizedPassword)
             if nil != hashErr {
                 return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
             }
 
             targetUser.Password = passwordHash
+        }
+
+        if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
         }
 
         targetUser.Roles = normalizeRoles(dto.Roles)

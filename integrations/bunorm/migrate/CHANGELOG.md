@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Behavioural:** the text rendering escapes C0 control characters and DEL visibly (`\n`, `\r`, `\t`, the rest as `\xNN`) in every string it did not write itself — the error text off the wire, the failed statement, the query names, the DATABASE identity block the server answers and the migration names — before the terminal sees them, and before the table cells are measured, so the alignment counts the escaped spelling. A server whose error carried an escape sequence could repaint the operator's terminal or forge lines in a captured log; the failed statement alone keeps its real line breaks, which are the readability of the query block, with every other control byte escaped. The json rendering is untouched — its encoder escapes on its own
+- `db:rollback` answers the held migration lock with the same remedy-naming refusal `db:migrate` already answered: which manager, which locks table, and that `db:unlock` clears a lock a crashed process left behind. It used to return bun's bare error, which states that a lock exists and nothing else; the bun error stays the cause, so `errors.Is` still reaches it
+
 ### Added
 
 - under `--format=json` every command renders the one machine-readable document the declared flag always promised: the accumulated blocks as data, the side-reports as warnings, the failure inside the envelope's error. The flag was declared and validated by `StandardFlags` long before it was honoured — `db:status --format=json | jq` failed on the first byte of a plain-text table while the cli runner had already silenced its banner on the json promise

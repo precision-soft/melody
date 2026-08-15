@@ -132,3 +132,48 @@ func TestValidateUserField_RefusesEveryUnicodeSpace(t *testing.T) {
         }
     }
 }
+
+/* the divergent verdicts mirror the live measurement on busybox 1.37: DayOfWeek "0-6" beside DayOfMonth "16" ran only on the 16th under busybox while the crontab-dialect matcher answered due every day, and the check is semantic — both models evaluated over every day combination — so the agreeing pairs prove the refusal does not overreach. */
+func TestBusyboxDayFieldsDiverge_FlagsThePairsBusyboxRunsDifferently(t *testing.T) {
+    divergent := map[string][2]string{
+        "full-coverage day of week beside a restricted day of month": {"16", "0-6"},
+        "full-coverage via the sunday alias":                         {"16", "0-7"},
+        "stepped wildcard day of month beside a restricted weekday":  {"*/2", "1"},
+        "full-coverage day of month beside a restricted weekday":     {"1-31", "1"},
+        "two stepped wildcards":                                      {"*/2", "*/2"},
+    }
+
+    for name, pair := range divergent {
+        if false == busyboxDayFieldsDiverge(pair[0], pair[1]) {
+            t.Fatalf("%s: expected the pair (%q, %q) to diverge", name, pair[0], pair[1])
+        }
+    }
+}
+
+func TestBusyboxDayFieldsDiverge_PassesThePairsEveryTargetReadsAlike(t *testing.T) {
+    agreeing := map[string][2]string{
+        "both plain wildcards":                            {"*", "*"},
+        "restricted day of month beside a plain wildcard": {"15", "*"},
+        "restricted weekday beside a plain wildcard":      {"*", "1"},
+        "two restricted partial fields":                   {"15", "1"},
+        "stepped wildcard beside a plain wildcard":        {"*/2", "*"},
+        "full-coverage weekday beside a plain wildcard":   {"*", "0-6"},
+    }
+
+    for name, pair := range agreeing {
+        if true == busyboxDayFieldsDiverge(pair[0], pair[1]) {
+            t.Fatalf("%s: expected the pair (%q, %q) to agree", name, pair[0], pair[1])
+        }
+    }
+}
+
+/* a spelling that does not parse is left to validateScheduleFields, whose refusal names the field; answering divergent here would bury that message under the busybox one */
+func TestBusyboxDayFieldsDiverge_LeavesAMalformedFieldToTheScheduleValidation(t *testing.T) {
+    if true == busyboxDayFieldsDiverge("not-a-field", "1") {
+        t.Fatal("a malformed day of month must not be reported as busybox divergence")
+    }
+
+    if true == busyboxDayFieldsDiverge("1", "not-a-field") {
+        t.Fatal("a malformed day of week must not be reported as busybox divergence")
+    }
+}

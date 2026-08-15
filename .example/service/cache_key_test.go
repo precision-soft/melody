@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+    "strings"
+    "testing"
+)
 
 /* The key is what ties a cached user to the entries the listeners drop. Four callers reach it — the service that fills the entry and the three listeners that clear it — so the fold has to live HERE rather than beside each call: a caller that forgot it would write under one key and clear under another, and a renamed or deleted user would go on being served from the cache with nothing to say so. */
 func TestCacheKeyUserByUsernameFoldsWhateverItIsGiven(t *testing.T) {
@@ -42,6 +45,29 @@ func TestCacheKeysDoNotCollideAcrossKinds(t *testing.T) {
             if listKey == key {
                 t.Fatalf("the %s list shares a key with a single %s", listKey, kind)
             }
+        }
+    }
+}
+
+/* the predicate mirrors the backend key grammar — no space, no newline, bounded length — so a finder can answer absent instead of asking the cache a question it would refuse with an error the door renders as a 500 */
+func TestCacheSafeIdentifierMirrorsTheBackendKeyGrammar(t *testing.T) {
+    refused := map[string]string{
+        "empty":    "",
+        "space":    "a b",
+        "newline":  "a\nb",
+        "oversize": strings.Repeat("x", 256),
+    }
+
+    for name, identifier := range refused {
+        if true == CacheSafeIdentifier(identifier) {
+            t.Fatalf("%s: expected %q refused", name, identifier)
+        }
+    }
+
+    accepted := []string{"product-1", "café", strings.Repeat("x", 255)}
+    for _, identifier := range accepted {
+        if false == CacheSafeIdentifier(identifier) {
+            t.Fatalf("expected %q accepted", identifier)
         }
     }
 }

@@ -60,6 +60,10 @@ func (instance *CategoryService) List() ([]*entity.Category, error) {
 }
 
 func (instance *CategoryService) FindById(id string) (*entity.Category, bool, error) {
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyCategoryById(id)
 
     cached, rememberErr := melodycache.Remember(

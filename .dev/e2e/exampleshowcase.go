@@ -30,6 +30,7 @@ func runExampleShowcaseAssertions(major exampleMajor, application *exampleApplic
     assertExampleApiKeyFirewall(major)
     assertExampleGzipCompression(major)
     assertExampleValidationAnswersPerField(major, application)
+    assertExampleIdentityAndGrammarDoors(major, application)
     assertExampleForwardedAddressKeysTheLimiter(major, application, redisAddress)
     assertExampleStaticCacheValidators(major)
 }
@@ -349,4 +350,129 @@ func assertExampleForwardedAddressKeysTheLimiter(major exampleMajor, application
     pass("[%s] the throttled write was budgeted against the forwarded address %s (out-of-band redis key)", major.label, exampleShowcaseForwardedFor)
 
     resetExampleRateLimitCounters("["+major.label+"] forwarded-address probe", redisAddress, prefix)
+}
+
+/* assertExampleIdentityAndGrammarDoors proves, over the wire, the two identity repairs only the database can
+fake and only the cache can hide. The accent probe: the user table's collation folds accents ('café' = 'cafe'
+under utf8mb4_0900_ai_ci), so before the binary-collation comparison a login under the accent-stripped
+spelling authenticated a user nobody created under it; the rename probe: the by-username cache entry carries
+no ttl, so before the previous-username invalidation the OLD spelling kept signing in from the cache after a
+rename. Both proofs are the NEGATIVE — the refused login — beside the positive control that the proper
+spelling works; the grammar probe: a product id carrying an interior space used to land in the database and
+then poison every later cache write, so the door must answer 400 and the listing must never carry it. */
+func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *exampleApplication) {
+    editor := exampleEditorClient(major, application)
+
+    spaced := editor.call(
+        "POST",
+        "/products/api/create/",
+        "application/json",
+        "application/json",
+        `{"id":"probe id","name":"Probe","description":"probe","categoryId":"cat-1","price":1,"currencyId":"cur-eur","stock":1}`,
+    )
+    if http.StatusBadRequest != spaced.statusCode {
+        fail("[%s] a product id with an interior space answered %d, wanted 400: %s", major.label, spaced.statusCode, exampleTruncate(spaced.body))
+    }
+
+    listing := editor.call("GET", "/products/api/read/", "application/json", "", "")
+    if http.StatusOK != listing.statusCode {
+        fail("[%s] the product listing answered %d after the refused create", major.label, listing.statusCode)
+    }
+    if true == strings.Contains(listing.body, "probe id") {
+        fail("[%s] the refused product id reached the catalogue anyway", major.label)
+    }
+    pass("[%s] a product id the cache-key grammar refuses is turned away 400 before the row lands", major.label)
+
+    admin := newExampleClient(major)
+    adminSignIn := admin.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("admin", "admin"))
+    if http.StatusOK != adminSignIn.statusCode {
+        fail("[%s] the seeded admin could not sign in (%d): %s", major.label, adminSignIn.statusCode, exampleTruncate(adminSignIn.body))
+    }
+
+    /* the user table persists between runs, so a probe user a failed run left behind would turn the create
+    below into "username already exists"; both spellings the probe ever writes are removed first */
+    removeExampleProbeUsers(major, admin, "café-probe", "cafe-probe-renamed")
+
+    created := admin.call(
+        "POST",
+        "/users/api/create/",
+        "application/json",
+        "application/json",
+        `{"username":"café-probe","password":"probe-pass","roles":["ROLE_USER"]}`,
+    )
+    if http.StatusCreated != created.statusCode {
+        fail("[%s] creating the accented probe user answered %d: %s", major.label, created.statusCode, exampleTruncate(created.body))
+    }
+
+    createdUser := struct {
+        Id string `json:"id"`
+    }{}
+    decodeExampleData(major.label, "/users/api/create/", created.body, &createdUser)
+
+    stripped := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("cafe-probe", "probe-pass"))
+    if http.StatusUnauthorized != stripped.statusCode {
+        fail("[%s] the accent-stripped spelling signed in (%d) — the lookup is riding the column collation again", major.label, stripped.statusCode)
+    }
+
+    properClient := newExampleClient(major)
+    proper := properClient.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
+    if http.StatusOK != proper.statusCode {
+        fail("[%s] the proper accented spelling could not sign in (%d): %s", major.label, proper.statusCode, exampleTruncate(proper.body))
+    }
+    pass("[%s] the accent-stripped spelling authenticates nobody while the proper one signs in", major.label)
+
+    renamed := admin.call(
+        "PUT",
+        "/users/api/update/"+createdUser.Id+"/",
+        "application/json",
+        "application/json",
+        `{"username":"cafe-probe-renamed","password":"","roles":["ROLE_USER"]}`,
+    )
+    if http.StatusOK != renamed.statusCode {
+        fail("[%s] renaming the probe user answered %d: %s", major.label, renamed.statusCode, exampleTruncate(renamed.body))
+    }
+
+    oldSpelling := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
+    if http.StatusUnauthorized != oldSpelling.statusCode {
+        fail("[%s] the pre-rename spelling still signs in (%d) — the ttl-less cache entry survived the rename", major.label, oldSpelling.statusCode)
+    }
+
+    newSpelling := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("cafe-probe-renamed", "probe-pass"))
+    if http.StatusOK != newSpelling.statusCode {
+        fail("[%s] the renamed spelling could not sign in (%d): %s", major.label, newSpelling.statusCode, exampleTruncate(newSpelling.body))
+    }
+    pass("[%s] a rename closes the old spelling's door and opens the new one", major.label)
+
+    deleted := admin.call("DELETE", "/users/api/delete/"+createdUser.Id+"/", "application/json", "", "")
+    if http.StatusOK != deleted.statusCode {
+        fail("[%s] removing the probe user answered %d: %s", major.label, deleted.statusCode, exampleTruncate(deleted.body))
+    }
+}
+
+/* removeExampleProbeUsers deletes every listed username through the admin api, tolerating absence: it exists
+for the probe rows a failed earlier run may have left in the persistent user table. */
+func removeExampleProbeUsers(major exampleMajor, admin *exampleClient, usernames ...string) {
+    listing := admin.call("GET", "/users/api/read/", "application/json", "", "")
+    if http.StatusOK != listing.statusCode {
+        fail("[%s] the user listing answered %d during probe cleanup: %s", major.label, listing.statusCode, exampleTruncate(listing.body))
+    }
+
+    users := []struct {
+        Id       string `json:"id"`
+        Username string `json:"username"`
+    }{}
+    decodeExampleData(major.label, "/users/api/read/", listing.body, &users)
+
+    for _, user := range users {
+        for _, username := range usernames {
+            if username != user.Username {
+                continue
+            }
+
+            deleted := admin.call("DELETE", "/users/api/delete/"+user.Id+"/", "application/json", "", "")
+            if http.StatusOK != deleted.statusCode {
+                fail("[%s] removing the leftover probe user %q answered %d: %s", major.label, user.Username, deleted.statusCode, exampleTruncate(deleted.body))
+            }
+        }
+    }
 }

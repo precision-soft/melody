@@ -199,6 +199,29 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
         return "", scheduleValidationErr
     }
 
+    /* the user-less dialect targets busybox crond, which classifies a day field by its expanded values where vixie reads the spelling's first character — so a day-field pair the two daemons read differently is refused at generation, the same way the stepped single value is: emitting it would run one schedule in-process and another on the box. */
+    if false == includeUserColumn && nil != entry.Schedule {
+        dayOfMonthExpression := fieldOrWildcard(entry.Schedule.DayOfMonth)
+        dayOfWeekExpression := normalizeCronNameTokens(fieldOrWildcard(entry.Schedule.DayOfWeek), cronDayOfWeekNameValues)
+
+        if true == busyboxDayFieldsDiverge(dayOfMonthExpression, dayOfWeekExpression) {
+            return "", exception.NewError(
+                fmt.Sprintf(
+                    "cron: entry %q pairs day fields (DayOfMonth %q, DayOfWeek %q) that busybox crond — the scheduler the user-less crontab dialect targets — runs as a different schedule than vixie crond and the in-process runner: busybox classifies a day field by its expanded values, so a field admitting every value is unused and the other governs alone, while vixie reads the first character; restrict a single day field and leave the other as the plain wildcard so every target reads the same schedule",
+                    entry.Name,
+                    dayOfMonthExpression,
+                    dayOfWeekExpression,
+                ),
+                exceptioncontract.Context{
+                    "entry":      entry.Name,
+                    "dayOfMonth": dayOfMonthExpression,
+                    "dayOfWeek":  dayOfWeekExpression,
+                },
+                ErrBusyboxDivergentDaySchedule,
+            )
+        }
+    }
+
     var commandPart string
     if 0 < len(entry.Command) {
         if "" == strings.Join(entry.Command, "") {

@@ -107,42 +107,51 @@ type migrationPrinter struct {
 }
 
 func (instance *migrationPrinter) printExecuting(prefix string, queryName string) {
+    escapedQueryName := escapeControlCharacters(queryName, false)
+
     if instance.noColor {
-        _, _ = fmt.Fprintf(instance.writer, "%s executing: %s\n", prefix, queryName)
+        _, _ = fmt.Fprintf(instance.writer, "%s executing: %s\n", prefix, escapedQueryName)
         return
     }
 
-    _, _ = fmt.Fprintf(instance.writer, "%s%s%s executing: %s\n", cli.AnsiCyan, prefix, cli.AnsiReset, queryName)
+    _, _ = fmt.Fprintf(instance.writer, "%s%s%s executing: %s\n", cli.AnsiCyan, prefix, cli.AnsiReset, escapedQueryName)
 }
 
 func (instance *migrationPrinter) printCompleted(prefix string, queryName string) {
+    escapedQueryName := escapeControlCharacters(queryName, false)
+
     if instance.noColor {
-        _, _ = fmt.Fprintf(instance.writer, "%s completed: %s\n", prefix, queryName)
+        _, _ = fmt.Fprintf(instance.writer, "%s completed: %s\n", prefix, escapedQueryName)
         return
     }
 
-    _, _ = fmt.Fprintf(instance.writer, "%s%s%s completed: %s%s%s\n", cli.AnsiCyan, prefix, cli.AnsiReset, cli.AnsiGreen, queryName, cli.AnsiReset)
+    _, _ = fmt.Fprintf(instance.writer, "%s%s%s completed: %s%s%s\n", cli.AnsiCyan, prefix, cli.AnsiReset, cli.AnsiGreen, escapedQueryName, cli.AnsiReset)
 }
 
+/* printFailed escapes what it did not write itself before the terminal sees it: the error text came off the wire, and the statement — kept multi-line on purpose, its line breaks are the readability — may carry any byte the migration author or the driver put there. */
 func (instance *migrationPrinter) printFailed(prefix string, queryName string, err error, sql string) {
+    escapedQueryName := escapeControlCharacters(queryName, false)
+    escapedErrorMessage := escapeControlCharacters(err.Error(), false)
+    escapedSql := escapeControlCharacters(sql, true)
+
     if instance.noColor {
-        _, _ = fmt.Fprintf(instance.writer, "%s FAILED: %s\n", prefix, queryName)
-        _, _ = fmt.Fprintf(instance.writer, "%s ERROR: %s\n", prefix, err.Error())
-        _, _ = fmt.Fprintf(instance.writer, "%s QUERY:\n%s\n", prefix, formatQueryForLog(sql))
+        _, _ = fmt.Fprintf(instance.writer, "%s FAILED: %s\n", prefix, escapedQueryName)
+        _, _ = fmt.Fprintf(instance.writer, "%s ERROR: %s\n", prefix, escapedErrorMessage)
+        _, _ = fmt.Fprintf(instance.writer, "%s QUERY:\n%s\n", prefix, formatQueryForLog(escapedSql))
         return
     }
 
     _, _ = fmt.Fprintf(instance.writer, "%s%s%s %sFAILED:%s %s\n",
         cli.AnsiCyan, prefix, cli.AnsiReset,
         cli.AnsiRed, cli.AnsiReset,
-        queryName,
+        escapedQueryName,
     )
     _, _ = fmt.Fprintf(instance.writer, "%s%s ERROR: %s%s\n",
-        cli.AnsiRed, cli.AnsiBold, err.Error(), cli.AnsiReset,
+        cli.AnsiRed, cli.AnsiBold, escapedErrorMessage, cli.AnsiReset,
     )
     _, _ = fmt.Fprintf(instance.writer, "%s QUERY:%s\n%s%s%s\n",
         cli.AnsiYellow, cli.AnsiReset,
-        cli.AnsiYellow, formatQueryForLog(sql), cli.AnsiReset,
+        cli.AnsiYellow, formatQueryForLog(escapedSql), cli.AnsiReset,
     )
 }
 

@@ -1,6 +1,7 @@
 package cron
 
 import (
+    "errors"
     "strings"
     "testing"
 )
@@ -922,5 +923,60 @@ func TestCrontabTemplateStillRequiresTheUser(t *testing.T) {
 
     if _, err := Render(entries, RenderOptions{}); nil == err {
         t.Fatalf("expected the /etc/cron.d dialect to keep requiring a user")
+    }
+}
+
+/* the day-field pair is the one the live measurement on busybox 1.37 ran as a different schedule (only the 16th) than the crontab-dialect matcher (every day); the name spelling proves the refusal reads the folded day-of-week the emitted line carries */
+func TestCrontabNoUserTemplateRefusesBusyboxDivergentDayFields(t *testing.T) {
+    schedules := map[string]*Schedule{
+        "numeric full-coverage weekday": {Minute: "0", Hour: "0", DayOfMonth: "16", DayOfWeek: "0-6"},
+        "named full-coverage weekday":   {Minute: "0", Hour: "0", DayOfMonth: "16", DayOfWeek: "sun-sat"},
+        "stepped wildcard day of month": {Minute: "0", Hour: "0", DayOfMonth: "*/2", DayOfWeek: "1"},
+    }
+
+    for name, schedule := range schedules {
+        entries := []Entry{
+            {
+                Name:     "busybox-divergent",
+                Binary:   "/usr/local/bin/app",
+                Args:     []string{"tick"},
+                Schedule: schedule,
+            },
+        }
+
+        _, err := defaultCrontabNoUserTemplate.Render(entries, RenderOptions{})
+        if nil == err {
+            t.Fatalf("%s: expected the user-less dialect to refuse the divergent day pair", name)
+        }
+
+        if false == errors.Is(err, ErrBusyboxDivergentDaySchedule) {
+            t.Fatalf("%s: expected ErrBusyboxDivergentDaySchedule, got: %v", name, err)
+        }
+
+        if false == strings.Contains(err.Error(), "busybox") {
+            t.Fatalf("%s: the refusal must name the scheduler it protects, got: %v", name, err)
+        }
+    }
+}
+
+/* the same pair stays renderable for /etc/cron.d: vixie reads it exactly as the in-process matcher does, so only the busybox-target dialect refuses it */
+func TestCrontabTemplateKeepsTheDivergentPairForTheUserColumnDialect(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:     "vixie-job",
+            User:     "deploy",
+            Binary:   "/usr/local/bin/app",
+            Args:     []string{"tick"},
+            Schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "16", DayOfWeek: "0-6"},
+        },
+    }
+
+    content, err := defaultCrontabTemplate.Render(entries, RenderOptions{})
+    if nil != err {
+        t.Fatalf("expected the user-column dialect to keep the pair, got: %v", err)
+    }
+
+    if false == strings.Contains(content, "0 0 16 * 0-6 deploy /usr/local/bin/app tick") {
+        t.Fatalf("unexpected content:\n%s", content)
     }
 }

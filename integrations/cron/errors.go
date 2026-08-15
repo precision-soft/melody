@@ -17,6 +17,7 @@ var (
     ErrForbiddenCharacter                 = errors.New("cron: token contains forbidden character")
     ErrFieldContainsWhitespace            = errors.New("cron: field contains whitespace")
     ErrSteppedSingleValue                 = errors.New("cron: field steps a single value, which the target schedulers read differently")
+    ErrBusyboxDivergentDaySchedule        = errors.New("cron: day fields mean a different schedule under busybox crond")
     ErrInvalidSchedule                    = errors.New("cron: schedule field is not a valid cron expression")
     ErrUnknownScheduledCommand            = errors.New("cron: scheduled command has no matching registered command")
     ErrUnsupportedRunnerEntry             = errors.New("cron: the in-process runner supports only name-scheduled single-instance entries")

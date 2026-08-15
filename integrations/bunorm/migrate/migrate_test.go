@@ -604,3 +604,38 @@ func TestRunQueries_ReadsTheInstalledProcessDefault(t *testing.T) {
         t.Fatalf("expected the installed no-color posture to strip the escape codes, got %q", rendered)
     }
 }
+
+/* the failure rendering hands the terminal three foreign strings — the query name, the driver's error text and the statement — so each is escaped visibly, and the statement alone keeps its real line breaks, which are the readability of the query block. */
+func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    printer := &migrationPrinter{writer: buffer, noColor: true}
+
+    printer.printFailed(
+        "[migration:up] add_users [1/1]",
+        "create\rtable",
+        errors.New("server said\x1b[2J"),
+        "CREATE TABLE users (\n    id INT\x07\n)",
+    )
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, `create\rtable`) {
+        t.Fatalf("expected the query name escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, `server said\x1b[2J`) {
+        t.Fatalf("expected the error text escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, `INT\x07`) {
+        t.Fatalf("expected the statement's control byte escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "       CREATE TABLE users (\n") {
+        t.Fatalf("expected the statement to keep its real line breaks, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\x1b") || true == strings.Contains(rendered, "\x07") {
+        t.Fatalf("a raw control byte reached the terminal:\n%s", rendered)
+    }
+}

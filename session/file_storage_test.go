@@ -1377,3 +1377,54 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
         t.Fatalf("expected an empty snapshot after every session was deleted, got %d", len(reopened.sessionById))
     }
 }
+
+/* a hard kill between CreateTemp and the rename skips every cleanup path, and each orphan is a complete snapshot of every live session; the sweep runs at construction, where the per-process ownership the session documentation states means nothing else can be mid-rename over this path */
+func TestNewFileStorageFromPath_SweepsTheOrphanTemporaryFiles(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "session.json")
+
+    orphanPath := filepath.Join(directory, "session.json.123456.tmp")
+    if writeErr := os.WriteFile(orphanPath, []byte("{}"), 0600); nil != writeErr {
+        t.Fatalf("could not plant the orphan: %v", writeErr)
+    }
+
+    unrelatedPath := filepath.Join(directory, "other.json.123456.tmp")
+    if writeErr := os.WriteFile(unrelatedPath, []byte("{}"), 0600); nil != writeErr {
+        t.Fatalf("could not plant the unrelated file: %v", writeErr)
+    }
+
+    storage, storageErr := NewFileStorageFromPath(path)
+    if nil != storageErr {
+        t.Fatalf("unexpected construction error: %v", storageErr)
+    }
+    defer func() {
+        _ = storage.Close()
+    }()
+
+    if _, statErr := os.Stat(orphanPath); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected the orphan temp file swept away, stat answered %v", statErr)
+    }
+
+    if _, statErr := os.Stat(unrelatedPath); nil != statErr {
+        t.Fatalf("a file outside this storage's temp spelling was touched: %v", statErr)
+    }
+}
+
+func TestSyncSessionDirectory_AnswersTheDirectoryItCouldNotOpen(t *testing.T) {
+    missing := filepath.Join(t.TempDir(), "absent")
+
+    syncErr := syncSessionDirectory(missing)
+    if nil == syncErr {
+        t.Fatal("expected the missing directory to be refused")
+    }
+
+    if false == strings.Contains(syncErr.Error(), "fsync") {
+        t.Fatalf("expected the refusal to name the fsync step, got %v", syncErr)
+    }
+}
+
+func TestSyncSessionDirectory_AcceptsARealDirectory(t *testing.T) {
+    if syncErr := syncSessionDirectory(t.TempDir()); nil != syncErr {
+        t.Fatalf("unexpected error over a real directory: %v", syncErr)
+    }
+}

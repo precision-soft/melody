@@ -171,6 +171,77 @@ func exampleSteppedRangeOf(item string, fieldName string) string {
     return item[:slashIndex] + "-" + maximum + item[slashIndex:]
 }
 
+/* busyboxDayFieldsDiverge reports whether busybox crond would run this pair of day fields under a different rule than vixie crond and the in-process matcher. The two daemons classify a day field differently: vixie reads the spelling's first character — a star-based field counts as unrestricted — while busybox reads the expanded value set — a field admitting every value counts as unused and the other field alone governs (measured on busybox 1.37: DayOfWeek "0-6" beside DayOfMonth "16" runs only on the 16th, where vixie and the matcher run every day). The check is semantic rather than a shape list: both models are evaluated over every day-of-month / day-of-week combination and any disagreement is the divergence, so a pair the two daemons happen to read identically — a stepped wildcard beside the plain one, or "0-6" beside it — passes. It expects fields that already passed validateScheduleFields; a spelling that does not parse is answered as non-divergent and left to that refusal. */
+func busyboxDayFieldsDiverge(dayOfMonthExpression string, dayOfWeekExpression string) bool {
+    dayOfMonth, dayOfMonthErr := parseCronField(dayOfMonthExpression, cronFieldBounds{name: "DayOfMonth", minimum: dayOfMonthMinimum, maximum: dayOfMonthMaximum})
+    if nil != dayOfMonthErr {
+        return false
+    }
+
+    dayOfWeek, dayOfWeekErr := parseCronField(dayOfWeekExpression, cronFieldBounds{name: "DayOfWeek", minimum: dayOfWeekMinimum, maximum: dayOfWeekMaximum})
+    if nil != dayOfWeekErr {
+        return false
+    }
+
+    /* the same Sunday fold the matcher applies: a field naming 7 also matches 0 */
+    if true == dayOfWeek.allowed[dayOfWeekMaximum] {
+        dayOfWeek.allowed[dayOfWeekSunday] = true
+    }
+
+    dayOfMonthUnusedForBusybox := fieldCoversWholeRange(dayOfMonth, dayOfMonthMinimum, dayOfMonthMaximum)
+    dayOfWeekUnusedForBusybox := fieldCoversWholeRange(dayOfWeek, dayOfWeekSunday, dayOfWeekMaximumKubernetes)
+
+    vixieCombinesWithOr := false == dayOfMonth.starBased && false == dayOfWeek.starBased
+
+    for dayValue := dayOfMonthMinimum; dayValue <= dayOfMonthMaximum; dayValue++ {
+        for weekdayValue := dayOfWeekSunday; weekdayValue <= dayOfWeekMaximumKubernetes; weekdayValue++ {
+            dayMatches := dayOfMonth.allowed[dayValue]
+            weekdayMatches := dayOfWeek.allowed[weekdayValue]
+
+            vixieFires := dayMatches && weekdayMatches
+            if true == vixieCombinesWithOr {
+                vixieFires = dayMatches || weekdayMatches
+            }
+
+            busyboxFires := busyboxDayDecision(dayMatches, dayOfMonthUnusedForBusybox, weekdayMatches, dayOfWeekUnusedForBusybox)
+
+            if vixieFires != busyboxFires {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+/* fieldCoversWholeRange reports whether the field admits every value of its range — the busybox classification of an unused day field, which reads the expanded set rather than the spelling. */
+func fieldCoversWholeRange(field cronFieldMatcher, minimum int, maximum int) bool {
+    for value := minimum; value <= maximum; value = value + 1 {
+        if false == field.allowed[value] {
+            return false
+        }
+    }
+
+    return true
+}
+
+/* busyboxDayDecision is busybox crond's FixDayDow rule: both day fields unused fires every day, exactly one used lets it govern alone, and two used fields combine with or. */
+func busyboxDayDecision(dayMatches bool, dayUnused bool, weekdayMatches bool, weekdayUnused bool) bool {
+    if true == dayUnused && true == weekdayUnused {
+        return true
+    }
+
+    if true == dayUnused {
+        return weekdayMatches
+    }
+
+    if true == weekdayUnused {
+        return dayMatches
+    }
+
+    return dayMatches || weekdayMatches
+}
+
 func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
     if nil == entry.Schedule {
         return nil

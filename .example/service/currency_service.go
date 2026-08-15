@@ -60,6 +60,10 @@ func (instance *CurrencyService) List() ([]*entity.Currency, error) {
 }
 
 func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, error) {
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyCurrencyById(id)
 
     cached, rememberErr := melodycache.Remember(

@@ -68,7 +68,7 @@ Session ids are always 32-character lowercase hex strings. Incoming cookies that
 
 ## File storage durability
 
-[`NewFileStorageFromPath`](../../session/file_storage.go) flushes modifications atomically via `os.CreateTemp` + `os.Rename` so a crash mid-write cannot leave a truncated session file on disk. File mode `0755` is used for the parent directory.
+[`NewFileStorageFromPath`](../../session/file_storage.go) flushes modifications atomically via `os.CreateTemp` + `os.Rename`, and fsyncs the parent directory after the rename, so a crash mid-write cannot leave a truncated session file on disk and a power loss right after a save cannot resurface the previous snapshot. A hard kill between the temp file and the rename leaves an orphan `<name>.<random>.tmp` beside the store — a complete snapshot of every live session — and the next construction sweeps its own temp spelling away before reading. File mode `0755` is used for the parent directory.
 
 ## Rotating the session id
 

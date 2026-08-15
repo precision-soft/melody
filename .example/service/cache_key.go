@@ -1,8 +1,26 @@
 package service
 
 import (
+    "strings"
+
     "github.com/precision-soft/melody/.example/repository"
 )
+
+/* cacheSafeIdentifierMaximumBytes bounds a caller-supplied identifier so the composed key stays under the backends' 1024-byte key ceiling with room for every prefix above. */
+const cacheSafeIdentifierMaximumBytes = 255
+
+/* CacheSafeIdentifier reports whether a caller-supplied identifier can be embedded in a cache key: the backend grammar refuses a space or a newline inside a key and bounds its length, so an identifier the grammar refuses names a row that no write door admits — a lookup answers not-found instead of asking the cache a question it would refuse, which used to surface as a 500 on the read of an id that simply does not exist. */
+func CacheSafeIdentifier(identifier string) bool {
+    if "" == identifier {
+        return false
+    }
+
+    if true == strings.ContainsAny(identifier, " \n") {
+        return false
+    }
+
+    return cacheSafeIdentifierMaximumBytes >= len(identifier)
+}
 
 const (
     CacheKeyProductList  = "example-product-list"

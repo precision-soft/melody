@@ -2,8 +2,11 @@ package migrate
 
 import (
     "context"
+    "errors"
     "strings"
     "testing"
+
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
 )
 
 func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
@@ -99,5 +102,57 @@ func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
 
     if false == strings.Contains(rendered, "ERROR:") {
         t.Fatalf("unlock failure was not printed beside the exit code: %q", rendered)
+    }
+}
+
+/* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock, and rollback used to return it as it came */
+func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.execHook = func(query string) error {
+        if true == isLockInsert(query) {
+            return context.DeadlineExceeded
+        }
+
+        return nil
+    }
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    downCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
+
+    command := NewRollbackCommand(migrations, DefaultOptions())
+
+    _, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil == runErr {
+        t.Fatal("expected an error when the rollback lock cannot be taken")
+    }
+
+    if false == errors.Is(runErr, context.DeadlineExceeded) {
+        t.Fatalf("the bun lock failure must survive as the cause, got %q", runErr.Error())
+    }
+
+    contextual, isContextual := runErr.(interface{ Context() exceptioncontract.Context })
+    if false == isContextual {
+        t.Fatalf("the lock refusal carries no context at all: %q", runErr.Error())
+    }
+
+    lockContext := contextual.Context()
+    for key, expected := range map[string]string{
+        "locksTable":    migrationLocksTable,
+        "unlockCommand": DefaultOptions().CommandPrefix + ":unlock",
+    } {
+        actual, present := lockContext[key]
+        if false == present {
+            t.Fatalf("the lock refusal does not name %s: %v", key, lockContext)
+        }
+
+        if expected != actual {
+            t.Fatalf("%s = %v, want %q", key, actual, expected)
+        }
+    }
+
+    if 0 != downCalls {
+        t.Fatalf("rollback ran despite the lock failure (%d times)", downCalls)
     }
 }

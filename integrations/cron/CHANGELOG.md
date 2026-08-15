@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Breaking (generation-time refusal):** the user-less crontab dialect refuses a day-field pair busybox crond — the scheduler that dialect targets — runs as a different schedule than vixie crond and the in-process runner. Busybox classifies a day field by its expanded values (a field admitting every value is unused and the other field alone governs; measured on busybox 1.37, where `0 0 16 * 0-6` runs only on the 16th while the crontab-dialect matcher answers due every day), vixie by the spelling's first character, and the generator used to emit the pair without a word. The check is semantic — both models evaluated over every day combination — so a pair the two daemons read identically, a stepped wildcard beside the plain one included, still renders; the refusal names the entry, both spellings and the rewrite, and `ErrBusyboxDivergentDaySchedule` is its sentinel. The `/etc/cron.d` dialect keeps rendering the pair, since vixie reads it exactly as the runner does
+- **Behavioural:** the scheduler loop's per-minute document reports the evaluated minute as the real local instant — offset and all — instead of the utc materialization of its wall fields, which stated an instant off from the truth by the whole zone offset and disagreed with `--once`, which always reported local time. Only the minutes a forward jump skipped, the span a daylight-saving spring-forward has no local representation for, stay utc-materialized in the catch-up evaluations
+- the generator creates the subdirectory an `EntryConfig.LogFileName` names ("nightly/report.log"), the same way it always created the destination's parent: the name passed the escape guard, nothing created the directory, and under system cron the shell aborts the whole command when the `>>` redirection cannot create its file — so the scheduled job silently never ran while the same configuration ran fine in-process
+
 ### Added
 
 - `melody:cron:run --report-idle` makes the scheduler loop report every evaluated minute instead of only the ones that dispatched a command, so a consumer can tell a live scheduler with nothing due from a dead one

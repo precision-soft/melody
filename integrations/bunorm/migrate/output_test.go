@@ -496,3 +496,53 @@ func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T
         t.Fatalf("expected no cause for a failure that has none, got %#v", document.Error.Cause)
     }
 }
+
+/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering must escape control characters — visibly, before the cell widths are measured — while the json branch is left to its encoder. */
+func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printError(errors.New("boom\x1b[2J\rforged"))
+
+    if `ERROR: boom\x1b[2J\rforged` + "\n" != plainBuffer.String() {
+        t.Fatalf("expected the control characters escaped visibly, got %q", plainBuffer.String())
+    }
+}
+
+func TestCommandOutput_PrintDatabaseBlockEscapesBeforeMeasuringTheCell(t *testing.T) {
+    databaseName := "shop"
+    identity := &databaseIdentity{
+        CurrentDatabase: &databaseName,
+        Hostname:        "db-host",
+        Port:            3306,
+        CurrentUser:     "app@%",
+        Version:         "8.4\x1b[2J",
+    }
+
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printDatabaseBlock(identity)
+
+    rendered := plainBuffer.String()
+
+    expectedVersionRow := `| version  | 8.4\x1b[2J         |`
+    if false == strings.Contains(rendered, expectedVersionRow) {
+        t.Fatalf("expected the version cell padded over its escaped spelling, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\x1b") {
+        t.Fatalf("a raw escape byte reached the terminal:\n%s", rendered)
+    }
+}
+
+func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create\rusers"})
+
+    rendered := plainBuffer.String()
+
+    if false == strings.Contains(rendered, `20240101000000_create\rusers`) {
+        t.Fatalf("expected the carriage return escaped visibly, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\r") {
+        t.Fatalf("a raw carriage return reached the terminal:\n%s", rendered)
+    }
+}

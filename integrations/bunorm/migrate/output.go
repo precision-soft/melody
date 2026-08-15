@@ -208,10 +208,13 @@ func (instance *commandOutput) printError(err error) {
         return
     }
 
+    /* the message came off the wire, so its control characters are escaped before the terminal sees them; the json branch above needs none of this, the encoder escapes on its own */
+    escapedMessage := escapeControlCharacters(err.Error(), false)
+
     if false == instance.option.NoColor {
-        _, _ = fmt.Fprintf(instance.writer, "%s%sERROR: %s%s\n", cli.AnsiRed, cli.AnsiBold, err.Error(), cli.AnsiReset)
+        _, _ = fmt.Fprintf(instance.writer, "%s%sERROR: %s%s\n", cli.AnsiRed, cli.AnsiBold, escapedMessage, cli.AnsiReset)
     } else {
-        _, _ = fmt.Fprintf(instance.writer, "ERROR: %s\n", err.Error())
+        _, _ = fmt.Fprintf(instance.writer, "ERROR: %s\n", escapedMessage)
     }
 }
 
@@ -227,14 +230,15 @@ func (instance *commandOutput) printDatabaseBlock(identity *databaseIdentity) {
         currentDatabaseString = *identity.CurrentDatabase
     }
 
+    /* every value here is the server's own answer, so control characters are escaped BEFORE the cell is truncated and padded — the alignment must count the escaped spelling, not the raw bytes it replaces */
     _, _ = fmt.Fprintln(instance.writer, "DATABASE")
     _, _ = fmt.Fprintln(instance.writer, "| key      | value              |")
     _, _ = fmt.Fprintln(instance.writer, "| -------- | ------------------ |")
-    _, _ = fmt.Fprintf(instance.writer, "| database | %-18s |\n", truncateString(currentDatabaseString, 18))
-    _, _ = fmt.Fprintf(instance.writer, "| host     | %-18s |\n", truncateString(identity.Hostname, 18))
+    _, _ = fmt.Fprintf(instance.writer, "| database | %-18s |\n", truncateString(escapeControlCharacters(currentDatabaseString, false), 18))
+    _, _ = fmt.Fprintf(instance.writer, "| host     | %-18s |\n", truncateString(escapeControlCharacters(identity.Hostname, false), 18))
     _, _ = fmt.Fprintf(instance.writer, "| port     | %-18s |\n", strconv.FormatUint(uint64(identity.Port), 10))
-    _, _ = fmt.Fprintf(instance.writer, "| user     | %-18s |\n", truncateString(identity.CurrentUser, 18))
-    _, _ = fmt.Fprintf(instance.writer, "| version  | %-18s |\n", truncateString(identity.Version, 18))
+    _, _ = fmt.Fprintf(instance.writer, "| user     | %-18s |\n", truncateString(escapeControlCharacters(identity.CurrentUser, false), 18))
+    _, _ = fmt.Fprintf(instance.writer, "| version  | %-18s |\n", truncateString(escapeControlCharacters(identity.Version, false), 18))
 }
 
 func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
@@ -251,7 +255,7 @@ func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
     keys := []string{"manager", "group", "applied", "status", "name"}
     for _, key := range keys {
         if value, exists := fields[key]; exists {
-            _, _ = fmt.Fprintf(instance.writer, "| %-7s | %-49s |\n", key, truncateString(value, 49))
+            _, _ = fmt.Fprintf(instance.writer, "| %-7s | %-49s |\n", key, truncateString(escapeControlCharacters(value, false), 49))
         }
     }
 }
@@ -275,7 +279,7 @@ func (instance *commandOutput) printMigrationsBlock(key string, title string, na
     _, _ = fmt.Fprintln(instance.writer, "| name                                              |")
     _, _ = fmt.Fprintln(instance.writer, "| ------------------------------------------------- |")
     for _, name := range names {
-        _, _ = fmt.Fprintf(instance.writer, "| %-49s |\n", truncateString(name, 49))
+        _, _ = fmt.Fprintf(instance.writer, "| %-49s |\n", truncateString(escapeControlCharacters(name, false), 49))
     }
 }
 

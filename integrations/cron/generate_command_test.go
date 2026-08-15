@@ -3228,3 +3228,40 @@ func TestGenerateCommand_TheSweepDoesNotOpenANamedPipe(t *testing.T) {
         t.Fatal("the generator is wedged opening the fifo")
     }
 }
+
+/* the escape refusal above draws the outer boundary; this pins the inside of it — a LogFileName carrying a subdirectory stays within the logs dir, and the generator must create that subdirectory, because under system cron the shell aborts the whole command when the >> redirection cannot create its file and the job silently never runs. */
+func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDir := filepath.Join(tempDir, "logs")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("nightly:report", &testSchedule{
+            Minute:      "0",
+            LogFileName: "nightly/report.log",
+        }),
+    }
+
+    _, err := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+        },
+    )
+    if nil != err {
+        t.Fatalf("expected the subdirectory log file name to generate, got: %v", err)
+    }
+
+    subdirectoryInfo, statErr := os.Stat(filepath.Join(logsDir, "nightly"))
+    if nil != statErr {
+        t.Fatalf("expected the log subdirectory to exist after generation: %v", statErr)
+    }
+
+    if false == subdirectoryInfo.IsDir() {
+        t.Fatal("expected the created log path to be a directory")
+    }
+}

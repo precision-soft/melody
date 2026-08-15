@@ -697,8 +697,11 @@ func wallMinuteTime(index int64) time.Time {
 
 /* reconcileWallClock is the vixie-cron virtual-time algorithm: it compares the wall rendering of the minute the loop woke for against the last wall minute already evaluated and decides which wall minutes to evaluate for which entry class, where the chain continues, and whether the wake deserves a log line. A one-minute advance evaluates the current minute for both classes. A larger forward jump below the reset threshold — a daylight-saving spring-forward, a suspend, an ntp step — evaluates the current minute for wildcard entries and every skipped wall minute plus the current one for fixed-time entries, so a schedule pinned inside the gap still runs exactly once. A jump of zero or backward below the threshold — a daylight-saving fall-back repeats the wall hour, a sub-minute backward step repeats one wall minute — evaluates the current minute for wildcard entries only and leaves the chain anchored, exactly as vixie crond does: wildcard entries follow the wall clock (an every-minute job fires once per absolute minute, even on the minute whose wall rendering repeats the anchor), while fixed-time entries stay suppressed until the wall clock passes the anchor again and cannot run twice. A jump of at least the threshold in either direction re-anchors to the current minute without catch-up and returns a note for the log. The function is pure — no clock, no timer — so the callers own every side effect. */
 func reconcileWallClock(previousTarget time.Time, current time.Time) ([]minuteEvaluation, time.Time, string) {
+    /* the current minute is evaluated and reported as the real local time it is, offset and all: schedule matching reads only the rendered calendar fields, which the local form and the offset-folded utc materialization share by construction, but the minute also becomes the document's timestamp — and the utc materialization used to be printed there as a real instant, off from the truth by the whole zone offset and disagreeing with the --once mode, which always reported local time. Only the catch-up minutes strictly before the current one stay utc-materialized: they are the span a spring-forward skipped, which has no local representation to print. */
+    currentMinute := current.Truncate(time.Minute)
+
     previousIndex := wallMinuteIndex(previousTarget)
-    currentIndex := wallMinuteIndex(current.Truncate(time.Minute))
+    currentIndex := wallMinuteIndex(currentMinute)
 
     difference := currentIndex - previousIndex
     resetThresholdMinutes := int64(clockJumpResetThreshold / time.Minute)
@@ -709,30 +712,32 @@ func reconcileWallClock(previousTarget time.Time, current time.Time) ([]minuteEv
             difference,
         )
 
-        evaluations := []minuteEvaluation{{at: wallMinuteTime(currentIndex), runFixedTime: true, runWildcard: true}}
+        evaluations := []minuteEvaluation{{at: currentMinute, runFixedTime: true, runWildcard: true}}
 
-        return evaluations, wallMinuteTime(currentIndex), note
+        return evaluations, currentMinute, note
     }
 
     if 1 == difference {
-        evaluations := []minuteEvaluation{{at: wallMinuteTime(currentIndex), runFixedTime: true, runWildcard: true}}
+        evaluations := []minuteEvaluation{{at: currentMinute, runFixedTime: true, runWildcard: true}}
 
-        return evaluations, wallMinuteTime(currentIndex), ""
+        return evaluations, currentMinute, ""
     }
 
     if difference > 1 {
         evaluations := make([]minuteEvaluation, 0, difference+1)
-        evaluations = append(evaluations, minuteEvaluation{at: wallMinuteTime(currentIndex), runWildcard: true})
+        evaluations = append(evaluations, minuteEvaluation{at: currentMinute, runWildcard: true})
 
-        for index := previousIndex + 1; index <= currentIndex; index++ {
+        for index := previousIndex + 1; index < currentIndex; index++ {
             evaluations = append(evaluations, minuteEvaluation{at: wallMinuteTime(index), runFixedTime: true})
         }
 
-        return evaluations, wallMinuteTime(currentIndex), ""
+        evaluations = append(evaluations, minuteEvaluation{at: currentMinute, runFixedTime: true})
+
+        return evaluations, currentMinute, ""
     }
 
     /* the wall clock stepped back less than the threshold (or repeats the anchor minute itself), so the just-woken minute repeats a span that already ran: wildcard entries follow the wall clock, fixed-time entries stay suppressed behind the unchanged anchor. */
-    evaluations := []minuteEvaluation{{at: wallMinuteTime(currentIndex), runWildcard: true}}
+    evaluations := []minuteEvaluation{{at: currentMinute, runWildcard: true}}
 
     return evaluations, previousTarget, ""
 }

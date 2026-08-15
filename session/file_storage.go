@@ -7,6 +7,7 @@ import (
     "math"
     "os"
     "path/filepath"
+    "strings"
     "sync"
     "time"
 
@@ -39,6 +40,8 @@ func NewFileStorageFromPath(path string) (*FileStorage, error) {
             err,
         )
     }
+
+    removeOrphanSessionTemporaryFiles(trimmedPath)
 
     decoded, err := readSessionFileAtPath(trimmedPath)
     if nil != err {
@@ -367,7 +370,74 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
         return exception.NewError("failed to replace session storage file", nil, err)
     }
 
+    /* the rename is durable only once the directory itself is flushed: without this, a power loss after a save could resurface the previous snapshot — the session that was just written is gone and its user silently logged out. The cron generator's atomic writer holds the same rule for the same reason. */
+    if directorySyncErr := syncSessionDirectory(filepath.Dir(path)); nil != directorySyncErr {
+        return directorySyncErr
+    }
+
     return nil
+}
+
+/* syncSessionDirectory fsyncs the directory that just received a rename, which is where the file's NAME lives — the temp file's own Sync covered only its bytes. */
+func syncSessionDirectory(path string) error {
+    directory, openErr := os.Open(path)
+    if nil != openErr {
+        return exception.NewError(
+            "failed to open session storage directory for fsync",
+            exceptioncontract.Context{
+                "path": path,
+            },
+            openErr,
+        )
+    }
+
+    syncErr := directory.Sync()
+    closeErr := directory.Close()
+
+    if nil != syncErr {
+        return exception.NewError(
+            "failed to fsync session storage directory",
+            exceptioncontract.Context{
+                "path": path,
+            },
+            syncErr,
+        )
+    }
+
+    if nil != closeErr {
+        return exception.NewError(
+            "failed to close session storage directory after fsync",
+            exceptioncontract.Context{
+                "path": path,
+            },
+            closeErr,
+        )
+    }
+
+    return nil
+}
+
+/* removeOrphanSessionTemporaryFiles sweeps the temp files a killed process left behind: a hard kill between CreateTemp and the rename skips every cleanup path, each orphan is a complete snapshot of every live session and its tokens, and nothing ever opened them again — the surface only grew. The sweep runs at construction, where the per-process ownership the session documentation states means nothing else can be mid-rename over this path. A file that cannot be removed is left for the next construction rather than failing this one. */
+func removeOrphanSessionTemporaryFiles(path string) {
+    directoryPath := filepath.Dir(path)
+
+    entries, readErr := os.ReadDir(directoryPath)
+    if nil != readErr {
+        return
+    }
+
+    prefix := filepath.Base(path) + "."
+
+    for _, entry := range entries {
+        if true == entry.IsDir() {
+            continue
+        }
+
+        name := entry.Name()
+        if true == strings.HasPrefix(name, prefix) && true == strings.HasSuffix(name, ".tmp") {
+            _ = os.Remove(filepath.Join(directoryPath, name))
+        }
+    }
 }
 
 /* refuseAppendModeHandle asks the handle the only question that settles it, and asks it with a write of nothing: WriteAt refuses an appending handle before it looks at the bytes, so an empty slice answers the question and touches no file — a zero-length write on a handle that is not appending returns without reaching the descriptor at all. There is no portable way to read the open flags back otherwise, and os.File itself keeps the answer: it is the same field WriteAt consults on every save, so the door and the write agree by construction rather than by two guesses. */

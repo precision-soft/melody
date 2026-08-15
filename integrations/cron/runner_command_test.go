@@ -3310,3 +3310,90 @@ func TestRunnerCommand_ReportRunOutcomeIsSilentForASuccessfulRun(t *testing.T) {
         t.Fatalf("a successful run must leave no record, got %v", captured.entries)
     }
 }
+
+/* the evaluated minute doubles as the document's timestamp, so the ordinary advance must carry the real local instant — offset and all — while only the minutes a forward jump skipped, which have no local representation, stay utc-materialized. The pseudo-utc rendering used to reach the document as a real instant, off by the whole zone offset and disagreeing with the --once mode. */
+func TestReconcileWallClockReportsTheCurrentMinuteAsRealLocalTime(t *testing.T) {
+    zone := time.FixedZone("probe", 3*3600)
+    previousTarget := time.Date(2026, time.August, 15, 3, 29, 0, 0, zone)
+    current := time.Date(2026, time.August, 15, 3, 30, 7, 0, zone)
+
+    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+    if "" != note {
+        t.Fatalf("unexpected note: %s", note)
+    }
+
+    if 1 != len(evaluations) {
+        t.Fatalf("expected one evaluation, got %d", len(evaluations))
+    }
+
+    expected := "2026-08-15T03:30:00+03:00"
+    if rendered := evaluations[0].at.Format(time.RFC3339); expected != rendered {
+        t.Fatalf("expected the real local minute %q, got %q", expected, rendered)
+    }
+
+    if rendered := nextTarget.Format(time.RFC3339); expected != rendered {
+        t.Fatalf("expected the chain anchor to stay real local time, got %q", rendered)
+    }
+}
+
+func TestReconcileWallClockKeepsOnlyTheSkippedMinutesUtcMaterialized(t *testing.T) {
+    zone := time.FixedZone("probe", 3*3600)
+    previousTarget := time.Date(2026, time.August, 15, 3, 0, 0, 0, zone)
+    current := time.Date(2026, time.August, 15, 3, 3, 2, 0, zone)
+
+    evaluations, _, note := reconcileWallClock(previousTarget, current)
+    if "" != note {
+        t.Fatalf("unexpected note: %s", note)
+    }
+
+    expectedCurrent := "2026-08-15T03:03:00+03:00"
+
+    fixedTimeAtCurrent := 0
+    for _, evaluation := range evaluations {
+        rendered := evaluation.at.Format(time.RFC3339)
+
+        if rendered == expectedCurrent {
+            if true == evaluation.runFixedTime {
+                fixedTimeAtCurrent++
+            }
+
+            continue
+        }
+
+        /* a skipped minute has no local representation to print, so its materialization stays utc — and it must never carry the wildcard class */
+        if false == strings.HasSuffix(rendered, "Z") {
+            t.Fatalf("expected the skipped minute to stay utc-materialized, got %q", rendered)
+        }
+
+        if true == evaluation.runWildcard {
+            t.Fatalf("a skipped minute must not run wildcard entries, got %q", rendered)
+        }
+    }
+
+    if 1 != fixedTimeAtCurrent {
+        t.Fatalf("expected the current minute to run the fixed-time class exactly once as real local time, got %d", fixedTimeAtCurrent)
+    }
+}
+
+func TestReconcileWallClockReportsTheRepeatedMinuteAsRealLocalTime(t *testing.T) {
+    zone := time.FixedZone("probe", 3*3600)
+    previousTarget := time.Date(2026, time.August, 15, 3, 30, 0, 0, zone)
+    current := time.Date(2026, time.August, 15, 3, 30, 3, 0, zone)
+
+    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+    if "" != note {
+        t.Fatalf("unexpected note: %s", note)
+    }
+
+    if 1 != len(evaluations) {
+        t.Fatalf("expected one evaluation, got %d", len(evaluations))
+    }
+
+    if rendered := evaluations[0].at.Format(time.RFC3339); "2026-08-15T03:30:00+03:00" != rendered {
+        t.Fatalf("expected the repeated minute as real local time, got %q", rendered)
+    }
+
+    if false == nextTarget.Equal(previousTarget) {
+        t.Fatal("a repeated minute must leave the chain anchored")
+    }
+}

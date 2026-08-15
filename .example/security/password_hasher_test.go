@@ -65,3 +65,19 @@ func TestHashPasswordRefusesAPasswordOverTheBcryptLimit(t *testing.T) {
 
     MustHashPassword(oversized)
 }
+
+/* the ceiling is bytes, not characters: nineteen four-byte runes are over it while seventy-two ascii letters sit exactly on it, which is why the doors validate len() against the constant */
+func TestPasswordMaximumBytesIsTheExactBcryptCeiling(t *testing.T) {
+    if _, hashErr := HashPassword(strings.Repeat("a", PasswordMaximumBytes)); nil != hashErr {
+        t.Fatalf("a password exactly on the ceiling must hash, got %v", hashErr)
+    }
+
+    multiByte := strings.Repeat("🔒", 19)
+    if PasswordMaximumBytes >= len(multiByte) {
+        t.Fatalf("the probe must exceed the ceiling in bytes, got %d", len(multiByte))
+    }
+
+    if _, hashErr := HashPassword(multiByte); nil == hashErr {
+        t.Fatal("nineteen four-byte runes are over the byte ceiling and must be refused")
+    }
+}

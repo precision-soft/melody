@@ -62,3 +62,21 @@ func TestNormalizeRolesKeepsTheCaseItWasGiven(t *testing.T) {
         t.Fatalf("unexpected roles: %v", normalized)
     }
 }
+
+/* the repository stores the role list comma-joined, so a role carrying a comma would come back as several roles on the next read — among them, possibly, an administrator nobody granted */
+func TestRoleContainingCommaReportsTheOffendingRole(t *testing.T) {
+    role, found := roleContainingComma([]string{"ROLE_USER", "ROLE_X,ROLE_ADMIN"})
+    if false == found {
+        t.Fatal("expected the compound role reported")
+    }
+
+    if "ROLE_X,ROLE_ADMIN" != role {
+        t.Fatalf("expected the offending role named, got %q", role)
+    }
+}
+
+func TestRoleContainingCommaAcceptsPlainRoles(t *testing.T) {
+    if _, found := roleContainingComma([]string{"ROLE_USER", "ROLE_ADMIN"}); true == found {
+        t.Fatal("expected plain roles accepted")
+    }
+}
