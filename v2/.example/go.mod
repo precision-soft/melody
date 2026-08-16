@@ -7,7 +7,7 @@ require (
 	github.com/precision-soft/melody/integrations/bunorm/v2 v2.1.0
 	github.com/precision-soft/melody/integrations/cron/v2 v2.1.0
 	github.com/precision-soft/melody/integrations/rueidis/v2 v2.1.0
-	github.com/precision-soft/melody/v2 v2.11.0
+	github.com/precision-soft/melody/v2 v2.12.0
 	github.com/redis/rueidis v1.0.71
 	github.com/uptrace/bun v1.2.17
 )
