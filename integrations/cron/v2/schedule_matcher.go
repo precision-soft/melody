@@ -106,22 +106,22 @@ func newScheduleMatcher(schedule *Schedule, dialect RunnerDialect) (*scheduleMat
         }
     }
 
-    minute, minuteErr := parseCronField(minuteExpression, minuteMinimum, minuteMaximum)
+    minute, minuteErr := parseCronField(minuteExpression, cronFieldBounds{name: "Minute", minimum: minuteMinimum, maximum: minuteMaximum, dialect: resolvedDialect})
     if nil != minuteErr {
         return nil, minuteErr
     }
 
-    hour, hourErr := parseCronField(hourExpression, hourMinimum, hourMaximum)
+    hour, hourErr := parseCronField(hourExpression, cronFieldBounds{name: "Hour", minimum: hourMinimum, maximum: hourMaximum, dialect: resolvedDialect})
     if nil != hourErr {
         return nil, hourErr
     }
 
-    dayOfMonth, dayOfMonthErr := parseCronField(dayOfMonthExpression, dayOfMonthMinimum, dayOfMonthMaximum)
+    dayOfMonth, dayOfMonthErr := parseCronField(dayOfMonthExpression, cronFieldBounds{name: "DayOfMonth", minimum: dayOfMonthMinimum, maximum: dayOfMonthMaximum, dialect: resolvedDialect})
     if nil != dayOfMonthErr {
         return nil, dayOfMonthErr
     }
 
-    month, monthErr := parseCronField(monthExpression, monthMinimum, monthMaximum)
+    month, monthErr := parseCronField(monthExpression, cronFieldBounds{name: "Month", minimum: monthMinimum, maximum: monthMaximum, dialect: resolvedDialect})
     if nil != monthErr {
         return nil, monthErr
     }
@@ -132,7 +132,7 @@ func newScheduleMatcher(schedule *Schedule, dialect RunnerDialect) (*scheduleMat
         dayOfWeekFieldMaximum = dayOfWeekMaximumKubernetes
     }
 
-    dayOfWeek, dayOfWeekErr := parseCronField(dayOfWeekExpression, dayOfWeekMinimum, dayOfWeekFieldMaximum)
+    dayOfWeek, dayOfWeekErr := parseCronField(dayOfWeekExpression, cronFieldBounds{name: "DayOfWeek", minimum: dayOfWeekMinimum, maximum: dayOfWeekFieldMaximum, dialect: resolvedDialect})
     if nil != dayOfWeekErr {
         return nil, dayOfWeekErr
     }
@@ -187,15 +187,26 @@ func (instance *scheduleMatcher) fixedTime() bool {
     return false == instance.minute.starBased && false == instance.hour.starBased
 }
 
-/* parseCronField expands one field into the set of values it admits, bounded to [minimum, maximum]. It supports the wildcard, a stepped wildcard, single values, low-high ranges, stepped ranges and comma-separated lists of those. */
-func parseCronField(expression string, minimum int, maximum int) (cronFieldMatcher, error) {
+/* cronFieldBounds names the field being parsed and the limits it is judged against, so that a refusal can say which of the five positions failed and what it was measured with. The dialect belongs here because it is what chose the limits on the day-of-week field: "7" is a perfectly legal Sunday under the crontab dialect and out of range under kubernetes, and a refusal that names neither the field nor the dialect leaves the operator reading "value is out of range" about an expression that is not wrong anywhere else. It is left empty where the bounds are dialect-independent — the generator's own validation — rather than filled with a default that would name a chooser that never chose. */
+type cronFieldBounds struct {
+    name    string
+    minimum int
+    maximum int
+    dialect RunnerDialect
+}
+
+/* parseCronField expands one field into the set of values it admits, bounded to [bounds.minimum, bounds.maximum]. It supports the wildcard, a stepped wildcard, single values, low-high ranges, stepped ranges and comma-separated lists of those. */
+func parseCronField(expression string, bounds cronFieldBounds) (cronFieldMatcher, error) {
+    minimum := bounds.minimum
+    maximum := bounds.maximum
+
     if "" == expression {
-        return cronFieldMatcher{}, invalidScheduleError(expression, "field is empty")
+        return cronFieldMatcher{}, invalidScheduleError(expression, "field is empty", bounds)
     }
 
     /* whitespace anywhere in a field — leading, trailing or embedded — is rejected rather than trimmed away, for two different reasons. Embedded whitespace is a correctness matter: the generated crontab line splits on it, so the field crond reads is not the field that was written, and it refuses the whole file with a parse error — every entry in it stops, not just this one. Any unicode space counts there, a vertical tab and a no-break space failing crond exactly as a plain space does. Leading and trailing whitespace crond would itself tolerate, but the generator refuses the field, and the two halves are one rule: repairing it here would admit a schedule that runs in-process yet cannot be generated. */
     if -1 != strings.IndexFunc(expression, unicode.IsSpace) {
-        return cronFieldMatcher{}, invalidScheduleError(expression, "field contains whitespace")
+        return cronFieldMatcher{}, invalidScheduleError(expression, "field contains whitespace", bounds)
     }
 
     matcher := cronFieldMatcher{
@@ -205,7 +216,7 @@ func parseCronField(expression string, minimum int, maximum int) (cronFieldMatch
 
     for _, part := range strings.Split(expression, ",") {
         if "" == part {
-            return cronFieldMatcher{}, invalidScheduleError(expression, "list contains an empty item")
+            return cronFieldMatcher{}, invalidScheduleError(expression, "list contains an empty item", bounds)
         }
 
         rangeExpression := part
@@ -216,7 +227,7 @@ func parseCronField(expression string, minimum int, maximum int) (cronFieldMatch
             rangeExpression = part[:slashIndex]
             stepValue, stepParsed := parseCronNumber(part[slashIndex+1:])
             if false == stepParsed || 0 >= stepValue {
-                return cronFieldMatcher{}, invalidScheduleError(expression, "step must be a positive integer")
+                return cronFieldMatcher{}, invalidScheduleError(expression, "step must be a positive integer", bounds)
             }
 
             /* a step wider than the field is clamped to the field's cardinality rather than rejected: crond accepts such a step and simply admits the range's low value alone (its expansion strides past the high bound on the first hop), so rejecting it would refuse a schedule the generator renders and crond runs. The clamp keeps the expansion loop below the overflow a step near the integer maximum would otherwise cause. */
@@ -240,19 +251,19 @@ func parseCronField(expression string, minimum int, maximum int) (cronFieldMatch
                 lowValue, lowParsed := parseCronNumber(rangeExpression[:dashIndex])
                 highValue, highParsed := parseCronNumber(rangeExpression[dashIndex+1:])
                 if false == lowParsed || false == highParsed {
-                    return cronFieldMatcher{}, invalidScheduleError(expression, "range bounds must be integers")
+                    return cronFieldMatcher{}, invalidScheduleError(expression, "range bounds must be integers", bounds)
                 }
                 low = lowValue
                 high = highValue
             } else {
                 /* a step only makes sense over a range or the wildcard; classic cron rejects a step on a single value, so accepting one here would admit a schedule the generated crontab cannot run. */
                 if true == stepped {
-                    return cronFieldMatcher{}, invalidScheduleError(expression, "step requires a range or the wildcard as its base")
+                    return cronFieldMatcher{}, invalidScheduleError(expression, "step requires a range or the wildcard as its base", bounds)
                 }
 
                 singleValue, singleParsed := parseCronNumber(rangeExpression)
                 if false == singleParsed {
-                    return cronFieldMatcher{}, invalidScheduleError(expression, "value must be an integer")
+                    return cronFieldMatcher{}, invalidScheduleError(expression, "value must be an integer", bounds)
                 }
                 low = singleValue
                 high = singleValue
@@ -260,7 +271,7 @@ func parseCronField(expression string, minimum int, maximum int) (cronFieldMatch
         }
 
         if low < minimum || high > maximum || low > high {
-            return cronFieldMatcher{}, invalidScheduleError(expression, "value is out of range")
+            return cronFieldMatcher{}, invalidScheduleError(expression, "value is out of range", bounds)
         }
 
         for value := low; value <= high; value += step {
@@ -291,13 +302,26 @@ func parseCronNumber(text string) (int, bool) {
     return value, true
 }
 
-func invalidScheduleError(expression string, reason string) error {
+/* invalidScheduleError names the field, the limits it was judged against and — where a dialect chose those limits — which dialect, beside the expression and the reason. The expression alone leaves an operator holding "value is out of range" about a schedule that is out of range in one position, under one dialect, for a reason none of the five words says: DayOfWeek "7" is a legal Sunday under the crontab dialect and refused under kubernetes, and only the record can tell the two apart. */
+func invalidScheduleError(expression string, reason string, bounds cronFieldBounds) error {
+    context := exceptioncontract.Context{
+        "expression": expression,
+        "reason":     reason,
+    }
+
+    if "" != bounds.name {
+        context["field"] = bounds.name
+        context["minimum"] = bounds.minimum
+        context["maximum"] = bounds.maximum
+    }
+
+    if "" != bounds.dialect {
+        context["dialect"] = string(bounds.dialect)
+    }
+
     return exception.NewError(
         "cron: invalid schedule field",
-        exceptioncontract.Context{
-            "expression": expression,
-            "reason":     reason,
-        },
+        context,
         ErrInvalidSchedule,
     )
 }

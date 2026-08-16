@@ -26,6 +26,7 @@ use (
 	./integrations/cron
 	./integrations/cron/.example
 	./integrations/cron/v2
+	./integrations/cron/v2/.example
 	./integrations/cron/v3
 
 	./integrations/awss3/v3
