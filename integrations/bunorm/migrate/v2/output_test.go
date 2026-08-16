@@ -2,12 +2,17 @@ package migrate
 
 import (
     "bytes"
+    "encoding/json"
     "errors"
     "strings"
     "testing"
+    "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v2/cli"
     "github.com/precision-soft/melody/v2/cli/output"
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
 )
 
 func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
@@ -176,7 +181,7 @@ func TestCommandOutput_PrintDetailsBlockOrdersAndFiltersKeys(t *testing.T) {
 
 func TestCommandOutput_PrintMigrationsBlock(t *testing.T) {
     empty, emptyBuffer := newBufferedOutput(true)
-    empty.printMigrationsBlock("APPLIED", []string{})
+    empty.printMigrationsBlock("applied", "APPLIED", []string{})
 
     if 0 != emptyBuffer.Len() {
         t.Fatalf("empty migrations list produced output: %q", emptyBuffer.String())
@@ -184,7 +189,7 @@ func TestCommandOutput_PrintMigrationsBlock(t *testing.T) {
 
     instance, buffer := newBufferedOutput(true)
     longName := strings.Repeat("m", 60)
-    instance.printMigrationsBlock("PENDING", []string{"20240101000000_create_users", longName})
+    instance.printMigrationsBlock("pending", "PENDING", []string{"20240101000000_create_users", longName})
 
     rendered := buffer.String()
 
@@ -249,5 +254,295 @@ func TestTruncateString(t *testing.T) {
 
     if 18 != len(truncated) {
         t.Fatalf("truncated string length = %d, want 18", len(truncated))
+    }
+}
+
+/* the format widths pad by rune count, so the budget is runes too: a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune and rendering as a replacement character */
+func TestTruncateString_CountsRunesNotBytes(t *testing.T) {
+    seventeenRunes := strings.Repeat("愛", 17)
+    if seventeenRunes != truncateString(seventeenRunes, 18) {
+        t.Fatalf("a value that fits the column in runes was truncated: %q", truncateString(seventeenRunes, 18))
+    }
+
+    truncated := truncateString(strings.Repeat("愛", 30), 18)
+    if strings.Repeat("愛", 15)+"..." != truncated {
+        t.Fatalf("truncated string = %q, want 15 runes plus ellipsis", truncated)
+    }
+
+    if false == utf8.ValidString(truncated) {
+        t.Fatalf("truncation split a rune: %q", truncated)
+    }
+}
+
+/* a budget with no room for the ellipsis answers the clipped runes alone instead of slicing negative */
+func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
+    if "ab" != truncateString("abcdef", 2) {
+        t.Fatalf("expected the clipped runes alone, got %q", truncateString("abcdef", 2))
+    }
+
+    if "" != truncateString("abcdef", 0) {
+        t.Fatalf("expected nothing for a zero budget, got %q", truncateString("abcdef", 0))
+    }
+
+    if "" != truncateString("abcdef", -1) {
+        t.Fatalf("expected nothing for a negative budget, got %q", truncateString("abcdef", -1))
+    }
+}
+
+/* the machine document is not shaped by a display flag: verbosity decides how the TEXT renders — the readme says so in as many words — while json is the contract, and gating the blocks on --verbose left db:migrate --format=json answering an empty data object for a run that applied five migrations. */
+func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) {
+    for _, testCase := range []struct {
+        format          output.Format
+        verbose         bool
+        expectedOutcome bool
+    }{
+        {output.FormatJson, false, true},
+        {output.FormatJson, true, true},
+        {output.FormatTable, false, false},
+        {output.FormatTable, true, true},
+    } {
+        option := output.DefaultOption()
+        option.Format = testCase.format
+        option.Verbose = testCase.verbose
+
+        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, option).wantsDetail() {
+            t.Fatalf("format %s verbose %v: expected %v", testCase.format, testCase.verbose, testCase.expectedOutcome)
+        }
+    }
+}
+
+/* the document key and the display title were one string, so the same set of migrations arrived under APPLIED from db:status and under APPLIED MIGRATIONS from db:migrate, with no enumerable set of keys and a rename for readability breaking every consumer in silence */
+func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
+    jsonOption := output.DefaultOption()
+    jsonOption.Format = output.FormatJson
+
+    jsonBuffer := &bytes.Buffer{}
+    jsonInstance := newCommandOutput(jsonBuffer, jsonOption)
+    jsonInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
+
+    if _, keyedOnTheKey := jsonInstance.migrations["applied"]; false == keyedOnTheKey {
+        t.Fatalf("expected the document to be keyed on the key, got %v", jsonInstance.migrations)
+    }
+
+    if _, keyedOnTheTitle := jsonInstance.migrations["APPLIED MIGRATIONS"]; true == keyedOnTheTitle {
+        t.Fatalf("expected the display title to stay out of the document, got %v", jsonInstance.migrations)
+    }
+
+    /* the title is still what a person reads */
+    textInstance, textBuffer := newBufferedOutput(true)
+    textInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
+
+    if false == strings.Contains(textBuffer.String(), "APPLIED MIGRATIONS") {
+        t.Fatalf("expected the display title in the text block, got %q", textBuffer.String())
+    }
+
+    if true == strings.Contains(textBuffer.String(), "applied\n") {
+        t.Fatalf("expected the document key to stay out of the text block, got %q", textBuffer.String())
+    }
+}
+
+/* "no current database" was the string <null>, indistinguishable from a database named literally <null> and readable only by a consumer who knew melody's own placeholder; the text block keeps rendering it, because a person reads an empty cell as a missing value either way */
+func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
+    jsonOption := output.DefaultOption()
+    jsonOption.Format = output.FormatJson
+
+    buffer := &bytes.Buffer{}
+    instance := newCommandOutput(buffer, jsonOption)
+    instance.printDatabaseBlock(&databaseIdentity{Hostname: "localhost", Port: 5432, CurrentUser: "app"})
+
+    if finishErr := instance.finish("db:status", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    document := struct {
+        Data struct {
+            Database map[string]any `json:"database"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, buffer.String())
+    }
+
+    databaseValue, hasDatabaseKey := document.Data.Database["database"]
+    if false == hasDatabaseKey {
+        t.Fatalf("expected the database key to stay present, got %#v", document.Data.Database)
+    }
+
+    if nil != databaseValue {
+        t.Fatalf("expected the absent database to be json null, got %#v", databaseValue)
+    }
+
+    /* a named database still arrives as its name, or the guard above would pass for a field that never carries anything */
+    named := "orders"
+    namedBuffer := &bytes.Buffer{}
+    namedInstance := newCommandOutput(namedBuffer, jsonOption)
+    namedInstance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &named})
+
+    if finishErr := namedInstance.finish("db:status", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    namedDocument := struct {
+        Data struct {
+            Database map[string]any `json:"database"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(namedBuffer.Bytes(), &namedDocument); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, namedBuffer.String())
+    }
+
+    if "orders" != namedDocument.Data.Database["database"] {
+        t.Fatalf("expected the named database in the document, got %q", namedBuffer.String())
+    }
+}
+
+/*
+TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields
+the json envelope always declared and always answered null. The machine
+document is the contract a pipeline reads, and it was the one rendering that
+threw away what the error already carried: at the same instant, over the same
+value, the journal filed the connection, the pool sizing and the whole cause
+chain while stdout answered a single sentence beside `"details":null,
+"cause":null`.
+*/
+func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+
+    runErr := exception.NewError(
+        "database connection failed",
+        exceptioncontract.Context{"host": "mysql", "port": "3306"},
+        exception.NewError(
+            "Error 1045 (28000): Access denied for user 'melody'",
+            nil,
+            errors.New("dial refused"),
+        ),
+    )
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Code    string         `json:"code"`
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string              `json:"message"`
+                Details map[string][]string `json:"details"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if "mysql" != document.Error.Details["host"] || "3306" != document.Error.Details["port"] {
+        t.Fatalf("expected the failure's own context in the details, got %#v", document.Error.Details)
+    }
+
+    if nil == document.Error.Cause {
+        t.Fatalf("expected the failure to carry its cause, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Cause.Message, "Access denied") {
+        t.Fatalf("expected the cause to be the link under the failure, got %q", document.Error.Cause.Message)
+    }
+
+    if 2 > len(document.Error.Cause.Details["chain"]) {
+        t.Fatalf("expected the whole chain beneath the failure, got %#v", document.Error.Cause.Details)
+    }
+
+    if false == strings.Contains(strings.Join(document.Error.Cause.Details["chain"], " | "), "dial refused") {
+        t.Fatalf("expected the chain to reach the bottom, got %#v", document.Error.Cause.Details["chain"])
+    }
+}
+
+/* an error carrying no context still answers an object, and one carrying no cause answers a null there: a field whose json type changes with the outcome cannot be consumed, while a cause that genuinely does not exist is honestly absent */
+func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), errors.New("bare failure")); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string `json:"message"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the details to be empty for a bare failure, got %#v", document.Error.Details)
+    }
+
+    if nil != document.Error.Cause {
+        t.Fatalf("expected no cause for a failure that has none, got %#v", document.Error.Cause)
+    }
+}
+
+/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering must escape control characters — visibly, before the cell widths are measured — while the json branch is left to its encoder. */
+func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printError(errors.New("boom\x1b[2J\rforged"))
+
+    if `ERROR: boom\x1b[2J\rforged` + "\n" != plainBuffer.String() {
+        t.Fatalf("expected the control characters escaped visibly, got %q", plainBuffer.String())
+    }
+}
+
+func TestCommandOutput_PrintDatabaseBlockEscapesBeforeMeasuringTheCell(t *testing.T) {
+    databaseName := "shop"
+    identity := &databaseIdentity{
+        CurrentDatabase: &databaseName,
+        Hostname:        "db-host",
+        Port:            3306,
+        CurrentUser:     "app@%",
+        Version:         "8.4\x1b[2J",
+    }
+
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printDatabaseBlock(identity)
+
+    rendered := plainBuffer.String()
+
+    expectedVersionRow := `| version  | 8.4\x1b[2J         |`
+    if false == strings.Contains(rendered, expectedVersionRow) {
+        t.Fatalf("expected the version cell padded over its escaped spelling, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\x1b") {
+        t.Fatalf("a raw escape byte reached the terminal:\n%s", rendered)
+    }
+}
+
+func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create\rusers"})
+
+    rendered := plainBuffer.String()
+
+    if false == strings.Contains(rendered, `20240101000000_create\rusers`) {
+        t.Fatalf("expected the carriage return escaped visibly, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\r") {
+        t.Fatalf("a raw carriage return reached the terminal:\n%s", rendered)
     }
 }

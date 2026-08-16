@@ -1,8 +1,12 @@
 package migrate
 
 import (
+    "time"
+
     clicontract "github.com/precision-soft/melody/v2/cli/contract"
     "github.com/precision-soft/melody/v2/cli/output"
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/uptrace/bun/migrate"
 )
@@ -30,33 +34,51 @@ func (instance *RollbackCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer, option)
 
+    startedAt := time.Now()
+    defer func() {
+        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+    }()
+
+    SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer, option))
+
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
-        outputInstance.printError(dbErr)
         return dbErr
     }
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {
-        outputInstance.printError(migratorErr)
         return migratorErr
     }
 
-    /* @important take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
+    /* take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
     if lockErr := migrator.Lock(runtimeInstance.Context()); nil != lockErr {
-        outputInstance.printError(lockErr)
-        return lockErr
+        /* the same remedy-naming refusal the migrate sibling answers: bun's own error states that a lock exists and nothing else — not which database it belongs to, and not that this command set ships db:unlock to clear a lock a crashed process left behind. The bun error stays the cause, so errors.Is still reaches it. */
+        return exception.NewError(
+            "migrate: the migration lock is held; another migration is running, or a crashed one left it behind",
+            exceptioncontract.Context{
+                "manager":       managerName,
+                "locksTable":    migrationLocksTable,
+                "unlockCommand": instance.base.options.CommandPrefix + ":unlock",
+            },
+            lockErr,
+        )
     }
-    defer unlockMigrations(runtimeInstance.Context(), migrator, outputInstance)
+    /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
+    defer func() {
+        unlockErr := unlockMigrations(runtimeInstance.Context(), migrator, outputInstance)
+        if nil == runErr && nil != unlockErr {
+            runErr = unlockErr
+        }
+    }()
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
-            outputInstance.printError(identityErr)
             return identityErr
         }
         if nil != identity {
@@ -67,7 +89,6 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
     group, rollbackErr := migrator.Rollback(runtimeInstance.Context())
     if nil != rollbackErr {
-        outputInstance.printError(rollbackErr)
         return rollbackErr
     }
 
@@ -83,7 +104,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
     outputInstance.printSuccess("migrations rolled back successfully")
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         outputInstance.newline()
 
         groupString := "<none>"
@@ -102,7 +123,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
             for _, migration := range group.Migrations {
                 names = append(names, migration.Name)
             }
-            outputInstance.printMigrationsBlock("ROLLED BACK MIGRATIONS", names)
+            outputInstance.printMigrationsBlock("rolledBack", "ROLLED BACK MIGRATIONS", names)
         }
     }
 

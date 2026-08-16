@@ -13,11 +13,11 @@ import (
     "testing"
     "time"
 
-    "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/cli"
     clicontract "github.com/precision-soft/melody/v2/cli/contract"
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     "github.com/precision-soft/melody/v2/runtime"
@@ -226,13 +226,11 @@ func TestFormatQueryForLog(t *testing.T) {
     }
 }
 
-/* @info migration command harness */
-
 type fakeDatabaseProvider struct {
     database *bun.DB
 }
 
-func (instance *fakeDatabaseProvider) Open(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fakeDatabaseProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
@@ -344,8 +342,6 @@ func isUnlockDelete(query string) bool {
 func isMigrationStatusSelect(query string) bool {
     return strings.HasPrefix(query, "SELECT") && strings.Contains(query, "bun_migrations")
 }
-
-/* @info fake bun database */
 
 /*
 queryRecorder captures every statement sent to the fake driver so tests can
@@ -557,3 +553,91 @@ var (
     _ driver.Connector      = (*fakeConnector)(nil)
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
+
+func TestRunQueriesWithOption_EmptySetWarnsInsteadOfReportingSuccess(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    buffer := &bytes.Buffer{}
+
+    runErr := RunQueriesWithOption(
+        context.Background(),
+        database,
+        "up",
+        "20240101000000_create_users",
+        nil,
+        RunnerOption{Writer: buffer, NoColor: true},
+    )
+    if nil != runErr {
+        t.Fatalf("expected an empty set to still succeed, got %v", runErr)
+    }
+
+    rendered := buffer.String()
+    if false == strings.Contains(rendered, "WARNING") {
+        t.Fatalf("expected the empty set to be reported as a warning, got %q", rendered)
+    }
+
+    if true == strings.Contains(rendered, "executed successfully") {
+        t.Fatalf("expected no success line for a set that executed nothing, got %q", rendered)
+    }
+
+    if 0 != len(recorder.recordedQueries()) {
+        t.Fatalf("expected no statement to reach the database, got %v", recorder.recordedQueries())
+    }
+}
+
+/* RunQueries reads the installed process default when the migration passes no option of its own: the parsed --no-color posture reaches the per-query lines whose signature bun fixes at (ctx, db). */
+func TestRunQueries_ReadsTheInstalledProcessDefault(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var buffer bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &buffer, NoColor: true})
+
+    if runErr := RunQueries(context.Background(), nil, "up", "20240101000000_probe", nil); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    rendered := buffer.String()
+    if "" == rendered {
+        t.Fatal("expected the empty-set warning on the installed writer")
+    }
+
+    if true == strings.Contains(rendered, "\x1b[") {
+        t.Fatalf("expected the installed no-color posture to strip the escape codes, got %q", rendered)
+    }
+}
+
+/* the failure rendering hands the terminal three foreign strings — the query name, the driver's error text and the statement — so each is escaped visibly, and the statement alone keeps its real line breaks, which are the readability of the query block. */
+func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    printer := &migrationPrinter{writer: buffer, noColor: true}
+
+    printer.printFailed(
+        "[migration:up] add_users [1/1]",
+        "create\rtable",
+        errors.New("server said\x1b[2J"),
+        "CREATE TABLE users (\n    id INT\x07\n)",
+    )
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, `create\rtable`) {
+        t.Fatalf("expected the query name escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, `server said\x1b[2J`) {
+        t.Fatalf("expected the error text escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, `INT\x07`) {
+        t.Fatalf("expected the statement's control byte escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "       CREATE TABLE users (\n") {
+        t.Fatalf("expected the statement to keep its real line breaks, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\x1b") || true == strings.Contains(rendered, "\x07") {
+        t.Fatalf("a raw control byte reached the terminal:\n%s", rendered)
+    }
+}

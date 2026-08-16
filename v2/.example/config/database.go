@@ -53,6 +53,9 @@ func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel
         melodyexception.Panic(melodyexception.FromError(registryErr))
     }
 
+    /* this major hands the provider the connection value rather than the parameter name it came from, so naming the credential key is the application's job. Measured, it changes nothing here: the password parameter reads `%env(default::MYSQL_PASSWORD)%`, and the framework already marks a parameter whose template reads a marked environment key — the call is what an application whose credential does NOT come from one would need, and the example carries it because it is the wiring the integration documents. */
+    registry.MarkSecretParameters(kernelInstance.Config(), ParameterDatabasePassword)
+
     instance.databaseRegistry = registry
 }
 
