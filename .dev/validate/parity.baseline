@@ -39,7 +39,7 @@ v1:v2 ~ symbol-target ~ integrations/bunorm ~ .ErrLoggerIsRequired    ~ the refu
 v1:v2 ~ symbol-target ~ integrations/bunorm ~ .ConnectionParameters   ~ the parameters the v2 Open signature takes
 v1:v2 ~ symbol-target ~ integrations/bunorm ~ .ConnectionParams       ~ the released v2.0.0 spelling, kept so the module path's own major does not break twice
 v1:v2 ~ symbol-target ~ integrations/bunorm ~ .MarkSecretParameters   ~ the door a major that receives values needs, where v1 collects names at construction
-v1:v2 ~ symbol-target ~ integrations/bunorm ~ .SafeContext            ~ published on the v2 registry, which owns the context v1 reaches through the resolver
+v1:v2 ~ symbol-target ~ integrations/bunorm ~ .SafeContext            ~ published on the connection parameters type the v2 signature takes; v1 builds its safe context inside each provider, from the resolved configuration
 
 v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenResolverIsNil                     ~ there is no resolver argument on v2 to refuse
 v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenResolverIsTypedNil                ~ there is no resolver argument on v2 to refuse

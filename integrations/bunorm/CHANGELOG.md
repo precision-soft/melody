@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- the coalescing of concurrent first dials is pinned by two registry tests: the in-flight entry is registered under its name before the provider is dialed, and a caller that finds an in-flight open waits on it and answers with the published manager instead of dialing a second pool — the waiter is constructed by hand, so no scheduling window decides what the tests observe
+
+### Fixed
+
+- the `Provider` contract documents the ownership transfer its registry already enforces: `Open` answers a fresh pool that the registry closes whenever it decides not to keep it — handed back beside an error, losing a duplicate migration open, or landing after `Close` — so an implementation handing out a shared or memoized `*bun.DB` is outside the contract
+
 ### Changed
 
 - the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair

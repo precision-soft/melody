@@ -198,7 +198,7 @@ func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
         nil,
     )
     if nil != openErr {
-        t.Fatalf("expected open to succeed with a zero ConnectTimeout (no deadline) against a reachable database, got: %v", openErr)
+        t.Fatalf("expected open to succeed with a zero ConnectTimeout resolved to the default connect deadline against a reachable database, got: %v", openErr)
     }
     defer database.Close()
 }

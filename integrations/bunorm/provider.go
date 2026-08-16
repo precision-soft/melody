@@ -8,6 +8,7 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
 )
 
+/* Provider opens the connection pool a definition names. Open answers a fresh pool whose ownership transfers to the caller: the registry closes every database it decides not to keep — one handed back beside an error, one that loses a duplicate migration open, one that lands after Close — so an implementation handing out a shared or memoized *bun.DB would have its live pool closed underneath it. */
 type Provider interface {
     Open(resolver containercontract.Resolver) (*bun.DB, error)
 }

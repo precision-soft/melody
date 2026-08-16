@@ -73,8 +73,8 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
         t.Fatalf("resolveDatabase panicked on an unknown manager name instead of returning an error")
     }
 
-    if nil == resolveErr {
-        t.Fatalf("expected an error for an unknown manager name, got nil")
+    if false == errors.Is(resolveErr, bunorm.ErrProviderDefinitionNotFound) {
+        t.Fatalf("expected ErrProviderDefinitionNotFound for the unknown manager name, got %v", resolveErr)
     }
 }
 

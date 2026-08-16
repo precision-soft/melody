@@ -328,6 +328,114 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
 }
 
 /*
+   The in-flight entry is what a second caller coalesces onto, and it has to be
+   registered before the provider is dialed: registered after, a caller arriving
+   during the dial would find neither the cache nor the entry and dial the same
+   name again, opening a pool the publish immediately overwrites and leaks.
+*/
+func TestManagerRegistry_AnInFlightOpenIsRegisteredBeforeTheDial(t *testing.T) {
+    logger := &fakeLogger{}
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    provider := &blockingProvider{openStarted: openStarted, releaseOpen: releaseOpen}
+
+    registry, registryErr := NewManagerRegistry(
+        logger,
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    managerDone := make(chan struct{})
+    go func() {
+        _, _ = registry.Manager("x")
+        close(managerDone)
+    }()
+
+    select {
+    case <-openStarted:
+    case <-time.After(2 * time.Second):
+        close(releaseOpen)
+        t.Fatalf("the open of 'x' never started")
+    }
+
+    registry.lock.Lock()
+    _, inFlight := registry.pendingOpenByName["x"]
+    registry.lock.Unlock()
+
+    close(releaseOpen)
+    <-managerDone
+
+    if false == inFlight {
+        t.Fatalf("expected the in-flight open to be registered under its name before the dial")
+    }
+}
+
+/*
+   A caller that finds an in-flight open must wait on it rather than dial. The
+   pending entry is installed by hand, so the caller is a waiter by construction
+   and no scheduling window decides what the test observes: the provider counts
+   every dial, and the manager published on the entry is the one the waiter has
+   to answer with.
+*/
+func TestManagerRegistry_ACallerFindingAnInFlightOpenWaitsInsteadOfDialing(t *testing.T) {
+    logger := &fakeLogger{}
+    provider := &fakeProvider{}
+
+    registry, registryErr := NewManagerRegistry(
+        logger,
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    database, _ := newCloseRaceDatabase()
+    publishedManager := NewManager("x", database)
+
+    pendingOpen := &managerOpen{done: make(chan struct{})}
+    registry.lock.Lock()
+    registry.pendingOpenByName["x"] = pendingOpen
+    registry.lock.Unlock()
+
+    type managerOutcome struct {
+        manager *Manager
+        err     error
+    }
+
+    outcomeChannel := make(chan managerOutcome, 1)
+    go func() {
+        manager, managerErr := registry.Manager("x")
+        outcomeChannel <- managerOutcome{manager: manager, err: managerErr}
+    }()
+
+    pendingOpen.manager = publishedManager
+    close(pendingOpen.done)
+
+    var outcome managerOutcome
+    select {
+    case outcome = <-outcomeChannel:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("Manager('x') never returned from the coalesced wait")
+    }
+
+    if nil != outcome.err {
+        t.Fatalf("unexpected error: %v", outcome.err)
+    }
+
+    if publishedManager != outcome.manager {
+        t.Fatalf("expected the waiter to answer with the published manager, not its own")
+    }
+
+    if 0 != provider.openCount {
+        t.Fatalf("expected the waiter not to dial, got %d opens", provider.openCount)
+    }
+}
+
+/*
    closeRaceDialect is a minimal bun dialect assembled only from packages that
    already ship inside the bun core module, so a real *bun.DB can be built for the
    close-during-open regression without pulling in a database driver dependency.

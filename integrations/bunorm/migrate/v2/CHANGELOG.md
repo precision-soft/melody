@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- the unknown-manager test pins the refusal it always meant to pin: it accepted any error, so a regression that ignored the `--manager` flag and dialed the default database still read as the guard working; it now requires `bunorm.ErrProviderDefinitionNotFound`
+
 - **Behavioural:** the text rendering escapes C0 control characters and DEL visibly (`\n`, `\r`, `\t`, the rest as `\xNN`) in every string it did not write itself — the error text off the wire, the failed statement, the query names, the DATABASE identity block the server answers and the migration names — before the terminal sees them, and before the table cells are measured, so the alignment counts the escaped spelling. A server whose error carried an escape sequence could repaint the operator's terminal or forge lines in a captured log; the failed statement alone keeps its real line breaks, which are the readability of the query block, with every other control byte escaped. The json rendering is untouched — its encoder escapes on its own
 - `db:rollback` answers the held migration lock with the same remedy-naming refusal `db:migrate` already answered: which manager, which locks table, and that `db:unlock` clears a lock a crashed process left behind. It used to return bun's bare error, which states that a lock exists and nothing else; the bun error stays the cause, so `errors.Is` still reaches it
 
