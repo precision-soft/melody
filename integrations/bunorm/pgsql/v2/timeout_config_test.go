@@ -13,16 +13,14 @@ func TestDefaultTimeoutConfig(t *testing.T) {
     }
 }
 
-/* @info a zero ConnectTimeout is a valid configuration and must be preserved (the ping guard skips the deadline instead of using context.WithTimeout(0)) */
-
 func TestNewTimeoutConfigStoresValuesIncludingZero(t *testing.T) {
-    timeoutConfig := NewTimeoutConfig(time.Second)
+    timeoutConfig := NewTimeoutConfig(time.Second, 0, 0)
 
     if time.Second != timeoutConfig.ConnectTimeout {
         t.Fatalf("expected connect timeout 1s, got %s", timeoutConfig.ConnectTimeout)
     }
 
-    zeroTimeoutConfig := NewTimeoutConfig(0)
+    zeroTimeoutConfig := NewTimeoutConfig(0, 0, 0)
 
     if 0 != zeroTimeoutConfig.ConnectTimeout {
         t.Fatalf("expected a zero connect timeout to be preserved, got %s", zeroTimeoutConfig.ConnectTimeout)

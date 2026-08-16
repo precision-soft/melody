@@ -26,6 +26,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** A rule that genuinely needs the cross-segment reach — one deliberately governing every path beginning with the text — moves to `NewAccessControlRawPrefixRule` and keeps its old behaviour exactly. A rule that meant a path segment (the common case) needs no change beyond the stricter, intended matching. An empty-prefix catch-all becomes an explicit `"/"` prefix or `NewAccessControlRawPrefixRule("")`. Audit every `NewAccessControlRule` call whose prefix is a bare mount an attacker could extend (`/admin`, `/internal`): under the old raw rule these governed sibling paths by accident, and the bounded rule is what most such rules always meant.
 
+### Bunorm mysql: the provider negotiates verified TLS by default
+
+**What changed.** The mysql provider set no TLS on its connector, so it connected in plaintext and offered no option to enable TLS. It now builds a verifying `tls.Config` by default — the system roots, the configured host as the name to verify against, `MinVersion` TLS 1.2 — the same posture its pgsql sibling already carried, and refuses the driver spellings that would downgrade silently.
+
+**Symptom.** A mysql server that speaks no TLS fails the dial where it previously connected in plaintext. The example's development mysql is such a server.
+
+**Remedy.** A database reached over a trusted network, or one that speaks no TLS, arms `mysql.WithInsecure(true)` on the provider — the deliberate opt-out spelled the same way as pgsql's. A database with a certificate needs no change; one needing a pinned or client certificate passes `mysql.WithTlsConfig`. The example arms the opt-out through a new `MYSQL_INSECURE` switch in its `.env`, mirroring `PGSQL_INSECURE`.
+
 ### HTTP: a request path that folds to a different spelling is refused with 400
 
 **What changed.** The kernel now refuses, with `400`, a request whose path is not canonical — one carrying a `..` or `.` segment, or an empty `//` segment — before it is routed or authorized. A trailing slash is not a fold and still routes as before (`/admin/` reaches the `/admin` route). The router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule: `GET /admin/x/../../login` reached a catch-all `/admin` handler while `/login`'s public rule granted it. The refusal closes that by keeping the router, the firewall matchers and the access control reading one spelling.
@@ -113,6 +121,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 **Symptom.** The order in which two services are closed can change, and it changes toward the documented one: the holder is now closed before what it resolved. An application that had come to depend on the previous accidental order — a service whose `Close` assumed the other had already ended — sees the reverse. A handle built over the **container itself**, rather than over the resolver its provider received, still has no owner and keeps the previous ordering.
 
 **Remedy.** None for the ordinary case, which is the one this repairs: a component that drains through a lazily-resolved handle at `Close` now finds it alive. If a service genuinely must close after another, express it as a dependency by resolving that other service inside its provider.
+
+### Bunorm: bun's own diagnostics go to the journal
+
+**What changed.** Opening a connection through the mysql or pgsql provider routes bun's package-level logger into the application's journal, once per process, through the new `bunorm.RouteDiagnostics`. Bun's reports of a declaration mistake — an unknown struct tag option, an unknown `on_update` or `on_delete` rule, a query carrying arguments and no placeholders — arrive as warning records under the message `bun diagnostic` with the line in the context.
+
+**Symptom.** Those lines stop appearing on standard error and start appearing in the journal. An operator or a test grepping standard error for `WARN: bun:` finds nothing.
+
+**Remedy.** Read them from the journal, filtering on the `bun diagnostic` message. One line is deliberately unaffected and stays on standard error: the mysql dialect writes `can't discover MySQL version` through the **standard library's** default logger rather than bun's, so routing it would mean taking `log.SetOutput` for the whole process — every dependency and your own `log` calls with it. That is the application's decision; take it in your composition root if you want it, as the mysql readme shows.
 
 ### Security: `NewRoleHierarchyVoter` takes any `Voter` as its delegate
 
@@ -353,6 +369,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 **Symptom.** A key carrying a space or a newline — typically built from user input — now fails every operation against the in-memory backend with `cache key contains spaces`/`cache key contains newlines`, where it silently worked in development and failed only in production.
 
 **Remedy.** Sanitize the key at the call site (hash it, or strip the whitespace). The refusal names the key.
+
+### pgsql: every driver deadline is named, configured and lifted for migrations
+
+**What changed.** `pgsql.TimeoutConfig` carries `ReadTimeout` and `WriteTimeout` beside `ConnectTimeout`, the connector receives all three (the dial included), and the provider implements `bunorm.MigrationProvider`. Until now the dial ran under pgdriver's internal 5s default whatever `ConnectTimeout` said, every query ran under invisible 10s read / 5s write deadlines, and `db:migrate` ran on the request pool — an 11-second DDL statement died at 10.004s, measured.
+
+**Symptom.** `pgsql.NewTimeoutConfig(connect)` no longer compiles — the constructor takes the three durations, the mysql signature. Behaviourally, the effective read/write deadlines move from 10s/5s to the documented 30s/30s.
+
+**Remedy.** `NewTimeoutConfig(connect, 0, 0)` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines where request traffic needs them. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
 
 ### Security: a typed nil is refused where a nil is refused
 

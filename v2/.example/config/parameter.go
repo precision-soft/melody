@@ -27,6 +27,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter(ParameterDatabaseName, "%env(default::MYSQL_DATABASE)%")
     registrar.RegisterParameter(ParameterDatabaseUser, "%env(default::MYSQL_USER)%")
     registrar.RegisterParameter(ParameterDatabasePassword, "%env(default::MYSQL_PASSWORD)%")
+    registrar.RegisterParameter(ParameterDatabaseInsecure, "%env(default::MYSQL_INSECURE)%")
 
     registrar.RegisterParameter(ParameterRedisAddress, "%env(default::REDIS_ADDRESS)%")
     registrar.RegisterParameter(ParameterRedisUser, "%env(default::REDIS_USER)%")
