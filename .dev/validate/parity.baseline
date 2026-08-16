@@ -1,0 +1,143 @@
+# The divergences between two majors that are there on purpose, one line per fact.
+#
+#   pair ~ dimension ~ module ~ key ~ reason
+#
+# Read by .dev/validate/parity.sh. This is not a suppression list: every line is a claim the run has to
+# satisfy. A divergence with no line here fails the check, and a line here that matched nothing fails it
+# just as loudly — the divergence it excuses has been repaired, so the line has to go. Without that second
+# half the list accumulates dead entries and eventually excuses a real defect that happens to land on a
+# site something else already repaired.
+#
+# Wildcards are refused rather than supported. An entry written as a pattern grows silently to cover the
+# next divergence, which is the whole failure it exists to prevent.
+#
+# Fields are trimmed, so the columns may be aligned. The reason is mandatory: a line whose reason is empty
+# is a line nobody can review.
+#
+# ------------------------------------------------------------------------------------------------------
+# the framework
+# ------------------------------------------------------------------------------------------------------
+
+v1:v2 ~ text ~ . ~ version/version.go ~ each major names and stamps its own version
+
+# ------------------------------------------------------------------------------------------------------
+# bunorm: the deliberate major boundary, announced by `v2.0.0 - Introduce v2 Module Path and Provider.Open
+# Signature Change`. v1 hands the provider a container resolver and lets it resolve the connection
+# parameters itself; v2 and v3 agree on handing it the parameters and a logger. Everything below follows
+# from that one decision, and nothing below is a gap waiting to be closed.
+# ------------------------------------------------------------------------------------------------------
+
+v1:v2 ~ file-target   ~ integrations/bunorm ~ connection_parameters.go ~ the type the v2 Open signature takes; v1 has the resolver in its place
+v1:v2 ~ text          ~ integrations/bunorm ~ provider.go              ~ the Open signature: parameters and a logger against a resolver
+v1:v2 ~ text          ~ integrations/bunorm ~ provider_definition.go   ~ a definition carries connection parameters on v2 and parameter names on v1
+v1:v2 ~ text          ~ integrations/bunorm ~ manager_registry.go      ~ the registry holds a logger on v2 and a resolver on v1
+v1:v2 ~ text          ~ integrations/bunorm ~ manager_registry_test.go ~ the doubles and their construction follow the registry's own signature
+v1:v2 ~ text          ~ integrations/bunorm ~ errors.go                ~ the refusals name what each major is actually given
+
+v1:v2 ~ symbol-source ~ integrations/bunorm ~ .ErrResolverIsRequired  ~ v2 is handed no resolver, so it has none to refuse
+v1:v2 ~ symbol-target ~ integrations/bunorm ~ .ErrLoggerIsRequired    ~ the refusal of the argument v2 has in the resolver's place
+v1:v2 ~ symbol-target ~ integrations/bunorm ~ .ConnectionParameters   ~ the parameters the v2 Open signature takes
+v1:v2 ~ symbol-target ~ integrations/bunorm ~ .ConnectionParams       ~ the released v2.0.0 spelling, kept so the module path's own major does not break twice
+v1:v2 ~ symbol-target ~ integrations/bunorm ~ .MarkSecretParameters   ~ the door a major that receives values needs, where v1 collects names at construction
+v1:v2 ~ symbol-target ~ integrations/bunorm ~ .SafeContext            ~ published on the v2 registry, which owns the context v1 reaches through the resolver
+
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenResolverIsNil                     ~ there is no resolver argument on v2 to refuse
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenResolverIsTypedNil                ~ there is no resolver argument on v2 to refuse
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestManagerRegistry_ConcurrentFirstDialsShareNoResolutionContext   ~ the v2 registry holds no resolver, so concurrent first dials share no resolution context to keep apart
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestManagerRegistry_LateDialReplaysThroughTheContainerNotTheDeadScope ~ the v2 registry never reaches a container or a scope, so a late dial has none to replay through
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_MarksTheSecretParametersAtConstruction      ~ v2 marks through the setter rather than at construction; the target-side name proves the same guard
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_MarksEverySecretParameterOfEveryDefinition  ~ renamed onto the setter on v2
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_AnEmptySecretParameterNameIsSkipped         ~ renamed onto the setter on v2
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_AProviderWithoutTheCapabilityIsNotAsked     ~ renamed onto the setter on v2
+v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_ConstructsWhenTheConfigurationServiceIsAbsent ~ renamed onto the setter on v2, where an absent configuration is tolerated rather than resolved
+
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenLoggerIsNil                                     ~ the refusal of the argument v2 has in the resolver's place
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenLoggerIsTypedNil                                ~ the refusal of the argument v2 has in the resolver's place
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersMarksTheNamesItIsGiven                   ~ the setter's own guard, which v1 reaches at construction instead
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersMarksEverySecretParameterOfEveryDefinition ~ the setter's own guard, which v1 reaches at construction instead
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersAsksTheProvidersBesideTheNamesItIsGiven  ~ the setter marks the names it is given and the ones a provider declares; v1 has only the second half
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersLeavesAProviderWithoutTheCapabilityAlone ~ the setter's own guard, which v1 reaches at construction instead
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersToleratesAnAbsentConfiguration           ~ the setter's own guard, which v1 reaches at construction instead
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersSkipsAnEmptyParameterName                ~ the setter's own guard, which v1 reaches at construction instead
+
+# ------------------------------------------------------------------------------------------------------
+# bunorm/migrate: the commands are a copy, and the two files that are not carry the provider doubles the
+# core's signature forces on them.
+# ------------------------------------------------------------------------------------------------------
+
+v1:v2 ~ text ~ integrations/bunorm/migrate ~ base_command_test.go ~ the provider double implements the v2 Open signature and is constructed with a logger
+v1:v2 ~ text ~ integrations/bunorm/migrate ~ migrate_test.go      ~ the provider double implements the v2 Open signature and is constructed with a logger
+
+# ------------------------------------------------------------------------------------------------------
+# bunorm/mysql and bunorm/pgsql: the same boundary reaching the two drivers. The v1-only surface is two
+# symbols per module and both stay v1-only by verdict — NewProviderWithConfig duplicates the builder chain
+# v2 already carries, and SecretParameterNames cannot mean anything on a major that is handed values
+# rather than parameter names, where the door is ManagerRegistry.MarkSecretParameters.
+# ------------------------------------------------------------------------------------------------------
+
+v1:v2 ~ text ~ integrations/bunorm/mysql ~ provider.go             ~ the provider is built from connection parameters and a logger
+v1:v2 ~ text ~ integrations/bunorm/mysql ~ post_build_hook.go      ~ the hook signature carries no resolver on v2
+v1:v2 ~ text ~ integrations/bunorm/mysql ~ provider_test.go        ~ the tests construct through the v2 signature
+v1:v2 ~ text ~ integrations/bunorm/mysql ~ provider_option_test.go ~ the tests construct through the v2 signature
+v1:v2 ~ text ~ integrations/bunorm/pgsql ~ provider.go             ~ the provider is built from connection parameters and a logger
+v1:v2 ~ text ~ integrations/bunorm/pgsql ~ post_build_hook.go      ~ the hook signature carries no resolver on v2
+v1:v2 ~ text ~ integrations/bunorm/pgsql ~ provider_test.go        ~ the tests construct through the v2 signature
+v1:v2 ~ text ~ integrations/bunorm/pgsql ~ provider_option_test.go ~ the tests construct through the v2 signature
+
+v1:v2 ~ symbol-source ~ integrations/bunorm/mysql ~ .NewProviderWithConfig  ~ duplicates the builder chain v2 already carries
+v1:v2 ~ symbol-source ~ integrations/bunorm/mysql ~ .SecretParameterNames   ~ a major handed values has no parameter names to name; the door is ManagerRegistry.MarkSecretParameters
+v1:v2 ~ symbol-source ~ integrations/bunorm/pgsql ~ .NewProviderWithConfig  ~ duplicates the builder chain v2 already carries
+v1:v2 ~ symbol-source ~ integrations/bunorm/pgsql ~ .SecretParameterNames   ~ a major handed values has no parameter names to name; the door is ManagerRegistry.MarkSecretParameters
+
+v1:v2 ~ test-source ~ integrations/bunorm/mysql ~ .TestNewProviderWithConfigStoresConfigs                            ~ proves the constructor v2 does not carry
+v1:v2 ~ test-source ~ integrations/bunorm/mysql ~ .TestProvider_NamesThePasswordParameterAsItsOnlySecret             ~ proves SecretParameterNames, which v2 does not carry
+v1:v2 ~ test-source ~ integrations/bunorm/mysql ~ .TestProviderOpenMarksThePasswordParameterSecret                   ~ v2 marks through the registry setter, not through the provider's open
+v1:v2 ~ test-source ~ integrations/bunorm/mysql ~ .TestNewProviderStoresParameterNamesAndAppliesOptions              ~ renamed on v2, which stores no parameter names
+v1:v2 ~ test-source ~ integrations/bunorm/mysql ~ .TestProviderOpenResolvesConfigParametersAndAbortsOnPostBuildHookError ~ renamed on v2, which is handed the values instead of resolving them
+v1:v2 ~ test-source ~ integrations/bunorm/mysql ~ .TestProviderOpenWithRetryAndNoLoggerServiceDoesNotPanic           ~ renamed on v2, where the logger is an argument rather than a service
+v1:v2 ~ test-source ~ integrations/bunorm/mysql ~ .TestMigrationProviderKeepsParametersHookAndRetry                  ~ renamed on v2, where the migration provider keeps the transport instead of the parameters
+v1:v2 ~ test-source ~ integrations/bunorm/pgsql ~ .TestNewProviderWithConfigStoresConfigs                            ~ proves the constructor v2 does not carry
+v1:v2 ~ test-source ~ integrations/bunorm/pgsql ~ .TestProvider_NamesThePasswordParameterAsItsOnlySecret             ~ proves SecretParameterNames, which v2 does not carry
+v1:v2 ~ test-source ~ integrations/bunorm/pgsql ~ .TestProviderOpenMarksThePasswordParameterSecret                   ~ v2 marks through the registry setter, not through the provider's open
+v1:v2 ~ test-source ~ integrations/bunorm/pgsql ~ .TestNewProviderStoresParameterNames                               ~ renamed on v2, which stores no parameter names
+v1:v2 ~ test-source ~ integrations/bunorm/pgsql ~ .TestProviderOpenResolvesConfigParametersAndAbortsOnPostBuildHookError ~ renamed on v2, which is handed the values instead of resolving them
+v1:v2 ~ test-source ~ integrations/bunorm/pgsql ~ .TestProviderOpenWithRetryAndNoLoggerServiceDoesNotPanic           ~ renamed on v2, where the logger is an argument rather than a service
+
+v1:v2 ~ test-target ~ integrations/bunorm/mysql ~ .TestNewProviderAppliesOptions                                ~ the v2 spelling of the constructor test, with no parameter names to store
+v1:v2 ~ test-target ~ integrations/bunorm/mysql ~ .TestProviderOpenBuildsDriverConfigAndAbortsOnPostBuildHookError ~ the v2 spelling: the driver config is built from the values handed in
+v1:v2 ~ test-target ~ integrations/bunorm/mysql ~ .TestProviderOpenWithRetryAndNilLoggerDoesNotPanic             ~ the v2 spelling: a nil logger argument rather than an absent logger service
+v1:v2 ~ test-target ~ integrations/bunorm/mysql ~ .TestMigrationProviderKeepsHookRetryAndTransport               ~ the v2 spelling: the migration provider keeps the transport, having no parameters to keep
+v1:v2 ~ test-target ~ integrations/bunorm/pgsql ~ .TestNewProviderAppliesOptions                                ~ the v2 spelling of the constructor test, with no parameter names to store
+v1:v2 ~ test-target ~ integrations/bunorm/pgsql ~ .TestProviderOpenBuildsConnectorAndAbortsOnPostBuildHookError  ~ the v2 spelling: the connector is built from the values handed in
+v1:v2 ~ test-target ~ integrations/bunorm/pgsql ~ .TestProviderOpenWithRetryAndNilLoggerDoesNotPanic             ~ the v2 spelling: a nil logger argument rather than an absent logger service
+
+# ------------------------------------------------------------------------------------------------------
+# open residue, recorded so it is visible rather than invisible. Each of these goes when the work it
+# belongs to lands, and the staleness rule is what will force the line to be deleted then.
+# ------------------------------------------------------------------------------------------------------
+
+# E4-06. The two modules declare different melody floors, and the indirect set is a consequence of the
+# floor rather than of the code: their sources are identical outside the boundary above, nothing imports
+# godotenv directly, and no code difference could produce a dependency difference. The floors go up at the
+# release train, and these two lines go with them.
+v1:v2 ~ dependency-source ~ integrations/bunorm/mysql ~ github.com/joho/godotenv // indirect ~ recorded against the older melody floor this module declares; E4-06
+v1:v2 ~ dependency-source ~ integrations/bunorm/pgsql ~ github.com/joho/godotenv // indirect ~ recorded against the older melody floor this module declares; E4-06
+
+# E4-11. The upgrade notes of the integrations ported in earlier batches never reached the v2 document.
+# Fourteen sections, plus the one whose v2 title is narrower because the cron half had not arrived yet.
+# They are the work of Etapa 4 step 5; every line here disappears as that step lands.
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Boot-level: `websocket/v3` refuses a zero `IdleTimeout` ~ E4-11, and websocket is a v3-only integration
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Bunorm migrate: the held-lock refusal names the resource and the remedy ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### bunorm: the empty migrate module refuses the boot ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cache and cron: a recovered panic carries its cause ~ E4-11, retitled on v2 to the cache half alone
+v1:v2 ~ document-target ~ . ~ UPGRADE.md ### Cache: a recovered panic carries its cause ~ E4-11, the narrower title the cron half will widen
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: a clean shutdown is not a job failure ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: a module with runner commands and no configuration refuses the boot ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### cron: an entry routed to another crontab file refuses the in-process runner ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: a relative path from a parameter is anchored at the project directory ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: `Configuration.Entries` hands out copies ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: the generator answers a document on every outcome, and a job's output goes to the journal ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Migrate: the json document is not shaped by `--verbose`, and its keys are stable ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### rueidis: a wrong-typed credential refuses the boot, an empty prefix refuses the wipe, a closed backend refuses the call ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Rueidis: the counter refusals of the cache backend are named ~ E4-11
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Rueidis: the rate limiter reports a store failure by default ~ E4-11

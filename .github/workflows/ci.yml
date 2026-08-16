@@ -58,6 +58,18 @@ jobs:
             -   name: package documentation against every major
                 run: .dev/validate/documentation.sh
 
+    # one published major against the next, after the import path is rewritten. v1 and v2 are the same
+    # framework twice over — the port was a copy with the module path rewritten, not a translation — and
+    # they are separate modules, so no build ever sees them together: a fix that lands on one major and is
+    # forgotten on the other compiles, tests and documents cleanly on both. Reads the tree only, so it
+    # needs neither Go nor a service container. Mirrors run_parity_checks in `.dev/validate/all.sh`.
+    parity:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: v1 against v2 after the import path rewrite
+                run: .dev/validate/parity.sh
+
     # the race detector over the concurrency-carrying packages of the core majors
     # and the cron runner. The matrix job runs them without it, so a lost mutex or
     # an unsynchronized memo stays green there: these packages hold goroutines that

@@ -2,18 +2,11 @@
 
 This document lists high-level, forward-looking plans for the Melody repository.
 
-## Near-term
+The items this document used to carry have shipped: static file serving has first-class filesystem and embedded modes behind the `melody_static_embedded` build tag, the firewall system is the [`security`](../security/) package (see [`./package/SECURITY.md`](./package/SECURITY.md)), and the router carries named routes, url generation, route grouping and constraints (see [`../http/router.go`](../http/router.go), [`../http/router_group.go`](../http/router_group.go), [`../http/constraint.go`](../http/constraint.go) and [`./package/HTTP.md`](./package/HTTP.md)).
 
-- Static file serving enhancements
-    - Add explicit support for filesystem and embedded modes as a first-class feature set, aligned with the existing build tags (`melody_static_embedded`). See [`../http/`](../http/) and [`./package/HTTP.md`](./package/HTTP.md).
+## Direction
 
-- Firewall system
-    - Introduce a configurable firewall layer that can be composed with HTTP middleware and security integration points. See [`../security/`](../security/) and [`./package/SECURITY.md`](./package/SECURITY.md).
-
-## Mid-term
-
-- Router extensions
-    - Named routes, url generation, route grouping, and constraints. See [`../http/router.go`](../http/router.go) and [`./package/HTTP.md`](./package/HTTP.md).
+- This major line is being driven to complete stability and then frozen; new capabilities land in the newest major line. Remaining work here is hardening: aligning behaviour with what the documentation promises, closing defects, and keeping the example application a faithful showcase.
 
 ## Longer-term
 

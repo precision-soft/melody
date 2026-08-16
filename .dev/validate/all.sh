@@ -212,6 +212,20 @@ run_documentation_checks() {
         "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/documentation.sh"
 }
 
+# one published major against the next, after the import path is rewritten. v1 and v2 are the same framework
+# twice over — the port was a copy with the module path rewritten, not a translation — and they are separate
+# modules, so no build, no vet run and no test binary ever sees them together: a fix that lands on one major
+# and is forgotten on the other compiles, tests and reads correctly on both sides, and nothing else in this
+# script can tell. Reads the tree only, so it needs no container and costs seconds.
+run_parity_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/parity.sh" ]]; then
+        fail "the parity check is missing or not executable: .dev/validate/parity.sh. It is not optional — the ci job invokes it directly, so a skip here reports a pass locally against a lane that fails in ci, and it is the only lane that compares one major against another at all; restore it or chmod +x it"
+    fi
+
+    run_section "melody v1 against v2 after the import path rewrite (mirrors the ci parity job)" "${TAG_VALIDATE}" "parity" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/parity.sh"
+}
+
 # the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
 # actually drives a booted application over the wire, and that is the only place a whole class of defect shows
 # up at all — a middleware ordering that only matters once a real request traverses the chain, a route the
@@ -413,6 +427,8 @@ main() {
 
         run_documentation_checks
 
+        run_parity_checks
+
         run_race_go_suites
 
         if [[ "true" = "${SKIP_LIVE_BOOLEAN}" ]]; then
@@ -468,6 +484,12 @@ main() {
     # staged paths would skip it in the one commit that introduced the gap. It needs no container and costs
     # seconds, which is what makes running it every time affordable.
     run_documentation_checks
+
+    # ungated for the same reason as the documentation check above it, in a sharper form: the drift it
+    # reports lives between two majors that are never staged together. A fix staged on v1 is precisely what
+    # makes the unstaged v2 wrong, so gating on the staged paths would skip the check in the one commit that
+    # introduced the divergence. It reads the tree, needs no container and costs seconds.
+    run_parity_checks
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"
     success "validation completed"

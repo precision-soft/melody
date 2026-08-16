@@ -79,7 +79,7 @@ Purpose: upgrade guide for an application already running Melody.
 
 Include:
 
-- One section per release, newest first, matching the release headings of `CHANGELOG.md`
+- One section per release, newest first, matching the release headings of `CHANGELOG.md` — for releases made since the document was introduced; releases predating it are recorded in `CHANGELOG.md` alone
 - For each change that can require an action: what changed, the symptom the upgrader sees, the remedy
 - The versioning policy a breaking change is released under
 
@@ -94,6 +94,10 @@ Exclude:
 Purpose: API-driven documentation for a package and its subpackages.
 
 These documents must be short, factual, and scoped strictly to the package and its subpackages.
+
+### Documents outside the archetypes
+
+`CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, the GitHub templates under `.github/`, and the per-integration `README.md` files carry no archetype of their own: the changelog follows Keep a Changelog, the GitHub documents follow GitHub's conventions, and an integration README documents its module the way the example README documents the example — context, features, configuration, operational notes. The global rules below apply to all of them.
 
 ## Global rules
 
@@ -110,8 +114,8 @@ This is required to prevent documentation–code drift and to make navigation de
 
 ### File naming
 
-- Markdown file base names are uppercase (for example: `README.md`, `HTTP.md`).
-- Package docs live only under [`.documentation/package/`](./package/).
+- Markdown file base names are uppercase (for example: `README.md`, `HTTP.md`); the GitHub issue templates under `.github/ISSUE_TEMPLATE/` keep the lowercase names GitHub expects.
+- Package docs of the framework majors live only under the major's `.documentation/package/`; an integration module documents itself in its own `README.md`.
 
 ### Code examples
 
@@ -192,7 +196,7 @@ If a feature can be both constructed and retrieved from container/scope/runtime,
 
 ### Userland API at the end (uniform)
 
-For packages that expose userland API, include a “Userland API” section placed at the end of the document. This section lists only the exports intended for userland use, grouped semantically.
+For packages that expose userland API, include a “Userland API” section placed at the end of the document. This section lists only the exports intended for userland use, grouped semantically. The command-surface and wiring documents — `CLI.md`, `DEBUG.md`, `KERNEL.md` — title the same end-of-document listing “Exported API”, because much of what they list is reached by the framework's own wiring rather than called from userland.
 
 Internal-only packages must not include a “Userland API” section.
 
