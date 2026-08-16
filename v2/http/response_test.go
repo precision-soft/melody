@@ -4,6 +4,7 @@ import (
     "bytes"
     "errors"
     "io"
+    nethttp "net/http"
     "net/http/httptest"
     "os"
     "strings"
@@ -322,5 +323,55 @@ func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
 
     if "" == contentTypeByExtension(".svg") {
         t.Fatalf("expected a content type for .svg, got empty")
+    }
+}
+
+func TestRedirectResponse_CarriesTheLocationAndTheStatus(t *testing.T) {
+    response := RedirectResponse("/dashboard", nethttp.StatusSeeOther)
+
+    if nethttp.StatusSeeOther != response.StatusCode() {
+        t.Fatalf("unexpected status: %d", response.StatusCode())
+    }
+
+    if "/dashboard" != response.Headers().Get("Location") {
+        t.Fatalf("unexpected location: %q", response.Headers().Get("Location"))
+    }
+}
+
+func TestRedirectResponse_ZeroStatusBecomesFound(t *testing.T) {
+    response := RedirectResponse("/dashboard", 0)
+
+    if nethttp.StatusFound != response.StatusCode() {
+        t.Fatalf("expected a zero status to become 302, got: %d", response.StatusCode())
+    }
+
+    if "/dashboard" != response.Headers().Get("Location") {
+        t.Fatalf("unexpected location: %q", response.Headers().Get("Location"))
+    }
+}
+
+func TestRedirectShorthands_NameDifferentStatuses(t *testing.T) {
+    found := RedirectFound("/dashboard")
+
+    if nethttp.StatusFound != found.StatusCode() {
+        t.Fatalf("expected RedirectFound to answer 302, got: %d", found.StatusCode())
+    }
+
+    if "/dashboard" != found.Headers().Get("Location") {
+        t.Fatalf("unexpected location: %q", found.Headers().Get("Location"))
+    }
+
+    permanent := RedirectMovedPermanently("/new-home")
+
+    if nethttp.StatusMovedPermanently != permanent.StatusCode() {
+        t.Fatalf("expected RedirectMovedPermanently to answer 301, got: %d", permanent.StatusCode())
+    }
+
+    if "/new-home" != permanent.Headers().Get("Location") {
+        t.Fatalf("unexpected location: %q", permanent.Headers().Get("Location"))
+    }
+
+    if found.StatusCode() == permanent.StatusCode() {
+        t.Fatalf("the temporary and the permanent redirect must not share a status")
     }
 }

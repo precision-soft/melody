@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v2/exception"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
 )
 
 func NewRouter() *Router {
@@ -404,28 +405,8 @@ func (instance *Router) match(method string, path string, host string, scheme st
             continue
         }
 
-        if 0 != len(routeDefinition.locales) {
-            localeValue := ""
-            if value, exists := params[RouteAttributeLocale]; true == exists {
-                localeValue = value
-            }
-
-            if "" == localeValue {
-                continue
-            }
-
-            allowed := false
-            for _, allowedLocale := range routeDefinition.locales {
-                if allowedLocale == localeValue {
-                    allowed = true
-
-                    break
-                }
-            }
-
-            if false == allowed {
-                continue
-            }
+        if false == matchesLocale(routeDefinition.locales, params) {
+            continue
         }
 
         if false == matchesMethod(routeDefinition.methods, method) {
@@ -475,7 +456,13 @@ func (instance *Router) match(method string, path string, host string, scheme st
         return nil, nil, map[string]any{}
     }
 
-    return bestHandler, bestParams, bestAttributes
+    /* the winning route's attributes are the registry's own map, alive for every request of the
+    process: handed out uncopied, a sort or an append through the match result — or through
+    request.Attributes(), where the kernel publishes these values — rewrote the route table with no
+    lock. The copy is deep, so the methods slice and any nested value a route registered are the
+    caller's to mutate; what the copy does not descend into (a pointer, a struct) is shared state
+    by the same boundary the session copy documents. */
+    return bestHandler, bestParams, internal.CopyAnyMap(bestAttributes)
 }
 
 func (instance *Router) findRouteCandidates(pathSegments []string) []int {

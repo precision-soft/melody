@@ -29,7 +29,7 @@ The application boot is split around configuration resolve:
 
 1. **Pre-resolve**: modules may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go).
 2. **Resolve**: application configuration is resolved.
-3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security/events/CLI/HTTP.
+3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then — in this order — security, event subscribers, HTTP middlewares, HTTP routes and CLI commands.
 
 This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
 `kernelInstance.Config().MustGet("my.param").String()`.
@@ -51,7 +51,7 @@ The order is decided when the pipeline is built, not at registration:
 2. Registrations at **equal priority** keep **registration order**, the first registered being the outer one. A factory registration and a direct one share one registration sequence, so they compete on the same footing.
 3. `before` / `after` edges declared on a [`pipeline.NewHttpMiddlewareDefinition`](../../http/middleware/pipeline/definition.go) override both. The registrar exposes priority only; edges are for a pipeline assembled directly through [`pipeline.NewBuilder`](../../http/middleware/pipeline/builder.go).
 
-A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain that was actually built and `debug:middleware` renders it. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
+A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain the serving process actually built, for in-process inspection; `debug:middleware` describes and — under `--build` — builds a report of its own rather than reading that record. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
 
 ## Usage
 
@@ -68,13 +68,17 @@ package main
 import (
 	"context"
 	"io/fs"
+	nethttp "net/http"
 
 	"github.com/precision-soft/melody/v2/application"
 	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
+	containercontract "github.com/precision-soft/melody/v2/container/contract"
+	"github.com/precision-soft/melody/v2/http"
 	httpcontract "github.com/precision-soft/melody/v2/http/contract"
 	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
 	"github.com/precision-soft/melody/v2/logging"
 	loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
+	runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
 type demoModule struct{}
@@ -91,11 +95,11 @@ func (instance *demoModule) RegisterConfigurations(registrar applicationcontract
 	registrar.RegisterConfiguration(
 		loggingcontract.LoggingConfigurationName,
 		logging.NewLoggingConfiguration(loggingcontract.LevelLabels{
-			loggingcontract.LevelDebug:     "100",
-			loggingcontract.LevelInfo:      "200",
-			loggingcontract.LevelWarning:   "300",
-			loggingcontract.LevelError:     "400",
-			loggingcontract.LevelEmergency: "500",
+			loggingcontract.LevelDebug:     loggingcontract.LevelLabelFromInt(100),
+			loggingcontract.LevelInfo:      loggingcontract.LevelLabelFromInt(200),
+			loggingcontract.LevelWarning:   loggingcontract.LevelLabelFromInt(300),
+			loggingcontract.LevelError:     loggingcontract.LevelLabelFromInt(400),
+			loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
 		}),
 	)
 }
@@ -115,8 +119,8 @@ func (instance *demoModule) RegisterServices(
 
 	registrar.RegisterService(
 		"service.demo.value",
-		func(serviceLocator any) (any, error) {
-			_ = serviceLocator
+		func(resolver containercontract.Resolver) (string, error) {
+			_ = resolver
 			return "value", nil
 		},
 	)
@@ -127,21 +131,18 @@ func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Ker
 
 	router.HandleNamed(
 		"health",
-		httpcontract.MethodGet,
+		nethttp.MethodGet,
 		"/health",
-		func(kernelInstance kernelcontract.Kernel) httpcontract.Handler {
-			_ = kernelInstance
-
-			return func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-				_ = writer
-				_ = request
-
-				return httpcontract.NewStaticResponse(
-					"ok",
-					200,
-				), nil
-			}
-		}(kernelInstance),
+		func(
+			_ runtimecontract.Runtime,
+			_ nethttp.ResponseWriter,
+			_ httpcontract.Request,
+		) (httpcontract.Response, error) {
+			return http.TextResponse(
+				200,
+				"ok",
+			), nil
+		},
 	)
 }
 
@@ -150,10 +151,10 @@ var _ applicationcontract.ParameterModule = (*demoModule)(nil)
 var _ applicationcontract.ServiceModule = (*demoModule)(nil)
 var _ applicationcontract.HttpModule = (*demoModule)(nil)
 
-func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *application.Application {
+func buildApplication(embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
 	app := application.NewApplication(
+		embeddedEnvFiles,
 		embeddedPublicFiles,
-		embeddedConfigFiles,
 	)
 
 	app.RegisterModule(&demoModule{})
@@ -164,15 +165,16 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 	 */
 
 	app.RegisterHttpRoute(
-		httpcontract.MethodGet,
+		nethttp.MethodGet,
 		"/ping",
-		func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-			_ = writer
-			_ = request
-
-			return httpcontract.NewStaticResponse(
-				"pong",
+		func(
+			_ runtimecontract.Runtime,
+			_ nethttp.ResponseWriter,
+			_ httpcontract.Request,
+		) (httpcontract.Response, error) {
+			return http.TextResponse(
 				200,
+				"pong",
 			), nil
 		},
 	)
@@ -180,8 +182,8 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 	return app
 }
 
-func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) {
-	app := buildApplication(embeddedPublicFiles, embeddedConfigFiles)
+func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) {
+	app := buildApplication(embeddedEnvFiles, embeddedPublicFiles)
 	app.Run(ctx)
 }
 ```
@@ -228,7 +230,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 ### Constructors
 
-- [`NewApplication(embeddedPublicFiles, embeddedConfigFiles)`](../../application/application_new.go)
+- [`NewApplication(embeddedEnvFiles, embeddedPublicFiles)`](../../application/application_new.go) — both parameters are `fs.FS`, so the compiler never objects to them being swapped: the **env** files come first and the **public** files second, matching the `melody_env_embedded` and `melody_static_embedded` build tags in that order.
 - [`NewRuntimeFlags(mode)`](../../application/cli.go)
 - [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
 - [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)
@@ -241,7 +243,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 ### Registration APIs
 
-- [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go)
+- [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go) — accepts exactly one name in this major, `loggingcontract.LoggingConfigurationName`; any other name panics at registration, because nothing can ever consume it
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
 - [`(*Application).RegisterService(name, factory)`](../../application/application_container.go)
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)
@@ -249,7 +251,17 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)
 - [`(*Application).RegisterHttpRoute(method, pattern, handler)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpMiddlewares(middlewares...)`](../../application/application_http.go)
-- [`(*Application).RegisterHttpMiddlewareFactories(factories...)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpMiddlewareFactories(factories...)`](../../application/application_http.go) — a factory that yields nil (or a typed nil) fails the pipeline build, naming the definition; a factory that wants to disable itself conditionally returns a pass-through middleware instead
+
+### Boot refusals and the process exit
+
+Boot fails fast where serving would be the widening: an **http** process whose `.env` artifacts contributed **no keys at all** refuses to boot rather than serve on development defaults (a cli process stays permissive — a command takes its configuration with it when it exits). The http server limits are fixed defaults in this major — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB — with no override surface; the shutdown timeout alone is configurable through `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), defaulting to 5s.
+
+**The shutdown budget covers the request scopes as well as the connections.** `net/http`'s own `Shutdown` drains the connections the server still owns — and a **hijacked** connection is not one of them: a handler that upgrades to a websocket or takes the socket for any other reason removes it from the server's accounting, so `Shutdown` returns immediately and reports success while that handler is still running. Melody counts the request scopes the http kernel opened and waits for them under the *same* budget after `Shutdown` returns. A drain that finishes leaves the exit exactly as it was; one that does not is recorded as `http shutdown left request scopes open`, carrying the count, and the process exits non-zero — the same signal an overrun `Shutdown` gives, for the same reason. An application that serves upgraded connections should close them from a shutdown hook so the drain has something to succeed at; without one, the budget is what bounds the wait.
+
+On the way out, the record that explains a dying process is written **before** the teardown, through a logger that still writes: the exit handler climbs a ladder — the configured container logger while it still answers, a last-resort logger opened on the configured log destination when the container cannot, and the emergency logger when even that destination is unusable. A teardown failure that `Run`'s own close discovers turns into exit 1, symmetric with the cli path, which folds the run scope's close failure into the command's result while the container teardown belongs to the exit handler.
+
+A panic **during boot** exits fail-fast, with the container teardown run between the record and the exit: `Boot`'s own recover handler logs the record first, through a logger the teardown has not touched, then closes the container — which asks `IsClosed` before acting, so a container that never got built costs nothing — and exits. Connections modules opened before the failing boot line — database pools, redis clients — therefore get their `Close`, bounded by the same per-step budget the exit path applies to everything else.
 
 ### Middleware helpers
 

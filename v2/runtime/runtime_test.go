@@ -5,6 +5,7 @@ import (
     "errors"
     "reflect"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
@@ -223,4 +224,57 @@ func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = runtimeInstance.Scope().MustGet("x")
     }, "failed to get service from scope")
+}
+
+/* nilableScope embeds the interface so a nil pointer of this type is a typed nil that still satisfies containercontract.Scope */
+type nilableScope struct {
+    containercontract.Scope
+}
+
+/* nilableContainer embeds the interface so a nil pointer of this type is a typed nil that still satisfies containercontract.Container */
+type nilableContainer struct {
+    containercontract.Container
+}
+
+/* typedNilContext is a Context implementation carried as a typed nil, the shape a caller produces by passing an unassigned variable of a concrete context type: it is not equal to nil once it sits in the interface, so a plain comparison lets it through and the first Done() on the request path dereferences it */
+type typedNilContext struct{}
+
+func (instance *typedNilContext) Deadline() (time.Time, bool) {
+    return time.Time{}, false
+}
+
+func (instance *typedNilContext) Done() <-chan struct{} {
+    return nil
+}
+
+func (instance *typedNilContext) Err() error {
+    return nil
+}
+
+func (instance *typedNilContext) Value(key any) any {
+    return nil
+}
+
+func TestNew_RefusesANilAndATypedNilContext(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New(nil, serviceContainer.NewScope(), serviceContainer)
+    }, "context may not be nil on runtime")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New((*typedNilContext)(nil), serviceContainer.NewScope(), serviceContainer)
+    }, "context may not be nil on runtime")
+}
+
+func TestNew_RefusesTypedNilScopeAndContainer(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New(context.Background(), (*nilableScope)(nil), serviceContainer)
+    }, "scope may not be nil on runtime")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New(context.Background(), serviceContainer.NewScope(), (*nilableContainer)(nil))
+    }, "container may not be nil on runtime")
 }

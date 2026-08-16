@@ -1,7 +1,9 @@
 package container
 
 import (
+    "errors"
     "reflect"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -519,7 +521,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     }
 }
 
-/* @info OverrideProtectedInstance on a WithoutTypeRegistration value service must close once */
+/* OverrideProtectedInstance on a WithoutTypeRegistration value service must close once */
 
 type overrideValueCloser struct {
     counter *int
@@ -570,7 +572,7 @@ func TestContainer_Close_OverrideProtectedInstanceWithoutTypeRegistrationClosesO
     }
 }
 
-/* @info a concurrent second Close must not report success while the first is still tearing services down: both callers get the first teardown's result once it finishes */
+/* a concurrent second Close must not report success while the first is still tearing services down: both callers get the first teardown's result once it finishes */
 func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -632,7 +634,7 @@ func (instance *panickingCloseService) Close() error {
     panic("teardown exploded")
 }
 
-/* @info a service whose Close panics must not abort the teardown: the remaining services still close, the panic is recorded as a close failure, and a repeated Close reports the same error instead of a silent success */
+/* a service whose Close panics must not abort the teardown: the remaining services still close, the panic is recorded as a close failure, and a repeated Close reports the same error instead of a silent success */
 func TestContainer_Close_PanickingServiceCloseIsRecordedAndSiblingsStillClose(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -712,7 +714,7 @@ func (instance *panickingErrorMessageService) Close() error {
     return panickingErrorMessage{}
 }
 
-/* @info a user error whose Error() panics must not escape the teardown: the failure is recorded with a deterministic message and a repeated Close reports the same error instead of a silent success */
+/* a user error whose Error() panics must not escape the teardown: the failure is recorded with a deterministic message and a repeated Close reports the same error instead of a silent success */
 func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -891,7 +893,7 @@ func (instance *sameTypeZeroSizeCloser) Close() error {
     return nil
 }
 
-/* @info two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one was collapsed onto the first and never closed */
+/* two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one was collapsed onto the first and never closed */
 func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T) {
     sameTypeZeroSizeCloseCount = 0
 
@@ -926,7 +928,7 @@ func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T
     }
 }
 
-/* @info the mirror case: a service whose provider hands back what it resolved from another service holds the same instance, and the dependency edge proves it, so the shared instance is still closed exactly once */
+/* the mirror case: a service whose provider hands back what it resolved from another service holds the same instance, and the dependency edge proves it, so the shared instance is still closed exactly once */
 func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
     sameTypeZeroSizeCloseCount = 0
 
@@ -957,5 +959,631 @@ func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
 
     if 1 != sameTypeZeroSizeCloseCount {
         t.Fatalf("expected the shared instance to be closed exactly once, got %d", sameTypeZeroSizeCloseCount)
+    }
+}
+
+type failingCloseService struct{}
+
+func (instance *failingCloseService) Close() error {
+    return errors.New("refusing to close")
+}
+
+type replacedBuiltProbe struct {
+    label    string
+    recorder *closeOrderRecorder
+}
+
+func (instance *replacedBuiltProbe) Close() error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+/* an override replacing an instance the container built evicts it from the only maps the close sweep reads: it used to leak forever, with both the resolution and the override reporting success. The evicted value waits in the graveyard and the teardown closes it — once — alongside the override that took its place. */
+func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.replaced.built",
+        func(resolver containercontract.Resolver) (*replacedBuiltProbe, error) {
+            return &replacedBuiltProbe{label: "built", recorder: recorder}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.replaced.built"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    overrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.built",
+        &replacedBuiltProbe{label: "override", recorder: recorder},
+    )
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    builtCloses := 0
+    overrideCloses := 0
+    for _, label := range closeSequence {
+        if "built" == label {
+            builtCloses = builtCloses + 1
+        }
+        if "override" == label {
+            overrideCloses = overrideCloses + 1
+        }
+    }
+
+    if 1 != builtCloses {
+        t.Fatalf("expected the replaced built instance to be closed exactly once, got %v", closeSequence)
+    }
+
+    if 1 != overrideCloses {
+        t.Fatalf("expected the final override to be closed exactly once, got %v", closeSequence)
+    }
+}
+
+/* an override evicting an EARLIER override closes nothing: an installed override belongs to whoever installed it, and only what the container itself built enters the graveyard. */
+func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.replaced.override",
+        func(resolver containercontract.Resolver) (*replacedBuiltProbe, error) {
+            return &replacedBuiltProbe{label: "built", recorder: recorder}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    firstOverrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.override",
+        &replacedBuiltProbe{label: "first-override", recorder: recorder},
+    )
+    if nil != firstOverrideErr {
+        t.Fatalf("unexpected override error: %v", firstOverrideErr)
+    }
+
+    secondOverrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.override",
+        &replacedBuiltProbe{label: "second-override", recorder: recorder},
+    )
+    if nil != secondOverrideErr {
+        t.Fatalf("unexpected override error: %v", secondOverrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    for _, label := range closeSequence {
+        if "first-override" == label {
+            t.Fatalf("expected the evicted override to stay its installer's, got %v", closeSequence)
+        }
+    }
+}
+
+/* a close that both fails and cycles used to keep the failures and drop the cycle's node list — the operator saw WHICH services failed but not which ones cycled. The nodes ride inside the failure text now. */
+func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    registerFirstErr := serviceContainer.Register(
+        "app.cycle.first",
+        func(resolver containercontract.Resolver) (*failingCloseService, error) {
+            return &failingCloseService{}, nil
+        },
+    )
+    if nil != registerFirstErr {
+        t.Fatalf("unexpected register error: %v", registerFirstErr)
+    }
+
+    registerSecondErr := serviceContainer.Register(
+        "app.cycle.second",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}}, nil
+        },
+    )
+    if nil != registerSecondErr {
+        t.Fatalf("unexpected register error: %v", registerSecondErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.cycle.first"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+    if _, getErr := serviceContainer.Get("app.cycle.second"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    serviceContainer.registerDependencyLocked("service:app.cycle.first", "service:app.cycle.second")
+    serviceContainer.registerDependencyLocked("service:app.cycle.second", "service:app.cycle.first")
+    serviceContainer.mutex.Unlock()
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the failing close to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected the failures map in the close error context")
+    }
+
+    cycleText, hasCycle := failures["container.dependencyCycle"]
+    if false == hasCycle {
+        t.Fatalf("expected the dependency cycle to be recorded among the failures")
+    }
+
+    if false == strings.Contains(cycleText, "app.cycle.first") || false == strings.Contains(cycleText, "app.cycle.second") {
+        t.Fatalf("expected the cycle failure to name its nodes, got %q", cycleText)
+    }
+}
+
+/* IsClosed is asked before a defensive Close: the memoized close error makes a repeated Close indistinguishable from the discovering one, and the asker must not re-report a failure somebody else already carried away. */
+func TestContainerIsClosed_FlipsExactlyAtClose(t *testing.T) {
+    containerInstance := NewContainer()
+
+    closedChecker, isChecker := interface{}(containerInstance).(interface{ IsClosed() bool })
+    if false == isChecker {
+        t.Fatalf("expected the container to report closedness")
+    }
+
+    if true == closedChecker.IsClosed() {
+        t.Fatalf("expected a fresh container to report not closed")
+    }
+
+    if closeErr := containerInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == closedChecker.IsClosed() {
+        t.Fatalf("expected a closed container to report closed")
+    }
+}
+
+type lazyHoldingService struct {
+    recorder *closeOrderRecorder
+    handle   *LazyService[*closeOrderServiceA]
+}
+
+func (instance *lazyHoldingService) Close() error {
+    instance.recorder.record("holder")
+    return nil
+}
+
+/* a service that keeps its resolver and reaches through it after its provider returned depends on what it then resolves exactly as hard as one that resolved it during construction. The edge used to be read from the live resolution stack, which is empty by then, so no edge was recorded at all and the teardown fell back to closing the two in descending name order — here that closes the dependency FIRST, and the holder's own Close then runs over a service that has already ended. The names are chosen so the fallback and the correct order disagree: without the edge, "service.a" sorts after "app.holder" and goes first. */
+func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptResolver(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if err := serviceContainer.Register(
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    ); nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    if err := serviceContainer.Register(
+        "app.holder",
+        func(resolver containercontract.Resolver) (*lazyHoldingService, error) {
+            /* nothing is resolved here: the handle defers it to first use, which is the whole point */
+            return &lazyHoldingService{
+                recorder: recorder,
+                handle:   Lazy[*closeOrderServiceA](resolver, "service.a"),
+            }, nil
+        },
+    ); nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    holder, err := FromResolver[*lazyHoldingService](serviceContainer, "app.holder")
+    if nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    /* the dependency is built before the handle ever asks for it, which is the ordinary case and the one that tells the read path from the write path: a resolution that finds the instance already there still has an edge to record */
+    if _, err := serviceContainer.Get("service.a"); nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    /* the first use, on a path that runs long after the provider returned */
+    if nil == holder.handle.Get() {
+        t.Fatalf("expected the lazy handle to resolve the service")
+    }
+
+    if err := serviceContainer.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "holder" != closeSequence[0] {
+        t.Fatalf("expected the holder to close before the service it resolved, got %v", closeSequence)
+    }
+
+    if "a" != closeSequence[1] {
+        t.Fatalf("expected the resolved service to close last, got %v", closeSequence)
+    }
+}
+
+type panickingCloseWithCauseService struct {
+    cause error
+}
+
+func (instance *panickingCloseWithCauseService) Close() error {
+    panic(instance.cause)
+}
+
+type panickingCloseWithTextService struct{}
+
+func (instance *panickingCloseWithTextService) Close() error {
+    panic("the drain buffer was nil")
+}
+
+/*
+TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack pins what an
+operator learns from the one boundary that contains a teardown panic: nothing
+above it sees the panic and nothing below it survives, so whatever the recorded
+failure drops is gone. An error-shaped panic value kept only as its stringified
+message collapsed to one line at the render boundary, taking the context map
+and the cause chain of the very error the Close raised with it, and the frames
+that ran existed only inside the recover.
+*/
+func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T) {
+    panicCause := exception.NewError(
+        "the socket was already gone",
+        map[string]any{"peer": "10.0.0.7"},
+        errors.New("connection reset by peer"),
+    )
+
+    closeErr := closeServiceValue(&panickingCloseWithCauseService{cause: panicCause})
+
+    if nil == closeErr {
+        t.Fatalf("expected the panic to be contained as a failure")
+    }
+
+    if false == errors.Is(closeErr, panicCause) {
+        t.Fatalf("expected the panic value to travel as the cause, got %v", closeErr)
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    panicStack, hasStack := typedError.Context()["panicStack"].(string)
+    if false == hasStack || false == strings.Contains(panicStack, "closeServiceValue") {
+        t.Fatalf("expected the frames that ran to be captured, got %v", typedError.Context()["panicStack"])
+    }
+
+    causeChain := exception.BuildCauseChain(closeErr, 8)
+    if 3 != len(causeChain) {
+        t.Fatalf("expected the whole chain beneath the panic, got %v", causeChain)
+    }
+}
+
+/* a panic value that is not an error has no cause to give, and the record still carries what it can */
+func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(t *testing.T) {
+    closeErr := closeServiceValue(&panickingCloseWithTextService{})
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    if nil != typedError.Unwrap() {
+        t.Fatalf("expected no cause for a panic value that is not an error, got %v", typedError.Unwrap())
+    }
+
+    if _, hasStack := typedError.Context()["panicStack"].(string); false == hasStack {
+        t.Fatalf("expected the stack to be captured anyway, got %v", typedError.Context())
+    }
+}
+
+/*
+TestContainer_Close_ClosesTheEarliestCreatedServiceLast pins the tie-break the
+dependency graph leaves open. It used to be the node key descending — a string
+comparison nobody wrote — so a service resolved first at boot and used silently
+by everything afterwards, the logger being the case that matters, was closed in
+the middle of the teardown by nothing but its name. Whether a worker still had
+somewhere to report its drain came down to whether it sorted above or below its
+dependency: renaming app.worker to zz.worker was the whole difference.
+*/
+func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
+    for _, dependentName := range []string{"service.aaa.worker", "service.zzz.worker"} {
+        serviceContainer := NewContainer()
+
+        var mutex sync.Mutex
+        closeSequence := make([]string, 0, 2)
+        recorder := &closeOrderRecorder{
+            mutex:         &mutex,
+            closeSequence: &closeSequence,
+        }
+
+        if registerErr := serviceContainer.Register(
+            "service.mmm.shared",
+            func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+                return &closeOrderServiceA{recorder: recorder}, nil
+            },
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+
+        if registerErr := serviceContainer.Register(
+            dependentName,
+            func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+                return &closeOrderServiceB{recorder: recorder}, nil
+            },
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+
+        /* the shared service is resolved FIRST and no edge is ever declared: this is the whole shape of a logger resolved at boot and used by everything through its own door afterwards */
+        if _, getErr := serviceContainer.Get("service.mmm.shared"); nil != getErr {
+            t.Fatalf("unexpected get error: %v", getErr)
+        }
+
+        if _, getErr := serviceContainer.Get(dependentName); nil != getErr {
+            t.Fatalf("unexpected get error: %v", getErr)
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("unexpected close error: %v", closeErr)
+        }
+
+        if 2 != len(closeSequence) {
+            t.Fatalf("expected both services closed, got %v", closeSequence)
+        }
+
+        if "b" != closeSequence[0] || "a" != closeSequence[1] {
+            t.Fatalf("expected the later-created service closed first for %s, got %v", dependentName, closeSequence)
+        }
+    }
+}
+
+/* a declared edge still decides: the tie-break only settles what the graph says nothing about, so a dependency created LATER than its dependent is still closed after it */
+func TestContainer_Close_ADeclaredEdgeBeatsTheCreationOrder(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependency",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            if _, resolveErr := resolver.Get("service.dependency"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    /* the dependent is resolved first, so its dependency is created AFTER it: the edge must still put the dependency last */
+    if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "b" != closeSequence[0] || "a" != closeSequence[1] {
+        t.Fatalf("expected the declared edge to decide, got %v", closeSequence)
+    }
+}
+
+type closeTimeResolvingService struct {
+    serviceContainer containercontract.Container
+    resolveErr       error
+    resolvedValue    any
+}
+
+func (instance *closeTimeResolvingService) Close() error {
+    instance.resolvedValue, instance.resolveErr = instance.serviceContainer.Get("service.mmm.shared")
+
+    return nil
+}
+
+/*
+TestContainer_Close_AServiceStillResolvesDuringTheTeardown pins the first of the
+two closing states against the second. Refusing every resolution from the moment
+Close begins would take away the very thing closing the logger last exists to
+give: a worker reporting its drain resolves what it reports through, from inside
+its own Close. What is refused is a resolution made after the LAST close
+returned, which used to answer the instance found in the map — already closed —
+with a nil error.
+*/
+func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 1)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.mmm.shared",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    resolvingService := &closeTimeResolvingService{serviceContainer: serviceContainer}
+
+    if registerErr := serviceContainer.Register(
+        "service.zzz.worker",
+        func(resolver containercontract.Resolver) (*closeTimeResolvingService, error) {
+            return resolvingService, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.mmm.shared"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.zzz.worker"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if nil != resolvingService.resolveErr {
+        t.Fatalf("expected a service closing to still resolve what it reports through, got %v", resolvingService.resolveErr)
+    }
+
+    if nil == resolvingService.resolvedValue {
+        t.Fatalf("expected the resolution during the teardown to answer the instance")
+    }
+}
+
+/*
+TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state.
+A resolution performed once the teardown is over was answered out of the maps —
+which the teardown has just emptied of meaning — so a caller holding a resolver
+received a handle to a service every Close in the process had already run on,
+with a nil error saying it was fine. The fast path is asked separately because a
+memoized instance never reaches the creation guard that refuses a closed
+container.
+*/
+func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    closed := false
+
+    if registerErr := serviceContainer.Register(
+        "service.probe",
+        func(resolver containercontract.Resolver) (*probeClosableService, error) {
+            return &probeClosableService{closed: &closed}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.probe"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    lateValue, lateErr := serviceContainer.Get("service.probe")
+
+    if nil == lateErr {
+        t.Fatalf("expected a resolution after the teardown to be refused, got %v", lateValue)
+    }
+
+    if false == strings.Contains(lateErr.Error(), "container is closed") {
+        t.Fatalf("expected the closed-container refusal, got %v", lateErr)
+    }
+
+    if nil != lateValue {
+        t.Fatalf("expected no value beside the refusal, got %v", lateValue)
+    }
+}
+
+type probeClosableService struct {
+    closed *bool
+}
+
+func (instance *probeClosableService) Close() error {
+    *instance.closed = true
+
+    return nil
+}
+
+/* the refusal covers the resolution paths the fast path never sees: a resolution made through a SCOPE skips the memoized read entirely and reaches the creation guard, which is the second door the same closing state has to be asked at */
+func TestScope_Get_RefusesAfterTheContainerTeardownFinished(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    closed := false
+
+    if registerErr := serviceContainer.Register(
+        "service.probe",
+        func(resolver containercontract.Resolver) (*probeClosableService, error) {
+            return &probeClosableService{closed: &closed}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("service.probe"); nil != getErr {
+        t.Fatalf("unexpected warm get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    lateValue, lateErr := scopeInstance.Get("service.probe")
+
+    if nil == lateErr {
+        t.Fatalf("expected the resolution through the scope to be refused, got %v", lateValue)
+    }
+
+    if false == strings.Contains(lateErr.Error(), "container is closed") {
+        t.Fatalf("expected the closed-container refusal, got %v", lateErr)
     }
 }

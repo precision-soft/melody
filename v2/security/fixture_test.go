@@ -1,0 +1,312 @@
+/* The shared test material of this package: the doubles every test file of it reaches for, the helpers
+that build them, and — where a contract spans every source rather than any one of them — the test that
+asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to
+exist without a matching source, which is what keeps every other one honest. A test provable from a
+single source belongs in that source's own mirror, not here. */
+package security
+
+import (
+    "context"
+    "errors"
+    nethttp "net/http"
+    "net/http/httptest"
+    "reflect"
+    "sync"
+    "time"
+
+    "github.com/precision-soft/melody/v2/bag"
+    bagcontract "github.com/precision-soft/melody/v2/bag/contract"
+    "github.com/precision-soft/melody/v2/clock"
+    clockcontract "github.com/precision-soft/melody/v2/clock/contract"
+    configcontract "github.com/precision-soft/melody/v2/config/contract"
+    "github.com/precision-soft/melody/v2/container"
+    containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/event"
+    eventcontract "github.com/precision-soft/melody/v2/event/contract"
+    "github.com/precision-soft/melody/v2/http"
+    httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
+    "github.com/precision-soft/melody/v2/logging"
+    "github.com/precision-soft/melody/v2/runtime"
+    runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+)
+
+type securityTestRequestContext struct {
+    requestIdValue string
+    startedAtValue time.Time
+}
+
+func (instance *securityTestRequestContext) RequestId() string {
+    return instance.requestIdValue
+}
+
+func (instance *securityTestRequestContext) StartedAt() time.Time {
+    return instance.startedAtValue
+}
+
+func newSecurityTestRequest(method string, path string, headers map[string]string, runtimeInstance runtimecontract.Runtime) httpcontract.Request {
+    request := httptest.NewRequest(method, "http://example.com"+path, nil)
+
+    for key, value := range headers {
+        request.Header.Set(key, value)
+    }
+
+    return http.NewRequest(
+        request,
+        nil,
+        runtimeInstance,
+        &securityTestRequestContext{
+            requestIdValue: "test",
+            startedAtValue: time.Now(),
+        },
+    )
+}
+
+type firewallTestRequestContext struct {
+    requestIdValue string
+    startedAtValue time.Time
+}
+
+func (instance *firewallTestRequestContext) RequestId() string    { return instance.requestIdValue }
+func (instance *firewallTestRequestContext) StartedAt() time.Time { return instance.startedAtValue }
+
+func newFirewallTestRequest(path string) httpcontract.Request {
+    request := httptest.NewRequest(nethttp.MethodGet, "http://example.com"+path, nil)
+
+    return http.NewRequest(
+        request,
+        nil,
+        nil,
+        &firewallTestRequestContext{
+            requestIdValue: "test",
+            startedAtValue: time.Now(),
+        },
+    )
+}
+
+type testScope struct {
+    mutex      sync.RWMutex
+    valueByKey map[string]any
+    closed     bool
+}
+
+func newTestScope() *testScope {
+    return &testScope{
+        valueByKey: make(map[string]any),
+    }
+}
+
+func (instance *testScope) Get(serviceName string) (any, error) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    if true == instance.closed {
+        return nil, errors.New("scope is closed")
+    }
+
+    value, exists := instance.valueByKey[serviceName]
+    if false == exists {
+        return nil, errors.New("service not found")
+    }
+
+    return value, nil
+}
+
+func (instance *testScope) MustGet(serviceName string) any {
+    value, err := instance.Get(serviceName)
+    if nil != err {
+        panic(err)
+    }
+
+    return value
+}
+
+func (instance *testScope) GetByType(targetType reflect.Type) (any, error) {
+    return nil, errors.New("not implemented")
+}
+
+func (instance *testScope) MustGetByType(targetType reflect.Type) any {
+    panic(errors.New("not implemented"))
+}
+
+func (instance *testScope) Has(serviceName string) bool {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    if true == instance.closed {
+        return false
+    }
+
+    _, exists := instance.valueByKey[serviceName]
+    return true == exists
+}
+
+func (instance *testScope) HasType(targetType reflect.Type) bool {
+    return false
+}
+
+func (instance *testScope) OverrideInstance(serviceName string, value any) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return errors.New("scope is closed")
+    }
+
+    instance.valueByKey[serviceName] = value
+    return nil
+}
+
+func (instance *testScope) MustOverrideInstance(serviceName string, value any) {
+    err := instance.OverrideInstance(serviceName, value)
+    if nil != err {
+        panic(err)
+    }
+}
+
+func (instance *testScope) OverrideProtectedInstance(serviceName string, value any) error {
+    return instance.OverrideInstance(serviceName, value)
+}
+
+func (instance *testScope) MustOverrideProtectedInstance(serviceName string, value any) {
+    err := instance.OverrideProtectedInstance(serviceName, value)
+    if nil != err {
+        panic(err)
+    }
+}
+
+func (instance *testScope) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    return nil
+}
+
+func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+}
+
+func (instance *testScope) Close() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.closed = true
+    return nil
+}
+
+var _ containercontract.Scope = (*testScope)(nil)
+
+type testKernel struct {
+    configuration    configcontract.Configuration
+    serviceContainer containercontract.Container
+    eventDispatcher  eventcontract.EventDispatcher
+    httpKernel       httpcontract.Kernel
+    httpRouter       httpcontract.Router
+    clock            clockcontract.Clock
+}
+
+func newTestKernel() *testKernel {
+    httpRouter := http.NewRouter()
+
+    return &testKernel{
+        configuration:    nil,
+        serviceContainer: container.NewContainer(),
+        eventDispatcher:  event.NewEventDispatcher(clock.NewSystemClock()),
+        httpKernel:       http.NewKernel(httpRouter),
+        httpRouter:       httpRouter,
+        clock:            clock.NewSystemClock(),
+    }
+}
+
+func (instance *testKernel) Environment() string {
+    return "test"
+}
+
+func (instance *testKernel) DebugMode() bool { return true }
+
+func (instance *testKernel) ServiceContainer() containercontract.Container {
+    return nil
+}
+
+func (instance *testKernel) EventDispatcher() eventcontract.EventDispatcher {
+    return instance.eventDispatcher
+}
+
+func (instance *testKernel) Config() configcontract.Configuration { return nil }
+
+func (instance *testKernel) HttpKernel() httpcontract.Kernel {
+    return instance.httpKernel
+}
+
+func (instance *testKernel) HttpRouter() httpcontract.Router {
+    return instance.httpRouter
+}
+
+func (instance *testKernel) Clock() clockcontract.Clock { return nil }
+
+var _ kernelcontract.Kernel = (*testKernel)(nil)
+
+func newTestRuntime() runtimecontract.Runtime {
+    scope := newTestScope()
+    serviceContainer := container.NewContainer()
+
+    overrideErr := scope.OverrideInstance(
+        logging.ServiceLogger,
+        logging.NewNopLogger(),
+    )
+    if nil != overrideErr {
+        panic(overrideErr)
+    }
+
+    return runtime.New(context.Background(), scope, serviceContainer)
+}
+
+func registerTestKernelExceptionListener(kernelInstance *testKernel) {
+    kernelInstance.EventDispatcher().AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exceptionEvent, ok := eventValue.Payload().(*http.KernelExceptionEvent)
+            if false == ok || nil == exceptionEvent {
+                return nil
+            }
+
+            if nil != exceptionEvent.Response() {
+                return nil
+            }
+
+            exceptionEvent.SetResponse(
+                http.JsonErrorResponse(
+                    500,
+                    "internal_server_error",
+                ),
+            )
+
+            return nil
+        },
+        0,
+    )
+}
+
+/* newTestCompiledFirewallWithRoleHierarchy builds the smallest firewall a security context needs: the nineteen-argument constructor is spelled out once here rather than in every test that only cares about the role hierarchy behind it. */
+func newTestCompiledFirewallWithRoleHierarchy(name string, roleHierarchy *RoleHierarchy) *CompiledFirewall {
+    return NewCompiledFirewall(
+        name,
+        NewPathPrefixMatcher("/"),
+        "prefix /",
+        nil,
+        nil,
+        nil,
+        nil,
+        roleHierarchy,
+        nil,
+        nil,
+        "",
+        "",
+        nil,
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+}
+
+var _ bagcontract.ParameterBag = bag.NewParameterBag()
+var _ runtimecontract.Runtime = nil

@@ -39,6 +39,8 @@ This package is intended for simple outbound HTTP calls from userland and framew
 
 The example below performs a GET request and decodes a JSON response.
 
+A client owns a connection pool, so it is built once and held for as long as the application calls the service it points at — never per call.
+
 ```go
 package main
 
@@ -52,18 +54,18 @@ type HealthResponse struct {
 	Status string `json:"status"`
 }
 
-func callHealthEndpoint() (string, error) {
-	client := httpclient.NewHttpClient(
-		httpclient.NewHttpClientConfig(
-			"https://api.example.com",
-			5*time.Second,
-			map[string]string{
-				"accept": "application/json",
-			},
-		),
-	)
+var healthClient = httpclient.NewHttpClient(
+	httpclient.NewHttpClientConfig(
+		"https://api.example.com",
+		5*time.Second,
+		map[string]string{
+			"accept": "application/json",
+		},
+	),
+)
 
-	response, requestErr := client.Get(
+func callHealthEndpoint() (string, error) {
+	response, requestErr := healthClient.Get(
 		"/health",
 	)
 	if nil != requestErr {
@@ -82,6 +84,15 @@ func callHealthEndpoint() (string, error) {
 
 ## Footguns & caveats
 
+- **A client is held, not built per call, and closed when it is done.** Every `NewHttpClient` builds its own transport with an idle pool — a hundred connections per host, kept for ninety seconds — and dropping the last reference to the client releases none of it: each parked connection has a read loop of its own keeping the transport alive. `Close()` releases the idle connections; it does not abort requests in flight, and the client keeps working afterwards by dialling again.
+- **A `StreamResponse` belongs to the caller, on every path.** `RequestStream` hands back a body that is still on the wire, and the streaming client deliberately carries no whole-request deadline, so a stream that is not closed pins its connection and its descriptor for the life of the process. Close it even when the status is one you do not like and you never read the body. `RequestStreamWithContext` is the variant that can end a stream a server never ends.
+- **`Body()` after `Close()` reads as a failure, not as nil.** A watchdog goroutine closing an indefinite stream is the ordinary shape, so the accessor never hands back a nil reader; the first read reports that the stream is closed, and the reader's own `Close` succeeds.
+- **The base url is a prefix, and it binds the client to one origin.** `https://host/v1` plus `/users` names `https://host/v1/users` — deliberately unlike RFC 3986 reference resolution, which Symfony and Guzzle implement and where an absolute path would replace `/v1` entirely. An empty target names the base resource itself. An absolute url that leaves the base origin is refused rather than sent, because the headers and the authorization configured on the client would otherwise travel to a host the url string chose — the leak the redirect policy stops one hop later. A client that talks to several origins is built without a base url.
+- **`WithMaxResponseBodyBytes` on a stream applies only when you name it.** `Request` caps the body it reads whole into memory, at ten mebibytes by default. On `RequestStream` the default does not apply, because a long-lived feed is exactly what it would cut; a cap you set explicitly is enforced there too, and the read fails once it is passed.
+- **A secret belongs in a header, not in the url — but an error will not spill it.** Every url this package puts into a message or an error context is sanitized: the userinfo and the query values are replaced, while the scheme, host, path and parameter names survive for diagnosis. On a cross-origin redirect the client also strips `Referer`, which net/http would otherwise populate with the full previous url.
+- **`TransportConfig` reads every non-positive value as "not set".** The meanings net/http gives to zero — an unbounded idle pool, no idle or response-header deadline — and the meaning `net.Dialer` gives to a negative keep-alive cannot be reached through this type; a deployment that needs one asks for a duration large enough to be the same thing in practice.
+- **A `[]byte` body is copied when the request is built**, because net/http writes the body on its own goroutine and `Do` returns as soon as the response headers arrive; a caller reusing a pooled buffer right after the call would otherwise race the transport.
+- **A bearer token wins over a basic credential** when both are set, because the two cannot share one `Authorization` header. A basic credential travels whenever it was asked for, empty halves included — `WithBasicAuth("", key)` is the ordinary shape of an api key spelled as a password.
 - `Response.Json` unmarshals the response body as-is; it does not validate content-type headers.
 - `NewHttpClientConfig` copies headers defensively; modifications to the input map after construction are not observed.
 - `NewDefaultHttpClient` uses an empty base URL and a default timeout. Set a base URL via `HttpClientConfig` or `SetBaseUrl`.
@@ -103,8 +114,18 @@ func callHealthEndpoint() (string, error) {
 - [`type HttpClient`](../../httpclient/http_client.go)
     - [`NewDefaultHttpClient()`](../../httpclient/http_client.go)
     - [`NewHttpClient(*HttpClientConfig)`](../../httpclient/http_client.go)
-    - `Get`, `Post`, `Put`, `Patch`, `Delete`, `Request`, `RequestStream`
-    - `SetBaseUrl`, `SetHeader`, `SetTimeout`
+    - [`(*HttpClient).Get(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Post(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Put(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Patch(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Delete(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Request(method string, urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).RequestStream(method string, urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.StreamResponse, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).RequestStreamWithContext(contextInstance context.Context, method string, urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.StreamResponse, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).SetBaseUrl(baseUrl string)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).SetHeader(key string, value string)`](../../httpclient/http_client.go) — stores under the canonical spelling, the one the constructor stores under, so rotating a credential overwrites the entry it means to instead of leaving two that collapse onto one header
+    - [`(*HttpClient).SetTimeout(timeout time.Duration)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Close() error`](../../httpclient/http_client.go)
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go)
     - [`NewHttpClientConfig(baseUrl string, timeout time.Duration, headers map[string]string) *HttpClientConfig`](../../httpclient/http_client_config.go)
 - Request options:

@@ -30,7 +30,7 @@ Important rules:
 - Missing keys return `exists == false` for helpers that expose key presence (for example `String` and `StringStrict`).
 - For conversion helpers (`Int`, `Bool`, `Float64`, `Duration`), the boolean result represents whether a typed value was present/produced (for example, it is `false` when the stored value is `nil`).
 - When a key is present but the stored value cannot be converted, conversion helpers return an error (with the boolean typically `true`, meaning the key was present and conversion was attempted).
-- `String` is intentionally permissive: it returns `""` for non-string stored types. Use `StringStrict` when you need validation and errors.
+- `String` is intentionally permissive: it returns `""` for non-string scalar stored types, but a `[]string` value panics naming the key — read it with `StringSlice`. Use `StringStrict` when you need validation and errors.
 
 ## Conversion semantics
 
@@ -38,7 +38,7 @@ The typed helpers distinguish three situations:
 
 - **Key missing**: the bag does not contain the key. Helpers return `exists == false` and no error.
 - **Key present, value is nil**: the bag contains the key, but its stored value is `nil`.
-    - `String` / `StringStrict` treat this as present and return `""` with `exists == true`.
+    - All string accessors (`String`, `StringStrict`, `StringSlice`, `StringSliceStrict`) report this as absent and return the zero value with `exists == false`.
     - `Int` / `Bool` / `Float64` / `Duration` treat this as no typed value and return the zero value with `exists == false`.
 - **Key present, value cannot be converted**: helpers return a typed parse error and `exists == true`.
 
@@ -113,10 +113,14 @@ func readRequestParameters(
 
 ## Footguns & caveats
 
-- `String` returns `""` for non-string stored types; use `StringStrict` to detect type mismatches.
+- `String` returns `""` for non-string scalar stored types — a `[]string` value panics naming the key, and is read with `StringSlice`; use `StringStrict` to detect type mismatches.
 - `StringSlice` and `StringSliceStrict` accept both `[]string` and `string` (single value), returning a slice in both cases.
-- A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) still report it as present with a zero value.
-- `ParameterBag.All()` returns a copy of the internal map.
+- `String` (and everything built on it: `StringOrDefault`, `HasNonEmptyString`) refuses a `[]string` **loudly, with a panic naming the key**: answering the empty string silently lost the value, answering one element silently hid the rest. A slice is read with `StringSlice` or `StringAt`. The request bags built by `NewParameterBagFromValues` keep the two apart by type — a key that appeared once is stored as its string, only a genuinely repeated key stays a slice — so the panic fires only where a scalar read genuinely meets an array.
+- A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) report it as absent as well.
+- `ParameterBag.All()` returns a copy of the internal map, deep for the shapes the bag's own writers produce (`[]string`, `map[string]string`); other value types come back as stored.
+- `ParameterBag.Get` hands back the stored value **as stored** — no copy. A `[]string` or `map[string]string` reached through it is the bag's own: mutating an element writes into the bag behind its lock, visible to every later reader and racing a concurrent `All`/`StringSlice` copy. The copying doors are `All`, `StringSlice` and `StringSliceStrict`; treat what `Get` answers as read-only.
+- The string grammar `Float64` accepts is Go's `strconv.ParseFloat` in full — underscore spellings (`1_000_000.5`), hexadecimal floats (`0x1p10` is `1024`) and exponents all parse — which is **wider** than the strict base-10 grammar `Int` reads: the `"1_000"` an `Int` read refuses is accepted by `Float64` as `1000`. Only `NaN` and the infinities are refused on every branch. Validation built on the float accessor accepts spellings the integer accessor was hardened against.
+- `bag.AppendString` appends inside one critical section when handed the concrete `*ParameterBag`; over a foreign implementation of the contract it falls back to Get and Set, whose window between two locks can lose a concurrent append.
 
 ## Userland API
 

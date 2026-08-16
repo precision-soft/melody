@@ -216,3 +216,41 @@ func TestHasExcludedPathPrefix_EmptyEntryExcludesEverything(t *testing.T) {
         t.Fatalf("expected an empty entry to exclude every path")
     }
 }
+
+/* the substitution of "." for the empty name is inert for the outcome — joining "." onto the base resolves back to the base — so this test does not prove it on position; the inversion does, by emptying every name that is not "." and answering the root for a request that named a file. */
+func TestDirFileSystem_OpenDotNamesTheServedDirectory(t *testing.T) {
+    directory := t.TempDir()
+
+    fileSystem := osDirFileSystem(directory)
+
+    file, err := fileSystem.Open(".")
+    if nil != err {
+        t.Fatalf("open dot error: %v", err)
+    }
+    defer file.Close()
+
+    info, statErr := file.Stat()
+    if nil != statErr {
+        t.Fatalf("stat error: %v", statErr)
+    }
+
+    if false == info.IsDir() {
+        t.Fatalf("expected \".\" to name the served directory")
+    }
+}
+
+/* the fallback that keeps the configured base when the base itself does not resolve is LATENT: resolving the target resolves the base as its prefix, so the base cannot fail while the target succeeds, and the target's own failure is answered above it — which is what this asserts. Only the base disappearing between the two resolutions could enter that branch, which no in-process state forces. */
+func TestDirFileSystem_ABaseThatDoesNotResolveIsRefusedOnTheTargetFirst(t *testing.T) {
+    directory := t.TempDir()
+
+    fileSystem := osDirFileSystem(filepath.Join(directory, "absent"))
+
+    _, err := fileSystem.Open("a.txt")
+    if nil == err {
+        t.Fatalf("expected a base that does not resolve to refuse the target")
+    }
+
+    if true == errors.Is(err, fs.ErrPermission) {
+        t.Fatalf("expected the target's own resolution failure rather than the containment refusal, got %v", err)
+    }
+}

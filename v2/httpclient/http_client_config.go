@@ -9,19 +9,10 @@ func NewHttpClientConfig(
     timeout time.Duration,
     headers map[string]string,
 ) *HttpClientConfig {
-    copiedHeaders := map[string]string{}
-
-    if nil != headers {
-        copiedHeaders = make(map[string]string, len(headers))
-        for key, value := range headers {
-            copiedHeaders[key] = value
-        }
-    }
-
     return &HttpClientConfig{
         baseUrl: baseUrl,
         timeout: timeout,
-        headers: copiedHeaders,
+        headers: canonicalHeaderMap(headers),
     }
 }
 

@@ -1,6 +1,8 @@
 package kernel
 
 import (
+    "fmt"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v2/clock"
@@ -100,5 +102,94 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
 
     if true == kernelInstance.DebugMode() {
         t.Fatalf("expected debug mode to be false outside development")
+    }
+}
+
+func TestKernel_ReportsTheHttpKernelItBuiltAndTheClockItWasGiven(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    httpRouter := http.NewRouterWithRouteRegistry(http.NewRouteRegistry())
+
+    kernelInstance := NewKernel(
+        newTestConfiguration(t, config.EnvDevelopment),
+        container.NewContainer(),
+        httpRouter,
+        event.NewEventDispatcher(clockInstance),
+        clockInstance,
+    )
+
+    if clockInstance != kernelInstance.Clock() {
+        t.Fatalf("expected the kernel to report the clock it was built with")
+    }
+
+    httpKernel := kernelInstance.HttpKernel()
+    if nil == httpKernel {
+        t.Fatalf("expected the kernel to build an http kernel")
+    }
+
+    if httpKernel != kernelInstance.HttpKernel() {
+        t.Fatalf("expected the http kernel to be built once and reported, not rebuilt per call")
+    }
+}
+
+func TestNewKernel_RefusesEachMissingDependencyByName(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    httpRouter := http.NewRouterWithRouteRegistry(http.NewRouteRegistry())
+    configuration := newTestConfiguration(t, config.EnvDevelopment)
+
+    for _, testCase := range []struct {
+        name     string
+        build    func()
+        expected string
+    }{
+        {
+            "configuration",
+            func() {
+                NewKernel(nil, container.NewContainer(), httpRouter, event.NewEventDispatcher(clockInstance), clockInstance)
+            },
+            "application configuration is required for new kernel",
+        },
+        {
+            "container",
+            func() {
+                NewKernel(configuration, nil, httpRouter, event.NewEventDispatcher(clockInstance), clockInstance)
+            },
+            "service container is required for new kernel",
+        },
+        {
+            "router",
+            func() {
+                NewKernel(configuration, container.NewContainer(), nil, event.NewEventDispatcher(clockInstance), clockInstance)
+            },
+            "http router is required for new kernel",
+        },
+        {
+            "dispatcher",
+            func() {
+                NewKernel(configuration, container.NewContainer(), httpRouter, nil, clockInstance)
+            },
+            "event dispatcher is required for new kernel",
+        },
+        {
+            "clock",
+            func() {
+                NewKernel(configuration, container.NewContainer(), httpRouter, event.NewEventDispatcher(clockInstance), nil)
+            },
+            "clock is required for new kernel",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            defer func() {
+                recovered := recover()
+                if nil == recovered {
+                    t.Fatalf("expected the missing %s to refuse the boot", testCase.name)
+                }
+
+                if false == strings.Contains(fmt.Sprintf("%v", recovered), testCase.expected) {
+                    t.Fatalf("expected the refusal to name the missing %s, got: %v", testCase.name, recovered)
+                }
+            }()
+
+            testCase.build()
+        })
     }
 }

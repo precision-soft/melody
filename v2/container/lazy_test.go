@@ -2,6 +2,7 @@ package container
 
 import (
     "errors"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -102,7 +103,7 @@ func TestLazyService_RetriesResolutionAfterFailure(t *testing.T) {
     }
 }
 
-/* @info the resolver runs outside the handle's lock, so a resolver that reaches back into the same handle — a provider chain that cycles through a lazy handle — recurses into the resolution machinery, where a cycle guard can answer with an error; under a lock held across the resolution it would deadlock instead, unreachable by any cycle detection. */
+/* the resolver runs outside the handle's lock, so a resolver that reaches back into the same handle — a provider chain that cycles through a lazy handle — recurses into the resolution machinery, where a cycle guard can answer with an error; under a lock held across the resolution it would deadlock instead, unreachable by any cycle detection. */
 func TestLazyService_ResolverReachingBackIntoTheHandleIsNotDeadlocked(t *testing.T) {
     depth := 0
     var handle *LazyService[string]
@@ -142,7 +143,7 @@ type lazyProbeItem struct {
     name string
 }
 
-/* @info a resolution yielding nil without an error must not be memoized as success: Get keeps its documented retry-on-failure promise only if the next call re-runs the resolver instead of returning the poisoned nil forever. */
+/* a resolution yielding nil without an error must not be memoized as success: Get keeps its documented retry-on-failure promise only if the next call re-runs the resolver instead of returning the poisoned nil forever. */
 func TestLazyService_NilYieldIsNotMemoized(t *testing.T) {
     resolveCount := 0
     handle := &LazyService[*lazyProbeItem]{
@@ -183,7 +184,7 @@ func TestLazyService_NilYieldIsNotMemoized(t *testing.T) {
     }
 }
 
-/* @info what this guards is race-freedom, and nothing else: the value assertion holds whether or not Resolve synchronizes its memo — a shared container service is memoized by the container too, so every caller observes the one instance either way — which means a lost mutex here is invisible without the detector. The ci race job and .dev/validate/all.sh therefore run this package under -race, and this test is only meaningful there. */
+/* what this guards is race-freedom, and nothing else: the value assertion holds whether or not Resolve synchronizes its memo — a shared container service is memoized by the container too, so every caller observes the one instance either way — which means a lost mutex here is invisible without the detector. The ci race job and .dev/validate/all.sh therefore run this package under -race, and this test is only meaningful there. */
 func TestLazyService_GetIsSafeForConcurrentUse(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -206,4 +207,253 @@ func TestLazyService_GetIsSafeForConcurrentUse(t *testing.T) {
     }
 
     waitGroup.Wait()
+}
+
+/* Get is the panicking door of the handle, and its nil-yield refusal had never been entered: a resolver that answers (nil, nil) — a provider whose value the container never filed, a typed nil boxed by a foreign resolver — would otherwise hand the caller a nil the compiler says is a live service, dereferenced somewhere far from the handle. The refusal has to carry its own message, because the failure path of the same call answers with whatever the resolver refused and a reader has to be able to tell the two apart. */
+func TestLazyService_GetRefusesANilYieldByName(t *testing.T) {
+    handle := &LazyService[*lazyProbeItem]{
+        resolve: func() (*lazyProbeItem, error) {
+            return nil, nil
+        },
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the nil yield to panic on the Get door")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "lazy service resolved to nil" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    _ = handle.Get()
+}
+
+/* the failure door of Get answers with the resolver's own error rather than the nil-yield message, which is what keeps the two refusals distinguishable in a boot log: a service that is missing and a service that resolved to nothing are different mistakes. */
+func TestLazyService_GetCarriesTheResolversOwnFailure(t *testing.T) {
+    handle := &LazyService[*lazyProbeItem]{
+        resolve: func() (*lazyProbeItem, error) {
+            return nil, errors.New("the resolver refused")
+        },
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the failed resolution to panic on the Get door")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "the resolver refused" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+    }()
+
+    _ = handle.Get()
+}
+
+/* the deferred by-type handle is the counterpart of Lazy for a component assembled before the service is safe to resolve; nothing executed it, so the closure it builds — the one that reaches FromResolverByType rather than FromResolver — was never proven to resolve anything at all. */
+func TestLazyByType_ResolvesTheServiceOnFirstUse(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    resolutionCount := 0
+
+    registerErr := RegisterType[*registerScopedProbe](
+        serviceContainer,
+        func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
+            resolutionCount++
+
+            return &registerScopedProbe{value: "lazy by type"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    lazyService := LazyByType[*registerScopedProbe](serviceContainer)
+
+    if 0 != resolutionCount {
+        t.Fatalf("expected the handle to resolve nothing before its first use, got %d resolutions", resolutionCount)
+    }
+
+    value := lazyService.Get()
+    if "lazy by type" != value.value {
+        t.Fatalf("unexpected resolved value: %#v", value)
+    }
+
+    if value != lazyService.Get() {
+        t.Fatalf("expected the second use to answer with the memoized value")
+    }
+}
+
+/* a by-type handle over a type nothing registered has to fail through the by-type resolution, not through a name lookup: the two doors report differently, and a handle wired to the wrong one would name a service the caller never spelled. */
+func TestLazyByType_MissingRegistrationFailsThroughTheByTypeResolution(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    lazyService := LazyByType[*registerScopedOtherProbe](serviceContainer)
+
+    _, resolveErr := lazyService.Resolve()
+    if nil == resolveErr {
+        t.Fatalf("expected the by-type resolution of an unregistered type to fail")
+    }
+
+    if false == strings.Contains(resolveErr.Error(), "service type is not registered") {
+        t.Fatalf("expected the by-type refusal, got %q", resolveErr.Error())
+    }
+}
+
+/* a handle follows the scope of the resolver it was built over: once the scope closes, serving the memoized value would hand a dead request's state to every later caller forever — the answer is the scope-is-closed error, on this call and each one after */
+func TestLazyService_AClosedScopeTurnsTheHandleTerminal(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.RegisterScoped(
+        "app.unit",
+        func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+            return &lazyProbeItem{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    requestScope := serviceContainer.NewScope()
+
+    lazyService := Lazy[*lazyProbeItem](requestScope, "app.unit")
+
+    if nil == lazyService.Get() {
+        t.Fatalf("expected the live scope to serve the value")
+    }
+
+    if closeErr := requestScope.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    _, resolveErr := lazyService.Resolve()
+    if nil == resolveErr {
+        t.Fatalf("expected a closed scope to end the handle")
+    }
+
+    if false == strings.Contains(resolveErr.Error(), "lazy service scope is closed") {
+        t.Fatalf("expected the scope-is-closed refusal, got %q", resolveErr.Error())
+    }
+
+    _, secondErr := lazyService.Resolve()
+    if nil == secondErr || false == strings.Contains(secondErr.Error(), "lazy service scope is closed") {
+        t.Fatalf("expected the terminal state to answer the same on every later call, got %v", secondErr)
+    }
+}
+
+func TestLazyService_AScopeClosedBeforeFirstUseNeverRunsTheResolver(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    resolverRan := false
+    registerErr := serviceContainer.RegisterScoped(
+        "app.unit",
+        func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+            resolverRan = true
+            return &lazyProbeItem{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    requestScope := serviceContainer.NewScope()
+
+    lazyService := Lazy[*lazyProbeItem](requestScope, "app.unit")
+
+    if closeErr := requestScope.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    _, resolveErr := lazyService.Resolve()
+    if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "lazy service scope is closed") {
+        t.Fatalf("expected the scope-is-closed refusal before any resolution, got %v", resolveErr)
+    }
+
+    if true == resolverRan {
+        t.Fatalf("expected the resolver never to run over a closed scope")
+    }
+}
+
+/* the transition drops the memoized value, the closure and the resolver together — the handle keeps no path to the dead request's state, which is what lets the garbage collector take the scope */
+func TestLazyService_TheTerminalHandleDropsItsReferences(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.RegisterScoped(
+        "app.unit",
+        func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+            return &lazyProbeItem{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    requestScope := serviceContainer.NewScope()
+
+    lazyService := Lazy[*lazyProbeItem](requestScope, "app.unit")
+    _ = lazyService.Get()
+
+    if closeErr := requestScope.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    _, _ = lazyService.Resolve()
+
+    lazyService.mutex.Lock()
+    defer lazyService.mutex.Unlock()
+
+    if nil != lazyService.resolve || nil != lazyService.source {
+        t.Fatalf("expected the closure and the resolver to be dropped")
+    }
+
+    if true == lazyService.resolved || nil != lazyService.value {
+        t.Fatalf("expected the memoized value to be dropped")
+    }
+}
+
+/* a resolver that cannot answer the liveness question is read as open, exactly as the exit handler reads a logger that cannot: the container never reports closed through this door, so a container-backed handle keeps its memoization for the life of the process */
+func TestLazyService_AContainerBackedHandleIsUntouchedByScopeLifecycles(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    buildCount := 0
+    registerErr := serviceContainer.Register(
+        "app.shared",
+        func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+            buildCount = buildCount + 1
+            return &lazyProbeItem{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    lazyService := Lazy[*lazyProbeItem](serviceContainer, "app.shared")
+
+    first := lazyService.Get()
+
+    requestScope := serviceContainer.NewScope()
+    if closeErr := requestScope.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if first != lazyService.Get() {
+        t.Fatalf("expected the container-backed handle to keep serving its memoized value")
+    }
+
+    if 1 != buildCount {
+        t.Fatalf("expected one build, got %d", buildCount)
+    }
 }

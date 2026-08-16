@@ -53,6 +53,7 @@ func (instance *resolverContext) scopedServiceByName(
         guardedCreation{
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedNameNodeKey(serviceName),
+            ownerNodeKey: scopedNameNodeKey(serviceName),
             getCreatingState: func() (*creationState, bool) {
                 state, exists := scopeInstance.creatingByName[serviceName]
 
@@ -74,7 +75,7 @@ func (instance *resolverContext) scopedServiceByName(
             },
             create: scopedProviderCreateFunc(provider),
             store: instanceStore{
-                keep: func(value any) error {
+                keep: func(value any) (any, bool, error) {
                     return scopeInstance.storeCreatedInstance(serviceName, canonicalType, value)
                 },
             },
@@ -95,6 +96,7 @@ func (instance *resolverContext) scopedServiceByType(
         guardedCreation{
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedTypeNodeKey(typeKey),
+            ownerNodeKey: scopedTypeNodeKey(typeKey),
             getCreatingState: func() (*creationState, bool) {
                 state, exists := scopeInstance.creatingByType[typeKey]
 
@@ -116,7 +118,7 @@ func (instance *resolverContext) scopedServiceByType(
             },
             create: scopedProviderCreateFunc(provider),
             store: instanceStore{
-                keep: func(value any) error {
+                keep: func(value any) (any, bool, error) {
                     return scopeInstance.storeCreatedInstance("", canonicalType, value)
                 },
             },

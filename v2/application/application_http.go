@@ -4,10 +4,12 @@ import (
     "context"
     "errors"
     nethttp "net/http"
+    "time"
 
     "github.com/precision-soft/melody/v2/cache"
     "github.com/precision-soft/melody/v2/config"
     "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
@@ -16,6 +18,7 @@ import (
     "github.com/precision-soft/melody/v2/session"
 )
 
+/* RegisterHttpRoute queues one of the application's own routes. The queue drains before any module's RegisterHttpRoutes runs, so where a root route and a module route meet at dispatch, the root route wins the registration-order tie-break: the composition root wrote its route against the application, not against whichever module boots beside it. */
 func (instance *Application) RegisterHttpRoute(
     method string,
     pattern string,
@@ -23,6 +26,17 @@ func (instance *Application) RegisterHttpRoute(
 ) {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register http routes after boot", nil, nil))
+    }
+
+    /* the queue drains early in the boot, before the module phases: a registrar queued from inside a module boot hook would never run — a route silently absent — so the door refuses during the boot window; a module registers its routes through RegisterHttpRoutes, on the hook made for them */
+    if true == instance.booting {
+        exception.Panic(
+            exception.NewError(
+                "may not register http routes from inside a module boot hook; a module registers routes through RegisterHttpRoutes",
+                nil,
+                nil,
+            ),
+        )
     }
 
     instance.httpRouteRegistrars = append(
@@ -51,6 +65,43 @@ func (instance *Application) RegisterHttpMiddlewareFactories(
     instance.httpMiddlewares.UseFactories(factories...)
 }
 
+/* errorHandlerReporter is the door through which the composition root asks a kernel whether the
+application installed its own error handler — a Has door like the logger's, so a replacement kernel
+that does not implement it keeps the framework exception listener unconditionally, exactly the
+behavior it has today. */
+type errorHandlerReporter interface {
+    HasErrorHandler() bool
+}
+
+func kernelHasErrorHandler(httpKernel httpcontract.Kernel) bool {
+    reporter, ok := httpKernel.(errorHandlerReporter)
+    if false == ok {
+        return false
+    }
+
+    return reporter.HasErrorHandler()
+}
+
+/* openRequestScopeReporter is the door through which the shutdown asks a kernel how many requests are
+still inside it. It sits beside the contract rather than in it, like the error-handler door above: a
+replacement kernel that cannot answer is not interrogated, and the shutdown reports exactly what it
+did before. */
+type openRequestScopeReporter interface {
+    OpenRequestScopes() int64
+}
+
+/* openRequestScopeCount answers the number of request scopes still open, and -1 for a kernel that cannot
+be asked — which is not zero: zero is the answer "everything drained", and handing that back for a kernel
+that never counted would report a drain nobody measured. */
+func openRequestScopeCount(httpKernel httpcontract.Kernel) int64 {
+    reporter, ok := httpKernel.(openRequestScopeReporter)
+    if false == ok {
+        return -1
+    }
+
+    return reporter.OpenRequestScopes()
+}
+
 func (instance *Application) bootHttp() {
     kernelInstance := instance.kernel
 
@@ -59,9 +110,12 @@ func (instance *Application) bootHttp() {
     }
 }
 
-func (instance *Application) runHttp(
-    ctx context.Context,
-) error {
+/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot, in every
+process shape: the listeners are inert in a console that never dispatches a kernel event, and a
+dispatcher inspected there answers with the same set the serving process runs — the introspection
+command used to report an empty dispatcher for a correctly wired application. The conditions are
+boot-final by contract: an error handler is installed by boot, and debug mode is configuration. */
+func (instance *Application) registerKernelHttpListeners() {
     eventDispatcher := instance.kernel.EventDispatcher()
 
     if true == instance.kernel.DebugMode() {
@@ -70,11 +124,23 @@ func (instance *Application) runHttp(
 
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
-    http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
 
+    /* the framework exception listener answers every kernel.exception dispatch, so with it
+    registered an error handler the application installed at boot could never run — the kernel
+    consults the handler only when the dispatch produced no response. A handler installed by boot
+    therefore takes the listener's place; without one the listener renders exactly as before. */
+    if false == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
+        http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
+    }
+}
+
+func (instance *Application) runHttp(
+    ctx context.Context,
+) error {
     configuration := instance.configuration
 
     httpKernel := instance.kernel.HttpKernel()
+
     httpKernel.Use(
         instance.httpMiddlewares.all(instance.kernel)...,
     )
@@ -86,9 +152,11 @@ func (instance *Application) runHttp(
         Handler: httpHandler,
     }
 
-    applyHttpServerTimeouts(httpServer, configuration)
+    applyHttpServerTimeouts(httpServer)
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
+
+    applyHttpServerErrorLog(httpServer, logger)
 
     instance.warnOnUnboundedDefaultCacheBackend(logger)
 
@@ -106,19 +174,49 @@ func (instance *Application) runHttp(
         errorChannel <- listenAndServeErr
     }()
 
+    return awaitHttpServerEnd(ctx, httpServer, errorChannel, logger, configuration.Http().ShutdownTimeout(), httpKernel)
+}
+
+/* awaitHttpServerEnd waits for whichever ends the serving first: the cancelled context or the server's own failure. The serve error is read even on the shutdown branch — when the listen fails in the same instant the context is cancelled, the select's choice of branch is arbitrary, and taking the shutdown branch used to discard the real failure, so a process that never served a byte reported a clean shutdown. Shutdown closes the listeners before it returns, so the serve goroutine has already been released and the receive is bounded. A shutdown that outlives its configured budget surfaces the deadline error and the process exits non-zero on purpose: the overrun is the operator's signal that draining hung, not a success to smooth over.
+
+Shutdown answers for the connections the server still owns, and only for those: a handler that hijacked its connection took it out of the server's accounting, so Shutdown returns immediately and reports success while that handler runs on. The request scopes the kernel opened are what remains measurable about them, and they are drained under the same budget for the same reason the budget exists. */
+func awaitHttpServerEnd(
+    ctx context.Context,
+    httpServer *nethttp.Server,
+    errorChannel chan error,
+    logger loggingcontract.Logger,
+    shutdownTimeout time.Duration,
+    httpKernel httpcontract.Kernel,
+) error {
     select {
     case <-ctx.Done():
-        shutdownContext, cancel := context.WithTimeout(context.Background(), resolveHttpShutdownTimeout(configuration))
+        shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
         defer cancel()
 
         shutdownErr := httpServer.Shutdown(shutdownContext)
+
+        serveErr := <-errorChannel
+        if nil != serveErr && false == errors.Is(serveErr, nethttp.ErrServerClosed) {
+            logger.Error(
+                "http server error",
+                exception.LogContext(serveErr),
+            )
+
+            return markHttpRunErrorLogged(serveErr)
+        }
+
         if nil != shutdownErr {
             logger.Error(
                 "http server shutdown error",
                 exception.LogContext(shutdownErr),
             )
 
-            return shutdownErr
+            return markHttpRunErrorLogged(shutdownErr)
+        }
+
+        drainErr := awaitOpenRequestScopes(shutdownContext, httpKernel, logger)
+        if nil != drainErr {
+            return markHttpRunErrorLogged(drainErr)
         }
 
         return nil
@@ -130,11 +228,64 @@ func (instance *Application) runHttp(
                 exception.LogContext(err),
             )
 
-            return err
+            return markHttpRunErrorLogged(err)
         }
 
         return nil
     }
+}
+
+/* awaitOpenRequestScopesInterval is how often the drain re-reads the counter. It is short enough that an ordinary drain adds no perceptible delay to the exit and long enough that the wait is not a spin: the loop exists to bound a wait, not to time it precisely. */
+const awaitOpenRequestScopesInterval = 20 * time.Millisecond
+
+/* awaitOpenRequestScopes holds the exit until every request scope the kernel opened has closed, or until the shutdown budget the caller already opened runs out. It is what makes the stop melody reports the stop it obtained: Shutdown drains the connections the server owns and returns nil for a hijacked one, so a websocket still being served — its request scope, its session, everything it holds — used to sit under a container that was closing while the process announced a clean stop and exited zero.
+
+An expiry is an error rather than a warning, for the reason the budget overrun above is one: a drain that did not finish is the operator's signal, and the process exiting non-zero is how they receive it. A kernel that cannot be asked is not waited on at all — the answer -1 means "no measurement", and waiting on a number nobody maintains would hang every shutdown of a replacement kernel. */
+func awaitOpenRequestScopes(
+    ctx context.Context,
+    httpKernel httpcontract.Kernel,
+    logger loggingcontract.Logger,
+) error {
+    if 0 > openRequestScopeCount(httpKernel) {
+        return nil
+    }
+
+    ticker := time.NewTicker(awaitOpenRequestScopesInterval)
+    defer ticker.Stop()
+
+    for {
+        openScopes := openRequestScopeCount(httpKernel)
+        if 0 >= openScopes {
+            return nil
+        }
+
+        select {
+        case <-ctx.Done():
+            drainErr := exception.NewError(
+                "http shutdown left request scopes open",
+                exceptioncontract.Context{
+                    "openRequestScopes": openScopes,
+                    "reason":            "a hijacked connection is not drained by the http server's own shutdown, so its handler is still running",
+                },
+                ctx.Err(),
+            )
+
+            logger.Error("http server shutdown error", exception.LogContext(drainErr))
+
+            return drainErr
+
+        case <-ticker.C:
+        }
+    }
+}
+
+/* markHttpRunErrorLogged wraps a failure runHttp already wrote to the log and marks it so: the caller turns it into the process-ending panic, and without the mark the exit handler would render the same failure a second time. */
+func markHttpRunErrorLogged(err error) error {
+    wrappedErr := exception.FromError(err)
+
+    _ = exception.MarkLogged(wrappedErr)
+
+    return wrappedErr
 }
 
 /* warnOnUnboundedDefaultCacheBackend reports, once at boot, that the cache melody wired by default carries no item ceiling. Whether an entry ever leaves the map is then decided entirely by the caller: a key cached with a positive ttl is reclaimed by the sweep, and one cached without stays for as long as the process lives, with nothing to evict it under memory pressure. The constructor's second argument sets how often that sweep runs, not how long an entry lives. The warning is raised from the http path alone on purpose: a command runs and exits, taking its map with it, so there is genuinely nothing to warn a cli invocation about, and a warning it cannot act on would only teach it to ignore the ones it can. */

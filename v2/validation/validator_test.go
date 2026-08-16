@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/internal/testhelper"
     validationcontract "github.com/precision-soft/melody/v2/validation/contract"
 )
 
@@ -268,9 +269,17 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         }
     }
 
-    /* a valid leading integer (3.9 -> 3) is still accepted, so the field is enforced rather than rejected as malformed */
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abcd"}))
+    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
+    fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
+
+    fractionalError, ok := fractionalErrors[0].(*ValidationError)
+    if false == ok {
+        t.Fatalf("expected *ValidationError, got %T", fractionalErrors[0])
+    }
+
+    if ErrorInvalidRuleSyntax != fractionalError.Code() {
+        t.Fatalf("expected a fractional bound to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, fractionalError.Code())
+    }
 }
 
 type payloadWithGreaterThanUnknownParam struct {
@@ -568,7 +577,6 @@ func TestValidator_ParamsOnNonParameterizableConstraintFailClosed(t *testing.T) 
     validatorInstance := NewValidator()
     validatorInstance.RegisterConstraint("rigid", &rigidConstraint{})
 
-    /* @important a parameterized constraint given parameters without its recognized key must be rejected as invalid rather than validated with the registered singleton (which would fail open) */
     err := validatorInstance.Validate(payloadWithRigidParams{Code: "anything"})
     validationErrors := requireValidationErrors(t, err)
 
@@ -617,7 +625,6 @@ func findValidationErrorByField(validationErrors ValidationErrors, field string)
     return nil
 }
 
-/* @info validate tags declared on nested struct fields and on slice-of-struct elements are enforced, with a path identifying the offending nested field. */
 func TestValidator_EnforcesNestedConstraints(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -638,7 +645,6 @@ func TestValidator_EnforcesNestedConstraints(t *testing.T) {
     }
 }
 
-/* @info a fully valid nested payload still passes so the cascade adds no false rejections. */
 func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -651,7 +657,6 @@ func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
     requireNoValidationErrors(t, err)
 }
 
-/* @info a self-referential value must not hang or overflow the stack during the recursive cascade. */
 func TestValidator_CyclicPayloadTerminates(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -662,7 +667,6 @@ func TestValidator_CyclicPayloadTerminates(t *testing.T) {
     requireNoValidationErrors(t, err)
 }
 
-/* @info a field encoding/json never populates must not be validated: its permanent zero value would fail the tag on every request, while the openapi mirror rightly omits the field from the schema — the whole endpoint would advertise one contract and reject another */
 func TestValidateStruct_SkipsAFieldJsonNeverPopulates(t *testing.T) {
     type payload struct {
         Internal string `json:"-" validate:"notBlank"`
@@ -686,7 +690,6 @@ type shadowingPayload struct {
     UpdatedBy string `json:"updatedBy"`
 }
 
-/* @info the outer field shadows the promoted one under encoding/json's dominance, so the payload can never populate the embed's field; validating its permanent zero value rejected every request while the schema mirror documented only the winner */
 func TestValidateStruct_SkipsAPromotedFieldShadowedByTheOuterOne(t *testing.T) {
     validator := NewValidator()
 
@@ -709,7 +712,6 @@ type ambiguousPayload struct {
     ambiguousRight
 }
 
-/* @info two promoted fields claiming one name at equal depth are the ambiguity encoding/json drops — no field is populated, so none is validated */
 func TestValidateStruct_DropsAnAmbiguousPromotedName(t *testing.T) {
     validator := NewValidator()
 
@@ -732,7 +734,6 @@ type taggedWinsPayload struct {
     untaggedTwin
 }
 
-/* @info at equal depth a single explicitly json-named field beats the untagged one, so only the tagged twin's tag runs — against the value the payload actually lands in */
 func TestValidateStruct_TaggedPromotedFieldBeatsTheUntaggedTwin(t *testing.T) {
     validator := NewValidator()
 
@@ -798,7 +799,6 @@ func TestValidateStruct_AStackedDiamondKeepsThePopulatedNameValidated(t *testing
     t.Fatalf("expected the diamond-promoted CreatedBy to be validated, got %v", validationErrors)
 }
 
-/* @info encoding/json populates the exported fields promoted through an unexported embed, so their tags run — the walk must include what a payload reaches */
 func TestValidateStruct_ValidatesFieldsPromotedThroughAnUnexportedEmbed(t *testing.T) {
     validator := NewValidator()
 
@@ -872,7 +872,6 @@ type taggedEmbedPayload struct {
     Title       string `json:"title"`
 }
 
-/* @info a constraint declared on the embed itself runs against the embed value: the promoted fields are payload-populated, so the tag is satisfiable and must not vanish with the flattening */
 func TestValidateStruct_AppliesTheTagDeclaredOnAPromotedEmbed(t *testing.T) {
     validator := NewValidator()
 
@@ -886,7 +885,6 @@ type payloadWithPaddedSkipTag struct {
     Anything string `validate:" - "`
 }
 
-/* @info a padded " - " is the skip marker, not an unknown rule that would reject every value */
 func TestValidator_PaddedDashSkipsValidation(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -898,12 +896,21 @@ type payloadWithValueLessGreaterThan struct {
     Count int `json:"count" validate:"greaterThan"`
 }
 
-/* @info a value-less greaterThan runs with the constraint's registered default and enforces > 0 */
-func TestValidator_ValueLessGreaterThanEnforcesThePositiveDefault(t *testing.T) {
+func TestValidator_ValueLessParameterizedRuleFailsClosed(t *testing.T) {
     validatorInstance := NewValidator()
 
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: 0}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: 1}))
+    for _, count := range []int{0, 1} {
+        validationErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: count}))
+
+        validationError, ok := validationErrors[0].(*ValidationError)
+        if false == ok {
+            t.Fatalf("expected *ValidationError, got %T", validationErrors[0])
+        }
+
+        if ErrorInvalidRuleSyntax != validationError.Code() {
+            t.Fatalf("expected a value-less parameterized rule to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, validationError.Code())
+        }
+    }
 }
 
 type deepValidationNode struct {
@@ -1056,7 +1063,7 @@ func TestValidator_ValidatesConcurrentlyWithMemoizedConstraints(t *testing.T) {
                     return
                 }
 
-                constraint, ok := validatorInstance.createConstraintWithParams("concurrentCounting", map[string]string{"mode": "strict"})
+                constraint, ok, _ := validatorInstance.createConstraintWithParams("concurrentCounting", map[string]string{"mode": "strict"})
                 if false == ok {
                     t.Errorf("expected the parameterized constraint to resolve")
 
@@ -1761,5 +1768,456 @@ func TestPromotedValidationMarshalerOrigin_APointerEmbedWithAPointerReceiverCode
     validationErrors := requireValidationErrors(t, validatorInstance.Validate(pointerReceiverCodecHostPayload{}))
     if "name: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
+    }
+}
+
+type sharedPointerItem struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type sharedPointerBatch struct {
+    Primary   *sharedPointerItem `json:"primary"`
+    Secondary *sharedPointerItem `json:"secondary"`
+}
+
+func TestValidator_SharedPointerIsValidatedUnderEveryPath(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    shared := &sharedPointerItem{Name: ""}
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(sharedPointerBatch{Primary: shared, Secondary: shared}))
+
+    if 2 != len(validationErrors) {
+        t.Fatalf("expected the shared pointer to be validated under both paths, got %d errors: %v", len(validationErrors), validationErrors)
+    }
+
+    fields := map[string]bool{}
+    for _, validationError := range validationErrors {
+        fields[validationError.Field()] = true
+    }
+
+    if false == fields["primary.name"] || false == fields["secondary.name"] {
+        t.Fatalf("expected errors under both primary.name and secondary.name, got %v", fields)
+    }
+}
+
+type typedNilErrorConstraint struct{}
+
+func (instance *typedNilErrorConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    var typedNil *ValidationError
+
+    return typedNil
+}
+
+type typedNilErrorPayload struct {
+    Value string `json:"value" validate:"typedNilError"`
+}
+
+func TestValidator_TypedNilConstraintErrorIsSuccess(t *testing.T) {
+    validatorInstance := NewValidator()
+    validatorInstance.RegisterConstraint("typedNilError", &typedNilErrorConstraint{})
+
+    requireNoValidationErrors(t, validatorInstance.Validate(typedNilErrorPayload{Value: "anything"}))
+}
+
+/* the registry is append-only, so the missing-name read is unreachable through Validate: the guard is latent and this pins it at the only level it is observable. */
+func TestValidator_CreateConstraintWithParamsRefusesUnregisteredName(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    constraint, ok, refusalCause := validatorInstance.createConstraintWithParams("neverRegistered", nil)
+
+    if nil != constraint || true == ok {
+        t.Fatalf("expected an unregistered name to fail closed, got constraint=%v ok=%v", constraint, ok)
+    }
+
+    if "" == refusalCause {
+        t.Fatalf("expected a refusal cause for an unregistered name")
+    }
+}
+
+type refusalCausePayload struct {
+    Name string `json:"name" validate:"min(value=abc)"`
+}
+
+func TestValidator_ParameterRefusalCauseReachesTheErrorContext(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(refusalCausePayload{Name: "anything"}))
+
+    validationError, ok := validationErrors[0].(*ValidationError)
+    if false == ok {
+        t.Fatalf("expected *ValidationError, got %T", validationErrors[0])
+    }
+
+    cause, exists := validationError.Context()["cause"].(string)
+    if false == exists || false == strings.Contains(cause, "invalid min length parameter") {
+        t.Fatalf("expected the WithParams refusal reason in the error context, got %v", validationError.Context())
+    }
+}
+
+var settlementProbeCalls atomic.Int64
+var settlementProbeFirstEntered = make(chan struct{})
+var settlementProbeFirstRelease = make(chan struct{})
+
+type settlementProbeCodec struct {
+    time.Time
+    Label string `json:"label" validate:"notBlank"`
+}
+
+func (instance *settlementProbeCodec) UnmarshalJSON(data []byte) error {
+    call := settlementProbeCalls.Add(1)
+
+    if 1 == call {
+        close(settlementProbeFirstEntered)
+        <-settlementProbeFirstRelease
+
+        return exception.NewError("refusing the empty object", nil, nil)
+    }
+
+    return nil
+}
+
+/* the first probe is held open and computes the opposite answer, so the ordering is constructed rather than awaited. */
+func TestValidator_TimeCodecVerdictSettlesOnTheFirstStored(t *testing.T) {
+    structType := reflect.TypeOf(settlementProbeCodec{})
+
+    /* the memo is process-global, so a repeated run (-count) finds the verdict already settled and the probe choreography must not replay over closed channels */
+    if cached, exists := validationTimeCodecCache.Load(structType); true == exists {
+        if true == cached.(bool) {
+            t.Fatalf("expected the settled verdict to remain the first stored one")
+        }
+
+        return
+    }
+
+    firstVerdict := make(chan bool)
+
+    go func() {
+        firstVerdict <- promotesValidationTimeCodec(structType)
+    }()
+
+    <-settlementProbeFirstEntered
+
+    secondVerdict := promotesValidationTimeCodec(structType)
+    if true == secondVerdict {
+        t.Fatalf("expected the unblocked probe to conclude the type accepts an object body")
+    }
+
+    close(settlementProbeFirstRelease)
+
+    if true == <-firstVerdict {
+        t.Fatalf("expected the held-open probe to adopt the already-published verdict instead of overwriting it")
+    }
+
+    if cached, exists := validationTimeCodecCache.Load(structType); false == exists || true == cached.(bool) {
+        t.Fatalf("expected the cached verdict to stay the first stored one, got %v (exists=%v)", cached, exists)
+    }
+}
+
+func TestValidator_RegisterConstraintRefusesTheThreeShapesNoTagCanEverName(t *testing.T) {
+    for _, testCase := range []struct {
+        name            string
+        constraintName  string
+        constraint      validationcontract.Constraint
+        expectedMessage string
+    }{
+        {
+            name:            "an empty name",
+            constraintName:  "",
+            constraint:      &Alpha{},
+            expectedMessage: "constraint name is empty",
+        },
+        {
+            name:            "a padded name",
+            constraintName:  " alpha",
+            constraint:      &Alpha{},
+            expectedMessage: "constraint name must not contain leading or trailing whitespace",
+        },
+        {
+            name:            "a trailing-padded name",
+            constraintName:  "alpha ",
+            constraint:      &Alpha{},
+            expectedMessage: "constraint name must not contain leading or trailing whitespace",
+        },
+        {
+            name:            "an untyped nil instance",
+            constraintName:  "custom",
+            constraint:      nil,
+            expectedMessage: "constraint instance is nil",
+        },
+        {
+            name:            "a typed nil instance",
+            constraintName:  "custom",
+            constraint:      (*Alpha)(nil),
+            expectedMessage: "constraint instance is nil",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            validator := NewValidator()
+
+            testhelper.AssertPanicsWithError(
+                t,
+                func() {
+                    validator.RegisterConstraint(testCase.constraintName, testCase.constraint)
+                },
+                testCase.expectedMessage,
+            )
+        })
+    }
+}
+
+func TestRefusesValidationObjectBody_APanickingDecoderCountsAsAccepting(t *testing.T) {
+    if true == refusesValidationObjectBody(reflect.TypeOf(panickingDecodeTarget{})) {
+        t.Fatalf("expected a panicking decoder to count as accepting the object body")
+    }
+
+    /* the two sides it sits between: a plain struct accepts an empty object, and a type whose body must be a string refuses it */
+    if true == refusesValidationObjectBody(reflect.TypeOf(struct{ Name string }{})) {
+        t.Fatalf("expected a plain struct to accept an empty object body")
+    }
+
+    if false == refusesValidationObjectBody(reflect.TypeOf(time.Time{})) {
+        t.Fatalf("expected a type whose body must be a string to refuse an empty object body")
+    }
+}
+
+type panickingDecodeTarget struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+func (instance *panickingDecodeTarget) UnmarshalJSON(payload []byte) error {
+    panic("decoder exploded")
+}
+
+func TestValidator_AByteSliceIsAScalarPayloadRatherThanASequence(t *testing.T) {
+    validator := NewValidator()
+
+    type payloadHolder struct {
+        Blob    []byte `json:"blob"`
+        Members []struct {
+            Name string `json:"name" validate:"notBlank"`
+        } `json:"members"`
+    }
+
+    validateErr := validator.Validate(payloadHolder{
+        Blob: []byte{0, 1, 2, 3},
+        Members: []struct {
+            Name string `json:"name" validate:"notBlank"`
+        }{
+            {Name: ""},
+        },
+    })
+
+    errors := validationErrorsFrom(t, validateErr)
+
+    if 1 != len(errors) {
+        t.Fatalf("expected exactly the one nested failure, got %#v", errors)
+    }
+
+    if "members[0].name" != errors[0].Field() {
+        t.Fatalf("expected the failure to name the nested member, got %q", errors[0].Field())
+    }
+}
+
+func validationErrorsFrom(t *testing.T, validateErr error) ValidationErrors {
+    t.Helper()
+
+    if nil == validateErr {
+        t.Fatalf("expected validation to fail")
+    }
+
+    errors, isValidationErrors := validateErr.(ValidationErrors)
+    if false == isValidationErrors {
+        t.Fatalf("expected ValidationErrors, got %T: %v", validateErr, validateErr)
+    }
+
+    return errors
+}
+
+func TestValidator_TheFieldNameFollowsEncodingJsonsOwnReadingOfTheTag(t *testing.T) {
+    validator := NewValidator()
+
+    type tagShapes struct {
+        OptionsOnly string `json:",omitempty" validate:"notBlank"`
+        Renamed     string `json:"renamed,omitempty" validate:"notBlank"`
+        Plain       string `validate:"notBlank"`
+    }
+
+    errors := validationErrorsFrom(t, validator.Validate(tagShapes{}))
+
+    reported := map[string]bool{}
+    for _, validationError := range errors {
+        reported[validationError.Field()] = true
+    }
+
+    for _, expectedField := range []string{"OptionsOnly", "renamed", "Plain"} {
+        if false == reported[expectedField] {
+            t.Fatalf("expected a failure under %q, got %#v", expectedField, reported)
+        }
+    }
+
+    if true == reported[""] {
+        t.Fatalf("expected no failure to be reported under an empty field name, got %#v", reported)
+    }
+}
+
+func TestValidator_AnEmbedWithAJsonNameIsAnObjectRatherThanAPromotion(t *testing.T) {
+    validator := NewValidator()
+
+    errors := validationErrorsFrom(t, validator.Validate(embedHolder{}))
+
+    reported := map[string]bool{}
+    for _, validationError := range errors {
+        reported[validationError.Field()] = true
+    }
+
+    if false == reported["named.inner"] {
+        t.Fatalf("expected the named embed to be validated under its own path, got %#v", reported)
+    }
+
+    if false == reported["promoted"] {
+        t.Fatalf("expected the plain embed to be validated as a promotion, got %#v", reported)
+    }
+}
+
+type NamedEmbed struct {
+    Inner string `json:"inner" validate:"notBlank"`
+}
+
+type PlainEmbed struct {
+    Promoted string `json:"promoted" validate:"notBlank"`
+}
+
+type embedHolder struct {
+    NamedEmbed `json:"named"`
+    PlainEmbed
+}
+
+type NestedEmbedTagCore struct {
+    Value string `json:"value"`
+}
+
+type nestedEmbedTagHolder struct {
+    NestedEmbedTagCore `validate:"notBlank"`
+}
+
+type nestedEmbedTagPayload struct {
+    Inner nestedEmbedTagHolder `json:"inner"`
+}
+
+func TestValidateStruct_AnEmbedsOwnTagReportsUnderTheParentsPath(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(nestedEmbedTagPayload{}))
+
+    if "inner.NestedEmbedTagCore: value must be a string" != validationErrors.Error() {
+        t.Fatalf("expected the embed's own tag to report under the parent's path, got %q", validationErrors.Error())
+    }
+}
+
+type DashExcludedEmbedCore struct {
+    Value string `json:"value" validate:"notBlank"`
+}
+
+type dashExcludedEmbedPayload struct {
+    DashExcludedEmbedCore `json:"-"`
+}
+
+/* this test is not the proof of the dash guard in isPromotedValidationEmbed: for the exact "-" tag the split check below it answers the same false, so the guard is shadowed there and is proved instead on verdict, by an inversion that stops flattening every plain embed. */
+func TestIsPromotedValidationEmbed_ADashTaggedEmbedIsNeitherFlattenedNorNamed(t *testing.T) {
+    encoded, marshalErr := json.Marshal(dashExcludedEmbedPayload{})
+    if nil != marshalErr {
+        t.Fatalf("unexpected error: %v", marshalErr)
+    }
+
+    if `{}` != string(encoded) {
+        t.Fatalf("expected encoding/json to drop the dash-tagged embed, got %s", encoded)
+    }
+
+    validatorInstance := NewValidator()
+
+    requireNoValidationErrors(t, validatorInstance.Validate(dashExcludedEmbedPayload{}))
+}
+
+type tiedTimeLeft struct {
+    time.Time
+}
+
+type tiedTimeRight struct {
+    time.Time
+}
+
+type tiedTimeCarrier struct {
+    tiedTimeLeft
+    tiedTimeRight
+}
+
+func (instance tiedTimeCarrier) MarshalJSON() ([]byte, error) {
+    return []byte(`"carrier"`), nil
+}
+
+func (instance *tiedTimeCarrier) UnmarshalJSON(data []byte) error {
+    return exception.NewError("carrier accepts no object body", nil, nil)
+}
+
+type tiedTimeHostPayload struct {
+    tiedTimeCarrier
+    Name string `json:"name" validate:"notBlank"`
+}
+
+func TestValidateStruct_ANestedCodecTieResolvesToTheCarrierAndKeepsItsSiblingsValidated(t *testing.T) {
+    origin, depth, resolved := promotedValidationMarshalerOrigin(reflect.TypeOf(tiedTimeCarrier{}), map[reflect.Type]bool{})
+    if false == resolved || 0 != depth || reflect.TypeOf(tiedTimeCarrier{}) != origin {
+        t.Fatalf("expected the equal-depth tie to resolve to the carrier itself, got %v at depth %d (resolved=%v)", origin, depth, resolved)
+    }
+
+    validatorInstance := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(tiedTimeHostPayload{}))
+    if "name: this field is required" != validationErrors.Error() {
+        t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
+    }
+}
+
+type WalkedPointerEmbedCore struct {
+    Value string `json:"value" validate:"notBlank"`
+}
+
+type walkedPointerEmbedPayload struct {
+    *WalkedPointerEmbedCore
+}
+
+func TestValidator_ANonNilPointerEmbedIsWalkedThroughItsValue(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(walkedPointerEmbedPayload{WalkedPointerEmbedCore: &WalkedPointerEmbedCore{}}))
+
+    if "value: this field is required" != validationErrors.Error() {
+        t.Fatalf("expected the pointee's constraint to be enforced through the pointer embed, got %q", validationErrors.Error())
+    }
+}
+
+type typedNilWithParamsConstraint struct{}
+
+func (instance *typedNilWithParamsConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return nil
+}
+
+func (instance *typedNilWithParamsConstraint) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+    return (*typedNilWithParamsConstraint)(nil), nil
+}
+
+func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *testing.T) {
+    validatorInstance := NewValidator()
+    validatorInstance.RegisterConstraint("typedNilFromParams", &typedNilWithParamsConstraint{})
+
+    constraint, ok, refusalCause := validatorInstance.createConstraintWithParams("typedNilFromParams", map[string]string{"value": "x"})
+
+    if nil != constraint || true == ok {
+        t.Fatalf("expected a typed-nil construction to fail closed, got constraint=%v ok=%v", constraint, ok)
+    }
+
+    if "constraint construction returned nil" != refusalCause {
+        t.Fatalf("expected the typed-nil refusal cause, got %q", refusalCause)
     }
 }
