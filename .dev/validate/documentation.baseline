@@ -108,15 +108,10 @@ v3 ~ SECURITY.md ~ Source                           ~ the matched rule's Source 
 # declaring fails the run rather than passing quietly.
 # ------------------------------------------------------------------------------------------------------
 
-# bunorm core — the v1 and v2 readmes name the registry constructor and, through the audit and encrypt
-# sections, the sub-package types; the v3 readme delegates both to its own sub-readmes and names neither.
+# bunorm core — the v1 and v2 readmes name the registry constructor and the v3 readme does not. The audit
+# and encrypt types stood here too, until the published readmes stopped carrying sections about a binding
+# they do not ship: all three readmes now leave those to the sub-readmes that live beside the code.
 v3 ~ integrations/bunorm/README.md ~ NewManagerRegistry ~ the registry constructor is named by v1 and v2 only
-v3 ~ integrations/bunorm/README.md ~ ChangeSet          ~ the audit types are named by the v1 readme only, v3 delegates to bunorm/v3/audit/README.md
-v3 ~ integrations/bunorm/README.md ~ Entry              ~ the audit types are named by the v1 readme only, v3 delegates to bunorm/v3/audit/README.md
-v3 ~ integrations/bunorm/README.md ~ Recorder           ~ the audit types are named by the v1 readme only, v3 delegates to bunorm/v3/audit/README.md
-v3 ~ integrations/bunorm/README.md ~ EncryptedString    ~ the encrypt types are named by the v1 readme only, v3 delegates to bunorm/v3/encrypt/README.md
-v3 ~ integrations/bunorm/README.md ~ KeyProvider        ~ the encrypt types are named by the v1 readme only, v3 delegates to bunorm/v3/encrypt/README.md
-v3 ~ integrations/bunorm/README.md ~ UseCipher          ~ the encrypt doors are named by the v1 readme only, v3 delegates to bunorm/v3/encrypt/README.md
 
 # bunorm drivers — the published readmes carry a typed-configuration section and a migration-open section
 # that the v3 readmes do not.

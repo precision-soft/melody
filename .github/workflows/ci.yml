@@ -82,6 +82,19 @@ jobs:
             -   name: document citations against the code of every major
                 run: .dev/validate/citation.sh
 
+    # the shape of every changelog block: which sections it opens, in which order, and whether the two
+    # published majors file the same entry under the same one. The three jobs above read what a document
+    # CLAIMS and none of them reads a heading, so a session that opened a second `### Fixed` at the head of
+    # a block instead of writing into the one already there left half a cycle where no reader would find
+    # it. Reads the tree only, so it needs neither Go nor a service container. Mirrors
+    # run_changelog_checks in `.dev/validate/all.sh`.
+    changelog:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: changelog block shape across every major
+                run: .dev/validate/changelog.sh
+
     # the race detector over the concurrency-carrying packages of the core majors
     # and the cron runner. The matrix job runs them without it, so a lost mutex or
     # an unsynchronized memo stays green there: these packages hold goroutines that

@@ -1,0 +1,22 @@
+# The changelog blocks whose shape is deliberately what it is, one line per fact.
+#
+#   scope ~ dimension ~ key ~ reason
+#
+# Read by .dev/validate/changelog.sh. This is not a suppression list: every line is a claim the run has to
+# satisfy. A block with no line here fails the check, and a line here that matched nothing fails it just as
+# loudly — the shape it excuses is now correct, so the line has to go. Without that second half the list
+# accumulates dead entries and eventually excuses a block that really did open its section twice, which is
+# the failure this band exists to prevent.
+#
+# Wildcards are refused rather than supported. An entry written as a pattern grows silently to cover the
+# next block, which is the whole failure it exists to prevent.
+#
+# A `cross-major` row is refused outright, not merely discouraged. There is no state of the tree in which
+# one sentence belongs under two different sections on two majors that ship the same framework, so a row
+# excusing one would excuse exactly the defect the dimension was built to catch.
+#
+# Fields are trimmed, so the columns may be aligned. The reason is mandatory: a line whose reason is empty
+# is a line nobody can review.
+#
+# v3 is not gated — its documents are the next stage's work — and the run reports its findings under a
+# count rather than as failures. It therefore has no lines here either.

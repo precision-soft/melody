@@ -6,20 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Fixed
-
-- documentation: the readme states that a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the default, the same field-by-field fill it presented as `RetryConfig`'s exception. `WithInsecure(true)` is described as disabling TLS entirely rather than restoring a legacy plain-TCP default: what preceded the verifying handshake was `pgdriver`'s own insecure mode, which negotiates TLS with verification off. The post-build-hook example guards the `TLSConfig` it dereferences, which is nil under the very option documented two sections above it
-
-- the zero-connect-timeout test message stops claiming a deadline-free dial: a non-positive `ConnectTimeout` is resolved to the default connect deadline before it reaches the driver — the documented normalization — and the failure message now says so instead of describing a no-deadline semantics the provider refuses to have
-
-- the provider's GoDoc stops claiming a construction-time server query: both open-path comments said the dialect handshake bun performs at construction queries the server under no caller context — true of the mysql twin the sentence was copied from, false here, since pgdialect's `Init` has an empty body. They now say what pgsql pays: no construction-time round trip, the first packet on the wire being the boot ping's dial, made under the caller's context and bounded by the connect timeout
-- the readme's retry fill-in rule states the multiplier's real floor: it claimed every listed value fills in when the supplied field is zero or non-positive, while for `BackoffMultiplier` the code replaces any supplied value below `1`, `NaN` included, with the default `2.0`, and keeps exactly `1` as a valid constant backoff — so a configured `0.5` was documented as honoured and was not
-- bun's diagnostics are routed into the journal on the retry-less open path too: the `bunorm.RouteDiagnostics` call sat only in the retry loop, so the default provider — one built without a `RetryConfig` — opened its connection and left bun's declaration mistakes as unstructured lines on standard error, exactly the state the routing was added to end. The call now lives in the one open funnel every door shares — `Open`, `OpenContext`, the retry loop and the migration door alike
-
-### Changed
-
-- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
-
 ### Added
 
 - opening a connection routes bun's own diagnostic channel into the application's journal, once per process, through `bunorm.RouteDiagnostics`: bun's reports of a declaration mistake — an unknown struct tag option, an unknown `on_update` or `on_delete` rule on a relation, a query carrying arguments and no placeholders — arrive as warning records instead of unstructured lines on standard error. See the `bunorm` changelog for the door itself. The pgsql dialect, unlike the mysql one, writes nothing through the standard library's logger, so this covers everything bun reports here
@@ -31,12 +17,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- README — the timeout section describes the three-deadline `TimeoutConfig` that ships: it still claimed the connect timeout was the only field "because pgdriver exposes no separate read/write deadlines", a rationale the package's own code states the opposite of, and its defaults table lacked the 30s read and write rows
+- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
+
 - `TimeoutConfig` names every deadline the driver applies — `ReadTimeout` and `WriteTimeout` join `ConnectTimeout` — and the connector receives all three, the dial included: the configured connect timeout never reached the dial, which ran under pgdriver's internal 5-second default whatever the operator set, and the read/write deadlines governed invisibly at the driver's 10s/5s with no field in this package to even mention they existed. The defaults mirror the mysql sibling at 30s/30s. **Breaking** at compile time: `NewTimeoutConfig` takes the three durations, the mysql signature. **Behavioural change**: the effective read and write deadlines move from the driver's invisible 10s/5s to the documented 30s/30s
 - credential redaction is the application's call on this major, not the provider's: v1's `Provider.Open` marks its configured password parameter through the configuration's own `MarkSecret`, but this major hands the provider the connection VALUES rather than the parameter names it would read them under, so the provider knows no configuration key. The equivalent door is `bunorm.ManagerRegistry.MarkSecretParameters(configuration, names...)`, called by the party that resolved the values; the provider carries no `bunorm.SecretParameterProvider`
 - the terminal failure record of the retry loop is the log of that failure: written in full through the exception context, and the returned error carries the already-logged mark, so the exit handler no longer writes the same outage a second time
 
 ### Fixed
+
+- documentation: the readme states that a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the default, the same field-by-field fill it presented as `RetryConfig`'s exception. `WithInsecure(true)` is described as disabling TLS entirely rather than restoring a legacy plain-TCP default: what preceded the verifying handshake was `pgdriver`'s own insecure mode, which negotiates TLS with verification off. The post-build-hook example guards the `TLSConfig` it dereferences, which is nil under the very option documented two sections above it
+
+- the zero-connect-timeout test message stops claiming a deadline-free dial: a non-positive `ConnectTimeout` is resolved to the default connect deadline before it reaches the driver — the documented normalization — and the failure message now says so instead of describing a no-deadline semantics the provider refuses to have
+
+- the provider's GoDoc stops claiming a construction-time server query: both open-path comments said the dialect handshake bun performs at construction queries the server under no caller context — true of the mysql twin the sentence was copied from, false here, since pgdialect's `Init` has an empty body. They now say what pgsql pays: no construction-time round trip, the first packet on the wire being the boot ping's dial, made under the caller's context and bounded by the connect timeout
+- the readme's retry fill-in rule states the multiplier's real floor: it claimed every listed value fills in when the supplied field is zero or non-positive, while for `BackoffMultiplier` the code replaces any supplied value below `1`, `NaN` included, with the default `2.0`, and keeps exactly `1` as a valid constant backoff — so a configured `0.5` was documented as honoured and was not
+- bun's diagnostics are routed into the journal on the retry-less open path too: the `bunorm.RouteDiagnostics` call sat only in the retry loop, so the default provider — one built without a `RetryConfig` — opened its connection and left bun's declaration mistakes as unstructured lines on standard error, exactly the state the routing was added to end. The call now lives in the one open funnel every door shares — `Open`, `OpenContext`, the retry loop and the migration door alike
 
 - `provider.go` — the retry warning carries the diagnostic shape the terminal records carry: the host and port dialed, the pool sizing, the deadlines that governed the attempt and the cause chain, lifted through `exception.LogContext` the way the three records above it already are. The first two records an operator sees when a database is down had the failure flattened to `openErr.Error()` — a message and nothing to act on — and only the third, terminal one named the database
 
@@ -47,6 +42,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `IsDuplicateKey` answers on the typed SQLSTATE — `23505`, matched through `errors.As`, which sees through wrapping — instead of probing the rendered message for a substring. The probe answered true for any error whose text merely contained the digits (a quoted value in a CHECK-violation detail was enough) and answered false for a real duplicate-key error wrapped in an exception whose message hides its cause. **Behavioural**: errors that carry no PostgreSQL protocol error — a hand-written message containing "duplicate key", an error stringified across a process boundary — no longer match
 
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), and the deprecated `net.Error.Temporary()` call is removed: the interface was deprecated in Go 1.18 for its ill-defined semantics, and the one retryable case it uniquely caught is now covered by the marker
+
+- README — the timeout section describes the three-deadline `TimeoutConfig` that ships: it still claimed the connect timeout was the only field "because pgdriver exposes no separate read/write deadlines", a rationale the package's own code states the opposite of, and its defaults table lacked the 30s read and write rows
 
 ## [v2.0.6] - 2026-07-24 - Cold-Start Transient Markers
 

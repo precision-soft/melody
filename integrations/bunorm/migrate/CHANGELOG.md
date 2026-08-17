@@ -6,15 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Fixed
-
-- documentation: the readme states that without the `--manager` flag the registration's own `ManagerName` pin is used, and only an empty pin falls back to the registry default. The dedicated migration connection is attributed to all six commands rather than to migrate and rollback, since they share one manager resolution
-
-- the unknown-manager test pins the refusal it always meant to pin: it accepted any error, so a regression that ignored the `--manager` flag and dialed the default database still read as the guard working; it now requires `bunorm.ErrProviderDefinitionNotFound`
-
-- **Behavioural:** the text rendering escapes C0 control characters and DEL visibly (`\n`, `\r`, `\t`, the rest as `\xNN`) in every string it did not write itself — the error text off the wire, the failed statement, the query names, the DATABASE identity block the server answers and the migration names — before the terminal sees them, and before the table cells are measured, so the alignment counts the escaped spelling. A server whose error carried an escape sequence could repaint the operator's terminal or forge lines in a captured log; the failed statement alone keeps its real line breaks, which are the readability of the query block, with every other control byte escaped. The json rendering is untouched — its encoder escapes on its own
-- `db:rollback` answers the held migration lock with the same remedy-naming refusal `db:migrate` already answered: which manager, which locks table, and that `db:unlock` clears a lock a crashed process left behind. It used to return bun's bare error, which states that a lock exists and nothing else; the bun error stays the cause, so `errors.Is` still reaches it
-
 ### Added
 
 - under `--format=json` every command renders the one machine-readable document the declared flag always promised: the accumulated blocks as data, the side-reports as warnings, the failure inside the envelope's error. The flag was declared and validated by `StandardFlags` long before it was honoured — `db:status --format=json | jq` failed on the first byte of a plain-text table while the cli runner had already silenced its banner on the json promise
@@ -26,10 +17,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - the json envelope is one line, following the framework's printer: `db:status --format=json` and its siblings render a single closed document per run rather than an indented block, and `--format=json-pretty` renders the same document indented for reading by hand. Nothing that decodes the document is affected
 
-- README — the flags section no longer claims `--format=json` is unimplemented: under it every command accumulates its output and renders the one machine-readable json envelope, failure included
 - the commands no longer pre-print the failure they return: the cli runner's `[error]` line and the full log record already report it, and the third copy of the same message on the same console said nothing new. The deliberate exception stays — an unlock failure beside a failed migration is still printed, because the return keeps the migration's error and would lose it
 
 ### Fixed
+
+- documentation: the readme states that without the `--manager` flag the registration's own `ManagerName` pin is used, and only an empty pin falls back to the registry default. The dedicated migration connection is attributed to all six commands rather than to migrate and rollback, since they share one manager resolution
+
+- the unknown-manager test pins the refusal it always meant to pin: it accepted any error, so a regression that ignored the `--manager` flag and dialed the default database still read as the guard working; it now requires `bunorm.ErrProviderDefinitionNotFound`
+
+- **Behavioural:** the text rendering escapes C0 control characters and DEL visibly (`\n`, `\r`, `\t`, the rest as `\xNN`) in every string it did not write itself — the error text off the wire, the failed statement, the query names, the DATABASE identity block the server answers and the migration names — before the terminal sees them, and before the table cells are measured, so the alignment counts the escaped spelling. A server whose error carried an escape sequence could repaint the operator's terminal or forge lines in a captured log; the failed statement alone keeps its real line breaks, which are the readability of the query block, with every other control byte escaped. The json rendering is untouched — its encoder escapes on its own
+- `db:rollback` answers the held migration lock with the same remedy-naming refusal `db:migrate` already answered: which manager, which locks table, and that `db:unlock` clears a lock a crashed process left behind. It used to return bun's bare error, which states that a lock exists and nothing else; the bun error stays the cause, so `errors.Is` still reaches it
 
 - the refusal of a held migration lock names the resource and the remedy. Bun's own error states that a lock exists and nothing else — not which database it belongs to, and not that this command set ships `<prefix>:unlock` to clear one a crashed process left behind — and it reached the operator carrying no melody context at all, while the unknown-manager refusal three lines away has always named both what was asked for and what exists. The manager label, the lock table and the unlock command travel in the context now, with bun's error kept as the cause so `errors.Is` still reaches it. **Behavioural change** for anything matching on the message text — see the framework's `UPGRADE.md`
 - a migration group that fails part way through names the migrations that already landed, on the plain text and in the machine document alike. Bun returns them beside the failure and the command threw them away, so the operator was told which migration broke and nothing about which had been applied and recorded — leaving the choice between re-running (safe) and rolling back (which would take the landed ones with it) impossible to make without reading the database by hand, and `data` was `{}` for a run that had applied two migrations. The last entry of bun's group is the migration that failed rather than one that succeeded — the group is fixed to the slice up to and including the one about to be attempted, before it runs — so it is counted out, which matches the migrations table exactly, since the migrator marks a migration applied only once its `Up` returns. A run that landed nothing reports no applied block at all rather than an empty one claiming a partial state
@@ -41,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `RunQueries` and `RunQueriesWithOption` report an empty query set as a warning instead of printing "all 0 queries executed successfully". The run still succeeds — the caller decides what an empty migration means — but under `WithMarkAppliedOnSuccess(true)` the migration is marked applied and never runs again, so a builder that produced nothing must not read like the queries ran
 - `RegisterCommands` refuses a nil migration set instead of returning no commands at all. The silence left a direct caller believing it had registered the command family and finding out at invocation time, as "unknown command", far from the wiring that caused it; `Module` gates its own optional set before calling, so a binary registering only migration contexts is unaffected. **Behavioural**: `RegisterCommands(nil, ...)` now panics at registration
 - table cells are truncated by runes, not bytes: the format widths pad by rune count, so a multi-byte value was truncated even when it fit the column, with the cut landing mid-rune and rendering as a replacement character; a budget too small for the ellipsis no longer slices negative
+
+- README — the flags section no longer claims `--format=json` is unimplemented: under it every command accumulates its output and renders the one machine-readable json envelope, failure included
 
 ## [v1.2.0] - 2026-07-11 - Multi-Context Migration Command Families
 

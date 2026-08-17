@@ -246,6 +246,21 @@ run_citation_checks() {
         "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/citation.sh"
 }
 
+# the shape of every changelog block: which sections it opens, in which order, and whether the two published
+# majors file the same entry under the same one. The three checks above read what a document CLAIMS; none of
+# them reads a heading, so a session that opened a second `### Fixed` at the head of a block instead of
+# writing into the one already there left half a cycle where no reader of that block would find it — which
+# is what ten of the fourteen `[Unreleased]` blocks of the published majors were measured doing. Reads the
+# tree only, so it needs no container and costs seconds.
+run_changelog_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/changelog.sh" ]]; then
+        fail "the changelog check is missing or not executable: .dev/validate/changelog.sh. It is not optional — the ci job invokes it directly, so a skip here reports a pass locally against a lane that fails in ci, and it is the only lane that reads a changelog heading at all; restore it or chmod +x it"
+    fi
+
+    run_section "melody changelog block shape across every major (mirrors the ci changelog job)" "${TAG_VALIDATE}" "changelog" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/changelog.sh"
+}
+
 # the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
 # actually drives a booted application over the wire, and that is the only place a whole class of defect shows
 # up at all — a middleware ordering that only matters once a real request traverses the chain, a route the
@@ -451,6 +466,8 @@ main() {
 
         run_citation_checks
 
+        run_changelog_checks
+
         run_race_go_suites
 
         if [[ "true" = "${SKIP_LIVE_BOOLEAN}" ]]; then
@@ -517,6 +534,12 @@ main() {
     # commit that moves it stages a .go file while the document that names it stays untouched. Gating on
     # the staged paths would skip the check in exactly the commit that broke the claim.
     run_citation_checks
+
+    # ungated for the same reason, in the form closest to home: a changelog entry is written by the very
+    # commit that stages the code it describes, and it is written into a file gating on staged paths would
+    # then judge against the section it was just dropped into. The whole point is to catch the entry the
+    # moment it is filed, not a cycle later.
+    run_changelog_checks
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"
     success "validation completed"

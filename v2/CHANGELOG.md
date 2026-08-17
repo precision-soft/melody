@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- tooling: `.dev/validate/changelog.sh` and `.dev/validate/changelog.baseline` read the SHAPE of every changelog block, which nothing here had ever read. The neighbouring bands ask what a document claims and whether what it names exists; none of them reads a heading, so a session that opened a second `### Fixed` at the head of a block instead of writing into the one already there left half a cycle where no reader of that block would find it — ten of the fourteen `[Unreleased]` blocks of the two published majors were doing exactly that, and the entries of this cycle were split across two sections in each. Four dimensions are asserted: the same section opened twice inside one block, a heading outside the vocabulary, the sections of a block out of the declared order, and an entry common to both published majors filed under different sections. The vocabulary is not invented here — it is the list the release auditor already judges published release bodies against, narrowed to the eight this tree writes, because two sources of truth for one list is how they drift. The order is derived from the tree rather than chosen (`Breaking Changes` opens its block in every block that has one, `Documentation` closes it in every one, and the middle is the Keep a Changelog order these files name as their format), and the one judgement made rather than measured is written into the script's header with its count. The cross-major dimension is the only one no baseline row may excuse, and it is empty by construction on a tree whose two majors were written from one another — it is built for what it can prove rather than for what it finds, being the only thing that can say a session which moved an entry moved it on both majors. What the band cannot do is written down too: no reader of markdown decides which section an entry BELONGS under
+
+- event: `RequiredListenerSkippedError` and its three constructors — `NewRequiredListenerSkippedError`, `NewRequiredListenerSkippedErrorWithCause` and `NewRequiredListenerSkippedErrorWithStoppedListenerFailure` — name the class a caller has to separate from an ordinary listener failure: a dispatch ended, by a stop or by a failure, while a listener marked required was still behind it. The type is what carries that distinction, not the message, and it is what lets the http kernel refuse the dispatch outright on `kernel.request` — a stopping listener that also produced a response would otherwise have that response served with access control never consulted. The two causal constructors keep the ending decision as the refusal and hand the listener's own failure on as the cause, so the diagnostic of what actually broke is not lost behind it
+- exception: `IsAlreadyLogged` reads the already-logged mark at the depth `MarkLogged` writes it. It is the single reader: asking a concrete `*Error` instead misses a marked `HttpException` and anything wrapping a marked error, which are then rendered a second time
+- logging: `LogOnRecoverAndExitAfter` logs a recovered value like `LogOnRecoverAndExit` and runs a step of the caller's between the record and the process exit. It is the one place that is both after the record and before the exit: a teardown deferred below never runs, because `os.Exit` skips it, and one run before closes the logger the final record has to travel through
+- serializer: `ErrNotAcceptable` is the cause the manager's refusal carries when the accept header refused every media type it can produce. It is read with `errors.Is` rather than matched on the message — the error renderer and the result handler both answer `406` from it — which is what tells that refusal apart from a serializer that failed on the value, the other error the same call answers
+- session: `ErrSessionDeleted` is the cause the save refusal carries for a session deleted while the request holding it was still running. It says the session ended rather than that the storage failed, and the two want different answers: the response path expires the browser cookie and serves the handler's response, where a storage outage suppresses the cookie and answers `500`
+- session: `(*Session).Snapshot` reads the values, the modified flag and the cleared flag under one lock acquisition, for the response path that has to pair its branch decision with the values it acts on. Read through the individual accessors, a concurrent `Clear` slips between them and the save branch writes the emptied map under a live id — a session neither alive nor deleted
+- config: `(*Configuration).MarkServing` records that the wiring phase is over, after which `Resolve` is refused: every service built during boot copied the values it read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers entitled to treat it as settled. Registering a parameter still works, resolving itself on registration, which is what keeps a late module functioning. The framework's own boot marks it; an application wiring the configuration by hand is what the door exists for
+- httpclient: `(*HttpClient).RequestStreamWithContext` is `RequestStream` bound to a context: cancelling it ends the request and the body read, which is the only remedy for a stream a server never ends. The close obligation is unchanged — cancelling releases the connection, it does not close the `StreamResponse` for the caller
+- debug: `MiddlewareDescriptionProvider` and `MiddlewareBuildProvider` are the two seams `debug.NewMiddlewareCommand` takes. The first answers what the http pipeline would run without building it — the ordered descriptions, the selection report carrying the inactive entries with their reasons, or the same refusal the build gives a cycle or a missing reference. The second runs the real build for an explicit `--build`, answering the failure as an error, with a factory panic recovered by the command around the call
+
 - validation: `.dev/validate/citation.sh` and `.dev/validate/citation.baseline` check what the documents of a major CITE against what that major declares — the direction the neighbouring documentation check structurally cannot ask. That check asks whether a symbol a major ships is documented; it stayed green for months over an upgrade note announcing, with a code example and a symptom, a method no major declares, and it reads nothing outside `<major>/.documentation`, so the per-integration README and CHANGELOG files were compared to nothing by anything. Three dimensions are asserted: a citation qualified by one of the major's own package names must resolve in that major, a citation linking to a .go file must be answered by that file, and every relative link target must exist. A bare backticked name is deliberately not asserted and the omission is written into the header with its measurement — 189 of some 650 distinct bare tokens on one major resolve to nothing, being header names, environment keys, http verbs and placeholder spellings — because a dimension that needs its exceptions counted in the hundreds is not a dimension. The baseline is a set of claims rather than a filter, so an entry that stops matching fails the run as loudly as an unrecorded citation, and wildcards are refused. v1 and v2 are gated; v3 is measured and reported. A `--samples` pass type-checks the fenced go blocks that are whole programs, by writing each into the module that owns the document; it is opt-in and wired into neither the local run nor ci, because it needs a Go toolchain where both neighbouring bands read the tree alone. `.dev/validate/all.sh` and `.github/workflows/ci.yml` carry the band, ungated in the staged tail for the reason its neighbours are: a citation goes stale when the code moves, and the commit that moves it stages a .go file while the document that names it stays untouched
 
 - logging: `loggingcontract.LevelReporter`, the optional capability a `Logger` implements to answer whether a record at a given level would survive its threshold, and `logging.LevelEnabled`, the single door onto it. It exists for the callers that BUILD what they log rather than for the ones that merely hand a record over — see the Fixed entry for what the event dispatch was paying. `jsonLogger` implements it against its own threshold and reports nothing enabled once closed, `nopLogger` reports nothing enabled at all, and `requestLogger` forwards to the base it decorates, which is what makes the capability worth anything on the request path, since the decorator is what every handler and listener actually holds. The answer for a logger that does not implement it is **enabled**, so the reporting behaviour is the floor and never the thing the capability turns off; `loggingcontract.Logger` is untouched, so an existing logger of your own keeps working unchanged
@@ -22,8 +34,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - security: `RoleHierarchyAware`, the optional capability an `AccessDecisionManager` implements to receive the declared role hierarchy at compilation, and `(*AccessDecisionManager).WithRoleHierarchy`, which implements it for the built-in manager by wrapping its own role voters. The compilation asks for the capability instead of asserting on the concrete type, and refuses by firewall name a manager that is handed a hierarchy it cannot apply
 - http: `Kernel.SetMethodPolicy` installs the method policy the kernel reads on every request — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header. `KernelOptions`, `MethodPolicy` and `DefaultKernelOptions` were a documented surface with no door to hand them to: `NewKernel` fixed the defaults and the field behind them was unexported, so an api that had to answer `405` to `OPTIONS` wrote the configuration and watched it change nothing. `MethodPolicy` now lives on `http/contract` beside `ForwardedHeadersPolicy` and `SessionCookiePolicy`, with an alias under its old name in `http`. **Breaking**: the method is added to `http/contract.Kernel`, which breaks an out-of-tree implementation of that interface
-
-- http/static: an embedded file server proves its public directory against the embedded filesystem at construction and refuses by name when it is absent. `MELODY_PUBLIC_DIR` stays a runtime key while the embedded layout is frozen at compile time, so a value naming a directory the build did not embed booted cleanly and then answered 404 for every asset the binary carries. The key is not ignored in this mode, because the join with the public directory is what confines a stripped prefix to it
 
 - exception: `PanicCause` reads a recovered panic value as the cause of the error a recovery boundary fabricates in its place — the error itself when the panic was error-shaped, and nothing when it was a typed nil whose `Error()` would dereference a nil receiver at the first render. It names in one place the grammar the framework's own recovery boundaries follow: a panic value kept only in a context slot collapses to its bare message, because the json logger stringifies an error it finds in a context, so the context map and the cause chain of the very error that was raised reach no record at all
 - validation: `IsRuleWiringErrorCode`, `ValidationErrors.HasRuleWiringError` and `ValidationErrors.WithoutRuleWiringContext` tell a mistake in the rule DECLARATION — `unknownRule`, `invalidRuleSyntax`, `invalidPattern` — apart from a refusal of the submitted value. None of the three is reachable from any input a client can send: the struct tag is what is wrong, and it is wrong for every request that route will ever serve
@@ -68,18 +78,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - cache: `Manager.GetCounter` reads a key written by `Increment` or `Decrement`. Those operations are backend-native so a distributed backend keeps them atomic, which means they store the count as decimal text rather than through the serializer — `Get` handed that raw payload to a deserializer that does not expect it, and with any serializer other than the default the two were mutually unreadable in both directions. The contract is now stated on `Increment` as well
 - application: two boot warnings name a resource melody supplied that nothing will ever reclaim, so the deployment learns it from a log line rather than from a memory graph. One reports that the framework-supplied in-memory cache backend carries no item ceiling, so a key cached without a ttl is kept until the process exits. The other reports the framework-supplied in-memory session storage paired with a session ttl of zero: melody mints a session for every request that arrives without a session cookie, so one write on a public path turns every such request into a permanent entry, and an unauthenticated caller decides how many arrive. Either half alone is silent — a storage the application registered is the operator's to prune, and a lifetime the deployment set reclaims on its own. Both are raised from the http path only: a command builds its map, runs, and takes it away with it
-- config: a dollar in an `.env` value opens a reference only where godotenv says it does — upper case, digits and underscore. Admitting lower case and the dot turned literals that had always been read as data into references to keys no file defines, and an unresolvable reference fails the boot: `DB_PASSWORD=pa$sword` became a lookup of a key named `sword`, and `PRICE=$1.50` a lookup of `1.50`, in applications whose configuration had not changed
-- http: a middleware reference is satisfiable when the registrations sharing the referenced name cover the referrer between them. Each registration was weighed alone, so the ordinary way of writing an environment-specific middleware — an `auth` for development beside an `auth` for production, both under the one name the pipeline orders against — was refused in development AND in production for a configuration that boots correctly in both. The environment is not free-form (`config.validateEnvironment` admits `dev` and `prod` and refuses to boot on anything else), so a name registered for both is registered everywhere
-- http: the reference-gating check weighs only what the group being built assembles. It was handed every definition the builder holds, so building the `web` group reported an unsatisfiable reference between two definitions confined to `api` — a pair `web` never assembles, over a gating no request to it could reach. The check still fires for the group that does carry the pair
-- application: the comment on `MiddlewarePriorityStatic` describes where the static file server actually sits. It said a priority above the default keeps the server innermost; the constant is below the default and the server is outermost, which is what makes a request for a file that exists skip the rate limiter, the compressor and the access log
-- http: `PrefersHtml` is covered again for an html type that arrives on its own in mixed case. The entry was rewritten to carry a second type, which reaches the parser differently — one takes the whole header as the type, the other has to split it first — and the single-type case was left uncovered everywhere
-- container: a service the container owns stays one instance for the whole process even when it is resolved through a request scope. A provider builds from the container alone now; the scope layers over the container for the code running inside a request and no longer reaches underneath into the container's own wiring. The kernel installs a request logger into every scope under the name the container registers, so a provider that did nothing request-specific beyond asking for a logger was assembled from a scope entry, kept per request, and closed when that request ended — the bunorm providers read the logger while opening, so the `*bun.DB` pool was closed at the end of the request that first resolved it, taking it away from every other one. A provider that genuinely needs something only a request carries is now told the service does not exist, at the point the mistake is made, instead of quietly becoming a per-request object a request ending destroys
-- debug: the error-context walk stops at a depth bound instead of descending until the goroutine stack is gone. The cycle guard answers a context that holds itself and says nothing about one that is merely very deep, so a deep enough acyclic context — a producer-supplied map, which nothing validates — ended the process with `fatal error: stack overflow` while rendering a debug page: not a panic, so no recover in the command layer turns it into a reported failure. Measured with the stack capped at 16 MiB it took some five hundred thousand levels, which the production cap of one gigabyte scales up rather than removes. The bound is the same one `internal/copy.go` puts on the same shape of walk, far above anything a real error context reaches; a subtree past it renders as `<depth limit>`, told apart from `<cycle>` because the two say different things
 
 - container: a scope is a registrar in its own right, layered over the container it came from. `ScopeManager.RegisterScoped` — reached through the container, which is a scope manager — declares a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope, held for as long as that scope lives, and closed when it closes; `container.RegisterScoped[T]`, `MustRegisterScoped[T]`, `RegisterScopedType[T]` and `MustRegisterScopedType[T]` are the typed front doors, and `Scope.RegisterScoped` adds one to a single live scope. The root container never sees a scoped service and two scopes never share one: each holds its own creation guard, so neither waits on the other's build. A scoped service reads both levels — the scope's overrides and the container's singletons — while a container provider stays request-agnostic exactly as before, which is the direction that had to stay closed. Until now the only way to put anything request-specific in front of userland was the override the framework installs for its own logger and request context, so an application had no way to declare a request-lifetime service at all. The declaration sits on `ScopeManager` rather than beside the container's own registrations, because a scope does not exist until a request arrives: the services a scope owns have to be declared by whatever will be making the scopes. **Breaking**: `container/contract.ScopeManager` and `container/contract.Scope` gain `RegisterScoped` and `MustRegisterScoped`, which breaks an out-of-tree implementation of either — including an implementation of `Container`, which embeds `ScopeManager`
 - container: `Replacing()` admits a registration whose name — or whose registered type — the other lifetime already claims. Without it the collision is refused where it is made, in both directions and whichever order the two registrations arrive in, because a name that answers with a process singleton outside a scope and with a per-request service inside one is an ambiguity whose symptom appears one lifetime away from its cause. It admits substitution, not decoration: a scoped provider that resolves the name it replaces re-enters itself and is reported as the circular dependency it is
 - container: `ClosedWithScope()` hands an installed override to the scope's teardown, through the new `OverrideInstanceWithOptions` and `OverrideProtectedInstanceWithOptions`. The default is unchanged and stays the right one — an override belongs to whoever installed it and outlives the scope, which is what lets the http kernel report a scope-close failure through the request logger it installed — so the option is for the caller that built the value for one scope and holds no other reference to it. The four `OverrideService` signatures are untouched
-- container: a scope closes what it built in dependency order, dependents before their dependencies, falling back to creation order, latest first, for anything the graph says nothing about — the same tie-break the container's own teardown applies, since the two share one walk — and reporting a cycle the way that teardown reports one. The previous order was the node name alone, which was defensible while the only scope-built values were incidental and is a coin flip now that a scoped repository holding a scoped transaction is the ordinary shape
 - application: `ScopedServiceModule` is the module hook for request-lifetime services, with `RegisterScopedServices(kernelInstance, registrar)` running at boot beside `RegisterServices`. It is a separate interface, so no existing module changes. `ScopedServiceRegistrar` and `ServiceRegistrar` deliberately share no method: a container provider handed to the scoped hook, or a scoped provider handed to `RegisterServices`, is a compile error at the call site rather than a service quietly rebuilt and closed once per request. A name claimed at both lifetimes joins the aggregated boot collision report
 
 ### Changed
@@ -264,7 +266,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - example: the catalogue reading is served at `/catalog/report/` under the name `example.catalog.report`. The `/integration` prefix it sat under was named for a group of routes that no longer exists — the three that only demonstrated a backend went when the integrations were wired into the nomenclature itself — so a prefix was left standing over a single route that has nothing to do with it. `ReportDemoHandler` is `CatalogReportHandler`, named for what it renders
 - example: the welcome text on the static index says what the application is — a product nomenclature of products, categories, currencies and users — instead of calling itself a small demo, and the api token shipped in `.env` is named for the example rather than for a demonstration. The word had outlived what it described: the application it names has been a working nomenclature since the integrations were wired to it
 
-
 - logging: `LogOnRecover` only logs. It terminated the process when the recovered value carried an exit code, skipping every remaining deferred call, which is the one place in the framework where a library helper could end a program that had not asked to end. `LogOnRecoverAndExit` is the honestly named helper for that, and the three call sites that want it use it — one through it, two through its `LogOnRecoverAndExitAfter` sibling, which runs a final step between the record and the exit because a teardown deferred below never runs
 - config: `Resolve()` reports an error once the application is serving. Resolution rewrites the parameter store, and by then every service holds values copied out of it, so a later pass cannot reconfigure anything that is running — it only rewrites the store under readers that expect it settled. Building a configuration by hand and resolving it before serving is unaffected
 - config: a positive session ttl below one second fails the boot. Such a value does not describe a short session but a broken one: the file-backed store purges a lapsed entry on the same write that stores it, so a lifetime near the cost of that write returns success having persisted nothing, and one second is the finest unit an HTTP date can express in any case. Zero keeps its meaning of no expiry
@@ -288,6 +289,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: an access control rule whose attribute list normalizes to empty is refused at construction instead of being accepted. Such a rule still matched its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied — a silent privilege downgrade from a variadic call with no attribute, or from a role that a configuration value resolved to empty. Blank attributes inside a non-empty list are still trimmed
 - http: `TokenBucketLimiter` is now `FixedWindowLimiter`, with the old type name and both constructors kept as deprecated aliases so existing code is unaffected. The limiter restores the whole allowance at the window edge rather than proportionally to elapsed time, so it is a fixed-window counter and an instant straddling that edge admits up to twice the rate; the name now says so. `SlidingWindowLimiter`, which `IpRateLimit` and `UserRateLimit` already use, holds the rate over every trailing window
 - http: the request attributes the kernel owns are reserved under the framework's own underscore prefix (`RequestAttributeSession` is `_session`, `RequestAttributeScheme` is `_scheme`) and are published after the route attributes, so a route attribute can no longer replace the session object or the resolved scheme. Every other framework attribute already carried that prefix. **Behavioural change**: code reading these attributes through the exported constants is unaffected; code that hardcoded the literal `"session"` must move to `RequestAttributeSession`
+
+- container: a scope closes what it built in dependency order, dependents before their dependencies, falling back to creation order, latest first, for anything the graph says nothing about — the same tie-break the container's own teardown applies, since the two share one walk — and reporting a cycle the way that teardown reports one. The previous order was the node name alone, which was defensible while the only scope-built values were incidental and is a coin flip now that a scoped repository holding a scoped transaction is the ordinary shape
+
+### Removed
+
+- cli: the dead unexported error presenter is gone — an error-printing path with sorted context and a bounded cause chain that nothing has called since the envelope renderer became the one presentation, drifting beside the live path it duplicated
 
 ### Fixed
 
@@ -533,7 +540,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - cli: the banners honour `--no-color`. The start and finish banners, the red error line and the command-not-found header wrote their ansi sequences unconditionally, so a run redirected into a file carried escape codes around an output that honoured the flag — the suggestion header even printed them beside a table rendered under the no-color option it itself had set
 - cli: a printing failure no longer replaces the failure the envelope carried. `Render` returned the print error alone, so an envelope whose `Data` does not serialize lost the business failure that existed nowhere else — the record said "json: unsupported type" and nothing else; the envelope's exit-coded failure now travels as the cause beside the named print failure
 - cli: `output.NewMeta` honours the caller's Go version the way it honours the application and melody versions — the field was the one of the three silently discarded — and `NormalizeOption` clamps a negative verbosity level like its integer siblings
-- cli: the dead unexported error presenter is gone — an error-printing path with sorted context and a bounded cause chain that nothing has called since the envelope renderer became the one presentation, drifting beside the live path it duplicated
 - config: a broken `.env` no longer prints its neighbours' credentials. The godotenv parse error quotes the file content it choked on — the whole remaining tail for a malformed variable name, so one broken key on line three put `DB_PASSWORD` from line seven into the emergency log, preprocessing markers included — and that error rode the cause chain the logger renders in full; the failure now travels as a content-free description beside the path of the file to open
 - config: a template referencing a non-string parameter reports the type, never the value — the raw `environmentValue` sat in the error context one line under the comment forbidding exactly that, and a signing key registered as bytes is precisely what a template would reference; the typed accessors additionally withhold the value-quoting strconv cause for a parameter marked secret, keeping it for ordinary parameters whose mistyped pool size deserves the diagnostic
 - config: a runtime registration whose template fails to resolve leaves nothing behind. The parameter was published into the map before the resolution that could panic, so a recovered failure left the raw `%env(...)%` served as the value to every later reader and the name burnt — the corrected retry answered "duplicate parameter name" forever. The publication still comes first — the resolution's secret propagation marks the reader it finds in that map by name, so a parameter resolved before it was published was absent at the only moment the propagation looks — and a failed resolution now removes the name again before the panic. Nothing observes the intermediate state: publish, resolution and rollback all run under the write lock every reader takes
@@ -675,6 +681,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - example: the api error presenter emits the raw error message, the concrete Go type and the unwrap chain only when the kernel environment is the development one, the same gate the framework exception listener applies, and stays closed when that environment cannot be resolved at all. The presenter read no configuration, so a production 500 response carried the whole cause chain byte-identically to a development one. The status code, the timestamp, the request identifier and the caller-supplied message stay unconditional
 - documentation: eighteen exported symbols this major has always carried are documented at last — `cache.Item` and `cache.NewItem`, `logging.LoggerFromResolver` and `LoggerMustFromResolver`, `output.NewTablePrinter`, `NewMeta`, `NewWarning`, `NewError`, `NewErrorCause`, `security.NewFirewall`, `NewFirewallManager`, `NewFirewallRegistry`, `NewResolverTokenSource`, `NewRoleHierarchyVoter`, `NewAccessDecisionManagerWithVoters`, and `application.MiddlewareFactory`, `RouteRegistrar` and `SecurityModule` — along with three caveats only one major carried: that `InMemoryBackend` owns a cleanup goroutine which stops on `Close`, that `NewJsonLogger` serializes writes through an internal mutex, and that `ApiKeyHeaderAuthenticator` compares with `crypto/subtle.ConstantTimeCompare` so timing does not leak the expected key. `CONFIG.md` gains the environment key table, the kernel parameter names and the environment/mode/role constants it never carried while v1 documented them, `APPLICATION.md` gains the middleware ordering constants and `RegisterModuleProvider`. `.dev/validate/documentation.sh` checks the package documents against the code of every major, and now runs in the staged mode as well as the full one; it reads both bullet characters the documents use, every symbol a list entry names rather than only the first, methods as well as top-level declarations, the members of grouped `const`/`var` blocks, and packages at any depth, so a symbol documented for one major and shipped here can no longer go undocumented here
 
+- http/static: an embedded file server proves its public directory against the embedded filesystem at construction and refuses by name when it is absent. `MELODY_PUBLIC_DIR` stays a runtime key while the embedded layout is frozen at compile time, so a value naming a directory the build did not embed booted cleanly and then answered 404 for every asset the binary carries. The key is not ignored in this mode, because the join with the public directory is what confines a stripped prefix to it
+
+- config: a dollar in an `.env` value opens a reference only where godotenv says it does — upper case, digits and underscore. Admitting lower case and the dot turned literals that had always been read as data into references to keys no file defines, and an unresolvable reference fails the boot: `DB_PASSWORD=pa$sword` became a lookup of a key named `sword`, and `PRICE=$1.50` a lookup of `1.50`, in applications whose configuration had not changed
+
+- http: a middleware reference is satisfiable when the registrations sharing the referenced name cover the referrer between them. Each registration was weighed alone, so the ordinary way of writing an environment-specific middleware — an `auth` for development beside an `auth` for production, both under the one name the pipeline orders against — was refused in development AND in production for a configuration that boots correctly in both. The environment is not free-form (`config.validateEnvironment` admits `dev` and `prod` and refuses to boot on anything else), so a name registered for both is registered everywhere
+
+- http: the reference-gating check weighs only what the group being built assembles. It was handed every definition the builder holds, so building the `web` group reported an unsatisfiable reference between two definitions confined to `api` — a pair `web` never assembles, over a gating no request to it could reach. The check still fires for the group that does carry the pair
+
+- application: the comment on `MiddlewarePriorityStatic` describes where the static file server actually sits. It said a priority above the default keeps the server innermost; the constant is below the default and the server is outermost, which is what makes a request for a file that exists skip the rate limiter, the compressor and the access log
+
+- http: `PrefersHtml` is covered again for an html type that arrives on its own in mixed case. The entry was rewritten to carry a second type, which reaches the parser differently — one takes the whole header as the type, the other has to split it first — and the single-type case was left uncovered everywhere
+
+- container: a service the container owns stays one instance for the whole process even when it is resolved through a request scope. A provider builds from the container alone now; the scope layers over the container for the code running inside a request and no longer reaches underneath into the container's own wiring. The kernel installs a request logger into every scope under the name the container registers, so a provider that did nothing request-specific beyond asking for a logger was assembled from a scope entry, kept per request, and closed when that request ended — the bunorm providers read the logger while opening, so the `*bun.DB` pool was closed at the end of the request that first resolved it, taking it away from every other one. A provider that genuinely needs something only a request carries is now told the service does not exist, at the point the mistake is made, instead of quietly becoming a per-request object a request ending destroys
+
+- debug: the error-context walk stops at a depth bound instead of descending until the goroutine stack is gone. The cycle guard answers a context that holds itself and says nothing about one that is merely very deep, so a deep enough acyclic context — a producer-supplied map, which nothing validates — ended the process with `fatal error: stack overflow` while rendering a debug page: not a panic, so no recover in the command layer turns it into a reported failure. Measured with the stack capped at 16 MiB it took some five hundred thousand levels, which the production cap of one gigabyte scales up rather than removes. The bound is the same one `internal/copy.go` puts on the same shape of walk, far above anything a real error context reaches; a subtree past it renders as `<depth limit>`, told apart from `<cycle>` because the two say different things
+
 ## [v2.12.1] - 2026-07-24 - Contained Container Teardown Panics and Padded Skip Marker
 
 ### Fixed
@@ -731,6 +753,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `--role=`.
 
 ## [v2.10.0] - 2026-07-11 - Platform-Ergonomics Back-ports and Cross-Version Correctness & Security Hardening
+
+### Added
+
+- `http/contract/middleware.go` — optional `RuntimeRateLimiter` widening of `RateLimiter` for shared-store limiters: `AllowWithRuntime(runtime, key) (bool, error)` threads the request context to the store and reports store failures, with the returned allowed value already reflecting the limiter's failure policy. `middleware.RateLimitMiddleware` now prefers this method when the configured limiter implements it (logging the store failure and honoring the returned decision); every existing `RateLimiter` takes the unchanged plain path.
+- `config/environment.go`, `config/process_role.go`, `application/cli.go`, `application/service_resolver.go` — process roles for multi-instance deployments that split web serving from background work. A process now declares a role — `web`, `worker` or `all` (the default, byte-for-byte today's behavior) — via the `MELODY_PROCESS_ROLE` parameter in `.env` or the new `--role` runtime flag, the flag winning; the flag exists because melody deliberately never reads the process environment, so a docker-compose deployment differentiates containers built from one image with `command: ["/app", "--role=worker"]` instead of an inert environment variable. Melody itself gates nothing on the role — it is declared intent that composition-root wiring and long-running runners query through `Application.ProcessRole()`, the `KernelConfiguration.ProcessRole()` accessor, or the `ServiceProcessRole` container service, with `config.RoleAllowsBackgroundWork(role)` / `config.RoleAllowsHttp(role)` as the
+  standard predicates (previously every app reinvented this gate on `ModeHttp`, which conflates transport with responsibility). Like `--mode`, the `--role` flag never implies cli mode and is stripped before the cli framework parses the arguments. Note for external implementors of `config/contract.KernelConfiguration`: the interface gains `ProcessRole() string`.
+- `http/middleware/client_ip.go` — `NewForwardedClientIpResolver(policy)`: a trusted-proxy-aware `ClientIpResolver` that walks `X-Forwarded-For` right-to-left, skips hops matching the trusted proxy list (exact addresses and CIDR prefixes) and returns the first untrusted address — the client as attested by the trusted edge. It reuses the same `ForwardedHeadersPolicy` the kernel already takes for scheme detection, so one trusted-proxy list drives both, and falls back to `DefaultClientIp` whenever the chain cannot be trusted (untrusted direct peer, unparseable entry, all-trusted chain), so per-IP rate limits behind a reverse proxy key on the real client instead of collapsing onto the proxy address.
+
+### Changed
+
+- `config/configuration.go`, `application/application.go` — the misplaced-binary foot-gun is now diagnosable: melody derives the project directory from the executable location (the working directory only under `go run`), so `go run .` finds the `.env` artifacts but the same app built elsewhere and run from the same directory does not — and previously failed much later with an unsuggestive "undefined environment key". Boot now warns when zero environment keys were loaded (naming the searched `projectDirectory`) and the resolve failure carries `projectDirectory` in its error context. Log/diagnostic only; the lookup semantics are unchanged. Back-port from `v3`.
+- `application/boot_collision.go`, `application/application.go`, `application/application_container.go`, `application/application_cli.go`, `container/errors.go` — duplicate registrations now surface as ONE aggregated report at boot instead of one panic per run. Previously a consolidation that introduced several collisions (duplicate service ids, duplicate service types under the strict default, duplicate parameters, module configurations or cli command names) sent the developer around the fix-one-reboot-hit-the-next loop; the `Application.Register*` surface now records each duplicate (first registration wins for the remainder of the boot) and `Boot()` panics once, after the cli phase, listing every collision with the file:line of the registration that caused it. The container's raw `Register`/`MustRegister` and `Configuration.RegisterRuntime` keep their fail-fast behavior for direct callers, and any non-duplicate registration failure still panics immediately; the duplicate branches in
+  `container.Register` now carry `errors.Is`-able causes (`container.ErrServiceIdAlreadyRegistered`, `container.ErrServiceTypeAlreadyRegistered`) with unchanged messages.
+- `application/environment_warning.go`, `application/application.go` — boot now warns for every process environment variable whose name matches a known configuration parameter: melody deliberately reads configuration only from the `.env` artifacts (the application stays a black box), so such a variable is inert — the report's real-world case being an `APP_ROLE: web` set in docker-compose that consumers assumed was read while every container silently ran the outbox dispatcher. The known set is exactly the resolved parameter names, so `PATH`/`HOME` can never match; a variable whose value equals the resolved parameter value is skipped (platforms often mirror `.env` values); values are never logged. Log-only — behavior does not change.
 
 ### Fixed
 
@@ -793,20 +829,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `http/cors/service.go` — a scheme-qualified wildcard allowed-origin (`<scheme>://*.suffix`, for example `https://*.example.com`) is recognized as a wildcard and matches an `Origin` only when the scheme is identical and the host is a subdomain of the suffix. Such patterns were previously not treated as wildcards and matched nothing; scheme-less patterns keep their existing scheme-agnostic host matching.
 - `validation/validator.go` — `validate` tags on nested struct fields, slice/array elements, map values and embedded structs are now enforced rather than silently ignored; only top-level fields were validated before. A nested violation fails the whole validation with a path naming the offending field (`items[0].sku`, `bill.sku`). The descent is depth-bounded and cycle-guarded so a self-referential payload terminates, and nil pointers/interfaces and unexported fields are skipped, so a previously-valid flat payload is unaffected.
 
-### Added
-
-- `http/contract/middleware.go` — optional `RuntimeRateLimiter` widening of `RateLimiter` for shared-store limiters: `AllowWithRuntime(runtime, key) (bool, error)` threads the request context to the store and reports store failures, with the returned allowed value already reflecting the limiter's failure policy. `middleware.RateLimitMiddleware` now prefers this method when the configured limiter implements it (logging the store failure and honoring the returned decision); every existing `RateLimiter` takes the unchanged plain path.
-- `config/environment.go`, `config/process_role.go`, `application/cli.go`, `application/service_resolver.go` — process roles for multi-instance deployments that split web serving from background work. A process now declares a role — `web`, `worker` or `all` (the default, byte-for-byte today's behavior) — via the `MELODY_PROCESS_ROLE` parameter in `.env` or the new `--role` runtime flag, the flag winning; the flag exists because melody deliberately never reads the process environment, so a docker-compose deployment differentiates containers built from one image with `command: ["/app", "--role=worker"]` instead of an inert environment variable. Melody itself gates nothing on the role — it is declared intent that composition-root wiring and long-running runners query through `Application.ProcessRole()`, the `KernelConfiguration.ProcessRole()` accessor, or the `ServiceProcessRole` container service, with `config.RoleAllowsBackgroundWork(role)` / `config.RoleAllowsHttp(role)` as the
-  standard predicates (previously every app reinvented this gate on `ModeHttp`, which conflates transport with responsibility). Like `--mode`, the `--role` flag never implies cli mode and is stripped before the cli framework parses the arguments. Note for external implementors of `config/contract.KernelConfiguration`: the interface gains `ProcessRole() string`.
-- `http/middleware/client_ip.go` — `NewForwardedClientIpResolver(policy)`: a trusted-proxy-aware `ClientIpResolver` that walks `X-Forwarded-For` right-to-left, skips hops matching the trusted proxy list (exact addresses and CIDR prefixes) and returns the first untrusted address — the client as attested by the trusted edge. It reuses the same `ForwardedHeadersPolicy` the kernel already takes for scheme detection, so one trusted-proxy list drives both, and falls back to `DefaultClientIp` whenever the chain cannot be trusted (untrusted direct peer, unparseable entry, all-trusted chain), so per-IP rate limits behind a reverse proxy key on the real client instead of collapsing onto the proxy address.
-
-### Changed
-
-- `config/configuration.go`, `application/application.go` — the misplaced-binary foot-gun is now diagnosable: melody derives the project directory from the executable location (the working directory only under `go run`), so `go run .` finds the `.env` artifacts but the same app built elsewhere and run from the same directory does not — and previously failed much later with an unsuggestive "undefined environment key". Boot now warns when zero environment keys were loaded (naming the searched `projectDirectory`) and the resolve failure carries `projectDirectory` in its error context. Log/diagnostic only; the lookup semantics are unchanged. Back-port from `v3`.
-- `application/boot_collision.go`, `application/application.go`, `application/application_container.go`, `application/application_cli.go`, `container/errors.go` — duplicate registrations now surface as ONE aggregated report at boot instead of one panic per run. Previously a consolidation that introduced several collisions (duplicate service ids, duplicate service types under the strict default, duplicate parameters, module configurations or cli command names) sent the developer around the fix-one-reboot-hit-the-next loop; the `Application.Register*` surface now records each duplicate (first registration wins for the remainder of the boot) and `Boot()` panics once, after the cli phase, listing every collision with the file:line of the registration that caused it. The container's raw `Register`/`MustRegister` and `Configuration.RegisterRuntime` keep their fail-fast behavior for direct callers, and any non-duplicate registration failure still panics immediately; the duplicate branches in
-  `container.Register` now carry `errors.Is`-able causes (`container.ErrServiceIdAlreadyRegistered`, `container.ErrServiceTypeAlreadyRegistered`) with unchanged messages.
-- `application/environment_warning.go`, `application/application.go` — boot now warns for every process environment variable whose name matches a known configuration parameter: melody deliberately reads configuration only from the `.env` artifacts (the application stays a black box), so such a variable is inert — the report's real-world case being an `APP_ROLE: web` set in docker-compose that consumers assumed was read while every container silently ran the outbox dispatcher. The known set is exactly the resolved parameter names, so `PATH`/`HOME` can never match; a variable whose value equals the resolved parameter value is skipped (platforms often mirror `.env` values); values are never logged. Log-only — behavior does not change.
-
 ## [v2.9.0] - 2026-07-06 - Kernel Fail-Closed Dispatch, Non-Panicking Response Write and Closed-Scope Errors
 
 ### Added
@@ -861,14 +883,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v2.8.0] - 2026-06-16 - Configurable Transport & Shutdown Tunables + v3 Security and Correctness Back-ports
 
-### Security
-
-- `security/access_control_listener.go` — the access-control listener (the request authorization gate) matched only prefix rules and the empty-prefix fallback, silently ignoring exact (`NewAccessControlExactRule`) and regular-expression (`NewAccessControlRegexRule`) rules; a request could therefore bypass an exact or regular-expression access-control rule entirely. `matchAccessControlRule` now delegates to `AccessControl.matchRuleIndex`, sharing the full exact → prefix → regular-expression → fallback precedence already used by `AccessControl.Match`
-- `security/rule.go` — `ApiKeyHeaderRule.Check` compared the configured key against the request header with a plain `==`, which is not constant-time and leaks key length and shared prefix through timing; the comparison now uses `crypto/subtle.ConstantTimeCompare`. `NewApiKeyHeaderRule` additionally panics when the header name or the expected value is empty, closing a fail-open path where a request that omits the header (yielding `""`) would compare equal to an empty expected key and authorize every caller
-- `security/access_control.go` — `NewAccessControlRule` and `NewAccessControlRuleWithSegmentPrefix` now reject a rule that combines `PUBLIC_ACCESS` with any other attribute (via `normalizeAccessControlAttributes`); the listener grants `PUBLIC_ACCESS` before any role or voter check, so a rule such as `(PUBLIC_ACCESS, ROLE_ADMIN)` would have silently opened the endpoint to everyone and discarded the role requirement
-- `security/config/access_control_builder.go` — `AllowAnonymous` appended a rule with no attributes, which the listener treats as "authentication required", so the helper actually denied anonymous access with a 401; it now carries `securitycontract.AttributePublicAccess` so anonymous requests are granted as intended
-- `security/access_control.go` — an exact or anchored-regex access-control rule could be bypassed by appending extra trailing slashes (`/admin//` routes to the `/admin` handler, but `matchRuleIndex` trimmed only one trailing slash and so failed to match the exact `/admin` rule, leaving the request unguarded). `matchRuleIndex` now collapses all trailing slashes like the router. Ported from the `v3` fix.
-
 ### Added
 
 - `security/rule_test.go` — regression coverage for the API-key rule fail-open guards (empty header name and empty expected value both panic at construction); `security/access_control_test.go`, `security/access_control_listener_test.go`, and `security/config/access_control_builder_test.go` extended to cover the access-control matching, `PUBLIC_ACCESS` rejection, and `AllowAnonymous` fixes above
@@ -915,6 +929,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `security/compiled_configuration.go` — `CompiledFirewall.Login` no longer panics with a nil-pointer dereference when a userland `LoginHandler` returns `(nil, nil)`. The contract returns `(*LoginResult, error)`, so a handler returning neither a result nor an error is valid Go, but the firewall previously dereferenced `result.Token` unguarded inside the request goroutine; it now fails closed with a `firewall login handler returned nil result` error before the login-success event is dispatched. Ported from the `v3` fix.
 - `container/container_resolver.go` — a service resolution that raced `Close()` could store its freshly created instance after the close snapshot was taken, so the instance was never closed (a connection/file-handle leak for standalone container users). The creation guard now fails fast with a `container is closed` error when the container is already closed, and a value whose creation completed while `Close()` ran is closed best-effort instead of being stored; already-created instances remain readable after `Close()`. Ported from the `v3` fix.
 - `cache/remember.go` — a **cancelable** `Remember` call whose waiters all timed out cancels the leader's context, but the in-flight entry lingered until the leader's deferred cleanup ran, so a caller that joined in that window inherited the doomed call and received its cancellation error even though a fresh computation would have succeeded. A late joiner now detects the canceled call, replaces the entry, and leads a fresh computation; the leader's cleanup deletes only its own entry so it can no longer evict the replacement. Ported from the `v3` fix.
+
+### Security
+
+- `security/access_control_listener.go` — the access-control listener (the request authorization gate) matched only prefix rules and the empty-prefix fallback, silently ignoring exact (`NewAccessControlExactRule`) and regular-expression (`NewAccessControlRegexRule`) rules; a request could therefore bypass an exact or regular-expression access-control rule entirely. `matchAccessControlRule` now delegates to `AccessControl.matchRuleIndex`, sharing the full exact → prefix → regular-expression → fallback precedence already used by `AccessControl.Match`
+- `security/rule.go` — `ApiKeyHeaderRule.Check` compared the configured key against the request header with a plain `==`, which is not constant-time and leaks key length and shared prefix through timing; the comparison now uses `crypto/subtle.ConstantTimeCompare`. `NewApiKeyHeaderRule` additionally panics when the header name or the expected value is empty, closing a fail-open path where a request that omits the header (yielding `""`) would compare equal to an empty expected key and authorize every caller
+- `security/access_control.go` — `NewAccessControlRule` and `NewAccessControlRuleWithSegmentPrefix` now reject a rule that combines `PUBLIC_ACCESS` with any other attribute (via `normalizeAccessControlAttributes`); the listener grants `PUBLIC_ACCESS` before any role or voter check, so a rule such as `(PUBLIC_ACCESS, ROLE_ADMIN)` would have silently opened the endpoint to everyone and discarded the role requirement
+- `security/config/access_control_builder.go` — `AllowAnonymous` appended a rule with no attributes, which the listener treats as "authentication required", so the helper actually denied anonymous access with a 401; it now carries `securitycontract.AttributePublicAccess` so anonymous requests are granted as intended
+- `security/access_control.go` — an exact or anchored-regex access-control rule could be bypassed by appending extra trailing slashes (`/admin//` routes to the `/admin` handler, but `matchRuleIndex` trimmed only one trailing slash and so failed to match the exact `/admin` rule, leaving the request unguarded). `matchRuleIndex` now collapses all trailing slashes like the router. Ported from the `v3` fix.
 
 ### Documentation
 
@@ -964,6 +986,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v2.5.0] - 2026-04-17 - Extract HTTP CORS Subpackage and Harden Request Lifecycle
 
+### Added
+
+- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
+- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
+- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
+- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
+- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
+- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
+
 ### Changed
 
 - `http/middleware/cors.go` — public CORS API (`CorsConfig`, `NewCorsConfig`, `DefaultCorsConfig`, `RestrictiveCorsConfig`, `CorsMiddleware`, `DefaultCorsMiddleware`, `RestrictiveCors`) moved to `http/cors/`. Old symbols retained in `http/middleware/` as deprecated shims that delegate to `http/cors`; kept for backwards compatibility, no removal scheduled
@@ -977,20 +1008,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `session/file_storage.go` — file writes are now atomic (`os.CreateTemp` + `os.Rename`) instead of truncate-in-place; load path decoupled from a long-lived `*os.File` handle; `ownsFile` retired in favor of path-based ownership
 - `.documentation/package/*.md` — full documentation overhaul across APPLICATION/CACHE/CLI/CONFIG/CONTAINER/EVENT/HTTP/HTTPCLIENT/LOGGING/SECURITY/SESSION/VALIDATION: added missing userland types, constructors, container-access helpers, environment key tables, constants, and footgun notes
 
-### Added
-
-- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
-- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
-- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
-- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
-- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
-- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
-
 ### Deprecated
 
 - `http/middleware.CorsConfig`, `http/middleware.NewCorsConfig`, `http/middleware.DefaultCorsConfig`, `http/middleware.RestrictiveCorsConfig`, `http/middleware.CorsMiddleware`, `http/middleware.DefaultCorsMiddleware`, `http/middleware.RestrictiveCors` — use the equivalents in `github.com/precision-soft/melody/v2/http/cors` instead. Deprecated symbols are kept for backwards compatibility; no removal scheduled.
 
 ## [v2.4.1] - 2026-04-17 - Fix Compression Error Propagation and Concurrent Access Races
+
+### Added
+
+- `http/static/utility_test.go` — symlink traversal rejection, absolute path rejection, parent traversal rejection, symlink within root allowed
+- `cli/output/application_version_test.go` — Set/Get coverage and concurrent access race test
+- `logging/emergency_logger_test.go` — singleton behavior, `Close`/recreate cycle, concurrent access
+- `httpclient/http_client_test.go` — concurrent `SetHeader`/`SetBaseUrl`/`SetTimeout` with in-flight requests, `HttpClientConfig.Headers()` defensive copy
+- `http/middleware/compression_test.go` — HuffmanOnly and BestCompression level boundary acceptance, out-of-range fallback to DefaultCompression
+- `config/configuration_test.go` — placeholder regex rejects identifiers starting with digits, accepts letter/underscore/dotted identifiers
+- `session/in_memory_storage_test.go`, `session/file_storage_test.go` — concurrent `Load`/`Save` race tests
+
+### Changed
+
+- `httpclient/http_client.go` — added `sync.RWMutex` to protect concurrent access to `baseUrl`, `headers`, and `timeout` fields
+- `httpclient/http_client_config.go` — `Headers()` now returns a defensive copy of the map
+- `cli/output/application_version.go` — application version storage replaced with `sync/atomic.Value` for thread safety
+- `logging/emergency_logger.go` — replaced `sync.Once` with `sync.Mutex` so `CloseEmergencyLogger()` can reset the singleton and a subsequent `EmergencyLogger()` call creates a fresh instance
+- `http/kernel.go` — `debugMode` variable hoisted to single computation at request entry
+- `application/application_http.go` — extracted `httpShutdownTimeout` constant for the HTTP server shutdown deadline
+- `cache/in_memory.go` — removed redundant map copy in `SetMultiple`
 
 ### Fixed
 
@@ -1005,26 +1047,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `httpclient/http_client.go` — `SetTimeout()` no longer mutates `http.Client.Timeout` on the shared client (which races with in-flight `Do()` calls); `clientForRequest` now reads the instance timeout under `RLock` and builds a per-request client only when it differs from the shared client's construction timeout
 - `logging/emergency_logger.go` — `CloseEmergencyLogger()` now resets the singleton to `nil` so that subsequent `EmergencyLogger()` calls actually create a fresh instance (previously the closed instance was retained)
 
-### Changed
-
-- `httpclient/http_client.go` — added `sync.RWMutex` to protect concurrent access to `baseUrl`, `headers`, and `timeout` fields
-- `httpclient/http_client_config.go` — `Headers()` now returns a defensive copy of the map
-- `cli/output/application_version.go` — application version storage replaced with `sync/atomic.Value` for thread safety
-- `logging/emergency_logger.go` — replaced `sync.Once` with `sync.Mutex` so `CloseEmergencyLogger()` can reset the singleton and a subsequent `EmergencyLogger()` call creates a fresh instance
-- `http/kernel.go` — `debugMode` variable hoisted to single computation at request entry
-- `application/application_http.go` — extracted `httpShutdownTimeout` constant for the HTTP server shutdown deadline
-- `cache/in_memory.go` — removed redundant map copy in `SetMultiple`
-
-### Added
-
-- `http/static/utility_test.go` — symlink traversal rejection, absolute path rejection, parent traversal rejection, symlink within root allowed
-- `cli/output/application_version_test.go` — Set/Get coverage and concurrent access race test
-- `logging/emergency_logger_test.go` — singleton behavior, `Close`/recreate cycle, concurrent access
-- `httpclient/http_client_test.go` — concurrent `SetHeader`/`SetBaseUrl`/`SetTimeout` with in-flight requests, `HttpClientConfig.Headers()` defensive copy
-- `http/middleware/compression_test.go` — HuffmanOnly and BestCompression level boundary acceptance, out-of-range fallback to DefaultCompression
-- `config/configuration_test.go` — placeholder regex rejects identifiers starting with digits, accepts letter/underscore/dotted identifiers
-- `session/in_memory_storage_test.go`, `session/file_storage_test.go` — concurrent `Load`/`Save` race tests
-
 ## [v2.4.0] - 2026-04-14 - Improve Goroutine Lifecycle and Default Logger
 
 ### Changed
@@ -1038,6 +1060,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v2.3.0] - 2026-04-13 - Fix Validators, Rate Limiter, and Router
 
+### Changed
+
+- `file_storage.go` — `copyAnyMap` performs recursive deep copy for nested `map[string]any` values
+- `exception/utility.go` — export `BuildCauseChain` and `BuildCauseContextChain`
+- `logging/logger.go` — remove duplicated cause chain functions; delegate to `exception.BuildCauseChain` / `exception.BuildCauseContextChain`
+- `router_utility.go` — remove implicit HEAD-to-GET match from `matchesMethod`; kernel `HeadFallbackToGet` policy is now the single control point
+- `httpclient/http_client.go` — extract shared request-building logic into `buildRequest` helper; `Request` and `RequestStream` both delegate to it
+
 ### Fixed
 
 - `validator.go` — `createConstraintWithParams` now handles `greaterThan` parameters; `validate:"greaterThan(value=5)"` was silently using `min=0`
@@ -1049,15 +1079,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `kernel.go` — `errorHandler` now called for controller errors (was only called on panic recovery path)
 - `cors.go` — panic at middleware initialization when `AllowCredentials=true` and origins contain `"*"` to prevent overly permissive CORS
 
+## [v2.2.4] - 2026-04-10 - Fix XSS, Symlink Traversal, and Routing Edge Cases
+
+### Added
+
+- `request_test.go`, `middleware/compression_test.go`, `middleware/cors_test.go`, `url_generation_route_definition_test.go` — new and expanded test coverage for all fixes
+
 ### Changed
 
-- `file_storage.go` — `copyAnyMap` performs recursive deep copy for nested `map[string]any` values
-- `exception/utility.go` — export `BuildCauseChain` and `BuildCauseContextChain`
-- `logging/logger.go` — remove duplicated cause chain functions; delegate to `exception.BuildCauseChain` / `exception.BuildCauseContextChain`
-- `router_utility.go` — remove implicit HEAD-to-GET match from `matchesMethod`; kernel `HeadFallbackToGet` policy is now the single control point
-- `httpclient/http_client.go` — extract shared request-building logic into `buildRequest` helper; `Request` and `RequestStream` both delegate to it
-
-## [v2.2.4] - 2026-04-10 - Fix XSS, Symlink Traversal, and Routing Edge Cases
+- `kernel.go` — remove dead nil checks on `MatchResult` (router `Match()` always returns non-nil)
+- `request.go` — log warning when `ParseForm` fails (previously silent)
+- `url_generation_route_definition.go` — `Defaults()` and `Requirements()` now return defensive copies
+- Rename `security/security_test.go` to `security/test_helper_test.go`
+- Remove redundant comments from modified files
 
 ### Fixed
 
@@ -1068,18 +1102,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `middleware/cors.go` — origin matching was case-sensitive; now uses `strings.EqualFold` for case-insensitive comparison
 - `middleware/rate_limit.go` — `getClientIp` now uses `RemoteAddr` only; ignores `X-Forwarded-For` and `X-Real-IP` headers to prevent IP spoofing
 
-### Changed
-
-- `kernel.go` — remove dead nil checks on `MatchResult` (router `Match()` always returns non-nil)
-- `request.go` — log warning when `ParseForm` fails (previously silent)
-- `url_generation_route_definition.go` — `Defaults()` and `Requirements()` now return defensive copies
-- Rename `security/security_test.go` to `security/test_helper_test.go`
-- Remove redundant comments from modified files
-
-### Added
-
-- `request_test.go`, `middleware/compression_test.go`, `middleware/cors_test.go`, `url_generation_route_definition_test.go` — new and expanded test coverage for all fixes
-
 ## [v2.2.3] - 2026-03-21 - Refactor Address Colon Check in Config
 
 ### Changed
@@ -1088,13 +1110,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v2.2.2] - 2026-03-18 - Fix HTTP HEAD Handling and Update Dev Scripts
 
-### Fixed
-
-- `http/router_utility.go` — aligned HEAD handling and response contract validation; prevents incorrect responses on HEAD requests
-
 ### Changed
 
 - `internal/reflect.go` — updated type-reflection utilities
+
+### Fixed
+
+- `http/router_utility.go` — aligned HEAD handling and response contract validation; prevents incorrect responses on HEAD requests
 
 ## [v2.2.1] - 2026-03-17 - Fix JSON Logging Level Label Preservation
 
@@ -1120,13 +1142,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v2.1.2] - 2026-02-28 - Add CLI Stdout/Stderr Wiring and Standardize Method Receivers
 
-### Changed
-
-- All `*.go` files in the module — standardized all method receivers to `instance` for consistent style
-
 ### Added
 
 - `cli/command.go`, `cli/command_output.go` — wired `stdout`/`stderr` to CLI output; print command errors with failed exit status
+
+### Changed
+
+- All `*.go` files in the module — standardized all method receivers to `instance` for consistent style
 
 ## [v2.1.1] - 2026-02-23 - Fix RoleVoter Auto-Upgrade to RoleHierarchyVoter
 
@@ -1136,16 +1158,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v2.1.0] - 2026-02-18 - Add GreaterThan and NotEmpty Validation Constraints
 
-### Fixed
-
-- `CONTRIBUTING.md` — broken documentation links corrected
-
 ### Added
 
 - `validation/constraint_greater_than.go` — new `greaterThan(value=N)` constraint with support for int, float32, float64; returns per-constraint error codes
 - `validation/constraint_not_empty.go` — new `notEmpty` constraint for slices and strings; returns per-constraint error codes
 - `validation/const.go`, `validation/validation_rule.go`, `validation/validator.go` — wired new constraints into the validation pipeline
 - `exception/utility.go` — context-aware error wrapping helper `Wrap(ctx, err)` for exception chaining
+
+### Fixed
+
+- `CONTRIBUTING.md` — broken documentation links corrected
 
 ## [v2.0.0] - 2026-02-17 - Introduce Melody v2 Module
 

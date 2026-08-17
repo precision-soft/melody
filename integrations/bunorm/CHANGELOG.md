@@ -8,20 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- the coalescing of concurrent first dials is pinned by two registry tests: the in-flight entry is registered under its name before the provider is dialed, and a caller that finds an in-flight open waits on it and answers with the published manager instead of dialing a second pool — the waiter is constructed by hand, so no scheduling window decides what the tests observe
-
-### Fixed
-
-- documentation: the readme's Enhancements section stops presenting read/write split, field encryption and the audit trail as capabilities of the core module. All three ship in the v3 binding alone, and the splitter example's `bunorm.` selector — which on this page resolves to this module — is marked as v3's
-
-- the `Provider` contract documents the ownership transfer its registry already enforces: `Open` answers a fresh pool that the registry closes whenever it decides not to keep it — handed back beside an error, losing a duplicate migration open, or landing after `Close` — so an implementation handing out a shared or memoized `*bun.DB` is outside the contract
-
-### Changed
-
-- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
-
-### Added
-
 - `RouteDiagnostics` sends bun's own diagnostic channel to the application's journal, and the mysql and pgsql providers call it on their first open. Bun reports the developer's declaration mistakes through a package-level logger of its own — an unknown struct tag option, an unknown `on_update` or `on_delete` rule on a relation, a query carrying arguments and no placeholders — and unrouted they go to standard error as unstructured text, invisible to a deployment whose journal is a json file. They arrive as warning records under the message `bun diagnostic` with the line in the context, the shape `logging.NewStandardErrorLogger` already gives `net/http`'s own reporting. Bun's logger is one variable for the whole process, so the first provider to open wins it; a binary that never opens a database takes the setting at all. **Behavioural change** for anyone reading bun's warnings on standard error — see the framework's `UPGRADE.md`. One line is deliberately not routed: the mysql dialect writes `can't discover MySQL version` through the **standard library's** default logger rather than bun's, so reaching it would mean taking `log.SetOutput` for the whole process, which is the application's decision and not this package's — the mysql readme says how
 - `MigrationContextOpener` — what `ContextOpener` is to `Open`: the migration open under the caller's context. The registry prefers it whenever a provider implements it, handing the context it was constructed with, exactly as it does for the ordinary open
 
@@ -29,7 +15,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `ContextOpener`, the optional capability of opening under a caller's context, and `NewManagerRegistryWithContext`, which binds the registry to the context its lazy opens run under: a provider that implements the capability refuses an open the context already cancelled, has its retry sleeps watch the context alongside the clock, and derives the configuration hook's and the boot ping's budgets from it — so a shutdown that cancels the context is honoured at every cancellable step of an attempt instead of sleeping through the whole retry budget, in the exact window supervisors send their signals. The one step outside its reach is the dialect handshake bun performs at construction, bounded by the connect timeout alone — mysql's dialect queries the server there; pgsql's performs no construction-time round trip, so its whole open answers to the context. A nil context reads as `context.Background()`, the exact behaviour of `NewManagerRegistry`
 - `MigrationProvider`, the optional capability of opening a connection tuned for migrations, and `ManagerRegistry.MigrationDatabase`, which answers the connection the migration commands should run on: the dedicated one with the driver deadlines lifted when the provider implements the capability, the ordinary pooled connection otherwise. The request pool carries read and write deadlines sized for requests, and a DDL statement that legitimately runs past them — an `ALTER TABLE` adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The dedicated database is opened once per name, cached beside the request pools — never inside them — closed by `Close`, and refused after it
 
+### Changed
+
+- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
+
 ### Fixed
+
+- documentation: the readme of each published binding stops carrying the three enhancements that ship only in the third. Read/write splitting, field encryption and the audit trail have no `split.go`, `encrypt/` or `audit/` outside `integrations/bunorm/v3`, so every path, package and selector in those sections was another module's, reached from here through eleven relative links that walked into that module's tree. The section now names the three and sends the reader to the documents that live beside the code — the binding readme for the splitter, and the `encrypt` and `audit` readmes for the other two — which is where a reader who can actually use them is already working
+
+- documentation: the readme's Enhancements section stops presenting read/write split, field encryption and the audit trail as capabilities of the core module. All three ship in the v3 binding alone, and the splitter example's `bunorm.` selector — which on this page resolves to this module — is marked as v3's
+
+- the `Provider` contract documents the ownership transfer its registry already enforces: `Open` answers a fresh pool that the registry closes whenever it decides not to keep it — handed back beside an error, losing a duplicate migration open, or landing after `Close` — so an implementation handing out a shared or memoized `*bun.DB` is outside the contract
 
 - a definition name the registry does not know is refused with the name that was asked for and the names that exist, on both doors — `Manager` and `MigrationDatabase` — the way the framework's own container names an unregistered service id. `db:migrate --manager=repots` printed "provider definition not found" and exited non-zero, with both halves of the answer in the registry's hand and neither in the record. `ErrProviderDefinitionNotFound` stays the cause, so every `errors.Is` keeps its answer, and the registered names are sorted so one misspelling always prints one list
 
@@ -52,6 +48,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - the error handed to callers coalesced onto a panicked open now carries the panic value in its context; they received an error naming only the definition while the actual reason rode a separate panic on the opening goroutine
 - `Close` names every database that failed to close: with several failures, only the first was returned and the rest left no trace anywhere. A lone failure keeps its own error untouched
 - `Manager` refuses everything after `Close` instead of only the names it had not opened yet. `Close` ends every pool it memoized without emptying the map, so a name already opened was answered with the manager over the now-dead pool and a nil error, while the same call for an unopened name was refused by `ErrManagerRegistryClosed` — one registry answering the same question two ways, with the answer that looked like success failing at the first query. The refusal also spares the dial: an unopened name used to be dialed in full, retry backoffs included, before the publish step refused it. **Behavioural**: `Manager`, `DefaultManager`, `Database` and their `Must` forms now refuse after `Close`
+
+- the coalescing of concurrent first dials is pinned by two registry tests: the in-flight entry is registered under its name before the provider is dialed, and a caller that finds an in-flight open waits on it and answers with the published manager instead of dialing a second pool — the waiter is constructed by hand, so no scheduling window decides what the tests observe
 
 ## [v1.0.1] - 2026-07-11 - Manager Registry Open Concurrency and Panic Safety
 
