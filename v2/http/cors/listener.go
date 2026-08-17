@@ -26,7 +26,7 @@ func RegisterListeners(eventDispatcher eventcontract.EventDispatcher, service *S
     RegisterResponseListener(eventDispatcher, service)
 }
 
-/* RegisterRequestListener answers a well-formed preflight from an allowed origin before the security chain runs. Everything else — a disallowed or absent origin, an OPTIONS request that is not a preflight, a request that already has a response — falls through untouched, so the listener can only answer what the cors middleware would have answered had the request reached it, never widen what security refuses. */
+/* RegisterRequestListener answers a well-formed preflight from an allowed origin before the security chain runs. A disallowed or absent origin and an OPTIONS request that is not a preflight fall through untouched, so the listener can only answer what the cors middleware would have answered had the request reached it, never widen what security refuses. A preflight from an allowed origin that a listener ahead of this one already answered is the one case that is neither answered nor left alone: its STATUS is untouched, and it is decorated with the cross-origin headers for the reason spelled out at that branch. */
 func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, service *Service) {
     if nil == service {
         service = DefaultService()

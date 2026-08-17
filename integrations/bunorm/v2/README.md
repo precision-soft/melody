@@ -212,13 +212,14 @@ The hook is executed during provider open, after Melody defaults and typed confi
 
 ## Enhancements
 
-The core `bunorm` module ships three optional enhancements with no dependency beyond the standard library, Bun and melody itself. Paths below reference the v3 binding, which is where they ship.
+These three optional enhancements ship in the **v3 binding alone**: neither this module nor its sibling binding carries them, and no `split.go`, `encrypt/` or `audit/` exists outside `integrations/bunorm/v3`. They add no dependency beyond the standard library, Bun and melody itself. Every path, package and selector below is v3's, so the snippets are read here for what the enhancement does, not copied into an application built on this binding.
 
 ### Read/write split
 
 [`ReadWriteSplitter`](../v3/split.go) routes reads to replica managers and writes to the primary manager, resolving named managers from a [`ManagerRegistry`](../v3/manager_registry.go). It is explicit: call `Writer()` for writes and `Reader()` for reads (replicas are chosen round-robin; with no replicas, the reader falls back to the primary).
 
 ```go
+// bunorm here is github.com/precision-soft/melody/integrations/bunorm/v3
 splitter := bunorm.NewReadWriteSplitter(registry, "primary", "replica-a", "replica-b")
 
 writeDatabase, _ := splitter.Writer()

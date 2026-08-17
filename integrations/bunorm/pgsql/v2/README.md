@@ -17,7 +17,7 @@ Pool, timeout and retry defaults can be overridden via the chainable [`WithPoolC
 
 ### Defaults
 
-`PoolConfig` and `TimeoutConfig` defaults apply when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go)). The `RetryConfig` rows are different: an absent `RetryConfig` means **no retry at all**, and the listed values fill in field by field when a `RetryConfig` is supplied with that field zero or non-positive — except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff ([`DefaultRetryConfig`](./retry_config.go) builds the same shape for callers who want it whole):
+All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the listed default, so passing `NewPoolConfig(0, 0, 0, 0)` yields the defaults rather than the zeros — on `database/sql` a zero maximum means *unlimited*, which is not a sizing anyone asks for by omission. An absent `PoolConfig` or `TimeoutConfig` is the whole default ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go)). What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two — except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff ([`DefaultRetryConfig`](./retry_config.go) builds the same shape for callers who want it whole):
 
 | Config          | Field                   | Default |
 |-----------------|-------------------------|---------|
@@ -47,7 +47,7 @@ Starting with `integrations/bunorm/pgsql v2.0.4` the provider is **secure-by-def
 
 Two provider options expose the TLS knobs:
 
-- [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to restore the legacy plain-TCP behaviour (for local development or non-TLS endpoints).
+- [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to disable TLS entirely and connect over plain TCP (for local development or non-TLS endpoints). It does not *restore* an earlier default: before the verifying handshake landed, this provider connected through `pgdriver`'s own insecure mode, which despite its name negotiates TLS with `InsecureSkipVerify: true` — encrypted but unauthenticated, never plain TCP. `true` here is a deliberate step further out than that.
 - [`pgsql.WithTlsConfig(*tls.Config)`](./provider_option.go) — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. When set, it takes precedence over `WithInsecure(...)`.
 
 Example — connect against a local Postgres that does not expose TLS:
@@ -90,7 +90,15 @@ func main() {
     provider := pgsql.NewProvider(
         pgsql.WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
             _ = ctx
-            connector.Config().TLSConfig.InsecureSkipVerify = true
+
+            /* WithInsecure(true) leaves TLSConfig nil, so the hook must not assume one is there */
+            tlsConfig := connector.Config().TLSConfig
+            if nil == tlsConfig {
+                return nil
+            }
+
+            tlsConfig.InsecureSkipVerify = true
+
             return nil
         }),
     )

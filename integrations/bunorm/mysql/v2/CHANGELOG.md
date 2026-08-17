@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the readme states that a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the default, the same field-by-field fill it presented as `RetryConfig`'s exception — what makes `RetryConfig` different is absence alone. The diagnostics section stops saying an application has one journal either way: the routing is taken once per process, so a first open handed no logger wins it with a no-op and drops the diagnostics of every provider opened afterwards. The released `v2.0.0` block no longer lists the three `With*Config` builder methods as removed — they were present at the tag and are present now — and records instead that the `ProviderOption` variadic joined them
+
 - the zero-connect-timeout test message stops claiming a deadline-free dial: a non-positive `ConnectTimeout` is resolved to the default connect deadline before it reaches the driver — the documented normalization — and the failure message now says so instead of describing a no-deadline semantics the provider refuses to have
 
 - the readme's retry fill-in rule states the multiplier's real floor: it claimed every listed value fills in when the supplied field is zero or non-positive, while for `BackoffMultiplier` the code replaces any supplied value below `1`, `NaN` included, with the default `2.0`, and keeps exactly `1` as a valid constant backoff — so a configured `0.5` was documented as honoured and was not
@@ -82,10 +84,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `go.mod` — module path changed to `github.com/precision-soft/melody/integrations/bunorm/mysql/v2` — Go v2 migration
 - `v2/provider.go` — `Provider.Open()` signature changed from `Open(resolver containercontract.Resolver) (*bun.DB, error)` to `Open(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error)` — provider no longer reads config from resolver
 - `v2/provider.go` — `NewProvider()` no longer accepts parameter names; takes `...ProviderOption` variadic args instead
-- `v2/provider.go` — removed builder methods `WithPoolConfig()`, `WithTimeoutConfig()`, `WithRetryConfig()` — options now supplied through `ProviderOption`
 
 ### Changed
 
+- `v2/provider.go` — the `WithPoolConfig()`, `WithTimeoutConfig()` and `WithRetryConfig()` builder methods are kept, and the `ProviderOption` variadic joins them rather than replacing them: both spellings configure the same provider
 - Code moved to `integrations/bunorm/mysql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 

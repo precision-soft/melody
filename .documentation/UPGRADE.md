@@ -48,7 +48,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Symptom.** A process that serves **hijacked** connections — a websocket, or any handler that takes the socket itself — now takes up to the shutdown budget to exit and leaves a non-zero status, where it used to exit immediately and report a clean stop.
 
-**Remedy.** Close those connections from a shutdown hook so the drain has something to succeed at; a hub that stops accepting and closes its clients when the process is stopping is the shape the v3 example uses. If the wait is unwelcome, `MELODY_HTTP_SHUTDOWN_TIMEOUT` bounds it — but the exit status is the point: `net/http`'s own `Shutdown` does not track a connection a handler hijacked, so the clean stop reported before was one melody had not obtained. The handler was still running, and the container was closing under it.
+**Remedy.** Close those connections when the shutdown begins, so the drain has something to succeed at. This major has no shutdown-hook door and keeps its `*http.Server` private, so the mechanism is the context: derive each upgraded connection's lifetime from the same context the application hands `Run`, since that context's cancellation is what starts the shutdown. A hub that stops accepting and closes its clients on that cancellation is the shape this takes. If the wait is unwelcome, `MELODY_HTTP_SHUTDOWN_TIMEOUT` bounds it — but the exit status is the point: `net/http`'s own `Shutdown` does not track a connection a handler hijacked, so the clean stop reported before was one melody had not obtained. The handler was still running, and the container was closing under it.
 
 ### Validation: a negative length bound is refused at construction
 
@@ -324,11 +324,11 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Security: a 403 names its branch and files one record
 
-**What changed.** Every refusal the access decision manager produces carries a `reason` — one of the exported `security.RefusalReason*` constants — beside the strategy and the attribute, in the exception context the response never renders. The access control listener files exactly one record for a refusal, naming the reason, the firewall and the matched rule: at warning for a denial, and at error only for `no_voter_supports_attribute`, the wiring fault in which a firewall names an attribute no configured voter looks at. The record is filed on whichever exit the path takes, an access denied handler answering and returning early included, and the error the `kernel.exception` dispatch carries is marked as already logged. `DecideAny` refuses an empty attribute list, the guard `DecideAll` always had.
+**What changed.** Every refusal the access decision manager produces carries a `reason` — one of the exported `security.RefusalReason*` constants — beside the strategy and the attribute, in the exception context the response never renders. The access control listener files exactly one record for a refusal, naming the reason, the firewall and the matched rule: at warning for a denial, and at error only for `no_voter_supports_attribute`, the wiring fault in which a firewall names an attribute no configured voter looks at. The record is filed on whichever exit the path takes, an access denied handler answering and returning early included, and the error the `kernel.exception` dispatch carries is marked as already logged. `DecideAny` names an empty attribute list as its refusal reason rather than falling through its loop to a generic `forbidden`; it refused that input before this change too, so what is new there is the attribution, not the verdict.
 
-**Symptom.** A 403 leaves an `authorization refused` warning where it used to leave only the exception listener's generic `unhandled exception`; a firewall whose attribute nothing votes on is now the one refusal filed at error, so it surfaces as a wiring fault rather than hiding among ordinary denials. An application calling `DecideAny(token, nil, subject)` directly is now refused instead of granted.
+**Symptom.** A 403 leaves an `authorization refused` warning where it used to leave only the exception listener's generic `unhandled exception`; a firewall whose attribute nothing votes on is now the one refusal filed at error, so it surfaces as a wiring fault rather than hiding among ordinary denials. An application calling `DecideAny(token, nil, subject)` directly is refused as it was before, but the refusal now carries `empty_attribute_list` where it used to be an unattributed `forbidden`.
 
-**Remedy.** Point alerting at `reason` rather than at the count of 403s, and fix any firewall that starts filing `no_voter_supports_attribute`: the attribute it names reaches no voter, and every request behind it is being refused for a reason no client can repair. A direct `DecideAny` call with no attributes was already refused by `DecideAll`; pass the attributes.
+**Remedy.** Point alerting at `reason` rather than at the count of 403s, and fix any firewall that starts filing `no_voter_supports_attribute`: the attribute it names reaches no voter, and every request behind it is being refused for a reason no client can repair. A direct `DecideAny` call with no attributes was already being refused before this change, so nothing an application relied on has flipped — but the refusal is now attributable, and the fix is the same as it always was: pass the attributes.
 
 ### Httpclient: `SetHeader` stores under the canonical spelling
 
@@ -1259,7 +1259,7 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 
 **Symptom.** `jq` and `json.Unmarshal` now consume `debug:*` output directly instead of failing on the first byte. A consumer that scraped the banner off stdout finds it gone.
 
-**Remedy.** Read the envelope. `meta` already reports the command, its arguments, the start time and the duration, and `error` reports the final status.
+**Remedy.** Read the envelope. `meta` already reports the command, its arguments, the start time and the duration, and `error` reports the failure the command itself returned. The **final** status is the exit code, not the document: the scope and the container are closed after the document has been written, so a teardown failure can no longer enter it and is visible only in the exit code.
 
 ### CLI: a command whose envelope reports an error exits non-zero
 
@@ -1275,7 +1275,7 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 
 **Symptom.** A script passing an unsupported value now fails with a non-zero exit instead of quietly receiving the human table.
 
-**Remedy.** Pass `table` or `json`, and `asc` or `desc`. Omitting either flag still defaults to `table` and `asc`.
+**Remedy.** Pass `table`, `json` or `json-pretty`, and `asc` or `desc` — the same three format spellings the validator's own message names. `json-pretty` is the one that restores a document a person can read by hand; `json` stays one document per line so a line-framed consumer can follow a long-running command live. Omitting either flag still defaults to `table` and `asc`.
 
 ### CLI: `--limit`, `--offset` and `--order` are applied to the rendered items
 

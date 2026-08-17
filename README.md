@@ -244,7 +244,7 @@ Each package below links to its source folder and its package documentation.
   Dependency injection container, scopes, service factories, and lifecycle.
 
 * **DEBUG** — [code](./debug/) | [docs](.documentation/package/DEBUG.md)  
-  Built-in CLI debug commands (container, events, router, middleware, parameters, versions).
+  Built-in CLI debug commands (container, events, router, middleware, parameters, version).
 
 * **EVENT** — [code](./event/) | [docs](.documentation/package/EVENT.md)  
   Deterministic event dispatching and subscriber/listener contracts.

@@ -357,7 +357,7 @@ func (instance *Application) logOnRecoverAndExit() {
         return
     }
 
-    /* the teardown hook mirrors the one Run passes: a boot that dies after the container was built — the logger service holds the log file open from that moment — used to exit with the container never closed, because os.Exit runs no defer. The record is written first, through a logger the teardown has not touched, and the close runs between the record and the exit; Close asks IsClosed before acting, so a container that never got built costs nothing. */
+    /* the teardown hook mirrors the one Run passes: a boot that dies after the container was built — the logger service holds the log file open from that moment — used to exit with the container never closed, because os.Exit runs no defer. The record is written first, through a logger the teardown has not touched, and the close runs between the record and the exit. That close is unconditional; the IsClosed probe it takes first only decides whether a teardown failure is reported as this call's discovery, and what makes a boot that died before the kernel existed cost nothing is the nil-kernel check close starts with. */
     logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.Close)
 }
 

@@ -15,8 +15,8 @@ The provider reads parameters (address, username, password) using the names you 
 
 Optional configuration:
 
-* [`ClientConfig`](./client_config.go) (client name, DB selection, TLS, disable client-side cache, ping on start)
-* [`TimeoutConfig`](./timeout_config.go) (connect / command timeouts)
+* [`ClientConfig`](./client_config.go) (client name, DB selection, TLS, disable client-side cache, ping on start, and the two deadlines that actually reach the client: `DialTimeout` and `ConnWriteTimeout`)
+* [`TimeoutConfig`](./timeout_config.go) — **boot only**. `ConnectTimeout` and `CommandTimeout` bound the provider's own ping round trips; neither is passed into `rueidis.ClientOption`, so ordinary commands are not bounded by them. The network deadlines a running application answers to are the two `ClientConfig` fields above.
 
 ## Rate limiter
 
@@ -42,7 +42,7 @@ The limiter surface:
 * `AllowWithRuntime(runtimeInstance, key)` — the entry point the rate-limit middleware prefers; it caps the request context with the call timeout, so a request that already carries a tighter deadline keeps it while a request with no deadline still fails fast, and it reports the store failure alongside the decision.
 * `Reset(key)` — drops the counter for one key, best-effort; a store failure reaches the error observer where one was given, and is otherwise written as a `rate limiter store failure` record through the request's logger or the emergency logger, marked already-logged.
 
-Keys live under the `melody:rate_limit:` prefix, so inside one application the limiter shares a Redis instance with the cache and the lock without colliding. Between two applications it is the opposite: the shipped prefixes are the same strings in every melody application and the client's `SelectDb` defaults to `0`, so two applications on one Redis with the defaults share every namespace — give each one its own prefix.
+Keys live under the `melody:rate_limit:` prefix, so inside one application the limiter shares a Redis instance with the cache — the other namespace this major ships — without colliding. Between two applications it is the opposite: the shipped prefixes are the same strings in every melody application and the client's `SelectDb` defaults to `0`, so two applications on one Redis with the defaults share every namespace — give each one its own prefix.
 
 Optional configuration:
 
@@ -146,7 +146,6 @@ import (
 	containercontract "github.com/precision-soft/melody/container/contract"
 	rueidisintegration "github.com/precision-soft/melody/integrations/rueidis"
 	rueidiscache "github.com/precision-soft/melody/integrations/rueidis/cache"
-	"github.com/redis/rueidis"
 )
 
 const (
@@ -155,16 +154,24 @@ const (
 )
 
 func RegisterCacheServices(app *application.Application) {
+	/* the client is registered wrapped in a Connection: rueidis.Client.Close returns nothing, so a
+	   bare client can never join the container's ordered teardown and its connections outlive the
+	   process's own shutdown. Everything below reaches the client through Connection.Client(). */
 	app.RegisterService(
 		ServiceRedisClient,
-		func(resolver containercontract.Resolver) (rueidis.Client, error) {
+		func(resolver containercontract.Resolver) (*rueidisintegration.Connection, error) {
 			provider := rueidisintegration.NewProvider(
 				"CACHE_REDIS_ADDRESS",
 				"CACHE_REDIS_USER",
 				"CACHE_REDIS_PASSWORD",
 			)
 
-			return provider.Open(resolver)
+			client, openErr := provider.Open(resolver)
+			if nil != openErr {
+				return nil, openErr
+			}
+
+			return rueidisintegration.NewConnection(client), nil
 		},
 	)
 
@@ -172,7 +179,8 @@ func RegisterCacheServices(app *application.Application) {
 		ServiceCacheRueidis,
 		func(resolver containercontract.Resolver) (*rueidiscache.BackendService, error) {
 			configuration := config.ConfigMustFromResolver(resolver)
-			client := container.MustFromResolver[rueidis.Client](resolver, ServiceRedisClient)
+			connection := container.MustFromResolver[*rueidisintegration.Connection](resolver, ServiceRedisClient)
+			client := connection.Client()
 			prefix := configuration.MustGet("CACHE_REDIS_PREFIX").String()
 
 			return rueidiscache.NewBackendService(client, prefix, 0, 0)

@@ -40,7 +40,9 @@ The typed helpers distinguish three situations:
 - **Key present, value is nil**: the bag contains the key, but its stored value is `nil`.
     - All string accessors (`String`, `StringStrict`, `StringSlice`, `StringSliceStrict`) report this as absent and return the zero value with `exists == false`.
     - `Int` / `Bool` / `Float64` / `Duration` treat this as no typed value and return the zero value with `exists == false`.
-- **Key present, value cannot be converted**: helpers return a typed parse error and `exists == true`.
+- **Key present, value cannot be converted**: the two families answer differently, because only one of them has an error to return.
+    - `Int` / `Bool` / `Float64` / `Duration` return the zero value, `exists == true` and a typed parse error.
+    - `String` / `StringSlice` have **no error return** at all: they answer `("", true)` and `(nil, true)` respectively, so an unconvertible value is indistinguishable from a genuinely empty one. Use the `Strict` variants where that distinction matters.
 
 Notes:
 

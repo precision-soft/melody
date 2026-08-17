@@ -31,7 +31,7 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`clicontract.BoolFlag`](../../cli/contract/type.go) (alias)
 - [`clicontract.IntFlag`](../../cli/contract/type.go) (alias)
 
-The flag and context types are **type aliases of [`github.com/urfave/cli/v3`](https://github.com/urfave/cli)**: `CommandContext` is that library's `Command`, the runtime value every command's `Execute` receives, and the flag types are its flag structs. This pins v2's CLI surface to `urfave/cli/v3` for the life of the major — a command reads flag values through the urfave context, and a flag is declared as an urfave struct. The coupling is deliberate for v2 (it ships the whole flag-parsing engine without a wrapper); a melody-owned flag and context layer that would let the engine be swapped is a v3 change, not a v2 one, since introducing it here would cascade a signature change through every command of the framework, the integrations and the example.
+The flag and context types are **type aliases of [`github.com/urfave/cli/v3`](https://github.com/urfave/cli)**: `CommandContext` is that library's `Command`, the runtime value every command's `Run` receives, and the flag types are its flag structs. This pins v2's CLI surface to `urfave/cli/v3` for the life of the major — a command reads flag values through the urfave context, and a flag is declared as an urfave struct. The coupling is deliberate for v2 (it ships the whole flag-parsing engine without a wrapper); a melody-owned flag and context layer that would let the engine be swapped is a v3 change, not a v2 one, since introducing it here would cascade a signature change through every command of the framework, the integrations and the example.
 
 ### Root command wiring (`cli`)
 
@@ -57,7 +57,7 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 - Flag names (string constants):
     - [`FlagNameFormat`, `FlagNameNoColor`, `FlagNameVerbose`, `FlagNameVerbosity`, `FlagNameQuiet`, `FlagNameOrder`, `FlagNameLimit`, `FlagNameOffset`, `FlagNameTableMaxWidth`](../../cli/output/flag.go)
-    - [`output.MergeFlags(standard []clicontract.Flag, commandSpecific []clicontract.Flag) []clicontract.Flag`](../../cli/output/flag.go) — concatenates the two sets and **panics on a duplicated flag name**: the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name would be silently inert. Do not reuse the `FlagName*` names.
+    - [`output.MergeFlags(standard []clicontract.Flag, commandSpecific []clicontract.Flag) []clicontract.Flag`](../../cli/output/flag.go) — concatenates the two sets and **panics on a duplicated flag name**, and on a nil flag: the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name would be silently inert. Do not reuse the `FlagName*` names.
 
 - Output format and ordering:
     - [`type Format`](../../cli/output/format.go) with constants [`FormatTable`, `FormatJson`](../../cli/output/format.go)
@@ -203,4 +203,4 @@ func main() {
 - Registered command execution closes `runtimeInstance.Scope()` after `Run(...)` and may fold that close's failure into the command's result; the container is deliberately left open on either outcome — the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and `os.Exit`. On a panic the finish banner reports `[failed]` before the panic is re-raised unchanged.
 - A table row must match its block: `AddRow(...)` panics on a row whose cell count disagrees with the block's declared columns; the single-token separator row (`TableRowSeparatorToken`) is the one exception.
 - The table builder and the envelope are not safe for concurrent use: a command assembling its table or warnings from parallel work funnels them through one goroutine.
-- The banners honour `--no-color`: they print as plain text, and under `--format=json` they are suppressed entirely so the document stays parseable.
+- The banners honour `--no-color`, but not uniformly: the status lines degrade to plain text, while the full-width coloured rules that frame them are **omitted entirely** — they are nothing but colour, so there is no plain text for them to become. A `--no-color` run therefore shows the status lines alone, without the frame. Under `--format=json` the whole banner is suppressed so the document stays parseable.

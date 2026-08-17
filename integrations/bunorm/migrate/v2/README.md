@@ -116,7 +116,7 @@ All commands accept the standard Melody output flags. Under `--format=json` a co
 
 The json document therefore carries every block the command produces at any verbosity: `--verbose` never shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`, `data.migrations.rolledBack`, `data.database`, `data.files`, `data.messages` — and are not the headings the text blocks print. `data.database.database` is json `null` when the connection reports no current database, where the text block renders `<null>`. One consequence is worth knowing: a json run performs the database-identity query a text run only performs under `--verbose`.
 
-The manager can be selected with `--<managerFlagName>`. If not provided, the registry default manager is used.
+The manager can be selected with `--<managerFlagName>`. Without the flag the `ManagerName` pin from the registration options is used, and only an empty pin falls back to the registry default — which is the point of pinning one manager per command set, so a multi-context binary cannot migrate the wrong database by omitting the flag.
 
 With the default prefix (`db`), the commands are:
 

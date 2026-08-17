@@ -4,9 +4,11 @@
 
 # Melody (v2)
 
-> **v2 is in maintenance mode — it receives security and critical correctness fixes only.** New features
-> land on **v3**. For new projects use [`../v3/`](../v3/) and its [example](../v3/.example/). See the
-> repository [`README.md`](../README.md#versions--project-status) for the versioning rationale.
+> **v2 is being driven to complete stability and will then be frozen.** New features land on **v3**;
+> what still arrives here is security work, correctness fixes and the capabilities being levelled
+> across the majors while the stabilisation runs — the releases since v2.8.0 each carried some. For
+> new projects use [`../v3/`](../v3/) and its [example](../v3/.example/). See the repository
+> [`README.md`](../README.md#versions--project-status) for the versioning rationale.
 
 Melody is a Go framework focused on building **HTTP applications and CLI commands** on top of the same runtime, container, configuration, logging, and validation infrastructure.
 
@@ -153,7 +155,7 @@ Each package below links to its source folder and its package documentation.
   Dependency injection container, scopes, service factories, and lifecycle.
 
 * **DEBUG** — [code](./debug/) | [docs](.documentation/package/DEBUG.md)  
-  Built-in CLI debug commands (container, events, router, middleware, parameters, versions).
+  Built-in CLI debug commands (container, events, router, middleware, parameters, version).
 
 * **EVENT** — [code](./event/) | [docs](.documentation/package/EVENT.md)  
   Deterministic event dispatching and subscriber/listener contracts.

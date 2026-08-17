@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the readme states that without the `--manager` flag the registration's own `ManagerName` pin is used, and only an empty pin falls back to the registry default. The dedicated migration connection is attributed to all six commands rather than to migrate and rollback, since they share one manager resolution. The released `v2.0.0` block names the symbols the tag actually shipped — `RegisterCommands` rather than `Register`, the unexported identity probe rather than a `DatabaseIdentity` type, the `Query`/`RunnerOption` runner surface rather than a `Migrate` type, the unexported `baseCommand` rather than a `BaseCommand`, and `Options`/`DefaultOptions` for the registration settings, with runner output and colour left to `RunnerOption` where they belong
+
 - the unknown-manager test pins the refusal it always meant to pin: it accepted any error, so a regression that ignored the `--manager` flag and dialed the default database still read as the guard working; it now requires `bunorm.ErrProviderDefinitionNotFound`
 
 - **Behavioural:** the text rendering escapes C0 control characters and DEL visibly (`\n`, `\r`, `\t`, the rest as `\xNN`) in every string it did not write itself — the error text off the wire, the failed statement, the query names, the DATABASE identity block the server answers and the migration names — before the terminal sees them, and before the table cells are measured, so the alignment counts the escaped spelling. A server whose error carried an escape sequence could repaint the operator's terminal or forge lines in a captured log; the failed statement alone keeps its real line breaks, which are the readability of the query block, with every other control byte escaped. The json rendering is untouched — its encoder escapes on its own
@@ -17,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - under `--format=json` every command renders the one machine-readable document the declared flag always promised: the accumulated blocks as data, the side-reports as warnings, the failure inside the envelope's error. The flag was declared and validated by `StandardFlags` long before it was honoured — `db:status --format=json | jq` failed on the first byte of a plain-text table while the cli runner had already silenced its banner on the json promise
 - `SetDefaultRunnerOption` — the migrate and rollback commands install their parsed writer and colour posture as the process default `RunQueries` reads when a migration passes no option of its own: a generated migration's signature is fixed by bun as `(ctx, db)` and cannot receive the parsed flags any other way, so a `--no-color` run carried escape codes from exactly the per-query lines the flag was passed to clean. Under json the per-query progress is discarded — the document is the only byte the command may emit
-- the migrate and rollback commands prefer the dedicated migration connection when the registry's provider implements `bunorm.MigrationProvider`, and fall back to the ordinary pool otherwise: the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement. The verbose manager label says which connection the run rides — "(dedicated migration connection)"
+- every one of the six commands prefers the dedicated migration connection when the registry's provider implements `bunorm.MigrationProvider`, and falls back to the ordinary pool otherwise — they share one manager resolution, so the preference is not per command: the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement. The verbose manager label says which connection the run rides — "(dedicated migration connection)"
 - the verbose DATABASE block is answered for PostgreSQL too, through `current_database()`, `inet_server_addr()`, `inet_server_port()`, `current_user` and `version()`. It was a MySQL-only facility, so on a pgsql-backed manager the operator's confirmation of which database a migration was about to touch was silently absent rather than reported as unavailable. A connection over a unix socket, the one a local migration is most likely to use, reports its host as `<local socket>`
 
 ### Changed
@@ -76,12 +78,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- `register.go` — `Register()` function that wires migration commands into a Melody CLI application
-- `database_identity.go` — `DatabaseIdentity` type — identifies which manager/database to migrate against
-- `migrate.go` — `Migrate` type — orchestrates migrations, resolves named managers through `bunorm.ManagerRegistry`
+- `register.go` — `RegisterCommands()` function that wires migration commands into a Melody CLI application
+- `database_identity.go` — the unexported identity probe (`fetchDatabaseIdentity`) that asks the connection which database it actually reached, so the command output names the target rather than the manager alone
+- `migrate.go` — the runner surface: the `Query` and `RunnerOption` types and the `RunQueries`/`Up`/`Down` functions, which apply migrations against a `*bun.DB` the commands resolve through `bunorm.ManagerRegistry`
 - `command_create.go`, `command_init.go`, `command_migrate.go`, `command_rollback.go`, `command_status.go`, `command_unlock.go` — CLI migration commands
-- `base_command.go` — `BaseCommand` — shared resolver-based manager lookup and error handling
-- `option.go` — `Option` — builder for runner output/color customization; `WithOption()` variants of `Migrate` methods
+- `base_command.go` — the unexported `baseCommand` — shared resolver-based manager lookup and error handling
+- `option.go` — `Options` and `DefaultOptions()` — the registration settings the commands are wired with: the manager-registry service id, the `--manager` flag name and the command prefix. Runner output and colour are the separate `RunnerOption`, taken by the `WithOption()` variants of the runner functions
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v2.2.0...HEAD
 

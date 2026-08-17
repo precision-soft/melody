@@ -26,7 +26,7 @@ Exclude:
 - Framework internals
 - Author guidelines / checklists
 
-### [`README.md`](../README.md) (repository root)
+### [`README.md`](../README.md) (module root)
 
 Purpose: framework entry document.
 
@@ -140,7 +140,7 @@ Sections with no content must be omitted entirely (do not write “None”).
 Whenever any documentation mentions `go test` or `go vet`, it must:
 
 - List all supported build-tag combinations: default (no tags), `melody_env_embedded`, `melody_static_embedded`, and `melody_env_embedded` + `melody_static_embedded`.
-- State explicitly that both the framework (repository root) and the example application ([`./.example/`](../.example/)) must be tested and vetted under the full matrix.
+- State explicitly that both the framework (module root) and the example application ([`./.example/`](../.example/)) must be tested and vetted under the full matrix.
 - Link to the local development shell aliases defined in [`./.dev/docker/.profile`](../.dev/docker/.profile) when referencing convenience commands.
 
 The normative build tags are implemented in [`../application/environment_embedded.go`](../application/environment_embedded.go) and [`../application/static_embedded.go`](../application/static_embedded.go).
@@ -196,7 +196,7 @@ If a feature can be both constructed and retrieved from container/scope/runtime,
 
 ### Userland API at the end (uniform)
 
-For packages that expose userland API, include a “Userland API” section placed at the end of the document. This section lists only the exports intended for userland use, grouped semantically. The command-surface and wiring documents — `CLI.md`, `DEBUG.md`, `KERNEL.md` — title the same end-of-document listing “Exported API”, because much of what they list is reached by the framework's own wiring rather than called from userland.
+For packages that expose userland API, include a “Userland API” section placed at the end of the document. This section lists only the exports intended for userland use, grouped semantically. The command-surface and wiring documents — `CLI.md`, `DEBUG.md`, `KERNEL.md` — title the same listing “Exported API”, because much of what they list is reached by the framework's own wiring rather than called from userland, and they are the exception to the placement rule as well: the listing is the substance of those documents rather than an appendix to them, so it sits where each one's own shape puts it — last in `KERNEL.md`, ahead of `Usage` in `CLI.md` and `DEBUG.md`.
 
 Internal-only packages must not include a “Userland API” section.
 

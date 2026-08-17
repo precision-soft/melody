@@ -57,6 +57,8 @@ v2 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing 
 
 v1 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
 v2 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
+v1 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+v2 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
 
 # ------------------------------------------------------------------------------------------------------
 # the absences the documents themselves announce

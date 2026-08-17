@@ -263,7 +263,7 @@ func example() configcontract.Configuration {
 - `ConfigMustFromContainer` is a fail-fast helper and will panic if `ServiceConfig` is missing or has an invalid type.
 - `Application.Boot()` calls `Resolve()` after all runtime parameters are registered via `Application.RegisterParameter`.
 - The boot `Resolve()` passes through any parameter whose value is not a string — which is what a runtime parameter registered with a native value is; a runtime parameter registered with a string template is resolved like any other, eagerly at registration once the boot resolution has run.
-- A template reference (e.g., `%kernel.project_dir%`, `%env(MELODY_ENV)%`) resolves only against a parameter whose value is a string; a parameter registered after construction is deferred by the constructor's tolerant pass and settled by the boot `Resolve()`, so the composition root may reference what it registers before boot.
+- A template reference (e.g., `%kernel.project_dir%`, `%env(MELODY_ENV)%`) resolves only against a parameter whose value is a string; a parameter registered after construction is deferred by the constructor's tolerant pass and settled by the boot `Resolve()`, so the composition root may reference what it registers before boot. The deferral is **not** transparent while it lasts: between construction and boot every accessor on a deferred parameter panics naming it, because the alternative is handing out the raw `%app.user%` template as though it were the value. Read such a parameter after `Resolve()` has run.
 
 ## Userland API
 

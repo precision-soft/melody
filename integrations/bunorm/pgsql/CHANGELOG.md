@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the readme states that a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the default, the same field-by-field fill it presented as `RetryConfig`'s exception. `WithInsecure(true)` is described as disabling TLS entirely rather than restoring a legacy plain-TCP default: what preceded the verifying handshake was `pgdriver`'s own insecure mode, which negotiates TLS with verification off. The post-build-hook example guards the `TLSConfig` it dereferences, which is nil under the very option documented two sections above it
+
 - the zero-connect-timeout test message stops claiming a deadline-free dial: a non-positive `ConnectTimeout` is resolved to the default connect deadline before it reaches the driver — the documented normalization — and the failure message now says so instead of describing a no-deadline semantics the provider refuses to have
 
 - the provider's GoDoc stops claiming a construction-time server query: both open-path comments said the dialect handshake bun performs at construction queries the server under no caller context — true of the mysql twin the sentence was copied from, false here, since pgdialect's `Init` has an empty body. They now say what pgsql pays: no construction-time round trip, the first packet on the wire being the boot ping's dial, made under the caller's context and bounded by the connect timeout

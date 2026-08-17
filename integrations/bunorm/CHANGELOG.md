@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the readme's Enhancements section stops presenting read/write split, field encryption and the audit trail as capabilities of the core module. All three ship in the v3 binding alone, and the splitter example's `bunorm.` selector — which on this page resolves to this module — is marked as v3's
+
 - the `Provider` contract documents the ownership transfer its registry already enforces: `Open` answers a fresh pool that the registry closes whenever it decides not to keep it — handed back beside an error, losing a duplicate migration open, or landing after `Close` — so an implementation handing out a shared or memoized `*bun.DB` is outside the contract
 
 ### Changed

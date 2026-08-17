@@ -2,7 +2,7 @@
 
 This document lists high-level, forward-looking plans for the Melody repository.
 
-The items this document used to carry have shipped: static file serving has first-class filesystem and embedded modes behind the `melody_static_embedded` build tag, the firewall system is the [`security`](../security/) package (see [`./package/SECURITY.md`](./package/SECURITY.md)), and the router carries named routes, url generation, route grouping and constraints (see [`../http/router.go`](../http/router.go), [`../http/router_group.go`](../http/router_group.go), [`../http/constraint.go`](../http/constraint.go) and [`./package/HTTP.md`](./package/HTTP.md)).
+Every item this document used to carry has shipped — static file serving, the firewall system and the router's named routes, url generation, grouping and constraints. What they do now is described where a current capability belongs, in [`./package/`](./package/), not here.
 
 ## Direction
 
@@ -11,4 +11,4 @@ The items this document used to carry have shipped: static file serving has firs
 ## Longer-term
 
 - Close remaining gaps
-    - Incrementally add framework capabilities that are aligned with Melody’s core principles (determinism, explicit wiring, clear boundaries), without expanding internal-only APIs into userland unintentionally. See [`../application/`](../application/) and [`../kernel/`](../kernel/).
+    - Finish levelling this major line with the newest one where a capability it already has is missing or behaves differently, then freeze. New framework capabilities are designed on the newest major line and reach this one only as part of that levelling, never as this line's own additions.

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the readme states that a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the default, the same field-by-field fill it presented as `RetryConfig`'s exception — what makes `RetryConfig` different is absence alone. The diagnostics section stops saying an application has one journal either way: the routing is taken once per process, so a first open handed no logger wins it with a no-op and drops the diagnostics of every provider opened afterwards
+
 - the zero-connect-timeout test message stops claiming a deadline-free dial: a non-positive `ConnectTimeout` is resolved to the default connect deadline before it reaches the driver — the documented normalization — and the failure message now says so instead of describing a no-deadline semantics the provider refuses to have
 
 - the readme's retry fill-in rule states the multiplier's real floor: it claimed every listed value fills in when the supplied field is zero or non-positive, while for `BackoffMultiplier` the code replaces any supplied value below `1`, `NaN` included, with the default `2.0`, and keeps exactly `1` as a valid constant backoff — so a configured `0.5` was documented as honoured and was not

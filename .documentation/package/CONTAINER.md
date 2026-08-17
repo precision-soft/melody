@@ -50,7 +50,7 @@ Services are always registered by name (`serviceName string`). By default a regi
 Registration options (see [`RegisterOptions`](../../container/contract/registrar.go)):
 
 - [`WithTypeRegistration(isStrict bool)`](../../container/register_option.go)  
-  Keeps type registration on and sets its strictness; `WithTypeRegistration(false)` relaxes the default so a later registration under the same type wins instead of failing.
+  Keeps type registration on and sets its strictness; `WithTypeRegistration(false)` relaxes the REGISTRATION, not the resolution: a second registration under the same type is accepted and appended instead of failing, and by-type resolution then refuses every one of them with `service type has multiple registrations`. Nothing wins — the type simply stops being resolvable, and the services stay reachable by name.
 - [`WithoutTypeRegistration()`](../../container/register_option.go)  
   Disables type registration for that registration call — the opt-out, since the default is on and strict.
 
@@ -59,7 +59,7 @@ Registration options (see [`RegisterOptions`](../../container/contract/registrar
 The example below demonstrates:
 
 - registering a service by name,
-- spelling out the strict type registration the defaults already give,
+- registering a service under its type through the generic door, which is strict by default,
 - resolving a dependency inside a provider,
 - creating a scope and overriding a service instance.
 
@@ -212,7 +212,6 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
 - [`type ScopeManager`](../../container/contract/scope.go)
 - [`type Scope`](../../container/contract/scope.go)
 - [`type ScopedRegistrar`](../../container/contract/scoped_registrar.go)
-- [`type ScopeManager`](../../container/contract/scope.go)
 - [`type OverrideServiceWithOptions`](../../container/contract/override.go)
 - [`type OverrideOption`](../../container/contract/override.go)
 - [`type OverrideOptions`](../../container/contract/override.go)

@@ -545,7 +545,7 @@ func promotesValidationTimeCodec(structType reflect.Type) bool {
 
     promotes := promotesValidationTimeEncoding(structType) && refusesValidationObjectBody(structType)
 
-    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE verdict: the probe below runs application code whose answer is not guaranteed stable, and two goroutines computing opposite verdicts with a plain Store would leave the frozen one decided by store ordering — every sibling memo in this package already settles this way */
+    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE verdict: the probe below runs application code whose answer is not guaranteed stable, and two goroutines computing opposite verdicts with a plain Store would leave the frozen one decided by store ordering. The parsed-tag and constructed-constraint memos settle the same way for the same reason; nestedTagBearingTypeCache is the one that does not, because its producer only reads the type's declared tags and every caller computes the same answer */
     stored, _ := validationTimeCodecCache.LoadOrStore(structType, promotes)
 
     return stored.(bool)
