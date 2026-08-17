@@ -11,7 +11,7 @@ This module implements [`bunorm.Provider`](../provider.go) and produces a Bun da
 
 ## Provider
 
-[`pgsql.Provider`](./provider.go) reads configuration values from Melody config using the parameter names passed to [`NewProvider`](./provider.go).
+[`pgsql.Provider`](./provider.go) reads configuration values from Melody config using the parameter names passed to [`NewProvider`](./provider.go), which also takes a variadic of [`ProviderOption`](./provider_option.go) — the shipped ones are `WithPostBuildHook`, `WithInsecure` and `WithTlsConfig`, and a caller can write their own, since the type is exported.
 
 Common parameter names:
 
@@ -25,7 +25,7 @@ Pool, timeout and retry defaults can be overridden via the chainable [`WithPoolC
 
 ### Defaults
 
-All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the listed default, so passing `NewPoolConfig(0, 0, 0, 0)` yields the defaults rather than the zeros — on `database/sql` a zero maximum means *unlimited*, which is not a sizing anyone asks for by omission. An absent `PoolConfig` or `TimeoutConfig` is the whole default ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go)). What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two — except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff ([`DefaultRetryConfig`](./retry_config.go) builds the same shape for callers who want it whole):
+All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the listed default, so passing zeros to [`NewPoolConfig`](./pool_config.go) yields the defaults rather than the zeros — on `database/sql` a zero maximum means *unlimited*, which is not a sizing anyone asks for by omission. An absent `PoolConfig` or `TimeoutConfig` is the whole default ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go)). What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two — except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff ([`NewRetryConfig`](./retry_config.go) builds one field by field, and [`DefaultRetryConfig`](./retry_config.go) builds the same shape for callers who want it whole):
 
 | Config          | Field                   | Default |
 |-----------------|-------------------------|---------|
@@ -42,6 +42,12 @@ All three configurations fill in **field by field**: a supplied `PoolConfig` or 
 | `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
 
 Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt.
+
+## Opening under a context, and opening for migrations
+
+- [`Provider.OpenContext`](./provider.go) implements [`bunorm.ContextOpener`](../provider.go): an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The registry prefers it and hands the context it was constructed with.
+- [`Provider.OpenForMigration`](./provider.go) implements [`bunorm.MigrationProvider`](../provider.go) and opens the same database with the read and write deadlines lifted, the connect timeout still armed, over a pool of the two connections a sequential migration run needs and with no connection recycled mid-run.
+- [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
 
 ## TLS
 

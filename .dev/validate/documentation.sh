@@ -73,6 +73,14 @@ fi
 
 cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 
+# everything a commit would carry, tracked or not. The integration half below enumerates from this rather
+# than from `find`, for the two reasons the neighbouring bands were repaired for: a walk of the tree
+# descends into the module cache under `.dev-data`, which holds released copies of melody itself, and a
+# walk of the index alone cannot see a document the session ADDS.
+list_repository_path() {
+    git ls-files --cached --others --exclude-standard -- "$@" | sort -u
+}
+
 MAJOR_DIRECTORY_STRING_LIST=(
     "."
     "v2"
@@ -138,10 +146,65 @@ fi
 # Only a target spelled `../../` is treated as a link. A looser pattern reads the `](` inside a backticked
 # call — `MustFromResolver[T](resolver, Service)` — as one, and then looks the symbol up in a package named
 # after the argument list.
+#
+# The link spelling depends on where the document sits, so it is a mode rather than one pattern. A package
+# document sits two levels under its major and writes every target as `../../<major-relative path>`, which
+# is strict enough to be its own guard. An integration readme sits in the module it documents and writes
+# `./provider.go` or `../../v2/manager_registry.go`, so the mode that reads it accepts any `./` or `../`
+# target and resolves it against the document's own directory. Requiring that leading `./` or `../` is what
+# keeps the `](` inside a backticked call — `MustFromResolver[T](resolver, Service)` — from being read as a
+# link into a package named after the argument list.
 extract_documented_entry_list() {
     local DOCUMENT_PATH_STRING="${1:?}"
+    local LINK_MODE_STRING="${2:-major}"
 
-    awk '
+    local LINK_PATTERN_STRING='\]\(\.\./\.\./[^)]*\)'
+    if [[ "relative" = "${LINK_MODE_STRING}" ]]; then
+        LINK_PATTERN_STRING='\]\(\.\.?/[^)]*\)'
+    fi
+
+    awk -v linkMode="${LINK_MODE_STRING}" \
+        -v linkPattern="${LINK_PATTERN_STRING}" \
+        -v documentDirectory="$(dirname "${DOCUMENT_PATH_STRING}")" '
+        # a relative target resolved against the directory it was written in, as a repository-relative
+        # path. Walking the segments is what makes `../../v2/manager_registry.go` in a driver readme come
+        # back as the core module it actually names, rather than as a path nothing can look up.
+        function normalizePath(base, target,   segmentList, segmentCount, piece, keptCount, walk, result) {
+            segmentCount = split(base "/" target, piece, "/")
+            keptCount = 0
+
+            for (walk = 1; walk <= segmentCount; walk++) {
+                if ("" == piece[walk] || "." == piece[walk]) {
+                    continue
+                }
+
+                if (".." == piece[walk]) {
+                    if (0 < keptCount) {
+                        keptCount--
+                    }
+
+                    continue
+                }
+
+                segmentList[++keptCount] = piece[walk]
+            }
+
+            result = ""
+            for (walk = 1; walk <= keptCount; walk++) {
+                result = result (1 == walk ? "" : "/") segmentList[walk]
+            }
+
+            return result
+        }
+
+        function targetOf(rawTarget) {
+            if ("relative" == linkMode) {
+                return normalizePath(documentDirectory, rawTarget)
+            }
+
+            return substr(rawTarget, 7)
+        }
+
         function symbolOf(token,   candidate) {
             candidate = token
 
@@ -154,6 +217,17 @@ extract_documented_entry_list() {
 
             sub(/^\(\*?[A-Za-z][A-Za-z0-9_]*\)\./, "", candidate)
             sub(/^[a-z][a-z0-9]*\./, "", candidate)
+
+            # a package document writes a method as ``(*Manager).Get``; an integration readme writes it as
+            # ``Provider.OpenContext``, and the two spellings are not interchangeable to the rule above,
+            # which keeps only what precedes the dot. So every method of every binding reduced to the name
+            # of its TYPE: v2 documents `Provider.OpenContext`, `Provider.OpenForMigration` and
+            # `Provider.OpenForMigrationContext`, v1 declares all three and documents none, and the check
+            # saw three entries that all said `Provider`. Read on the integration corpus alone, so the
+            # package documents keep the inventory they were measured with.
+            if ("relative" == linkMode) {
+                sub(/^[A-Z][A-Za-z0-9_]*\./, "", candidate)
+            }
 
             if (0 == match(candidate, /^[A-Z][A-Za-z0-9_]*/)) {
                 return ""
@@ -176,22 +250,24 @@ extract_documented_entry_list() {
             return directory
         }
 
-        /^[ \t]*[-*] / {
-            entry = $0
-            sub(/^[ \t]*[-*] /, "", entry)
-
+        # every symbol named inside a link in the text, printed with the package its own target names, and
+        # answering with the package of the first link so the caller can file an unlinked head under it.
+        #
+        # A linked entry names every symbol it covers inside the link text, and several list a whole family
+        # on one line — the env key constants, the kernel parameter names. Reading only the first leaves the
+        # rest outside the inventory, which is not merely incomplete: the missing ones are then reported as
+        # undocumented for whichever major happens to list one of them first.
+        function scanLinkedSymbol(text,   rest, closeStart, closeLength, head, target, packageDirectory,
+                                  headPackageDirectory, openAt, bracketDepthInteger, position, character,
+                                  linkText, tokenStart, tokenLength, token, symbol) {
             headPackageDirectory = ""
-            rest = entry
+            rest = text
 
-            # a linked entry names every symbol it covers inside the link text, and several list a whole
-            # family on one line — the env key constants, the kernel parameter names. Reading only the first
-            # leaves the rest outside the inventory, which is not merely incomplete: the missing ones are
-            # then reported as undocumented for whichever major happens to list one of them first.
-            while (0 != match(rest, /\]\(\.\.\/\.\.\/[^)]*\)/)) {
+            while (0 != match(rest, linkPattern)) {
                 closeStart = RSTART
                 closeLength = RLENGTH
                 head = substr(rest, 1, closeStart - 1)
-                target = substr(rest, closeStart + 8, closeLength - 9)
+                target = targetOf(substr(rest, closeStart + 2, closeLength - 3))
                 rest = substr(rest, closeStart + closeLength)
 
                 # the link opens at the bracket that matches the one `](` closes, found by walking left at
@@ -239,6 +315,37 @@ extract_documented_entry_list() {
                         print symbol "\t" packageDirectory
                     }
                 }
+            }
+
+            return headPackageDirectory
+        }
+
+        # an integration readme writes its doors as prose, not as a list: `[`NewManagerRegistry`](./…) takes
+        # a logger as its first argument` is a paragraph, and `Entry point: [`NewProvider`](./provider.go)`
+        # is a bare line. Anchoring on the bullet read nine entries of a readme that documents forty doors,
+        # and three symbols that cannot possibly be missing — the registry constructor, the generate command
+        # and the rueidis provider — read as undocumented. So in this corpus the entry is the LINKED symbol
+        # wherever it stands, which is the shape these documents actually use, and it is read on both sides
+        # at once: the same inventory decides what is demanded and what satisfies the demand.
+        "relative" == linkMode && $0 !~ /^[ \t]*[-*] / {
+            scanLinkedSymbol($0)
+        }
+
+        /^[ \t]*[-*] / {
+            entry = $0
+            sub(/^[ \t]*[-*] /, "", entry)
+
+            headPackageDirectory = scanLinkedSymbol(entry)
+
+            # the head and sibling shapes below are how a package document writes a list, and they carry no
+            # package of their own. In the integration corpus that is not merely weaker, it manufactures
+            # demands: the v3 token store lists its methods as bare bullets, so ``* `Delete` — revoke a
+            # single token`` demanded a `Delete` of the two published majors, which have one — on the cache
+            # backend service, a different symbol in a different package that only shares the name. The
+            # rule declared for this corpus is the linked symbol, and reading a second, weaker shape beside
+            # it is what let a name collision cross a package boundary the framework half scopes away.
+            if ("relative" == linkMode) {
+                next
             }
 
             if (1 == match(entry, /^`/)) {
@@ -322,7 +429,13 @@ list_major_source_file() {
 build_major_declaration_index() {
     local MAJOR_DIRECTORY_STRING="${1:?}"
 
-    list_major_source_file "${MAJOR_DIRECTORY_STRING}" | xargs awk '
+    list_major_source_file "${MAJOR_DIRECTORY_STRING}" | index_declaration_from_source_list
+}
+
+# the same pass over whatever source list is piped in, so the framework majors and the integration bindings
+# are indexed by one implementation rather than by two that drift apart.
+index_declaration_from_source_list() {
+    xargs -r awk '
         FNR == 1 { insideBlock = 0 }
 
         /^(const|var) \($/ { insideBlock = 1; next }
@@ -458,6 +571,136 @@ list_document_mentioned_symbol() {
             }
         }
     ' "${DOCUMENT_PATH_STRING}" 2>/dev/null | sort -u
+}
+
+# ------------------------------------------------------------------------------------------------------
+# the integration bindings
+# ------------------------------------------------------------------------------------------------------
+#
+# The framework majors are three trees of the same shape, so one directory names each. An integration is
+# not shaped like that: every binding is its own Go module, the first major's binding sits at the suite
+# root while the later ones sit under it, and a suite can ship several modules together — bunorm has a
+# core, two drivers and a migration module. So a binding is discovered from its module file and carries
+# three names: the SUITE it ships with, the FAMILY that pairs it with the same module of another major,
+# and the MAJOR itself.
+#
+# Nothing compared this corpus before. The check above excluded `integrations/` from both of its halves,
+# and the citation band only ever asks the reverse question — whether what a document cites exists — so
+# what a binding ships and its readme never names was unmeasured on every module of every major.
+#
+# What counts as an entry is not what counts in a package document, and the difference was measured rather
+# than assumed. A package document writes a list; an integration readme writes prose —
+# ``[`NewManagerRegistry`](./manager_registry.go) takes a logger as its first argument`` is a paragraph,
+# and ``Entry point: [`NewProvider`](./provider.go)`` is a bare line. Anchoring on the bullet read nine
+# entries of a readme that documents forty doors, and three symbols that cannot possibly be missing read as
+# undocumented. So here the entry is the LINKED symbol wherever it stands.
+#
+# The boundary that leaves is declared rather than hidden: a door named in backticks and NOT linked is a
+# mention, not an entry — `cron.NewGenerateCommand(configuration)` in the cron umbrella is named in plain
+# sight and enrolled nowhere. Demanding every backticked token of a prose line instead would enrol whatever
+# a sentence happens to quote, on both sides at once. `--undocumented` reports such a door as `mentioned`,
+# which is what it is.
+list_integration_binding() {
+    local GO_MOD_PATH_STRING
+    while IFS= read -r GO_MOD_PATH_STRING; do
+        local DIRECTORY_STRING="${GO_MOD_PATH_STRING%/go.mod}"
+
+        # an example application inside a binding is not a binding: it ships no surface and documents none.
+        case "/${DIRECTORY_STRING}/" in */.*/) continue ;; esac
+
+        if [[ ! -f "${DIRECTORY_STRING}/README.md" ]]; then
+            continue
+        fi
+
+        local MAJOR_STRING="."
+        local FAMILY_STRING="${DIRECTORY_STRING#integrations/}"
+
+        if [[ "${DIRECTORY_STRING}" =~ /(v[0-9]+)$ ]]; then
+            MAJOR_STRING="${BASH_REMATCH[1]}"
+            FAMILY_STRING="${FAMILY_STRING%/*}"
+        fi
+
+        printf '%s\t%s\t%s\t%s\n' "${FAMILY_STRING%%/*}" "${FAMILY_STRING}" "${MAJOR_STRING}" "${DIRECTORY_STRING}"
+    done < <(list_repository_path 'integrations/*go.mod')
+}
+
+# the sources of one binding: everything under its module root that a deeper module root does not claim.
+# Without that second half the bunorm core would answer for the surface of both drivers and the migration
+# module, and every door of theirs would read as documented by the core readme.
+list_binding_source_file() {
+    local DIRECTORY_STRING="${1:?}"
+
+    local NESTED_DIRECTORY_STRING_LIST=()
+    local NESTED_MODULE_PATH_STRING
+    while IFS= read -r NESTED_MODULE_PATH_STRING; do
+        local NESTED_DIRECTORY_STRING="${NESTED_MODULE_PATH_STRING%/go.mod}"
+
+        if [[ "${NESTED_DIRECTORY_STRING}" = "${DIRECTORY_STRING}" ]]; then
+            continue
+        fi
+
+        NESTED_DIRECTORY_STRING_LIST+=("${NESTED_DIRECTORY_STRING}/")
+    done < <(list_repository_path "${DIRECTORY_STRING}/*go.mod")
+
+    local SOURCE_PATH_STRING
+    while IFS= read -r SOURCE_PATH_STRING; do
+        case "${SOURCE_PATH_STRING}" in *_test.go) continue ;; esac
+
+        # an example application under a binding is not the binding's surface. Two of the three cron
+        # examples are their own module and are dropped by the rule above; the third is not, and counting it
+        # filed a template the example defines for itself as a door the umbrella fails to document.
+        case "/${SOURCE_PATH_STRING}" in */.*/*) continue ;; esac
+
+        local NESTED_DIRECTORY_STRING
+        local CLAIMED_INTEGER=0
+        for NESTED_DIRECTORY_STRING in ${NESTED_DIRECTORY_STRING_LIST[@]+"${NESTED_DIRECTORY_STRING_LIST[@]}"}; do
+            if [[ "${SOURCE_PATH_STRING}" = "${NESTED_DIRECTORY_STRING}"* ]]; then
+                CLAIMED_INTEGER=1
+
+                break
+            fi
+        done
+
+        if [[ 1 -eq ${CLAIMED_INTEGER} ]]; then
+            continue
+        fi
+
+        printf '%s\n' "${SOURCE_PATH_STRING}"
+    done < <(list_repository_path "${DIRECTORY_STRING}/*.go")
+}
+
+# the documents a reader of this binding is sent to: its own readme, plus the suite umbrella when the
+# readme delegates to it. Measured on the link graph rather than assumed — of the twenty-six integration
+# readmes only the two cron stubs delegate, and they say so outright ("See the umbrella README for the
+# full design"), so folding the umbrella in is what keeps sixty doors of a shared design document from
+# being demanded of a thirty-three line stub.
+#
+# The consequence is declared where it lands: a suite documented by ONE shared umbrella cannot produce a
+# cross-major gap at all, because every major's inventory is then the same set. For cron the gate below is
+# vacuous by construction and the reporting pass is what covers it. A green there is not coverage.
+list_binding_document() {
+    local SUITE_STRING="${1:?}"
+    local DIRECTORY_STRING="${2:?}"
+
+    printf '%s\n' "${DIRECTORY_STRING}/README.md"
+
+    local UMBRELLA_PATH_STRING="integrations/${SUITE_STRING}/README.md"
+
+    if [[ "${DIRECTORY_STRING}/README.md" = "${UMBRELLA_PATH_STRING}" || ! -f "${UMBRELLA_PATH_STRING}" ]]; then
+        return 0
+    fi
+
+    local RELATIVE_STRING="${DIRECTORY_STRING#integrations/${SUITE_STRING}/}"
+    local UPWARD_STRING=""
+
+    local SEGMENT_STRING
+    while IFS= read -r SEGMENT_STRING; do
+        UPWARD_STRING="${UPWARD_STRING}../"
+    done < <(printf '%s\n' "${RELATIVE_STRING//\// }" | tr ' ' '\n')
+
+    if grep -qF "](${UPWARD_STRING}README.md" "${DIRECTORY_STRING}/README.md" 2>/dev/null; then
+        printf '%s\n' "${UMBRELLA_PATH_STRING}"
+    fi
 }
 
 BASELINE_PATH_STRING=".dev/validate/documentation.baseline"
@@ -712,6 +955,77 @@ if [[ 1 -eq ${UNDOCUMENTED_MODE_INTEGER} ]]; then
         unset DOCUMENT_ROW_STRING_MAP DOCUMENT_DECLARED_COUNT_MAP DOCUMENT_ENROLLED_COUNT_MAP
     done
 
+    # the same report over the integration bindings. It needs no coverage map: a binding is one module with
+    # one readme, so the document that covers a symbol is the readme of the module that declares it. This
+    # half is the only measurement a suite documented by a single shared umbrella ever gets — the gate
+    # cannot produce a finding there, because every major's inventory is then the same set.
+    declare -A FAMILY_UNION_INVENTORY_STRING_MAP=()
+    declare -A BINDING_MENTION_STRING_MAP=()
+    declare -A BINDING_FAMILY_STRING_MAP=()
+
+    BINDING_DIRECTORY_STRING_LIST=()
+
+    while IFS=$'\t' read -r SUITE_STRING FAMILY_STRING BINDING_MAJOR_STRING BINDING_DIRECTORY_STRING; do
+        BINDING_DIRECTORY_STRING_LIST+=("${BINDING_DIRECTORY_STRING}")
+        BINDING_FAMILY_STRING_MAP["${BINDING_DIRECTORY_STRING}"]="${FAMILY_STRING}"
+
+        while IFS= read -r BINDING_DOCUMENT_PATH_STRING; do
+            FAMILY_UNION_INVENTORY_STRING_MAP["${FAMILY_STRING}"]+=$'\n'"$(
+                extract_documented_entry_list "${BINDING_DOCUMENT_PATH_STRING}" relative | cut -f1 | sort -u
+            )"$'\n'
+
+            BINDING_MENTION_STRING_MAP["${BINDING_DIRECTORY_STRING}"]+=$'\n'"$(
+                list_document_mentioned_symbol "${BINDING_DOCUMENT_PATH_STRING}"
+            )"$'\n'
+        done < <(list_binding_document "${SUITE_STRING}" "${BINDING_DIRECTORY_STRING}")
+    done < <(list_integration_binding)
+
+    if [[ 0 -eq ${#BINDING_DIRECTORY_STRING_LIST[@]} ]]; then
+        fail "no integration binding was discovered: every binding would be missing from the report rather than documented"
+    fi
+
+    for BINDING_DIRECTORY_STRING in "${BINDING_DIRECTORY_STRING_LIST[@]}"; do
+        if [[ "" != "${FILTER_STRING}" && "${BINDING_DIRECTORY_STRING}" != *"${FILTER_STRING}"* ]]; then
+            continue
+        fi
+
+        FAMILY_STRING="${BINDING_FAMILY_STRING_MAP[${BINDING_DIRECTORY_STRING}]}"
+
+        BINDING_DECLARED_COUNT_INTEGER=0
+        BINDING_ENROLLED_COUNT_INTEGER=0
+        BINDING_ROW_STRING=""
+
+        while IFS=$'\t' read -r SYMBOL_STRING DECLARING_FILE_STRING; do
+            if [[ "" = "${SYMBOL_STRING}" ]]; then
+                continue
+            fi
+
+            BINDING_DECLARED_COUNT_INTEGER=$((BINDING_DECLARED_COUNT_INTEGER + 1))
+
+            if [[ "${FAMILY_UNION_INVENTORY_STRING_MAP[${FAMILY_STRING}]:-}" == *$'\n'"${SYMBOL_STRING}"$'\n'* ]]; then
+                BINDING_ENROLLED_COUNT_INTEGER=$((BINDING_ENROLLED_COUNT_INTEGER + 1))
+
+                continue
+            fi
+
+            EVIDENCE_STRING="absent   "
+            if [[ "${BINDING_MENTION_STRING_MAP[${BINDING_DIRECTORY_STRING}]:-}" == *$'\n'"${SYMBOL_STRING}"$'\n'* ]]; then
+                EVIDENCE_STRING="mentioned"
+                TOTAL_MENTIONED_COUNT_INTEGER=$((TOTAL_MENTIONED_COUNT_INTEGER + 1))
+            fi
+
+            BINDING_ROW_STRING+="    ${EVIDENCE_STRING}  $(printf '%-42s' "${SYMBOL_STRING}")  ${DECLARING_FILE_STRING}"$'\n'
+            TOTAL_LISTED_COUNT_INTEGER=$((TOTAL_LISTED_COUNT_INTEGER + 1))
+        done < <(list_binding_source_file "${BINDING_DIRECTORY_STRING}" | index_declaration_from_source_list)
+
+        println ""
+        println "  ${BINDING_DIRECTORY_STRING}/README.md: ${BINDING_ENROLLED_COUNT_INTEGER} of ${BINDING_DECLARED_COUNT_INTEGER} enrolled"
+
+        if [[ "" != "${BINDING_ROW_STRING}" ]]; then
+            printf '%s' "${BINDING_ROW_STRING}" | sort
+        fi
+    done
+
     println ""
     info "${TOTAL_LISTED_COUNT_INTEGER} symbol/document row(s) enrolled in no entry list of any major, ${TOTAL_MENTIONED_COUNT_INTEGER} of them mentioned by the covering document; ${TOTAL_OUTSIDE_COUNT_INTEGER} symbol(s) outside every covered package"
     success "reported without a verdict: whether a door deserves an entry is read at the site"
@@ -777,6 +1091,106 @@ for DOCUMENT_NAME_STRING in "${DOCUMENT_NAME_STRING_LIST[@]}"; do
     done <<< "${ENTRY_UNION_STRING}"
 done
 
+# the same question asked of the integration bindings, keyed on the family so a module is only ever
+# compared with the same module of another major.
+#
+# What satisfies a demand is the FAMILY's own documents rather than everything its suite ships, and the
+# difference is the one the framework half draws with its package-scoped lookup. `Provider` is declared by
+# the bunorm core, by the mysql driver and by the pgsql driver, and they are three different symbols: an
+# inventory spanning the suite lets the core readme answer for a door deleted from a driver readme, which
+# is the check reporting green over exactly what it exists to catch.
+declare -A FAMILY_INVENTORY_STRING_MAP=()
+declare -A BINDING_DECLARATION_STRING_MAP=()
+declare -A BINDING_DIRECTORY_STRING_MAP=()
+declare -A FAMILY_SUITE_STRING_MAP=()
+
+FAMILY_STRING_LIST=()
+BINDING_DOCUMENT_COUNT_INTEGER=0
+
+while IFS=$'\t' read -r SUITE_STRING FAMILY_STRING BINDING_MAJOR_STRING BINDING_DIRECTORY_STRING; do
+    if [[ "" = "${FAMILY_SUITE_STRING_MAP[${FAMILY_STRING}]:-}" ]]; then
+        FAMILY_STRING_LIST+=("${FAMILY_STRING}")
+        FAMILY_SUITE_STRING_MAP["${FAMILY_STRING}"]="${SUITE_STRING}"
+    fi
+
+    BINDING_DIRECTORY_STRING_MAP["${FAMILY_STRING}"$'\t'"${BINDING_MAJOR_STRING}"]="${BINDING_DIRECTORY_STRING}"
+    BINDING_DOCUMENT_COUNT_INTEGER=$((BINDING_DOCUMENT_COUNT_INTEGER + 1))
+
+    while IFS= read -r BINDING_DOCUMENT_PATH_STRING; do
+        FAMILY_INVENTORY_STRING_MAP["${FAMILY_STRING}"$'\t'"${BINDING_MAJOR_STRING}"]+=$'\n'"$(
+            extract_documented_entry_list "${BINDING_DOCUMENT_PATH_STRING}" relative | cut -f1 | sort -u
+        )"$'\n'
+    done < <(list_binding_document "${SUITE_STRING}" "${BINDING_DIRECTORY_STRING}")
+
+    while IFS=$'\t' read -r INDEX_SYMBOL_STRING INDEX_FILE_STRING; do
+        if [[ "" = "${INDEX_SYMBOL_STRING}" ]]; then
+            continue
+        fi
+
+        BINDING_DECLARATION_STRING_MAP["${FAMILY_STRING}"$'\t'"${BINDING_MAJOR_STRING}"$'\t'"${INDEX_SYMBOL_STRING}"]="${INDEX_FILE_STRING}"
+    done < <(list_binding_source_file "${BINDING_DIRECTORY_STRING}" | index_declaration_from_source_list)
+done < <(list_integration_binding)
+
+if [[ 0 -eq ${BINDING_DOCUMENT_COUNT_INTEGER} ]]; then
+    fail "no integration binding was discovered: the corpus would be empty and every binding would read as agreeing with every other"
+fi
+
+for FAMILY_STRING in ${FAMILY_STRING_LIST[@]+"${FAMILY_STRING_LIST[@]}"}; do
+    SUITE_STRING="${FAMILY_SUITE_STRING_MAP[${FAMILY_STRING}]}"
+    DOCUMENT_NAME_STRING="integrations/${FAMILY_STRING}/README.md"
+
+    ENTRY_UNION_STRING="$(
+        for MAJOR_DIRECTORY_STRING in "${MAJOR_DIRECTORY_STRING_LIST[@]}"; do
+            BINDING_DIRECTORY_STRING="${BINDING_DIRECTORY_STRING_MAP[${FAMILY_STRING}$'\t'${MAJOR_DIRECTORY_STRING}]:-}"
+            if [[ "" != "${BINDING_DIRECTORY_STRING}" ]]; then
+                extract_documented_entry_list "${BINDING_DIRECTORY_STRING}/README.md" relative | cut -f1
+            fi
+        done | sort -u
+    )"
+
+    while IFS= read -r SYMBOL_STRING; do
+        if [[ "" = "${SYMBOL_STRING}" ]]; then
+            continue
+        fi
+
+        for MAJOR_DIRECTORY_STRING in "${MAJOR_DIRECTORY_STRING_LIST[@]}"; do
+            BINDING_DIRECTORY_STRING="${BINDING_DIRECTORY_STRING_MAP[${FAMILY_STRING}$'\t'${MAJOR_DIRECTORY_STRING}]:-}"
+            if [[ "" = "${BINDING_DIRECTORY_STRING}" ]]; then
+                continue
+            fi
+
+            CHECKED_COUNT_INTEGER=$((CHECKED_COUNT_INTEGER + 1))
+
+            if [[ "${FAMILY_INVENTORY_STRING_MAP[${FAMILY_STRING}$'\t'${MAJOR_DIRECTORY_STRING}]:-}" == *$'\n'"${SYMBOL_STRING}"$'\n'* ]]; then
+                continue
+            fi
+
+            DECLARING_FILE_STRING="${BINDING_DECLARATION_STRING_MAP[${FAMILY_STRING}$'\t'${MAJOR_DIRECTORY_STRING}$'\t'${SYMBOL_STRING}]:-}"
+            if [[ "" = "${DECLARING_FILE_STRING}" ]]; then
+                continue
+            fi
+
+            FINDING_KEY_STRING="${MAJOR_DIRECTORY_STRING}"$'\t'"${DOCUMENT_NAME_STRING}"$'\t'"${SYMBOL_STRING}"
+
+            if [[ "" != "${FINDING_SEEN_INTEGER_MAP[${FINDING_KEY_STRING}]:-}" ]]; then
+                continue
+            fi
+
+            FINDING_SEEN_INTEGER_MAP["${FINDING_KEY_STRING}"]=1
+            GAP_COUNT_INTEGER=$((GAP_COUNT_INTEGER + 1))
+
+            if [[ "" != "${BASELINE_LINE_INTEGER_MAP[${FINDING_KEY_STRING}]:-}" ]]; then
+                BASELINE_CONSUMED_INTEGER_MAP["${FINDING_KEY_STRING}"]=$((BASELINE_CONSUMED_INTEGER_MAP[${FINDING_KEY_STRING}] + 1))
+
+                continue
+            fi
+
+            println "  gap  ${DOCUMENT_NAME_STRING}: ${MAJOR_DIRECTORY_STRING} declares ${SYMBOL_STRING} in ${DECLARING_FILE_STRING} and does not document it"
+            UNRECORDED_COUNT_INTEGER=$((UNRECORDED_COUNT_INTEGER + 1))
+        done
+    done <<< "${ENTRY_UNION_STRING}"
+done
+
 for BASELINE_KEY_STRING in "${!BASELINE_CONSUMED_INTEGER_MAP[@]}"; do
     if [[ 0 -lt ${BASELINE_CONSUMED_INTEGER_MAP[${BASELINE_KEY_STRING}]} ]]; then
         continue
@@ -786,7 +1200,7 @@ for BASELINE_KEY_STRING in "${!BASELINE_CONSUMED_INTEGER_MAP[@]}"; do
     STALE_COUNT_INTEGER=$((STALE_COUNT_INTEGER + 1))
 done
 
-info "checked ${CHECKED_COUNT_INTEGER} symbol/major pairs across ${#DOCUMENT_NAME_STRING_LIST[@]} package documents"
+info "checked ${CHECKED_COUNT_INTEGER} symbol/major pairs across ${#DOCUMENT_NAME_STRING_LIST[@]} package documents and ${BINDING_DOCUMENT_COUNT_INTEGER} integration bindings"
 info "${GAP_COUNT_INTEGER} gap(s): $((GAP_COUNT_INTEGER - UNRECORDED_COUNT_INTEGER)) recorded in the baseline, ${UNRECORDED_COUNT_INTEGER} not"
 
 if [[ 0 -lt ${BROKEN_COUNT_INTEGER} ]]; then

@@ -64,7 +64,7 @@ provider := mysql.NewProvider(
 
 If you need driver options that are not exposed by [`mysql.TimeoutConfig`](./timeout_config.go), the TLS options above, or other typed configs, use a post-build hook.
 
-The provider constructor accepts optional provider options:
+The provider constructor takes a variadic of [`mysql.ProviderOption`](./provider_option.go) — the shipped ones are `WithPostBuildHook`, `WithInsecure` and `WithTlsConfig`, and a caller can write their own, since the type is exported:
 
 - [`mysql.NewProvider`](./provider.go)
 

@@ -91,3 +91,46 @@ v3 ~ SECURITY.md ~ WithEntryPoint                   ~ the firewall override sett
 v3 ~ SECURITY.md ~ WithAccessDeniedHandler          ~ the firewall override setters are listed by v1 and v2 only
 v3 ~ SECURITY.md ~ FirewallRegistry                 ~ the registry type is listed by v1 and v2 only
 v3 ~ SECURITY.md ~ Source                           ~ the matched rule's Source accessor is listed by v1 and v2 only
+
+# ------------------------------------------------------------------------------------------------------
+# Everything below is on v3 and in the integration corpus, which nothing compared until this run. The check
+# excluded `integrations/` from both of its halves, and the citation band only ever asks the reverse
+# question, so what a binding ships and its readme never names had never been measured on any module of any
+# major. Reading it — the linked symbol wherever it stands, and a method under its own name rather than
+# under its type — turned the two published readmes into a demand v3 does not meet in eighteen places.
+#
+# Two of them arrived with this session's own entries: naming the rueidis configuration defaults on v1 and
+# v2 is what put `DefaultClientConfig` and `DefaultTimeoutConfig` in the demand at all. That is the shape
+# of the trap, not an accident of it — a door listed on one major is owed by every other that ships it.
+#
+# None is a deliberate divergence. They are v3's readmes standing behind the two this stage owns, and
+# closing them is stage 6's work. One line per fact, so each closes on its own and a symbol v3 stops
+# declaring fails the run rather than passing quietly.
+# ------------------------------------------------------------------------------------------------------
+
+# bunorm core — the v1 and v2 readmes name the registry constructor and, through the audit and encrypt
+# sections, the sub-package types; the v3 readme delegates both to its own sub-readmes and names neither.
+v3 ~ integrations/bunorm/README.md ~ NewManagerRegistry ~ the registry constructor is named by v1 and v2 only
+v3 ~ integrations/bunorm/README.md ~ ChangeSet          ~ the audit types are named by the v1 readme only, v3 delegates to bunorm/v3/audit/README.md
+v3 ~ integrations/bunorm/README.md ~ Entry              ~ the audit types are named by the v1 readme only, v3 delegates to bunorm/v3/audit/README.md
+v3 ~ integrations/bunorm/README.md ~ Recorder           ~ the audit types are named by the v1 readme only, v3 delegates to bunorm/v3/audit/README.md
+v3 ~ integrations/bunorm/README.md ~ EncryptedString    ~ the encrypt types are named by the v1 readme only, v3 delegates to bunorm/v3/encrypt/README.md
+v3 ~ integrations/bunorm/README.md ~ KeyProvider        ~ the encrypt types are named by the v1 readme only, v3 delegates to bunorm/v3/encrypt/README.md
+v3 ~ integrations/bunorm/README.md ~ UseCipher          ~ the encrypt doors are named by the v1 readme only, v3 delegates to bunorm/v3/encrypt/README.md
+
+# bunorm drivers — the published readmes carry a typed-configuration section and a migration-open section
+# that the v3 readmes do not.
+v3 ~ integrations/bunorm/mysql/README.md ~ PoolConfig      ~ the typed configurations are listed by v1 and v2 only
+v3 ~ integrations/bunorm/mysql/README.md ~ TimeoutConfig   ~ the typed configurations are listed by v1 and v2 only
+v3 ~ integrations/bunorm/mysql/README.md ~ RetryConfig     ~ the typed configurations are listed by v1 and v2 only
+v3 ~ integrations/bunorm/mysql/README.md ~ PostBuildHook   ~ the post-build hook signature is listed by v1 and v2 only
+v3 ~ integrations/bunorm/mysql/README.md ~ OpenForMigration ~ the migration open is named by v1 and v2 only
+v3 ~ integrations/bunorm/pgsql/README.md ~ PoolConfig      ~ the typed configurations are listed by v1 and v2 only
+v3 ~ integrations/bunorm/pgsql/README.md ~ RetryConfig     ~ the typed configurations are listed by v1 and v2 only
+
+# rueidis — the published readmes name the configuration defaults and the runtime helper; the v3 readme
+# names neither, and `WithTokenStorePrefix` is a v3-only door its own readme still does not list.
+v3 ~ integrations/rueidis/README.md ~ DefaultClientConfig  ~ the shipped configuration defaults are named by v1 and v2 only
+v3 ~ integrations/rueidis/README.md ~ DefaultTimeoutConfig ~ the shipped configuration defaults are named by v1 and v2 only
+v3 ~ integrations/rueidis/README.md ~ BackendFromRuntime   ~ the runtime backend helper has a section on v1 and v2 and none on v3
+v3 ~ integrations/rueidis/README.md ~ WithTokenStorePrefix ~ a v3-only door the v3 readme mentions in prose and never lists

@@ -10,7 +10,7 @@ Import paths
 Key types
 
 - [`mysql.Provider`](./provider.go) implements [`bunorm.Provider`](../provider.go) and opens a Bun database handle using `go-sql-driver/mysql` + `mysqldialect`.
-- [`mysql.PoolConfig`](./pool_config.go) and [`mysql.TimeoutConfig`](./timeout_config.go) control connection pool and timeouts; [`mysql.RetryConfig`](./retry_config.go) controls the opt-in initial-connection retry.
+- [`mysql.PoolConfig`](./pool_config.go) and [`mysql.TimeoutConfig`](./timeout_config.go) control connection pool and timeouts; [`mysql.RetryConfig`](./retry_config.go) controls the opt-in initial-connection retry. All three are set through the chainable [`WithPoolConfig`](./provider.go) / [`WithTimeoutConfig`](./provider.go) / [`WithRetryConfig`](./provider.go) methods.
 
 ## Defaults
 
@@ -37,6 +37,12 @@ Notes
 - Connection errors are returned as Melody exceptions with a safe context.
 - This module does not register services by itself; service registration is left to the consuming application.
 
+## Opening under a context, and opening for migrations
+
+- [`Provider.OpenContext`](./provider.go) implements [`bunorm.ContextOpener`](../provider.go): the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget. The registry prefers it and hands the context it was constructed with.
+- [`Provider.OpenForMigration`](./provider.go) implements [`bunorm.MigrationProvider`](../provider.go) and opens the same database with the driver deadlines lifted: `ReadTimeout` and `WriteTimeout` are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed, the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run.
+- [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
+
 ## Transport security
 
 The provider negotiates a **verified TLS handshake by default**: it builds a `tls.Config` from the system roots, verifies the server certificate against the configured host, and requires TLS 1.2 or higher. A server that speaks no TLS fails the dial rather than falling back to plaintext, and the driver's `skip-verify` spelling — TLS negotiated but the certificate never checked — is not used, because it is trivially machine-in-the-middled.
@@ -57,7 +63,7 @@ provider := mysql.NewProvider(
 
 If you need driver options that are not exposed by [`mysql.TimeoutConfig`](./timeout_config.go), the TLS options above, or other typed configs, use a post-build hook.
 
-Provider constructors accept optional provider options:
+Provider constructors take a variadic of [`mysql.ProviderOption`](./provider_option.go) — the shipped ones are `WithPostBuildHook`, `WithInsecure` and `WithTlsConfig`, and a caller can write their own, since the type is exported:
 
 - [`mysql.NewProvider`](./provider.go)
 - [`mysql.NewProviderWithConfig`](./provider.go)

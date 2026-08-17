@@ -136,6 +136,8 @@ func RegisterDatabaseServices(app *application.Application) {
 }
 ```
 
+[`NewManagerRegistry`](./manager_registry.go) takes a `container/contract.Resolver` as its first argument, then the provider definitions as variadic values. It fails with `ErrResolverIsRequired` on a nil resolver and `ErrNoProviderDefinitions` when no definition is given. The resolver is what a lazy open replays through long after the construction-time resolution has ended, so the registry keeps the container behind it where the value implements `container/contract.ContainerCarrier` — a resolution context is single-threaded and dies with its scope, while the pools this registry hands out outlive both.
+
 ### Consuming the default database
 
 ```go

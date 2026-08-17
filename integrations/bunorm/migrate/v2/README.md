@@ -108,7 +108,7 @@ If you deliberately keep separate registries per context, set each context's `Ma
 * `ManagerRegistryServiceId` (default: `service.database.manager.registry`) is the container service id for the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: the commands resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
 * `ManagerName` (default: empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
 
-Empty values are replaced with the defaults in [`RegisterCommands`](./register.go).
+Empty values are replaced with the defaults in [`RegisterCommands`](./register.go), and [`DefaultOptions`](./option.go) answers with that same set as a value — the way to read what a field falls back to, or to start from it and change one field.
 
 ## Commands
 

@@ -2,8 +2,8 @@
 
 This integration provides:
 
-* A small `Provider` that opens a `rueidis.Client` from Melody config parameters.
-* A Redis-backed distributed rate limiter for the core `http/middleware` rate-limit middleware.
+* A small [`Provider`](./provider.go) that opens a `rueidis.Client` from Melody config parameters.
+* A Redis-backed distributed [`RateLimiter`](./rate_limit.go) for the core `http/middleware` rate-limit middleware.
 * A Redis-backed Melody cache backend implemented on top of Rueidis.
 * A Redis-backed revocable token store for the core `security` package (v3 binding only).
 
@@ -17,6 +17,10 @@ Optional configuration:
 
 * [`ClientConfig`](./client_config.go) (client name, DB selection, TLS, disable client-side cache, ping on start, and the two deadlines that actually reach the client: `DialTimeout` and `ConnWriteTimeout`)
 * [`TimeoutConfig`](./timeout_config.go) — **boot only**. `ConnectTimeout` and `CommandTimeout` bound the provider's own ping round trips; neither is passed into `rueidis.ClientOption`, so ordinary commands are not bounded by them. The network deadlines a running application answers to are the two `ClientConfig` fields above.
+
+Either configuration reaches the provider through the chainable [`WithClientConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) methods on the value `NewProvider` returns, or through [`NewProviderWithConfig`](./provider.go), which takes both beside the parameter names in one call.
+
+**A configuration is taken whole or not at all.** An absent one is replaced by [`DefaultClientConfig`](./client_config.go) or [`DefaultTimeoutConfig`](./timeout_config.go) entirely; a supplied one is used as it stands, with no field-by-field fill-in — unlike the bunorm drivers, which do fill in field by field. So a partial literal is not "the defaults plus my change": every field left at its zero value is what the provider gets, which turns `PingOnStart` off, so a store that cannot be reached is discovered by the first request rather than at boot, and turns `DisableCache` off, which switches client-side caching on where the shipped default keeps it off. Start from the two constructors above and change what you mean to change.
 
 ## Rate limiter
 
@@ -59,7 +63,7 @@ Package: [`cache`](./cache)
 
 ### Backend
 
-Entry point: [`cache.NewBackend`](./cache/backend.go)
+Entry point: [`cache.NewBackend`](./cache/backend.go), or [`cache.NewBackendWithCommandTimeout`](./cache/backend.go) to bound the half of the surface that carries no context. `NewBackend` leaves those unbounded, which is the case worth knowing: against a store that accepts connections and stops answering, a ctx-less call has no deadline of its own to fall back on. A non-positive timeout reads as unbounded, so the two constructors agree by construction.
 
 `Backend` wraps a `rueidis.Client`. It exposes two parallel surfaces:
 
@@ -92,7 +96,7 @@ func main() {
 
 ### BackendService
 
-Entry point: [`cache.NewBackendService`](./cache/backend_service.go)
+Entry point: [`cache.NewBackendService`](./cache/backend_service.go), or [`cache.NewBackendServiceWithCommandTimeout`](./cache/backend_service.go) to bound every contract call. The `cache/contract.Backend` methods carry no context at all, so without a bound a read on the request path against an unanswering store hangs the handler; a non-positive timeout is the unbounded behaviour of `NewBackendService`.
 
 `BackendService` is a singleton wrapper intended for service container registration. It holds a `Backend` (built with `context.Background()`) and implements [`cache/contract.Backend`](../../cache/contract/backend.go) by forwarding each call to the underlying `Backend`.
 
