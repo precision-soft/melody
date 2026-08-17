@@ -125,17 +125,18 @@ func (instance *bunUserRepository) FindById(ctx context.Context, id string) (*en
 }
 
 func (instance *bunUserRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
     if "" == wanted {
         return nil, false, nil
     }
 
     row := &userRow{}
 
+    /* the comparison is forced onto the binary collation because the column's own (utf8mb4_0900_ai_ci) folds accents — 'café' = 'cafe' is true under it — while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone; left to the column, this door matched users the invalidation could never address, and a deleted user kept authenticating from the ttl-less cache under the collation-only spelling */
     selectErr := instance.database.
         NewSelect().
         Model(row).
-        Where("LOWER(username) = ?", wanted).
+        Where("LOWER(username) = (? COLLATE utf8mb4_bin)", wanted).
         Limit(1).
         Scan(ctx)
     if nil != selectErr {
@@ -262,15 +263,16 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
 }
 
 func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
     if "" == wanted {
         return false, nil
     }
 
+    /* the same binary collation as FindByUsername, so the uniqueness door and the lookup door refuse and admit the exact same spellings */
     count, countErr := instance.database.
         NewSelect().
         Model((*userRow)(nil)).
-        Where("LOWER(username) = ?", wanted).
+        Where("LOWER(username) = (? COLLATE utf8mb4_bin)", wanted).
         Where("id != ?", excludedId).
         Count(ctx)
     if nil != countErr {

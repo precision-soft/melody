@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v2/.example/entity"
     "github.com/precision-soft/melody/v2/.example/presenter"
+    "github.com/precision-soft/melody/v2/.example/repository"
     "github.com/precision-soft/melody/v2/.example/security"
     "github.com/precision-soft/melody/v2/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
@@ -34,6 +35,15 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
         normalizedPassword := strings.TrimSpace(dto.Password)
         if "" == normalizedPassword {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password is required"), nil
+        }
+
+        /* the username becomes a cache key component, so a spelling the key grammar refuses must be turned away before the row lands */
+        if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must not contain spaces or newlines and must stay within 255 bytes"), nil
+        }
+
+        if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
         }
 
         userService := service.MustGetUserService(runtimeInstance.Container())

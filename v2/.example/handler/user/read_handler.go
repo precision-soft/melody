@@ -141,6 +141,17 @@ func normalizeRoles(roles []string) []string {
     return result
 }
 
+/* roleContainingComma reports the first role carrying a comma: the repository stores the role list comma-joined, so a role with one inside would come back as several roles on the next read — among them, possibly, an administrator nobody granted. */
+func roleContainingComma(roles []string) (string, bool) {
+    for _, role := range roles {
+        if true == strings.Contains(role, ",") {
+            return role, true
+        }
+    }
+
+    return "", false
+}
+
 func getSession(request melodyhttpcontract.Request) melodysessioncontract.Session {
     if nil == request {
         return nil

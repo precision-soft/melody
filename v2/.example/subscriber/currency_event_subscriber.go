@@ -1,6 +1,8 @@
 package subscriber
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/v2/.example/event"
     "github.com/precision-soft/melody/v2/.example/repository"
     "github.com/precision-soft/melody/v2/.example/service"
@@ -43,22 +45,20 @@ func (instance *CurrencyEventSubscriber) onCurrencyCreated() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCurrencyById(payloadInstance.Currency().Id))
-        if nil != byIdDeleteErr {
-            return byIdDeleteErr
-        }
+        invalidateErr := deleteCacheEntries(
+            cacheInstance,
+            service.CacheKeyCurrencyById(payloadInstance.Currency().Id),
+            service.CacheKeyCurrencyList,
+        )
 
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyCurrencyList)
-        if nil != listDeleteErr {
-            return listDeleteErr
-        }
-
-        return recordCatalogChange(
+        recordErr := recordCatalogChange(
             runtimeInstance,
             repository.CatalogJournalActionCreated,
             service.CatalogJournalSubjectCurrency,
             payloadInstance.Currency().Id,
         )
+
+        return errors.Join(invalidateErr, recordErr)
     }
 }
 
@@ -75,22 +75,20 @@ func (instance *CurrencyEventSubscriber) onCurrencyUpdated() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCurrencyById(payloadInstance.Currency().Id))
-        if nil != byIdDeleteErr {
-            return byIdDeleteErr
-        }
+        invalidateErr := deleteCacheEntries(
+            cacheInstance,
+            service.CacheKeyCurrencyById(payloadInstance.Currency().Id),
+            service.CacheKeyCurrencyList,
+        )
 
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyCurrencyList)
-        if nil != listDeleteErr {
-            return listDeleteErr
-        }
-
-        return recordCatalogChange(
+        recordErr := recordCatalogChange(
             runtimeInstance,
             repository.CatalogJournalActionUpdated,
             service.CatalogJournalSubjectCurrency,
             payloadInstance.Currency().Id,
         )
+
+        return errors.Join(invalidateErr, recordErr)
     }
 }
 
@@ -107,22 +105,20 @@ func (instance *CurrencyEventSubscriber) onCurrencyDeleted() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCurrencyById(payloadInstance.CurrencyId()))
-        if nil != byIdDeleteErr {
-            return byIdDeleteErr
-        }
+        invalidateErr := deleteCacheEntries(
+            cacheInstance,
+            service.CacheKeyCurrencyById(payloadInstance.CurrencyId()),
+            service.CacheKeyCurrencyList,
+        )
 
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyCurrencyList)
-        if nil != listDeleteErr {
-            return listDeleteErr
-        }
-
-        return recordCatalogChange(
+        recordErr := recordCatalogChange(
             runtimeInstance,
             repository.CatalogJournalActionDeleted,
             service.CatalogJournalSubjectCurrency,
             payloadInstance.CurrencyId(),
         )
+
+        return errors.Join(invalidateErr, recordErr)
     }
 }
 

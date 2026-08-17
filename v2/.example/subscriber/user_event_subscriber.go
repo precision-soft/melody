@@ -1,7 +1,7 @@
 package subscriber
 
 import (
-    "strings"
+    "errors"
 
     "github.com/precision-soft/melody/v2/.example/event"
     "github.com/precision-soft/melody/v2/.example/repository"
@@ -32,6 +32,16 @@ func (instance *UserEventSubscriber) SubscribedEvents() map[string][]melodyevent
     }
 }
 
+/* userUsernameCacheKey answers the cache key a username is served under, empty for a username that normalizes to nothing — which deleteCacheEntries skips. */
+func userUsernameCacheKey(username string) string {
+    normalizedUsername := repository.NormalizedUsername(username)
+    if "" == normalizedUsername {
+        return ""
+    }
+
+    return service.CacheKeyUserByUsername(normalizedUsername)
+}
+
 func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventListener {
     return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
@@ -45,30 +55,21 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyUserById(payloadInstance.User().Id))
-        if nil != byIdDeleteErr {
-            return byIdDeleteErr
-        }
+        invalidateErr := deleteCacheEntries(
+            cacheInstance,
+            service.CacheKeyUserById(payloadInstance.User().Id),
+            userUsernameCacheKey(payloadInstance.User().Username),
+            service.CacheKeyUserList,
+        )
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.User().Username))
-        if "" != normalizedUsername {
-            byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
-            if nil != byUsernameDeleteErr {
-                return byUsernameDeleteErr
-            }
-        }
-
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyUserList)
-        if nil != listDeleteErr {
-            return listDeleteErr
-        }
-
-        return recordCatalogChange(
+        recordErr := recordCatalogChange(
             runtimeInstance,
             repository.CatalogJournalActionCreated,
             service.CatalogJournalSubjectUser,
             payloadInstance.User().Id,
         )
+
+        return errors.Join(invalidateErr, recordErr)
     }
 }
 
@@ -85,30 +86,23 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyUserById(payloadInstance.User().Id))
-        if nil != byIdDeleteErr {
-            return byIdDeleteErr
-        }
+        /* the previous spelling travels in the event precisely for this delete: a rename leaves the ttl-less by-username entry behind under the old spelling, and the updated entity no longer knows it */
+        invalidateErr := deleteCacheEntries(
+            cacheInstance,
+            service.CacheKeyUserById(payloadInstance.User().Id),
+            userUsernameCacheKey(payloadInstance.User().Username),
+            userUsernameCacheKey(payloadInstance.PreviousUsername()),
+            service.CacheKeyUserList,
+        )
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.User().Username))
-        if "" != normalizedUsername {
-            byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
-            if nil != byUsernameDeleteErr {
-                return byUsernameDeleteErr
-            }
-        }
-
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyUserList)
-        if nil != listDeleteErr {
-            return listDeleteErr
-        }
-
-        return recordCatalogChange(
+        recordErr := recordCatalogChange(
             runtimeInstance,
             repository.CatalogJournalActionUpdated,
             service.CatalogJournalSubjectUser,
             payloadInstance.User().Id,
         )
+
+        return errors.Join(invalidateErr, recordErr)
     }
 }
 
@@ -125,30 +119,21 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyUserById(payloadInstance.UserId()))
-        if nil != byIdDeleteErr {
-            return byIdDeleteErr
-        }
+        invalidateErr := deleteCacheEntries(
+            cacheInstance,
+            service.CacheKeyUserById(payloadInstance.UserId()),
+            userUsernameCacheKey(payloadInstance.Username()),
+            service.CacheKeyUserList,
+        )
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.Username()))
-        if "" != normalizedUsername {
-            byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
-            if nil != byUsernameDeleteErr {
-                return byUsernameDeleteErr
-            }
-        }
-
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyUserList)
-        if nil != listDeleteErr {
-            return listDeleteErr
-        }
-
-        return recordCatalogChange(
+        recordErr := recordCatalogChange(
             runtimeInstance,
             repository.CatalogJournalActionDeleted,
             service.CatalogJournalSubjectUser,
             payloadInstance.UserId(),
         )
+
+        return errors.Join(invalidateErr, recordErr)
     }
 }
 
