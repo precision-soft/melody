@@ -188,6 +188,24 @@ append_target_major() {
     printf '%s/%s' "${VALUE_STRING}" "${TARGET_SUFFIX_STRING}"
 }
 
+# every path the tree would carry into a commit: what git tracks, plus what it does not yet track and does
+# not ignore either.
+#
+# The second half is not a convenience. `git ls-files` alone answers with the index, and the index belongs
+# to whoever is committing, so a file a session ADDS is invisible to every dimension below until someone
+# stages it — which is exactly the shape of drift this check exists to catch, a file that landed on one
+# major and not on the other. Measured: a new test file on v2 left the run reporting the same 715 pairs it
+# reported before the file existed, while the baseline lines written for it read as stale, so the band was
+# red in the working tree and could only go green after the commit it was supposed to gate.
+#
+# Nothing is lost by widening it, because every exclusion the walk relies on is a .gitignore entry rather
+# than an accident of not being tracked: /.dev-data/ holds released copies of melody itself, /var/ and
+# /.dev/mutate/ hold run artifacts, and scratch tests are named zz_*_test.go. --exclude-standard honours
+# all four, so what this lists is what a commit would contain and nothing else.
+list_repository_path() {
+    git ls-files --cached --others --exclude-standard -- "$@" | sort -u
+}
+
 # every module the tree declares, as `directory<tab>module path`. Discovered rather than listed, the way
 # the live lane discovers its integration modules: a module added later joins on its own, and the list
 # that has to be maintained by hand is exactly the one that gets forgotten. The example applications are
@@ -215,7 +233,7 @@ list_declared_module() {
         fi
 
         printf '%s\t%s\n' "${MODULE_DIRECTORY_STRING}" "${MODULE_PATH_STRING}"
-    done < <(git ls-files '*go.mod' | sort)
+    done < <(list_repository_path '*go.mod')
 }
 
 # the modules that belong to a given major. A module belongs to vN when its declared path ends in /vN,
@@ -401,14 +419,14 @@ run_positive_control_corpus() {
 # enumeration
 # ------------------------------------------------------------------------------------------------------
 
-# the go files that belong to a module and to nothing else: tracked, under the module directory, outside
-# every nested module and every dot directory.
+# the go files that belong to a module and to nothing else: carried by the repository, under the module
+# directory, outside every nested module and every dot directory.
 #
-# git ls-files rather than find is what keeps the exclusions honest without a list to maintain — the
-# module cache under .dev-data holds released copies of melody itself, var/ holds run artifacts, and
-# scratch tests are named so they are ignored, and all three are already excluded by being untracked. The
-# nested-module prune is not tidiness either: without it integrations/bunorm swallows migrate, mysql and
-# pgsql together with their own v2 and v3 subtrees, and reports several hundred files as v1-only.
+# list_repository_path rather than find is what keeps the exclusions honest without a list to maintain —
+# the module cache under .dev-data holds released copies of melody itself, var/ holds run artifacts, and
+# scratch tests are named so they are ignored, and all three are excluded by .gitignore. The nested-module
+# prune is not tidiness either: without it integrations/bunorm swallows migrate, mysql and pgsql together
+# with their own v2 and v3 subtrees, and reports several hundred files as v1-only.
 list_module_file() {
     local MODULE_DIRECTORY_STRING="${1:?}"
 
@@ -462,7 +480,7 @@ list_module_file() {
         fi
 
         printf '%s\n' "${RELATIVE_PATH_STRING}"
-    done < <(git ls-files "${PATHSPEC_STRING}" | sort)
+    done < <(list_repository_path "${PATHSPEC_STRING}")
 }
 
 # every exported production declaration of a module, as `package.Symbol`, the module root rendering as a
@@ -632,7 +650,7 @@ list_major_document_heading() {
                 print document " " heading
             }
         ' "${DOCUMENT_PATH_STRING}"
-    done < <(git ls-files "${DOCUMENTATION_DIRECTORY_STRING}" | grep '\.md$' | sort) | sort -u
+    done < <(list_repository_path "${DOCUMENTATION_DIRECTORY_STRING}" | grep '\.md$') | sort -u
 }
 
 # ------------------------------------------------------------------------------------------------------

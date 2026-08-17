@@ -27,7 +27,8 @@ v1:v2 ~ text ~ . ~ version/version.go ~ each major names and stamps its own vers
 # from that one decision, and nothing below is a gap waiting to be closed.
 # ------------------------------------------------------------------------------------------------------
 
-v1:v2 ~ file-target   ~ integrations/bunorm ~ connection_parameters.go ~ the type the v2 Open signature takes; v1 has the resolver in its place
+v1:v2 ~ file-target   ~ integrations/bunorm ~ connection_parameters.go      ~ the type the v2 Open signature takes; v1 has the resolver in its place
+v1:v2 ~ file-target   ~ integrations/bunorm ~ connection_parameters_test.go ~ the mirror of the file above; v1 has no source for it to mirror
 v1:v2 ~ text          ~ integrations/bunorm ~ provider.go              ~ the Open signature: parameters and a logger against a resolver
 v1:v2 ~ text          ~ integrations/bunorm ~ provider_definition.go   ~ a definition carries connection parameters on v2 and parameter names on v1
 v1:v2 ~ text          ~ integrations/bunorm ~ manager_registry.go      ~ the registry holds a logger on v2 and a resolver on v1
@@ -51,7 +52,10 @@ v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_AnEmptySecre
 v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_AProviderWithoutTheCapabilityIsNotAsked     ~ renamed onto the setter on v2
 v1:v2 ~ test-source ~ integrations/bunorm ~ .TestNewManagerRegistry_ConstructsWhenTheConfigurationServiceIsAbsent ~ renamed onto the setter on v2, where an absent configuration is tolerated rather than resolved
 
-v1:v2 ~ test-target ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenLoggerIsNil                                     ~ the refusal of the argument v2 has in the resolver's place
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestConnectionParametersSafeContextNamesTheConnection                            ~ the safe context of the type the v2 signature takes; v1 builds one inside each provider and pins it there
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestConnectionParametersSafeContextOmitsPassword                                 ~ the safe context of the type the v2 signature takes; v1 builds one inside each provider and pins it there
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestConnectionParamsIsAnAliasOfConnectionParameters                              ~ the released v2.0.0 spelling only exists on v2, so only v2 can pin that it stayed an alias
+v1:v2 ~ test-target ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenLoggerIsNil                                   ~ the refusal of the argument v2 has in the resolver's place
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenLoggerIsTypedNil                                ~ the refusal of the argument v2 has in the resolver's place
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersMarksTheNamesItIsGiven                   ~ the setter's own guard, which v1 reaches at construction instead
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersMarksEverySecretParameterOfEveryDefinition ~ the setter's own guard, which v1 reaches at construction instead

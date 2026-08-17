@@ -21,10 +21,6 @@ func (instance stubResult) RowsAffected() (int64, error) {
 
 var _ sql.Result = stubResult{}
 
-/* @info the answer feeds a caller that has to tell a write which landed from one that found no row, so
-a driver that will not report a count must read as "nothing changed" rather than as a change nobody
-can confirm */
-
 func TestAffectedAtLeastOneRow(t *testing.T) {
     if true == affectedAtLeastOneRow(nil) {
         t.Fatalf("expected a missing result to report no change")

@@ -216,7 +216,7 @@ func TestStackScript_V1SecretNegativeRequiresANonEmptyEntry(t *testing.T) {
     }
 }
 
-/* @info on a cold go build cache the holder outruns the marker-wait budget; the exclusive section must emit a
+/* on a cold go build cache the holder outruns the marker-wait budget; the exclusive section must emit a
 distinct holder-marker-timeout diagnostic and NOT launch the contender, so a build delay is never misreported
 as a mutual-exclusion violation the lock never committed. */
 func TestStackScript_ExclusiveMarkerTimeoutFailsLoudly(t *testing.T) {
@@ -241,7 +241,7 @@ func TestStackScript_ExclusiveMarkerTimeoutFailsLoudly(t *testing.T) {
     }
 }
 
-/* @info a prior run killed before its EXIT trap ran leaves MELODY_PROCESS_ROLE=web in .env.local on the repo
+/* a prior run killed before its EXIT trap ran leaves MELODY_PROCESS_ROLE=web in .env.local on the repo
 bind mount; the default-role check must clear it first (mirroring the rm -f hygiene the other sections use) so
 a stale role cannot poison the default-role assertion. */
 func TestStackScript_ProcessRoleClearsStaleEnvLocalBeforeDefaultCheck(t *testing.T) {

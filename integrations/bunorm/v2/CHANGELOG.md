@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - the coalescing of concurrent first dials is pinned by two registry tests: the in-flight entry is registered under its name before the provider is dialed, and a caller that finds an in-flight open waits on it and answers with the published manager instead of dialing a second pool — the waiter is constructed by hand, so no scheduling window decides what the tests observe
+- `ConnectionParameters.SafeContext` is pinned by its own mirror: it names the host, port, database and user, and the assertion that carries the guard is the negative one, which scans every value rather than only looking for the key it does not want — a password republished under another name reads as redacted to a check that asks only whether `password` is present. The same file pins that `ConnectionParams` is still an **alias** and has not become a defined type: nothing in this major uses the released spelling, so the change would leave every production build green while the drivers of the next major, which write it in the signatures that satisfy `Provider`, silently stopped matching the contract
 
 ### Fixed
 

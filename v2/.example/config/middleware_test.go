@@ -11,7 +11,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
-/* @info The duration header is the one thing this middleware exists to produce, and against the wall clock no test can state what it must contain — an assertion on it would have to be a range, which passes for a middleware that measures nothing at all. A frozen clock advanced by the handler underneath makes the expected value exact. */
+/* Against the wall clock no test can state what the duration header must contain: the assertion would have to be a range, and a range passes for a middleware that measures nothing at all. A frozen clock advanced by the handler underneath makes the expected value exact. */
 func TestTimingMiddlewareReportsTheDurationTheClockMeasured(t *testing.T) {
     frozenClock := melodyclock.NewFrozenClock(time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC))
 
@@ -38,7 +38,7 @@ func TestTimingMiddlewareReportsTheDurationTheClockMeasured(t *testing.T) {
     }
 }
 
-/* @info A failing handler has no response to write a header onto, and the middleware must hand the failure up rather than dereference what is not there. */
+/* A failing handler has no response to write a header onto, so the branch under test is the one that must not dereference what is not there. */
 func TestTimingMiddlewarePassesAFailureThroughUntouched(t *testing.T) {
     frozenClock := melodyclock.NewFrozenClock(time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC))
 

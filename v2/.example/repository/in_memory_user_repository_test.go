@@ -8,10 +8,7 @@ import (
     "github.com/precision-soft/melody/v2/.example/entity"
 )
 
-/* @info every repository is a process-wide singleton and net/http serves each request on its own
-goroutine, so a listing request and a deleting request overlap; the writer here always removes a
-non-terminal element, which is what makes DeleteById compact the backing array under the reader */
-
+/* Every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request really do overlap. The writer removes a NON-terminal element deliberately: that is the removal which makes DeleteById compact the backing array underneath a reader already walking it, and a terminal one would merely shorten the slice. */
 func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := NewInMemoryUserRepository()
@@ -80,9 +77,6 @@ func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
         t.Fatalf("expected the seeded users to survive, got %d", len(users))
     }
 }
-
-/* @info usernames are matched without regard to case in both implementations, so the comparison is
-normalised in the example rather than left to a database collation */
 
 func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
     ctx := context.Background()

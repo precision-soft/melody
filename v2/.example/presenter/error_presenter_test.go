@@ -60,9 +60,6 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
 
-/* @important the presenter must reach the same decision the framework exception listener reaches, and
-must reach "no debug material" whenever the environment cannot be read at all */
-
 func TestDebugModeFollowsTheKernelEnvironment(t *testing.T) {
     if true == debugMode(runtimeForEnvironment(t, melodyconfig.EnvProduction)) {
         t.Fatalf("expected production to disable debug material")
