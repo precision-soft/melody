@@ -265,4 +265,10 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
     - [`MustFromResolver[T]`](../../container/resolver.go)
     - [`FromResolverByType[T]`](../../container/resolver.go)
     - [`MustFromResolverByType[T]`](../../container/resolver.go)
+- Deferred resolution — the handle a component assembled during the boot phase holds over a service whose provider is registered but not yet safe to resolve at that phase:
+    - [`type LazyService[T]`](../../container/lazy.go) — memoizes success only, so a failed or nil resolution is retried on the next call
+    - [`Lazy[T](resolver, serviceName)`](../../container/lazy.go) — the deferred form of `FromResolver` / `MustFromResolver`
+    - [`LazyByType[T](resolver)`](../../container/lazy.go) — the deferred form of `FromResolverByType` / `MustFromResolverByType`
+- Sentinels:
+    - [`ErrServiceIdAlreadyRegistered`, `ErrServiceTypeAlreadyRegistered`, `ErrScopedServiceIdAlreadyRegistered`, `ErrScopedServiceTypeAlreadyRegistered`](../../container/errors.go)
       Scopes are created via `Container.NewScope()` (see [`ScopeManager`](../../container/contract/scope.go)).

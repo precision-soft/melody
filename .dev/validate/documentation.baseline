@@ -1,0 +1,93 @@
+# The doors one major's documents list and another major's do not, one line per fact.
+#
+#   major ~ document ~ symbol ~ reason
+#
+# Read by .dev/validate/documentation.sh. This is not a suppression list: every line is a claim the run has
+# to satisfy. A gap with no line here fails the check, and a line here that matched nothing fails it just as
+# loudly — the document has caught up, so the line has to go. Without that second half the list accumulates
+# dead entries and eventually excuses a real omission that happens to land on a symbol something else
+# already documented.
+#
+# Wildcards are refused rather than supported. An entry written as a pattern grows silently to cover the
+# next gap, which is the whole failure it exists to prevent.
+#
+# Fields are trimmed, so the columns may be aligned. The reason is mandatory: a line whose reason is empty
+# is a line nobody can review.
+#
+# ------------------------------------------------------------------------------------------------------
+# Every line below is on v3, and they arrived together: the reading half of this check saw 376 of the 770
+# entries a published major writes, so the whole listing surface of both published majors was demanded of
+# nothing. Reading the five shapes it was blind to — the label-grouped entry, the door named mid-sentence,
+# the bullet at any indent, the entry that carries its siblings unlinked, and the entry written with its
+# declaration keyword — turned the two published documents into a demand v3 does not meet in forty-eight
+# places.
+#
+# None of them is a divergence on purpose. They are the third major's documents standing behind the two
+# that were read twice during the stabilization sweep, and closing them is stage 6's work — the stage that
+# owns v3's documents — not this one's, which owns v1 and v2. The lines are written per fact so that each
+# closes on its own, and so that a symbol v3 stops declaring fails the run rather than passing quietly.
+# ------------------------------------------------------------------------------------------------------
+
+# `cli/output` — v1 and v2 enumerate the flag names, the two formats and the two sort orders a command
+# renders through; the v3 document describes the command surface and stops there.
+v3 ~ CLI.md ~ FlagNameFormat        ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ FlagNameLimit         ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ FlagNameNoColor       ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ FlagNameOffset        ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ FlagNameOrder         ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ FlagNameQuiet         ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ FlagNameTableMaxWidth ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ FlagNameVerbose       ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ FlagNameVerbosity     ~ the output flag-name constants are enumerated by v1 and v2 only
+v3 ~ CLI.md ~ MergeFlags            ~ the flag-merging door is listed by v1 and v2 only
+v3 ~ CLI.md ~ SetApplicationVersion ~ the version door of the output package is listed by v1 and v2 only
+v3 ~ CLI.md ~ Format                ~ the output format type is listed by v1 and v2 only
+v3 ~ CLI.md ~ FormatJson            ~ the output format constants are listed by v1 and v2 only
+v3 ~ CLI.md ~ FormatTable           ~ the output format constants are listed by v1 and v2 only
+v3 ~ CLI.md ~ SortOrder             ~ the sort order type is listed by v1 and v2 only
+v3 ~ CLI.md ~ SortOrderAscending    ~ the sort order constants are listed by v1 and v2 only
+v3 ~ CLI.md ~ SortOrderDescending   ~ the sort order constants are listed by v1 and v2 only
+
+# the frozen clock's ticker door, listed by v1 and v2 beside the clock it belongs to.
+v3 ~ CLOCK.md ~ Stop ~ the frozen clock's Stop is listed by v1 and v2 only
+
+# the router door the debug command renders, named by v1 and v2 where they describe route options.
+v3 ~ DEBUG.md ~ HandleWithOptions ~ the route-option registration door is named by v1 and v2 only
+
+# the dispatcher adapter's own surface, and the two constants that say where a registered listener came
+# from. v1 and v2 list each; the v3 document names the adapter type and leaves its methods unlisted.
+v3 ~ EVENT.md ~ AddListener                        ~ the adapter's registration methods are listed by v1 and v2 only
+v3 ~ EVENT.md ~ AddSubscriber                      ~ the adapter's registration methods are listed by v1 and v2 only
+v3 ~ EVENT.md ~ RemoveListener                     ~ the adapter's registration methods are listed by v1 and v2 only
+v3 ~ EVENT.md ~ RemoveSubscriber                   ~ the adapter's registration methods are listed by v1 and v2 only
+v3 ~ EVENT.md ~ Dispatch                           ~ the adapter's dispatch methods are listed by v1 and v2 only
+v3 ~ EVENT.md ~ DispatchName                       ~ the adapter's dispatch methods are listed by v1 and v2 only
+v3 ~ EVENT.md ~ RegisteredEvents                   ~ the adapter's inspection door is listed by v1 and v2 only
+v3 ~ EVENT.md ~ RegisteredListenerSourceListener   ~ the listener-source constants are listed by v1 and v2 only
+v3 ~ EVENT.md ~ RegisteredListenerSourceSubscriber ~ the listener-source constants are listed by v1 and v2 only
+
+# the http client's verbs and request options. v1 and v2 give each its own entry; the v3 document lists
+# `Get` and `Request` and leaves the siblings to the prose.
+v3 ~ HTTPCLIENT.md ~ Post                     ~ the client's verbs are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ Patch                    ~ the client's verbs are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ Delete                   ~ the client's verbs are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ RequestStream            ~ the streaming door is listed by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ SetHeader                ~ the client's setters are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ SetTimeout               ~ the client's setters are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ Authorization            ~ the request options are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ Body                     ~ the request options are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ WithBasicAuth            ~ the request options are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ WithTimeout              ~ the request options are listed one by one by v1 and v2 only
+v3 ~ HTTPCLIENT.md ~ WithMaxResponseBodyBytes ~ the response-size guard is listed by v1 and v2 only
+
+# the firewall override family and the registry. v1 and v2 list every builder step and every override
+# setter; the v3 document folds the builder into one line and does not reach the overrides at all.
+v3 ~ SECURITY.md ~ AddStatefulFirewall              ~ the builder's stateful and stateless doors are listed by v1 and v2 only
+v3 ~ SECURITY.md ~ AddStatelessFirewall             ~ the builder's stateful and stateless doors are listed by v1 and v2 only
+v3 ~ SECURITY.md ~ FirewallOverrideConfiguration    ~ the firewall override type is listed by v1 and v2 only
+v3 ~ SECURITY.md ~ NewFirewallOverrideConfiguration ~ the firewall override constructor is listed by v1 and v2 only
+v3 ~ SECURITY.md ~ WithStateless                    ~ the firewall override setters are listed by v1 and v2 only
+v3 ~ SECURITY.md ~ WithEntryPoint                   ~ the firewall override setters are listed by v1 and v2 only
+v3 ~ SECURITY.md ~ WithAccessDeniedHandler          ~ the firewall override setters are listed by v1 and v2 only
+v3 ~ SECURITY.md ~ FirewallRegistry                 ~ the registry type is listed by v1 and v2 only
+v3 ~ SECURITY.md ~ Source                           ~ the matched rule's Source accessor is listed by v1 and v2 only

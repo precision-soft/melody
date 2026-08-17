@@ -218,6 +218,8 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
 - [`type Provider[T]`](../../container/contract/provider.go)
 - [`type RegisterOption`](../../container/contract/registrar.go)
 - [`type RegisterOptions`](../../container/contract/registrar.go)
+- [`type ContainerCarrier`](../../container/contract/container_carrier.go) — the capability a resolver implements to name the container behind it. A process-lifetime service that defers work past the resolution that built it — a lazily-dialed pool, a registry that opens on first use — replays that work through the container rather than through its resolution context, which is single-threaded and dies with its scope. The container satisfies the shape by answering itself
+- [`type ServiceDescription`](../../container/contract/service_description.go), [`ServiceLifetimeContainer`, `ServiceLifetimeScoped`](../../container/contract/service_description.go) — what a container can say about a registration without running its provider: the name, the owning lifetime, whether an instance already exists, and the type. Answered by `ServiceDescriptions()` on the container, which is what lets an introspection command list a container without building it
 
 ### Constructors and helpers (`container`)
 
@@ -243,4 +245,10 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
     - [`MustFromResolver[T]`](../../container/resolver.go)
     - [`FromResolverByType[T]`](../../container/resolver.go)
     - [`MustFromResolverByType[T]`](../../container/resolver.go)
+- Deferred resolution — the handle a component assembled during the boot phase holds over a service whose provider is registered but not yet safe to resolve at that phase:
+    - [`type LazyService[T]`](../../container/lazy.go) — memoizes success only, so a failed or nil resolution is retried on the next call
+    - [`Lazy[T](resolver, serviceName)`](../../container/lazy.go) — the deferred form of `FromResolver` / `MustFromResolver`
+    - [`LazyByType[T](resolver)`](../../container/lazy.go) — the deferred form of `FromResolverByType` / `MustFromResolverByType`
+- Sentinels:
+    - [`ErrServiceIdAlreadyRegistered`, `ErrServiceTypeAlreadyRegistered`, `ErrScopedServiceIdAlreadyRegistered`, `ErrScopedServiceTypeAlreadyRegistered`](../../container/errors.go)
       Scopes are created via `Container.NewScope()` (see [`ScopeManager`](../../container/contract/scope.go)).

@@ -313,12 +313,17 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`MiddlewareNameStatic`](../../application/http_middleware.go)
 - [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
 - [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
+- [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
+    - [`ProcessRoleMustFromContainer(serviceContainer)`](../../application/service_resolver.go)
+    - [`ProcessRoleMustFromResolver(resolver)`](../../application/service_resolver.go)
 
 ### Constructors
 
 - [`NewApplication(embeddedPublicFiles, embeddedConfigFiles)`](../../application/application_new.go)
 - [`NewRuntimeFlags(mode)`](../../application/cli.go)
 - [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
+- [`ParseRuntimeFlagsWithRole(defaultMode, defaultRole)`](../../application/cli.go) — the form `ParseRuntimeFlags` delegates to. An explicit `--role`/`-role` wins over the configured default; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
+- [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently
 - [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)
 
 ### Application lifecycle
@@ -326,12 +331,14 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`(*Application).Boot()`](../../application/application.go)
 - [`(*Application).Run(ctx)`](../../application/application.go)
 - [`(*Application).Close()`](../../application/application_close.go)
+- [`(*Application).ProcessRole()`](../../application/application.go) — the role this process resolved to, the same string `ServiceProcessRole` answers
 
 ### Registration APIs
 
 - [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go)
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
 - [`(*Application).RegisterService(name, factory)`](../../application/application_container.go)
+- [`(*Application).RegisterScopedService(serviceName, provider)`](../../application/application_container.go) — the scoped counterpart: what it registers is built on the first resolution through a scope and closed when that scope closes
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)
 - [`(*Application).RegisterModuleProvider(provider)`](../../application/application_module.go) — registers every module returned by a [`ModuleProvider`](../../application/contract/module.go). `RegisterModule` also expands a module that additionally implements `ModuleProvider`, so a single registration can contribute a whole group of capability-modules. Each Melody integration ships a self-registering module via its `NewModule(ModuleConfig{...})` (e.g. `app.RegisterModule(amqp.NewModule(...))`) that wires that integration's services, parameters and commands in one call instead of hand-calling the individual `Register*` helpers.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)

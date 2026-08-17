@@ -47,9 +47,9 @@ The `security/config` subpackage provides the user-facing builder and the compil
 When a firewall defines both global and local access control, `security/config` merges them according to:
 
 - [`securityconfig.AccessControlMergeStrategy`](../../security/config/security_module.go)
-    - `localFirst`
-    - `globalFirst`
-    - `overrideOnly`
+    - [`AccessControlMergeLocalFirst`](../../security/config/security_module.go) — `localFirst`
+    - [`AccessControlMergeGlobalFirst`](../../security/config/security_module.go) — `globalFirst`
+    - [`AccessControlMergeOverrideOnly`](../../security/config/security_module.go) — `overrideOnly`
 
 ## Container integration
 
@@ -386,6 +386,8 @@ request.Attributes().Set(melodyhttp.RequestAttributeSession, rotated)
 /* sessionKeyUserId is application-owned; the framework defines no session key for the identity */
 rotated.Set(sessionKeyUserId, user.Id())
 ```
+
+Inside an http handler the two steps above are one call: [`http.RegenerateRequestSession(request)`](../../http/session.go) rotates the id and republishes the rotated session on the request, and the response path saves that session and emits its cookie. Reach for it rather than the manager — rotating without republishing destroys the id the browser holds without ever telling it the new one — and write the identity to the session it returns.
 
 Rotate on the way out too: logout should clear the session ([`Session.Clear`](../../session/session.go)), which deletes the stored entry and expires the browser cookie. See [SESSION](SESSION.md#rotating-the-session-id) for the full contract and its footguns, and the [session cookie](HTTP.md#session-cookie) section for the `Secure`/`SameSite` attributes that keep the rotated cookie from leaking in the first place.
 

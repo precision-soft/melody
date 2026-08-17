@@ -126,6 +126,11 @@ func readFile(path string) []byte {
 
 ### Constructors and utilities (`exception`)
 
+- The error type:
+    - [`type Error`](../../exception/error.go) — what every constructor below returns: a message, a loggable context, a wrapped cause and a log level
+    - [`(*Error).SetContext(context exceptioncontract.Context)`](../../exception/error.go) — replaces the whole context map
+    - [`(*Error).SetContextValue(key string, value any)`](../../exception/error.go) — sets one key in place, which is how an error is enriched as it crosses a layer
+    - [`(*Error).Unwrap() error`](../../exception/error.go) — the wrapped cause, so the standard library's unwrapping reaches it
 - Error constructors:
     - [`NewError`](../../exception/error_new.go)
     - [`NewWarning`](../../exception/error_new.go)
@@ -133,6 +138,8 @@ func readFile(path string) []byte {
     - [`NewEmergency`](../../exception/error_new.go)
 - Error utilities:
     - [`LogContext`](../../exception/utility.go)
+    - [`BuildCauseChain(causeErr error, maxDepth int) []string`](../../exception/utility.go) — the `causeChain` value a log record carries: every wrap link rendered as text, breadth-first and bounded by the depth, with a joined error contributing each of its branches
+    - [`BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any`](../../exception/utility.go) — the `causeContextChain` counterpart, one context map per link that implements `ContextProvider`
     - [`FromError`](../../exception/utility.go)
     - [`FromErrorWithLevel`](../../exception/utility.go)
     - [`FromErrorWithLevelAndContext`](../../exception/utility.go)

@@ -128,6 +128,9 @@ func callHealthEndpoint() (string, error) {
     - [`(*HttpClient).Close() error`](../../httpclient/http_client.go)
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go)
     - [`NewHttpClientConfig(baseUrl string, timeout time.Duration, headers map[string]string) *HttpClientConfig`](../../httpclient/http_client_config.go)
+    - [`WithTransport(transport *TransportConfig) *HttpClientConfig`](../../httpclient/http_client_config.go) — the door a transport comes through; the footgun below is about how its fields are read
+- [`type TransportConfig`](../../httpclient/transport_config.go)
+    - [`DefaultTransportConfig() *TransportConfig`](../../httpclient/transport_config.go)
 - Request options:
     - [`NewRequestOptions()`](../../httpclient/request_option.go)
     - `WithHeader`, `WithHeaders`, `WithQuery`, `WithQueryParams`, `WithBody`, `WithJson`, `WithTimeout`, `WithBearerToken`, `WithBasicAuth`, `WithMaxResponseBodyBytes`
@@ -137,3 +140,4 @@ func callHealthEndpoint() (string, error) {
         - `StatusCode`, `Status`, `Headers`, `Body`, `Request`, `Json`, `String`, `IsSuccess`, `IsClientError`, `IsServerError`
     - [`type StreamResponse`](../../httpclient/stream_response.go)
         - [`NewStreamResponse(...)`](../../httpclient/stream_response.go)
+        - `StatusCode`, `Headers`, `Body`, `Close` — the four it carries, against the ten its sibling above has: the body is still on the wire, so the caller closes it

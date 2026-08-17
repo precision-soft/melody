@@ -165,6 +165,7 @@ Implemented in:
 #### Logging configuration
 
 - [`const LoggingConfigurationName`](../../logging/contract/config.go) — registry key (`"logging"`)
+- [`LoggingConfigurationFromModules(moduleConfigurations map[string]any)`](../../logging/logging_config.go) — what turns the `ConfigModule` registration described above into the logger's labels. A nil map answers the defaults, and a registration under the right name holding the wrong type panics rather than falling back
 
 ### Implementations and helpers (`logging`)
 
@@ -192,6 +193,7 @@ Implemented in:
 - [`LogOnRecover(logger loggingcontract.Logger, panicAgain bool)`](../../logging/recover.go)
 - [`LogOnRecoverAndExit(logger loggingcontract.Logger, recovered any, exitCode int)`](../../logging/recover.go)
 - [`LogOnRecoverAndExitAfter(logger loggingcontract.Logger, recovered any, exitCode int, beforeExit func())`](../../logging/recover.go)
+- [`RunShieldedStep(stepName string, step func()) bool`](../../logging/recover.go) — the exit handler's own shield, offered to the one other caller that stands between a process and its end: it contains a panic inside the step and bounds how long the step may take, answering whether it finished. An abandoned step keeps running on its goroutine, so nothing it writes may be read by a caller that was told it did not finish
 
 #### Emergency logger
 

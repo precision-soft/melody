@@ -49,9 +49,9 @@ the order the strategy names. The strategy orders the LIST; the matcher still re
 earlier position only decides what the categories leave tied:
 
 - [`securityconfig.AccessControlMergeStrategy`](../../security/config/security_module.go)
-    - `localFirst` — the default
-    - `globalFirst`
-    - `overrideOnly` — the global policy is cut off entirely and nothing is merged
+    - [`AccessControlMergeLocalFirst`](../../security/config/security_module.go) — `localFirst`, the default
+    - [`AccessControlMergeGlobalFirst`](../../security/config/security_module.go) — `globalFirst`
+    - [`AccessControlMergeOverrideOnly`](../../security/config/security_module.go) — `overrideOnly`, the global policy is cut off entirely and nothing is merged
 
 The strategy is chosen with
 [`(FirewallOverrideConfiguration).WithMergeStrategy`](../../security/config/security_module.go), and inheritance
@@ -273,6 +273,8 @@ request.Attributes().Set(melodyhttp.RequestAttributeSession, rotated)
 rotated.Set(sessionKeyUserId, user.Id())
 ```
 
+Inside an http handler the two steps above are one call: [`http.RegenerateRequestSession(request)`](../../http/session.go) rotates the id and republishes the rotated session on the request, and the response path saves that session and emits its cookie. Reach for it rather than the manager — rotating without republishing destroys the id the browser holds without ever telling it the new one — and write the identity to the session it returns.
+
 Rotate on the way out too: logout should clear the session ([`Session.Clear`](../../session/session.go)), which deletes the stored entry and expires the browser cookie. See [SESSION](SESSION.md#rotating-the-session-id) for the full contract and its footguns, and the [session cookie](HTTP.md#session-cookie) section for the `Secure`/`SameSite` attributes that keep the rotated cookie from leaking in the first place.
 
 ## Footguns & caveats
@@ -322,6 +324,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go), [`ResolverTokenSource`](../../security/token_source.go)
 - Matchers: [`PathPrefixMatcher`](../../security/matcher.go)
 - Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go), [`RoleHierarchyVoter`](../../security/role_hierarchy_voter.go)
+- Events: [`AuthorizationGrantedEvent`, `AuthorizationDeniedEvent`](../../security/authorization_granted_event.go), [`LoginSuccessEvent`](../../security/login_success_event.go), [`LoginFailureEvent`](../../security/login_failure_event.go), [`LogoutSuccessEvent`](../../security/logout_success_event.go), [`LogoutFailureEvent`](../../security/logout_failure_event.go) — dispatched under the `EventSecurity*` names listed above
 - Configuration: [`CompiledConfiguration`, `CompiledFirewall`](../../security/compiled_configuration.go), [`Source`](../../security/security_context.go), [`FirewallRegistry`](../../security/firewall_registry.go), [`FirewallManager`](../../security/firewall_manager.go)
 - Context: [`SecurityContext`](../../security/security_context.go)
 
@@ -349,7 +352,8 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`(*AccessDecisionManager).WithRoleHierarchy(roleHierarchy *RoleHierarchy)`](../../security/access_decision_manager.go) — answers a manager whose built-in role voters read the expanded roles, leaving every other voter as it was; a nil hierarchy answers the manager unchanged
 - [`RefusalReasonEmptyAttributeList`, `RefusalReasonNoAttributeGranted`, `RefusalReasonAllVotersAbstained`, `RefusalReasonNoVoterSupportsAttribute`, `RefusalReasonAffirmativeNoGrant`, `RefusalReasonConsensusDenied`, `RefusalReasonConsensusTie`, `RefusalReasonUnanimousDenied`, `RefusalReasonUnanimousNoGrant`](../../security/access_decision_manager.go) — the branch a `403` names in its context
 - [`NewRoleVoter()`](../../security/voter.go)
-- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate securitycontract.Voter)`](../../security/role_hierarchy_voter.go) — the delegate is any `Voter`, so an integrator's own voter can be handed the expanded roles instead of reimplementing the expansion rule
+- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate securitycontract.Voter)`](../../security/role_hierarchy_voter.go) — the delegate is any `Voter`, so an integrator's own voter can be handed the expanded roles instead of reimplementing the expansion rule. A delegate that reads more of the token than its roles needs the capability below on the tokens it is given
+- [`type RolesReplacer`](../../security/role_hierarchy_voter.go) — the optional capability a `Token` implements to answer its own twin under a different role set. Without it the expansion hands the delegate a token melody rebuilt, so a voter that asserts the application's own concrete type — to learn *which* tenant or *which* owner the request speaks for — meets a type it has never seen and abstains; and a voter that would have **refused**, abstaining under the affirmative strategy beside a role voter that grants, hands out the access it exists to withhold. A token that implements it keeps its dynamic type through the expansion and the delegate is none the wiser. The capability is optional because `Token` is a published contract of a stable major and cannot grow a method
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
 - [`NewFirewall(rules ...securitycontract.Rule)`](../../security/firewall.go)
 - [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)

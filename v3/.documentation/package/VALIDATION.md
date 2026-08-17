@@ -88,16 +88,22 @@ func validateInput(input CreateUserInput) error {
 - **ValidationError** (`validation/contract.ValidationError`)  
   A typed error describing a single validation failure.
 
+- **ParameterizedConstraint** (`validation/contract.ParameterizedConstraint`) ([`validation/contract/constraint.go`](../../validation/contract/constraint.go))  
+  What a constraint implements to accept tag parameters such as `min(value=2)`. `WithParams` answers a NEW constraint configured from them and must not mutate the receiver; a rule whose parameters cannot be consumed fails closed, and so does a rule that names a parameterized constraint without parameters — the registered instance is a template for `WithParams`, never a fallback configuration.
+
 ### Types
 
 - **validation.Validator**  
   Tag-driven validator that can register constraints.
+    - [`Validate(data any) error`](../../validation/validator.go) — the door: it answers `ValidationErrors` when a field fails and nil when none does
 
 - **validation.ValidationError**  
   Default `validation/contract.ValidationError` implementation.
+    - [`ToExceptionError() error`](../../validation/error.go) — the same failure as an `exception.Error` carrying `field` and `code` in its loggable context, and the field's own context map under `context`
 
 - **validation.ValidationErrors**  
   Slice of validation errors returned as `error` by `Validator.Validate`.
+    - [`HasErrors() bool`](../../validation/error.go)
 
 ### Constructors
 

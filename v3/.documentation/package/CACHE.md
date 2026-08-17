@@ -264,6 +264,9 @@ type Cache interface {
 - **cache.InMemoryBackend** ([`cache/in_memory.go`](../../cache/in_memory.go))
 - **cache.JsonSerializer** ([`cache/json_serializer.go`](../../cache/json_serializer.go))
 - **cache.RememberOption** ([`cache/remember.go`](../../cache/remember.go))
+    - [`WithStampedeProtectionEnabled(enableStampedeProtection bool)`](../../cache/remember.go) / [`EnableStampedeProtection()`](../../cache/remember.go)
+    - [`WithWaitTimeout(waitTimeout time.Duration)`](../../cache/remember.go) / [`WaitTimeout()`](../../cache/remember.go) — the only door onto the wait the footguns below discuss. A deliberate zero means no-wait and is told apart from the field left unspoken, which answers the default
+    - [`WithCancelable(isCancelable bool)`](../../cache/remember.go) / [`IsCancelable()`](../../cache/remember.go)
 - **cache.Item** ([`cache/item.go`](../../cache/item.go)) — the backend-level entry exposed via `cachecontract.Backend.Get`. Carries key, payload, creation/expiration timestamps, last-access time, and hit count.
 
 ### Constructors

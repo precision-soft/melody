@@ -161,6 +161,7 @@ Implemented in:
 #### Logging configuration
 
 - [`const LoggingConfigurationName`](../../logging/contract/config.go) — registry key (`"logging"`)
+- [`LoggingConfigurationFromModules(moduleConfigurations map[string]any)`](../../logging/logging_config.go) — what turns the `ConfigModule` registration described above into the logger's labels. A nil map answers the defaults, and a registration under the right name holding the wrong type panics rather than falling back
 
 ### Implementations and helpers (`logging`)
 

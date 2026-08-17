@@ -275,9 +275,14 @@ type Cache interface {
 ### Types
 
 - **cache.Manager** ([`cache/manager.go`](../../cache/manager.go))
+    - [`NormalizeStoredValue(value any) (any, error)`](../../cache/manager.go) — the shape a value stored through this manager reads back as: one serializer round-trip, run locally with no backend involved. `Remember` consults it so the computing call and the cached calls answer one shape — without it a callback's `int` came back `float64` and its struct came back a map, but only from the second call on
 - **cache.InMemoryBackend** ([`cache/in_memory.go`](../../cache/in_memory.go))
 - **cache.JsonSerializer** ([`cache/json_serializer.go`](../../cache/json_serializer.go))
 - **cache.RememberOption** ([`cache/remember.go`](../../cache/remember.go))
+    - [`WithStampedeProtectionEnabled(enableStampedeProtection bool)`](../../cache/remember.go) / [`EnableStampedeProtection()`](../../cache/remember.go)
+    - [`WithWaitTimeout(waitTimeout time.Duration)`](../../cache/remember.go) / [`WaitTimeout()`](../../cache/remember.go) — the only door onto the wait the footguns below discuss. A deliberate zero means no-wait and is told apart from the field left unspoken, which answers the default
+    - [`WithCancelable(isCancelable bool)`](../../cache/remember.go) / [`IsCancelable()`](../../cache/remember.go)
+    - [`WithContext(callerContext context.Context)`](../../cache/remember.go) / [`Context()`](../../cache/remember.go) — ties the **wait** to the request that opened it, and nothing else
 - **cache.DeserializationError** ([`cache/deserialization_error.go`](../../cache/deserialization_error.go)) — the typed error a read answers when the payload does not deserialize; `Remember` treats it as a miss.
 - **cache.Item** ([`cache/item.go`](../../cache/item.go)) — the entry representation `InMemoryBackend` keeps internally. Carries key, payload, creation/expiration timestamps, last-access time, and hit count; `cachecontract.Backend.Get` itself returns the raw payload bytes, not an `Item`.
 

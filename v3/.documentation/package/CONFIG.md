@@ -253,19 +253,25 @@ func example() configcontract.Configuration {
     - `RegisterRuntimeSecret(name string, value any)`
     - `MarkSecret(name string) bool`
     - `Resolve() error`
+    - [`MarkServing()`](../../config/configuration.go) — records that the wiring phase is over, after which `Resolve` is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works, since a registration resolves itself
     - `Names() []string`
     - `Kernel() configcontract.KernelConfiguration`
     - `Http() configcontract.HttpConfiguration`
     - `Cli() configcontract.CliConfiguration`
 - [`type Environment`](../../config/environment.go)
     - [`NewEnvironment(configcontract.EnvironmentSource) (*Environment, error)`](../../config/environment.go)
+    - [`All() map[string]string` / `Get(key string) (string, bool)`](../../config/environment.go) — the loaded `.env` keys, and one of them with the presence flag that tells an empty value apart from an absent one
 - [`type EnvironmentSource`](../../config/environment_source.go)
     - [`NewEnvironmentSource(fs.FS, string) *EnvironmentSource`](../../config/environment_source.go)
+- [`type Parameter`](../../config/parameter.go), [`type ParameterMap`](../../config/parameter.go)
+    - [`NewParameter(environmentKey string, environmentValue any, value any, isDefault bool) *Parameter`](../../config/parameter.go)
+- [`IntWithDefault(configParameter configcontract.Parameter, defaultValue int) int`](../../config/utility.go) — answers the default for a parameter that is absent **and** for one whose value does not parse as an integer
 
 ### Container helpers (`config`)
 
 - [`const ServiceConfig`](../../config/service_resolver.go)
 - [`ConfigMustFromContainer(containercontract.Container) configcontract.Configuration`](../../config/service_resolver.go)
+- [`ConfigMustFromResolver(containercontract.Resolver) configcontract.Configuration`](../../config/service_resolver.go) — the door a provider comes through, since a provider is handed a `Resolver` and not a `Container`; the form above delegates to it
 
 ### Environment variable keys (`config`)
 
@@ -280,6 +286,8 @@ func example() configcontract.Configuration {
 - [`EnvDevelopment`, `EnvProduction`](../../config/environment.go)
 - [`ModeHttp`, `ModeCli`](../../config/environment.go)
 - [`RoleWeb`, `RoleWorker`, `RoleAll`](../../config/environment.go)
+- [`RoleAllowsBackgroundWork(role string) bool`](../../config/process_role.go) — whether a process with this role should start outbox relays and message consumers. Melody itself gates nothing on the role: it is declared intent for application wiring to query
+- [`RoleAllowsHttp(role string) bool`](../../config/process_role.go) — informational in the same way; the runtime **mode**, not the role, decides whether the http kernel starts
 
 ### Contracts (`config/contract`)
 

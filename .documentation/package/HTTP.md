@@ -437,7 +437,12 @@ Where the list itself comes from is the application's business — a constant as
 * [`type SessionCookiePolicy`](../../http/contract/kernel.go)
 * [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
 * [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go)
+* [`type MethodPolicy`](../../http/contract/kernel.go) — the policy the section above calls "the `MethodPolicy` of the contract", declared beside the two policies listed here
 * [`type Middleware`](../../http/contract/middleware.go)
+* [`type RateLimiter`](../../http/contract/middleware.go), [`type RuntimeRateLimiter`](../../http/contract/middleware.go) — what a userland limiter implements, the second when it needs the runtime of the request it is deciding on
+* [`type MatchResult`](../../http/contract/router.go) — what the router answers a match with
+* [`type RequestContext`](../../http/contract/request_context.go) — the per-request identity resolved under `ServiceRequestContext`
+* [`type UrlGenerationRouteDefinition`](../../http/contract/url_generation_route_definition.go) — the narrower view of a route the url generator reads
 
 ### Core types and helpers (`http`)
 
@@ -471,6 +476,10 @@ Where the list itself comes from is the application's business — a constant as
     * [`RedirectFound`](../../http/response.go)
     * [`RedirectMovedPermanently`](../../http/response.go)
 
+* Cookies:
+    * [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name with a panic and creating the header map when the response carries none
+    * [`DeleteCookie(response httpcontract.Response, name string, path string) `](../../http/cookie.go) — the expiring counterpart; an empty path is read as `/`
+
 * Session:
     * [`RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error)`](../../http/session.go)
 
@@ -482,6 +491,7 @@ Where the list itself comes from is the application's business — a constant as
     * [`RouteRegistryMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
     * [`UrlGeneratorMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
     * [`RouterMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
+    * [`RequestContextMustFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) / [`RequestContextFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope and so takes a resolver rather than the container; the second answers nil where the first panics
 
 ### CORS (`http/cors`)
 
@@ -508,6 +518,10 @@ Where the list itself comes from is the application's business — a constant as
     * [`type CorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.Service`
     * [`CorsMiddleware`](../../http/middleware/cors.go) — deprecated, use `http/cors.Middleware`
     * [`DefaultCorsMiddleware`](../../http/middleware/cors.go) — deprecated, use `http/cors.DefaultMiddleware`
+    * [`NewCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.NewService`
+    * [`DefaultCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.DefaultService`
+    * [`RestrictiveCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.RestrictiveService`
+    * [`RestrictiveCors`](../../http/middleware/cors.go) — deprecated, use `http/cors.Restrictive`
 
 * Compression:
     * [`type CompressionConfig`](../../http/middleware/compression.go)
@@ -546,6 +560,8 @@ Where the list itself comes from is the application's business — a constant as
 
 * [`type FileServer`](../../http/static/file_server.go)
     * [`NewFileServer`](../../http/static/file_server.go)
+    * [`ServeReader`](../../http/static/file_server.go) — the path every request actually takes: it answers the status, the headers and the body as a reader the caller closes
+    * [`Serve`](../../http/static/file_server.go) — the whole-response form, with no caller of its own in the framework
 
 * [`type FileServerConfig`](../../http/static/option.go)
     * [`NewFileServerConfig`](../../http/static/option.go)

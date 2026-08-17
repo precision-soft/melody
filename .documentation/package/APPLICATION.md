@@ -213,6 +213,8 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
 - [`EventModule`](../../application/contract/event_module.go)
+- [`ProcessContext`](../../application/contract/process_context.go)  
+  The console counterpart of the http request context: the identity of one cli run — the generated process id every log record of the run is correlated under, and the moment the run started. It lives on the run's scope, installed by the cli entry point, so a scoped service resolves it exactly the way a request-scoped service resolves the request context; the root container never carries it, and an http process carries the request context instead.
 
 ### Types
 
@@ -229,12 +231,20 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`MiddlewareNameStatic`](../../application/http_middleware.go)
 - [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
 - [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
+- [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
+    - [`ProcessRoleMustFromContainer(serviceContainer)`](../../application/service_resolver.go)
+    - [`ProcessRoleMustFromResolver(resolver)`](../../application/service_resolver.go)
+- [`ServiceProcessContext`](../../application/service_resolver.go) — resolves to the console run's `ProcessContext`. The cli entry point installs it into the run's scope, so it takes a resolver rather than the container
+    - [`ProcessContextMustFromResolver(resolver)`](../../application/service_resolver.go)
+    - [`ProcessContextFromResolver(resolver)`](../../application/service_resolver.go) — the error-tolerant form, for code that runs on both process shapes: absence — an http process, the root container — answers nil
 
 ### Constructors
 
 - [`NewApplication(embeddedEnvFiles, embeddedPublicFiles)`](../../application/application_new.go) — both parameters are `fs.FS`, so the compiler never objects to them being swapped: the **env** files come first and the **public** files second, matching the `melody_env_embedded` and `melody_static_embedded` build tags in that order.
 - [`NewRuntimeFlags(mode)`](../../application/cli.go)
 - [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
+- [`ParseRuntimeFlagsWithRole(defaultMode, defaultRole)`](../../application/cli.go) — the form `ParseRuntimeFlags` delegates to. An explicit `--role`/`-role` wins over the configured default; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
+- [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently
 - [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)
 
 ### Application lifecycle
@@ -242,12 +252,14 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`(*Application).Boot()`](../../application/application.go)
 - [`(*Application).Run(ctx)`](../../application/application.go)
 - [`(*Application).Close()`](../../application/application_close.go)
+- [`(*Application).ProcessRole()`](../../application/application.go) — the role this process resolved to, the same string `ServiceProcessRole` answers
 
 ### Registration APIs
 
 - [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go) — accepts exactly one name in this major, `loggingcontract.LoggingConfigurationName`; any other name panics at registration, because nothing can ever consume it
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
 - [`(*Application).RegisterService(name, factory)`](../../application/application_container.go)
+- [`(*Application).RegisterScopedService(serviceName, provider)`](../../application/application_container.go) — the scoped counterpart: what it registers is built on the first resolution through a scope and closed when that scope closes
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)
 - [`(*Application).RegisterModuleProvider(provider)`](../../application/application_module.go) — registers every module returned by a [`ModuleProvider`](../../application/contract/module.go). `RegisterModule` also expands a module that additionally implements `ModuleProvider`, so a single registration can contribute a whole group of capability-modules.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)

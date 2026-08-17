@@ -502,6 +502,10 @@ Where the list itself comes from is the application's business — a constant as
 * [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
 * [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go)
 * [`type Middleware`](../../http/contract/middleware.go)
+* [`type RateLimiter`](../../http/contract/middleware.go), [`type RuntimeRateLimiter`](../../http/contract/middleware.go) — what a userland limiter implements, the second when it needs the runtime of the request it is deciding on
+* [`type MatchResult`](../../http/contract/router.go) — what the router answers a match with
+* [`type RequestContext`](../../http/contract/request_context.go) — the per-request identity resolved under `ServiceRequestContext`
+* [`type UrlGenerationRouteDefinition`](../../http/contract/url_generation_route_definition.go) — the narrower view of a route the url generator reads
 
 ### Core types and helpers (`http`)
 
@@ -541,6 +545,10 @@ Where the list itself comes from is the application's business — a constant as
     * [`RedirectFound`](../../http/response.go)
     * [`RedirectMovedPermanently`](../../http/response.go)
 
+* Cookies:
+    * [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name with a panic
+    * [`DeleteCookie(response httpcontract.Response, name string, path string) `](../../http/cookie.go) — the expiring counterpart; an empty path is read as `/`
+
 * Session:
     * [`RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error)`](../../http/session.go)
 
@@ -576,6 +584,10 @@ Where the list itself comes from is the application's business — a constant as
     * [`type CorsConfig`](../../http/middleware/cors.go)
     * [`CorsMiddleware`](../../http/middleware/cors.go)
     * [`DefaultCorsMiddleware`](../../http/middleware/cors.go)
+    * [`NewCorsConfig`](../../http/middleware/cors.go)
+    * [`DefaultCorsConfig`](../../http/middleware/cors.go)
+    * [`RestrictiveCorsConfig`](../../http/middleware/cors.go)
+    * [`RestrictiveCors`](../../http/middleware/cors.go)
 
 * Compression:
     * [`type CompressionConfig`](../../http/middleware/compression.go)
@@ -613,6 +625,8 @@ Where the list itself comes from is the application's business — a constant as
 
 * [`type FileServer`](../../http/static/file_server.go)
     * [`NewFileServer`](../../http/static/file_server.go)
+    * [`ServeReader`](../../http/static/file_server.go) — the path every request actually takes: it answers the status, the headers and the body as a reader the caller closes
+    * [`Serve`](../../http/static/file_server.go) — the whole-response form
 
 * [`type FileServerConfig`](../../http/static/option.go)
     * [`NewFileServerConfig`](../../http/static/option.go)
