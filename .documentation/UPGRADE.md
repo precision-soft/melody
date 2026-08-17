@@ -844,7 +844,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Container: a closed container refuses registrations and overrides
 
-**What changed.** [`Register`](../container/container.go) and `OverrideInstance`/`OverrideProtectedInstance` on a closed container return the container-is-closed error, the way `RegisterScoped` always has. The read paths are untouched: already-built instances keep being served during shutdown.
+**What changed.** [`Register`](../container/container_registrar.go) and `OverrideInstance`/`OverrideProtectedInstance` on a closed container return the container-is-closed error, the way `RegisterScoped` always has. The read paths are untouched: already-built instances keep being served during shutdown.
 
 **Symptom.** Shutdown-adjacent code that registered or overrode after `Close()` — and silently produced a service nothing would build, or a value nothing would close — now receives an error; the `Must*` forms panic.
 

@@ -226,6 +226,26 @@ run_parity_checks() {
         "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/parity.sh"
 }
 
+# what every document of a major cites, against what that major declares. The documentation check above asks
+# whether a symbol a major ships is documented; it structurally cannot ask the opposite, and the opposite is
+# where a document rots — an upgrade note that keeps naming a method the code no longer has reads as correct
+# to every check in this file. It also reaches the documents nothing else does: the per-integration README
+# and CHANGELOG are outside `<major>/.documentation`, so neither the documentation check nor the parity check
+# has ever looked at them.
+#
+# The --samples pass is deliberately not passed here. It type-checks the fenced go blocks that are whole
+# programs and therefore needs a Go toolchain, which on this project lives in the development container,
+# while this lane runs on the host like its two neighbours. Run it there when documents change:
+# `./dc exec dev bash -lc '.dev/validate/citation.sh --samples'`.
+run_citation_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/citation.sh" ]]; then
+        fail "the citation check is missing or not executable: .dev/validate/citation.sh. It is not optional — the ci job invokes it directly, so a skip here reports a pass locally against a lane that fails in ci, and it is the only lane that asks whether what the documents claim exists at all; restore it or chmod +x it"
+    fi
+
+    run_section "melody document citations against the code of every major (mirrors the ci citation job)" "${TAG_VALIDATE}" "citation" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/citation.sh"
+}
+
 # the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
 # actually drives a booted application over the wire, and that is the only place a whole class of defect shows
 # up at all — a middleware ordering that only matters once a real request traverses the chain, a route the
@@ -429,6 +449,8 @@ main() {
 
         run_parity_checks
 
+        run_citation_checks
+
         run_race_go_suites
 
         if [[ "true" = "${SKIP_LIVE_BOOLEAN}" ]]; then
@@ -490,6 +512,11 @@ main() {
     # makes the unstaged v2 wrong, so gating on the staged paths would skip the check in the one commit that
     # introduced the divergence. It reads the tree, needs no container and costs seconds.
     run_parity_checks
+
+    # ungated for the same reason, in its own form: a citation goes stale when the CODE moves, and the
+    # commit that moves it stages a .go file while the document that names it stays untouched. Gating on
+    # the staged paths would skip the check in exactly the commit that broke the claim.
+    run_citation_checks
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"
     success "validation completed"

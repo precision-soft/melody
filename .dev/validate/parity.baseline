@@ -127,21 +127,11 @@ v1:v2 ~ test-target ~ integrations/bunorm/pgsql ~ .TestProviderOpenWithRetryAndN
 v1:v2 ~ dependency-source ~ integrations/bunorm/mysql ~ github.com/joho/godotenv // indirect ~ recorded against the older melody floor this module declares; E4-06
 v1:v2 ~ dependency-source ~ integrations/bunorm/pgsql ~ github.com/joho/godotenv // indirect ~ recorded against the older melody floor this module declares; E4-06
 
-# E4-11. The upgrade notes of the integrations ported in earlier batches never reached the v2 document.
-# Fourteen sections, plus the one whose v2 title is narrower because the cron half had not arrived yet.
-# They are the work of Etapa 4 step 5; every line here disappears as that step lands.
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Boot-level: `websocket/v3` refuses a zero `IdleTimeout` ~ E4-11, and websocket is a v3-only integration
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Bunorm migrate: the held-lock refusal names the resource and the remedy ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### bunorm: the empty migrate module refuses the boot ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cache and cron: a recovered panic carries its cause ~ E4-11, retitled on v2 to the cache half alone
-v1:v2 ~ document-target ~ . ~ UPGRADE.md ### Cache: a recovered panic carries its cause ~ E4-11, the narrower title the cron half will widen
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: a clean shutdown is not a job failure ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: a module with runner commands and no configuration refuses the boot ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### cron: an entry routed to another crontab file refuses the in-process runner ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: a relative path from a parameter is anchored at the project directory ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: `Configuration.Entries` hands out copies ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Cron: the generator answers a document on every outcome, and a job's output goes to the journal ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Migrate: the json document is not shaped by `--verbose`, and its keys are stable ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### rueidis: a wrong-typed credential refuses the boot, an empty prefix refuses the wipe, a closed backend refuses the call ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Rueidis: the counter refusals of the cache backend are named ~ E4-11
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Rueidis: the rate limiter reports a store failure by default ~ E4-11
+# the one upgrade note that is not a porting residue. Every other section E4-11 counted has landed on v2 and
+# its line here is gone; this one stays, and stays for a different reason than the one it was written under.
+#
+# Measured: the websocket integration has a v3 directory and no other, and its go.mod requires melody/v3, so
+# neither a v1 application nor a v2 one can import the module the note is about. Carrying it to v2 would
+# document a breaking change no reader of that major can encounter. v1 carries it for the same reason it
+# should not, which is a question for the sealing stage rather than for a port.
+v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Boot-level: `websocket/v3` refuses a zero `IdleTimeout` ~ the note is about a module that ships on v3 alone, so no reader of either of these majors can meet it

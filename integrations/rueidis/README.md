@@ -254,20 +254,30 @@ Context: the context-less mutators (`Put`/`Delete`/`DeleteByUser`/`PurgeExpired`
 package main
 
 import (
-	rueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
-	"github.com/precision-soft/melody/v3/security"
-	securitycontract "github.com/precision-soft/melody/v3/security/contract"
+	melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
+	"github.com/precision-soft/melody/v3/application"
+	"github.com/precision-soft/melody/v3/container"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/redis/rueidis"
 )
 
-const ServiceTokenStore = "security.token_store"
+const (
+	ServiceRedisClient = "service.redis.client"
+	ServiceTokenStore  = "security.token_store"
+)
 
-func registerTokenStore(builder containercontract.Builder, client redis.Client) {
-	builder.Set(ServiceTokenStore, func(runtimeInstance runtimecontract.Runtime) any {
-		return rueidis.NewTokenStore(
-			client,
-			rueidis.WithTokenStorePrefix("myapp:token"),
-		)
-	})
+func registerTokenStore(app *application.Application) {
+	app.RegisterService(
+		ServiceTokenStore,
+		func(resolver containercontract.Resolver) (*melodyrueidis.RedisTokenStore, error) {
+			client := container.MustFromResolver[rueidis.Client](resolver, ServiceRedisClient)
+
+			return melodyrueidis.NewTokenStore(
+				client,
+				melodyrueidis.WithTokenStorePrefix("myapp:token"),
+			), nil
+		},
+	)
 }
 ```
 

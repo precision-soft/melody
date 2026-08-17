@@ -4,7 +4,10 @@
 /*.zip
 /*.rar
 /*Zone.Identifier
-/.temp/
+# scratch, in any module rather than at the root alone: the citation band type-checks the code samples of a
+# document by writing them into `<major>/.temp/`, which has to be inside that major's module for its own
+# imports to resolve, and has to be ignored so the bands that enumerate the tree never see it
+.temp/
 /var/
 /application/var/
 /diff*.txt

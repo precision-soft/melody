@@ -1,0 +1,102 @@
+# The citations that resolve to no declaration on purpose, one line per fact.
+#
+#   major ~ dimension ~ key ~ reason
+#
+# Read by .dev/validate/citation.sh. This is not a suppression list: every line is a claim the run has to
+# satisfy. A citation with no line here fails the check, and a line here that matched nothing fails it just
+# as loudly — the citation it excuses now resolves, so the line has to go. Without that second half the
+# list accumulates dead entries and eventually excuses a document that really did start naming something
+# the code stopped having, which is the single failure this band exists to prevent.
+#
+# Wildcards are refused rather than supported. An entry written as a pattern grows silently to cover the
+# next citation, which is the whole failure it exists to prevent.
+#
+# Fields are trimmed, so the columns may be aligned. The reason is mandatory: a line whose reason is empty
+# is a line nobody can review.
+#
+# v3 carries citations of its own and has no lines here. It is not gated — its documents are the next
+# stage's work — and the run reports its findings under a count rather than as failures.
+#
+# ------------------------------------------------------------------------------------------------------
+# the standard library, under a name melody also uses
+#
+# The qualified dimension asks whether a citation whose qualifier is one of this major's package names
+# resolves in this major. melody declares packages called `http`, `runtime` and `debug`, and the standard
+# library declares `net/http`, `runtime` and `runtime/debug`, so a document writing `http.Flusher` about
+# the standard library is indistinguishable from one writing `http.Kernel` about melody — by name alone,
+# which is all a document offers. These are the second kind, read one by one at the site.
+#
+# Widening the reader to accept any standard library symbol was considered and refused: it needs either a
+# Go toolchain, which this band deliberately does not require, or a hand-kept list of every exported name
+# in the standard library, which is a larger and less honest list than the eight lines below.
+# ------------------------------------------------------------------------------------------------------
+
+v1 ~ symbol ~ debug.Stack            ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
+v1 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the streaming response asserts on the writer
+v1 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
+v1 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
+v1 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
+v1 ~ symbol ~ http.Server            ~ net/http.Server, whose read and write deadlines an accepted websocket leaves behind
+v1 ~ symbol ~ runtime.FuncForPC      ~ runtime.FuncForPC, named where a frame is resolved to a function name
+v1 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
+
+v2 ~ symbol ~ debug.Stack            ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
+v2 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the streaming response asserts on the writer
+v2 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
+v2 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
+v2 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
+v2 ~ symbol ~ runtime.FuncForPC      ~ runtime.FuncForPC, named where a frame is resolved to a function name
+v2 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
+
+# ------------------------------------------------------------------------------------------------------
+# the third-party client, under the name of the integration that wraps it
+#
+# An integration is named after the library it binds, so `rueidis.` in its documents is the driver as often
+# as it is melody's binding. The same collision waits for every future integration written this way.
+# ------------------------------------------------------------------------------------------------------
+
+v1 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
+v2 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
+
+# ------------------------------------------------------------------------------------------------------
+# the absences the documents themselves announce
+#
+# An upgrade note and a changelog entry exist to say that something is gone. The symbol has to be named for
+# the note to be usable, and it has to be absent for the note to be true, so these are the one class where
+# a citation resolving to nothing is the document being correct. The reason names the successor, so that a
+# line here dies if the removal is ever reverted.
+# ------------------------------------------------------------------------------------------------------
+
+v1 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
+v1 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
+v1 ~ symbol ~ security.Sha256Hex       ~ replaced in the example by HashPassword/MustHashPassword; the changelog entry names it to say so
+
+v2 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
+v2 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
+
+# ------------------------------------------------------------------------------------------------------
+# the umbrella README of an integration, which documents all three bindings
+#
+# `integrations/rueidis/README.md` and `integrations/cron/README.md` are the READMEs of the v1 modules and
+# also the documents all three bindings link back to, so each describes capabilities that ship in the v3
+# binding alone — and labels them, in the section heading with `(v3)` or in the sentence itself with "ships
+# in the v3 binding only". Judged at the site rather than by the file's directory: every citation below is
+# true of the integration and false of v1, and the document is the thing that says which.
+# ------------------------------------------------------------------------------------------------------
+
+v1 ~ symbol ~ cron.TemplateNameK8s                 ~ the k8s template constant; the sentence naming it says "in the v3 binding only"
+v1 ~ symbol ~ http.ServerSentEventHub              ~ the core hub the backplane fans out; declared on v3 only, and the section is labelled (v3)
+v1 ~ symbol ~ rueidis.NewServerSentEventBackplane  ~ the backplane entry point; the line says it ships in the v3 binding only
+v1 ~ symbol ~ rueidis.TokenStoreMustFromResolver   ~ the v3 binding's resolver helper, under the token store section labelled (v3)
+v1 ~ symbol ~ security.NewInMemoryTokenStore       ~ the core store the v3 token store replaces; declared on v3 only
+
+# ------------------------------------------------------------------------------------------------------
+# the code sample that is a template rather than a program
+#
+# Only reported with --samples. A sample importing `your/module/...` is telling the reader to substitute
+# their own module path, which is the sample being correct and is also the one thing a compiler cannot be
+# told. Everything else the pass reports is a document that would not compile for a reader who copied it.
+# ------------------------------------------------------------------------------------------------------
+
+v1 ~ sample ~ integrations/bunorm/migrate/README.md block 2    ~ imports your/module/database, the placeholder the reader replaces with their own module path
+v2 ~ sample ~ integrations/bunorm/migrate/v2/README.md block 2 ~ imports your/module/database, the placeholder the reader replaces with their own module path

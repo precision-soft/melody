@@ -122,6 +122,30 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None for the ordinary case, which is the one this repairs: a component that drains through a lazily-resolved handle at `Close` now finds it alive. If a service genuinely must close after another, express it as a dependency by resolving that other service inside its provider.
 
+### Rueidis: the rate limiter reports a store failure by default
+
+**What changed.** `rueidis.RateLimiter` writes a record when the store fails and no error observer was given. `Allow` returns a bool and `Reset` returns nothing, so under the fail-closed default a redis outage refused every call and reached no channel at all — measured against a dead store: no record, no error, no metric, and a successful login that should have cleared an account's lockout left it locked with no trace. The record goes through the request's own logger where there is one and through the emergency logger otherwise, at error for a store failure and warning for the caller's own cancellation, and the error is marked already-logged so the http middleware and listener do not file a second copy.
+
+**Symptom.** A deployment whose redis goes down now sees `rate limiter store failure` records where it previously saw silence — one per call, which during an outage is one per request. That is the point of the change, but it is a volume an operator should know about before it arrives. Nothing else changes: the refusals themselves, the failure mode and the returned values are exactly what they were.
+
+**Remedy.** None required. To route these somewhere of your own instead — a counter, a sampled channel — pass `WithRateLimiterOnError`, which replaces the record rather than adding to it and leaves the error unmarked, restoring the previous behaviour of the http path exactly.
+
+### Rueidis: the counter refusals of the cache backend are named
+
+**What changed.** On an open backend with a valid key, three distinct mistakes by the caller — a delta that overflows when negated, a counter driven past the int64 ceiling, an increment over a payload that is not a canonical number — used to arrive under one message, `cache counter operation failed`, which is also the answer to a genuine store outage. They now carry the same three messages the in-memory backend has always used: `delta overflows int64 when negated`, `cache increment overflow`, `cache value is not a valid int64`. The redis error stays the cause, and a store error matching none of them keeps the generic message.
+
+**Symptom.** Code matching on the text of a counter refusal sees the specific message instead of the generic one. `errors.Is` and `errors.As` over the redis error are unaffected — the cause chain is unchanged.
+
+**Remedy.** Match on the specific message, or better, on the cause. The generic message from here on means what it says: the store failed.
+
+### Bunorm migrate: the held-lock refusal names the resource and the remedy
+
+**What changed.** `<prefix>:migrate` wraps bun's lock error in a melody error naming the manager label, the lock table and the `<prefix>:unlock` command, with bun's error kept as the cause. It previously travelled as bun's own error, carrying no melody context at all.
+
+**Symptom.** Code matching the refusal on the text `already locked` no longer matches at the top of the chain: `Error()` answers `migrate: the migration lock is held; another migration is running, or a crashed one left it behind`.
+
+**Remedy.** Match through the chain — `errors.Is` and `errors.As` reach bun's error exactly as before — or read the `manager`, `locksTable` and `unlockCommand` keys of the context, which is what the wrap exists to provide.
+
 ### Bunorm: bun's own diagnostics go to the journal
 
 **What changed.** Opening a connection through the mysql or pgsql provider routes bun's package-level logger into the application's journal, once per process, through the new `bunorm.RouteDiagnostics`. Bun's reports of a declaration mistake — an unknown struct tag option, an unknown `on_update` or `on_delete` rule, a query carrying arguments and no placeholders — arrive as warning records under the message `bun diagnostic` with the line in the context.
@@ -129,6 +153,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 **Symptom.** Those lines stop appearing on standard error and start appearing in the journal. An operator or a test grepping standard error for `WARN: bun:` finds nothing.
 
 **Remedy.** Read them from the journal, filtering on the `bun diagnostic` message. One line is deliberately unaffected and stays on standard error: the mysql dialect writes `can't discover MySQL version` through the **standard library's** default logger rather than bun's, so routing it would mean taking `log.SetOutput` for the whole process — every dependency and your own `log` calls with it. That is the application's decision; take it in your composition root if you want it, as the mysql readme shows.
+
+### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
+
+**What changed.** Every module of the `bunorm` family — the manager, `mysql`, `pgsql` and the three `migrate` modules — requires `github.com/uptrace/bun v1.2.17` and, where they carry one, `dialect/mysqldialect`, `dialect/pgdialect` or `driver/pgdriver` at the same version. v1.2.16 swallowed the failure of a migration read from a `.sql` file: the deferred `conn.Close()` / `tx.Rollback()` overwrote the exec error with its own nil return, so `db:migrate` printed `[success]`, exited 0 and marked a migration applied that never ran.
+
+**Symptom.** If your application pins a bun dialect or driver of its own, the build now selects `bun v1.2.17` through this dependency while your dialect stays where it was, and the process **panics at init**: `mysqldialect and Bun must have the same version: v1.2.16 != v1.2.17`. The dialect packages check this themselves; it is not a melody rule.
+
+**Remedy.** Move your own `github.com/uptrace/bun/...` requirements to `v1.2.17` in the same change — `go get github.com/uptrace/bun@v1.2.17 github.com/uptrace/bun/dialect/mysqldialect@v1.2.17` and the equivalent for `pgdialect` / `pgdriver`. Applications that declare no bun dependency of their own need no action.
 
 ### Security: `NewRoleHierarchyVoter` takes any `Voter` as its delegate
 
@@ -170,6 +202,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None. If you were compensating for the old answer by filtering the list yourself, the compensation is now redundant. Note that the kernel adds the synthetic `OPTIONS` and `HEAD` its `MethodPolicy` allows on top of this set when it writes the header itself.
 
+### Cron: a relative path from a parameter is anchored at the project directory
+
+**What changed.** In `melody:cron:generate`, a relative path read from a parameter — `melody.cron.destination_file`, `melody.cron.logs_dir`, `melody.cron.heartbeat_path` — is resolved against `%kernel.project_dir%`, the way `MELODY_LOG_PATH`, `kernel.logs_dir` and `kernel.cache_dir` have always been. A relative path passed as a cli flag still resolves against the working directory.
+
+**Symptom.** A deployment whose cron parameters carry relative paths and whose generator runs from a directory other than the project root writes its crontab and its log directory elsewhere than before — where they were always meant to go. The shipped defaults carry `%kernel.project_dir%` already and are unaffected, as are absolute paths and every flag.
+
+**Remedy.** None to apply if the working directory was the project directory, which is the ordinary case. Otherwise either accept the new location or write the parameter as an absolute path — a value already absolute is never re-anchored. A configuration whose `Kernel()` names no project directory keeps the previous behaviour.
+
 ### Http/static: in the embedded mode the cache validators change shape
 
 **What changed.** An `embed.FS` reports the zero instant for every file it holds, so the entity tag used to be built out of that constant — degenerating into size alone, identical across every rebuild — and `Last-Modified` was rendered as `Mon, 01 Jan 0001 00:00:00 GMT`. The tag of an undated file is now derived from its size and `version.BuildVersion()`, and `Last-Modified` is not emitted at all when the filesystem carries no time. Nothing changes for the filesystem mode, where files have real modification times.
@@ -185,6 +225,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 **Symptom.** A release build whose `MELODY_PUBLIC_DIR` names a directory the `//go:embed` directive did not pack now fails at construction. It used to boot cleanly and answer `404` for every asset in the binary, which is the failure this refusal replaces.
 
 **Remedy.** Align the key with what the build embeds, or leave it unset to serve from the root of the embedded filesystem. The key is deliberately not ignored in this mode: the join with the public directory is what confines a stripped prefix to it.
+
+### Cron: `Configuration.Entries` hands out copies
+
+**What changed.** `Entries` copies all the way down — the list, each `*ScheduledCommand` and each `*EntryConfig` behind it, schedule included. Each entry the generator expands also carries its own `*Schedule`.
+
+**Symptom.** Code that reconfigured a registration by writing through what `Entries` returned — `configuration.Entries()[0].Config.Schedule.Hour = "23"` — no longer changes anything. A `Template.Render` implementation that calls the mutating `Schedule.Defaults()` on the schedule it was handed no longer rewrites the registered one for the rest of the process, which is what it used to do.
+
+**Remedy.** Register the entry with the configuration it should have. `Entries` is an inspector; the registry is written through `Schedule`.
 
 ### Debug: the `--build` sweep exits non-zero over the services it could not build
 
@@ -234,6 +282,22 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None: this is what the manager's own comment and `SERIALIZER.md` promised. A client that wants nothing at all still gets its 406 by refusing everything — `*/*;q=0`.
 
+### Migrate: the json document is not shaped by `--verbose`, and its keys are stable
+
+**What changed.** Under `--format=json`, `db:migrate`, `db:rollback`, `db:status`, `db:init` and `db:unlock` collect every block at any verbosity: verbosity remains a rendering decision about the plain text alone, which is what the readme always said. The document keys are now stable names rather than display headings — `data.migrations.applied`, `.pending`, `.rolledBack` — and `data.database.database` is json `null` when the connection reports no current database, where it used to be the rendered string `"<null>"`. The text blocks keep their headings and their `<null>`.
+
+**Symptom.** `db:migrate --format=json` without `-v` answers a populated `data` where it answered `{}`. A consumer reading `data.migrations["APPLIED MIGRATIONS"]` or `data.migrations.APPLIED` finds nothing under those keys. A json run performs the database-identity query that a text run performs only under `--verbose`.
+
+**Remedy.** Read `data.migrations.applied`, `data.migrations.pending` and `data.migrations.rolledBack`; test `data.database.database` for null rather than for the string `"<null>"`. Nothing needs `--verbose` any more to fill the document.
+
+### Cron: the generator answers a document on every outcome, and a job's output goes to the journal
+
+**What changed.** `melody:cron:generate --format=json` renders one envelope whatever happened: a failure travels as `error.code = "cron.generateFailed"` with its message as the cause, and `data.writes` names the destinations already written before it stopped. Under the in-process runner, a scheduled command's own output no longer reaches the process stdout — it is captured and filed as one record per run that printed anything, naming the command and the run id, capped at 64 KiB.
+
+**Symptom.** A pipeline that read an empty stream from a failed generation now reads a document with an error in it, and the command still exits non-zero. Anything tailing the stdout of `melody:cron:run` for a job's own printed output finds it in the log instead, under `cron: scheduled command output`.
+
+**Remedy.** Read `error` in the generator's document rather than inferring failure from an empty stream. For the runner, read the journal; a job that must write to a stream of its own should open it itself rather than relying on the command writer.
+
 ### Validation: a rule-declaration fault is an error, and its context stays out of the response
 
 **What changed.** Three validation codes name a mistake in the DECLARATION rather than in the submitted value: `unknownRule`, `invalidRuleSyntax` and `invalidPattern`. A 400 carrying any of them is now recorded at **error** instead of the warning a deliberate 4xx earns, and the internal context of those entries — `rule`, `params`, `cause` — is stripped from the response body while staying in full in the record. Every other validation error is unchanged in both places, so the bounds a numeric constraint reports still reach the client. The refusal itself is still a field error with the same status and the same code: the validator continues to fail closed on a rule it cannot honour rather than passing the value.
@@ -250,9 +314,9 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** If an alert was tuned around that volume, retune it; the records it was counting were the session ending, which `SESSION.md` and `HTTP.md` both describe as the normal outcome.
 
-### Cache: a recovered panic carries its cause
+### Cache and cron: a recovered panic carries its cause
 
-**What changed.** The recovery boundary of `cache.Remember` hands the panic value on as the CAUSE of the error it fabricates, and captures the stack of the goroutine that raised it. The context keys it already wrote — `panic`, `panicValue` — are unchanged; `panicStack` is added beside them.
+**What changed.** The recovery boundaries of `cache.Remember`, of the cron runner and of the bunorm manager registry hand the panic value on as the CAUSE of the error they fabricate, and capture the stack of the goroutine that raised it. The context keys they already wrote — `panic`, `panicValue` — are unchanged; `panicStack` is added beside them.
 
 **Symptom.** `errors.Is` and `errors.As` on the returned error now reach the failure underneath, where before they stopped at the fabricated wrapper. Code that relied on those calls answering false for a panicked callback will now see them answer true.
 
@@ -362,6 +426,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** A deployment that wants the hour says `3600`; the value now means what it reads like.
 
+### Cron: a module with runner commands and no configuration refuses the boot
+
+**What changed.** `cron.NewModule`'s `RegisterCliCommands` panics when `RunnerCommands` are supplied without a `Configuration`/`ConfigurationFactory`, and when a factory returns nil. Until now the module silently registered nothing and the wiring error surfaced as "unknown command" at invocation.
+
+**Symptom.** A wiring that carried runner commands but never set the configuration now fails at boot naming the missing configuration.
+
+**Remedy.** Set `Configuration` (or a factory that returns one); a parameters-only module — no runner commands, no generator — keeps working without one.
+
 ### Cache: the key grammar is the contract's, on both backends
 
 **What changed.** `cachecontract.Backend` now states the key grammar — non-empty, no spaces, no newlines, at most 1024 bytes — and the in-memory backend enforces it with the same refusals the redis backend always answered. The two implementations of one promise refused different keys.
@@ -377,6 +449,22 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 **Symptom.** `pgsql.NewTimeoutConfig(connect)` no longer compiles — the constructor takes the three durations, the mysql signature. Behaviourally, the effective read/write deadlines move from 10s/5s to the documented 30s/30s.
 
 **Remedy.** `NewTimeoutConfig(connect, 0, 0)` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines where request traffic needs them. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
+
+### rueidis: a wrong-typed credential refuses the boot, an empty prefix refuses the wipe, a closed backend refuses the call
+
+**What changed.** The provider reads user and password through `MustString`, so a wrong-typed credential panics at boot naming the parameter instead of silently connecting with no credential at all. `ClearByPrefixCtx("")` is refused like the empty key everywhere else, instead of wiping the whole namespace. `Backend.Close`/`BackendService.Close` mark the backend closed and later operations refuse — the in-memory backend's answer — while the shared client stays open.
+
+**Symptom.** A boot that connected with a silently-empty password now panics `cannot convert parameter value to string` naming the parameter. A caller using `ClearByPrefix("")` as a synonym of `Clear` now receives `cache key is empty`. An operation after `Close` now receives `cache backend is closed`.
+
+**Remedy.** Register the credential as a string; call `Clear` where the whole namespace is meant; order teardown so nothing uses a backend after closing it — the wrapped client, if shared, is unaffected.
+
+### cron: an entry routed to another crontab file refuses the in-process runner
+
+**What changed.** `EntryConfig.DestinationFile` joins `Command` and `Instances` in `NewRunnerCommand`'s construction refusal: an entry routed to another crontab addresses an external scheduler, and accepted by the runner as well it executed twice whenever the generated manifests were live.
+
+**Symptom.** A boot that used to succeed panics with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
+
+**Remedy.** Keep the routed entry out of the runner's `Configuration` (schedule it only for the generator), or drop its `DestinationFile` if in-process execution is the intent.
 
 ### Security: a typed nil is refused where a nil is refused
 
@@ -756,7 +844,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Container: a closed container refuses registrations and overrides
 
-**What changed.** [`Register`](../container/container.go) and `OverrideInstance`/`OverrideProtectedInstance` on a closed container return the container-is-closed error, the way `RegisterScoped` always has. The read paths are untouched: already-built instances keep being served during shutdown.
+**What changed.** [`Register`](../container/container_registrar.go) and `OverrideInstance`/`OverrideProtectedInstance` on a closed container return the container-is-closed error, the way `RegisterScoped` always has. The read paths are untouched: already-built instances keep being served during shutdown.
 
 **Symptom.** Shutdown-adjacent code that registered or overrode after `Close()` — and silently produced a service nothing would build, or a value nothing would close — now receives an error; the `Must*` forms panic.
 
@@ -915,106 +1003,6 @@ sessionInstance.Set("profile", profile)
 
 **Remedy.** None for a client reading the fields; a client that hardcoded the error content type sends an accept header for it, or none at all.
 
-### Compile-level: `config/contract.HttpConfiguration` gained `SessionTombstoneRetention`
-
-**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `SessionTombstoneRetention() time.Duration`, how long a deleted session id keeps refusing a write-back. The framework's own implementation reads it from `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`), five minutes by default — the constant the window used to be — and refuses zero and negative at boot, because a window that refuses nothing is not a shorter window but a disarmed logout defence.
-
-**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method SessionTombstoneRetention`.
-
-**Remedy.** Implement it. Returning `config.DefaultSessionTombstoneRetention` keeps the behaviour the interface had without the method:
-
-```go
-func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Duration {
-	return config.DefaultSessionTombstoneRetention
-}
-```
-
-### Compile-level: `config/contract.HttpConfiguration` gained `ShutdownTimeout`
-
-**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `ShutdownTimeout() time.Duration`, how long a stopping http server waits for the requests it has already admitted before cutting them. The framework's own implementation reads it from `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), five seconds by default — the constant the wait used to be — and refuses zero and negative at boot, because only a positive value can describe a wait.
-
-**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method ShutdownTimeout`.
-
-**Remedy.** Implement it. Returning `config.DefaultHttpShutdownTimeout` keeps the behaviour the interface had without the method:
-
-```go
-func (instance *CustomHttpConfiguration) ShutdownTimeout() time.Duration {
-	return config.DefaultHttpShutdownTimeout
-}
-```
-
-### Debug: `NewMiddlewareCommand` takes a description provider and a build provider
-
-**What changed.** `debug:middleware` describes the pipeline by default — selection, ordering and the function names captured at registration, no factory run — and builds the real chain only under the new `--build` flag, with a recover that renders a failing or panicking factory as a `debug.buildFailed` envelope instead of a dead process. The constructor therefore takes the two channels: `debug.NewMiddlewareCommand(descriptionProvider, buildProvider)`, typed `MiddlewareDescriptionProvider` and `MiddlewareBuildProvider`.
-
-**Symptom.** An out-of-tree caller of `debug.NewMiddlewareCommand` with the old single chain provider stops compiling.
-
-**Remedy.** Hand the two providers. For a pipeline assembled through `pipeline.Builder`, `Describe` answers the description half without building and `Build` remains the build half; a framework-booted application wires both automatically.
-
-### Debug: `debug:container` lists without building; `--build` is the sweep
-
-**What changed.** The bare listing runs no provider — names, lifetimes, built state and declared types, grouped into container and scoped blocks — where it used to resolve every windowed service, opening every pool and client of the application from a console command. The full diagnostic sweep — every service built, failures with cause chains — moved behind `--build`; `debug:container <name>` still builds, and a scoped name now resolves through the run's own scope instead of answering `debug.notFound`.
-
-**Symptom.** A consumer of the bare listing's json no longer receives `typeName`-with-error items — the items carry `name`, `lifetime`, `isBuilt`, `typeName` — and a table consumer sees two blocks. A pipeline that used the bare listing as a health sweep no longer probes anything.
-
-**Remedy.** Pass `--build` where the sweep was the point; keep the bare listing where the question was "what is registered".
-
-### Application: the kernel's default listeners register at the end of `Boot`
-
-**What changed.** The profiler (debug mode), the response normalizer, the terminate access log and the exception listener (when no error handler was installed by boot) register at the end of `Boot` in every process shape, not inside the http run. They are inert where no kernel event is dispatched, and `debug:events` now shows them in a console process.
-
-**Symptom.** A kernel event dispatched between boot and the http run — or from a console process — now reaches the default listeners; `debug:events` output grew the kernel listeners it used to miss.
-
-**Remedy.** Nothing for the ordinary application. A process that dispatched kernel events manually before `runHttp` and relied on nothing listening must account for the listeners existing from `Boot` on.
-
-### Debug: `debug:version` no longer reports melody's version as the application's
-
-**What changed.** The framework wiring stops filling the `application` row with `melody`'s own build version; the row reads the process-wide declaration made through `cli/output.SetApplicationVersion` and prints `<unknown>` without one.
-
-**Symptom.** The `application` row prints `<unknown>` where it printed the framework version.
-
-**Remedy.** Call `output.SetApplicationVersion(version)` once in the composition root's main, with the version the application keeps wherever it keeps it — its own ldflags variable or its environment.
-
-### Http: one record per handler failure, at the level of its status class
-
-**What changed.** The kernel's handler-error writers read and set the already-logged mark and record a deliberate 4xx at warning, so a handler failure files one record instead of two; a handler returning its request context's own cancellation is recorded once at warning as `request cancelled by client`; a response-write failure the client caused is `failed to write response; client disconnected` at warning; the access-control listener's three direct 401 branches file one warning naming the refusal reason; and the static file server's two per-request exits drop from info to debug. The mark now lands on every shape of failure: `MarkLogged` marks the nearest `AlreadyLogged` implementer in the chain, and a handler's plain `errors.New` or a runtime panic implements none, so those two still filed twice — the writers hand the exception dispatch a marked carrier keeping the original as its cause, while the application's error handler still receives the error the handler returned. The handler-error record also names the request method beside the path.
-
-**Symptom.** Dashboards counting error records see handler failures once instead of twice — foreign errors and runtime panics included — and 4xx refusals at warning; log queries matching `controller handler error` no longer match client disconnects; a 401 now leaves an `authorization refused` warning; the two static info messages disappear from info-level journals. An application error handler that type-asserted the error it receives is unaffected; a `kernel.exception` listener that did so sees the carrier and must reach the original through `errors.As` or `Unwrap`.
-
-**Remedy.** Point alerting at the level that means what it says: error is now a server fault, warning a refusal or a client-caused condition. Update any query that keyed on the duplicated record or the old levels.
-
-### Http: the access log reports the status a stream actually carried
-
-**What changed.** For a handler that committed its own response, the terminate event and the access log report the status code recorded on the connection instead of the synthetic response the kernel substituted; a streamed source that fails before its first byte now answers the rendered 500 instead of an implicit empty 200.
-
-**Symptom.** Streaming routes stop logging `statusCode=204`; a panic mid-stream logs the committed 200 instead of the never-written 500; clients of a failing stream receive 500.
-
-**Remedy.** Update status-distribution queries over the access log for streaming routes; they now read the wire's truth.
-
-### Ownership: configuration handed across a boundary stays what was handed
-
-**What changed.** `Kernel.SetForwardedHeadersPolicy`, `NewForwardedClientIpResolver`, `CompressionMiddleware`, `NewHttpMiddlewareDefinition`, `MiddlewareBuildReport.SetInactive`, `httpclient.RequestOptions.Headers`/`Query` and cron's `Configuration.Schedule`/`Entries` copy what crosses the boundary, in whichever direction it crosses.
-
-**Symptom.** Code that mutated a slice, map or struct after handing it over — or wrote through a getter's returned map — no longer changes the receiver's behaviour; `CompressionMiddleware` no longer rewrites the caller's config with normalized values.
-
-**Remedy.** Mutate before handing over, or use the setters that exist for the purpose; read normalized values from behaviour, not from the caller's own object.
-
-### Middleware: nil configurations read as defaults where defaults exist
-
-**What changed.** `CompressionMiddleware(nil)` builds over `DefaultCompressionConfig()` and the deprecated `CorsMiddleware(nil)` over the default cors service, the reading their siblings give the same absence; `static.NewFileServer(nil)` refuses by name, because its default would be a live file server over `public`.
-
-**Symptom.** A nil that used to panic with a raw dereference now serves defaults (compression, cors) or panics naming the rule (static).
-
-**Remedy.** Nothing, unless a boot script keyed on the raw panic text.
-
-### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
-
-**What changed.** Every module of the `bunorm` family — the manager, `mysql`, `pgsql` and the three `migrate` modules — requires `github.com/uptrace/bun v1.2.17` and, where they carry one, `dialect/mysqldialect`, `dialect/pgdialect` or `driver/pgdriver` at the same version. v1.2.16 swallowed the failure of a migration read from a `.sql` file: the deferred `conn.Close()` / `tx.Rollback()` overwrote the exec error with its own nil return, so `db:migrate` printed `[success]`, exited 0 and marked a migration applied that never ran.
-
-**Symptom.** If your application pins a bun dialect or driver of its own, the build now selects `bun v1.2.17` through this dependency while your dialect stays where it was, and the process **panics at init**: `mysqldialect and Bun must have the same version: v1.2.16 != v1.2.17`. The dialect packages check this themselves; it is not a melody rule.
-
-**Remedy.** Move your own `github.com/uptrace/bun/...` requirements to `v1.2.17` in the same change — `go get github.com/uptrace/bun@v1.2.17 github.com/uptrace/bun/dialect/mysqldialect@v1.2.17` and the equivalent for `pgdialect` / `pgdriver`. Applications that declare no bun dependency of their own need no action.
-
 ### Compile-level: `container/contract.ScopeManager` and `container/contract.Scope` gained `RegisterScoped`
 
 **What changed.** A scope is now a registrar of its own. [`container/contract.ScopeManager`](../container/contract/scope.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. [`container/contract.Scope`](../container/contract/scope.go) declares the same two verbs through [`ScopedRegistrar`](../container/contract/scoped_registrar.go), for adding a service to one live scope.
@@ -1102,6 +1090,34 @@ See [Versioning policy for breaking changes](#versioning-policy-for-breaking-cha
 ```go
 func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
 	return append([]string{}, instance.staticExcludedPaths...)
+}
+```
+
+### Compile-level: `config/contract.HttpConfiguration` gained `SessionTombstoneRetention`
+
+**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `SessionTombstoneRetention() time.Duration`, how long a deleted session id keeps refusing a write-back. The framework's own implementation reads it from `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`), five minutes by default — the constant the window used to be — and refuses zero and negative at boot, because a window that refuses nothing is not a shorter window but a disarmed logout defence.
+
+**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method SessionTombstoneRetention`.
+
+**Remedy.** Implement it. Returning `config.DefaultSessionTombstoneRetention` keeps the behaviour the interface had without the method:
+
+```go
+func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Duration {
+	return config.DefaultSessionTombstoneRetention
+}
+```
+
+### Compile-level: `config/contract.HttpConfiguration` gained `ShutdownTimeout`
+
+**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `ShutdownTimeout() time.Duration`, how long a stopping http server waits for the requests it has already admitted before cutting them. The framework's own implementation reads it from `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), five seconds by default — the constant the wait used to be — and refuses zero and negative at boot, because only a positive value can describe a wait.
+
+**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method ShutdownTimeout`.
+
+**Remedy.** Implement it. Returning `config.DefaultHttpShutdownTimeout` keeps the behaviour the interface had without the method:
+
+```go
+func (instance *CustomHttpConfiguration) ShutdownTimeout() time.Duration {
+	return config.DefaultHttpShutdownTimeout
 }
 ```
 
@@ -1260,3 +1276,83 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 **Symptom.** An invocation already passing `--limit` or `--offset` received the full list and now receives a window; with `--verbose`, `debug:events` also narrows its listeners block to the windowed events. `--order=desc` was accepted and ignored before, so an invocation that passed it now gets different output.
 
 **Remedy.** Nothing for a client that paged with `offset += limit` — it now walks each item exactly once instead of re-reading the whole list on every page. A consumer that passed `--limit` while expecting everything must drop the flag.
+
+### Debug: `NewMiddlewareCommand` takes a description provider and a build provider
+
+**What changed.** `debug:middleware` describes the pipeline by default — selection, ordering and the function names captured at registration, no factory run — and builds the real chain only under the new `--build` flag, with a recover that renders a failing or panicking factory as a `debug.buildFailed` envelope instead of a dead process. The constructor therefore takes the two channels: `debug.NewMiddlewareCommand(descriptionProvider, buildProvider)`, typed `MiddlewareDescriptionProvider` and `MiddlewareBuildProvider`.
+
+**Symptom.** An out-of-tree caller of `debug.NewMiddlewareCommand` with the old single chain provider stops compiling.
+
+**Remedy.** Hand the two providers. For a pipeline assembled through `pipeline.Builder`, `Describe` answers the description half without building and `Build` remains the build half; a framework-booted application wires both automatically.
+
+### Debug: `debug:container` lists without building; `--build` is the sweep
+
+**What changed.** The bare listing runs no provider — names, lifetimes, built state and declared types, grouped into container and scoped blocks — where it used to resolve every windowed service, opening every pool and client of the application from a console command. The full diagnostic sweep — every service built, failures with cause chains — moved behind `--build`; `debug:container <name>` still builds, and a scoped name now resolves through the run's own scope instead of answering `debug.notFound`.
+
+**Symptom.** A consumer of the bare listing's json no longer receives `typeName`-with-error items — the items carry `name`, `lifetime`, `isBuilt`, `typeName` — and a table consumer sees two blocks. A pipeline that used the bare listing as a health sweep no longer probes anything.
+
+**Remedy.** Pass `--build` where the sweep was the point; keep the bare listing where the question was "what is registered".
+
+### Application: the kernel's default listeners register at the end of `Boot`
+
+**What changed.** The profiler (debug mode), the response normalizer, the terminate access log and the exception listener (when no error handler was installed by boot) register at the end of `Boot` in every process shape, not inside the http run. They are inert where no kernel event is dispatched, and `debug:events` now shows them in a console process.
+
+**Symptom.** A kernel event dispatched between boot and the http run — or from a console process — now reaches the default listeners; `debug:events` output grew the kernel listeners it used to miss.
+
+**Remedy.** Nothing for the ordinary application. A process that dispatched kernel events manually before `runHttp` and relied on nothing listening must account for the listeners existing from `Boot` on.
+
+### Debug: `debug:version` no longer reports melody's version as the application's
+
+**What changed.** The framework wiring stops filling the `application` row with `melody`'s own build version; the row reads the process-wide declaration made through `cli/output.SetApplicationVersion` and prints `<unknown>` without one.
+
+**Symptom.** The `application` row prints `<unknown>` where it printed the framework version.
+
+**Remedy.** Call `output.SetApplicationVersion(version)` once in the composition root's main, with the version the application keeps wherever it keeps it — its own ldflags variable or its environment.
+
+### Http: one record per handler failure, at the level of its status class
+
+**What changed.** The kernel's handler-error writers read and set the already-logged mark and record a deliberate 4xx at warning, so a handler failure files one record instead of two; a handler returning its request context's own cancellation is recorded once at warning as `request cancelled by client`; a response-write failure the client caused is `failed to write response; client disconnected` at warning; the access-control listener's three direct 401 branches file one warning naming the refusal reason; and the static file server's two per-request exits drop from info to debug. The mark now lands on every shape of failure: `MarkLogged` marks the nearest `AlreadyLogged` implementer in the chain, and a handler's plain `errors.New` or a runtime panic implements none, so those two still filed twice — the writers hand the exception dispatch a marked carrier keeping the original as its cause, while the application's error handler still receives the error the handler returned. The handler-error record also names the request method beside the path.
+
+**Symptom.** Dashboards counting error records see handler failures once instead of twice — foreign errors and runtime panics included — and 4xx refusals at warning; log queries matching `controller handler error` no longer match client disconnects; a 401 now leaves an `authorization refused` warning; the two static info messages disappear from info-level journals. An application error handler that type-asserted the error it receives is unaffected; a `kernel.exception` listener that did so sees the carrier and must reach the original through `errors.As` or `Unwrap`.
+
+**Remedy.** Point alerting at the level that means what it says: error is now a server fault, warning a refusal or a client-caused condition. Update any query that keyed on the duplicated record or the old levels.
+
+### Http: the access log reports the status a stream actually carried
+
+**What changed.** For a handler that committed its own response, the terminate event and the access log report the status code recorded on the connection instead of the synthetic response the kernel substituted; a streamed source that fails before its first byte now answers the rendered 500 instead of an implicit empty 200.
+
+**Symptom.** Streaming routes stop logging `statusCode=204`; a panic mid-stream logs the committed 200 instead of the never-written 500; clients of a failing stream receive 500.
+
+**Remedy.** Update status-distribution queries over the access log for streaming routes; they now read the wire's truth.
+
+### Ownership: configuration handed across a boundary stays what was handed
+
+**What changed.** `Kernel.SetForwardedHeadersPolicy`, `NewForwardedClientIpResolver`, `CompressionMiddleware`, `NewHttpMiddlewareDefinition`, `MiddlewareBuildReport.SetInactive`, `httpclient.RequestOptions.Headers`/`Query` and cron's `Configuration.Schedule`/`Entries` copy what crosses the boundary, in whichever direction it crosses.
+
+**Symptom.** Code that mutated a slice, map or struct after handing it over — or wrote through a getter's returned map — no longer changes the receiver's behaviour; `CompressionMiddleware` no longer rewrites the caller's config with normalized values.
+
+**Remedy.** Mutate before handing over, or use the setters that exist for the purpose; read normalized values from behaviour, not from the caller's own object.
+
+### Middleware: nil configurations read as defaults where defaults exist
+
+**What changed.** `CompressionMiddleware(nil)` builds over `DefaultCompressionConfig()` and the deprecated `CorsMiddleware(nil)` over the default cors service, the reading their siblings give the same absence; `static.NewFileServer(nil)` refuses by name, because its default would be a live file server over `public`.
+
+**Symptom.** A nil that used to panic with a raw dereference now serves defaults (compression, cors) or panics naming the rule (static).
+
+**Remedy.** Nothing, unless a boot script keyed on the raw panic text.
+
+### bunorm: the empty migrate module refuses the boot
+
+**What changed.** `migrate.NewModule(migrate.ModuleConfig{})` — neither `Migrations` nor `Contexts` — is refused at command registration with `bunorm migrate module requires migrations or contexts`.
+
+**Symptom.** An application that registered the empty module booted with no migration commands; it now fails the boot naming the rule.
+
+**Remedy.** Pass the migrations the module exists to register, or remove the registration.
+
+### Cron: a clean shutdown is not a job failure
+
+**What changed.** A run the runner's own shutdown cancelled is recorded at warning as `cron: scheduled command cancelled by shutdown` and excluded from the failure aggregate; the runner's failure and abandon records carry the run's `cronRunId`.
+
+**Symptom.** `melody:cron:run --once` interrupted by SIGTERM exits 0 with a warning instead of non-zero with an error record; alerting keyed on `cron runner command failed` stops firing on deploys.
+
+**Remedy.** Key deploy-time alerting on the new warning if the old signal was load-bearing; genuine failures keep the error record, now attributable by `cronRunId`.

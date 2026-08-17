@@ -56,6 +56,7 @@ func main() {
 		0,
 		clockInstance,
 	)
+	defer inMemoryBackend.Close()
 }
 ```
 

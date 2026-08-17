@@ -70,6 +70,18 @@ jobs:
             -   name: v1 against v2 after the import path rewrite
                 run: .dev/validate/parity.sh
 
+    # what every document of a major CITES, against what that major declares. The documentation job above
+    # asks whether a symbol a major ships is documented and can never ask the opposite, which is where a
+    # document rots: a note that keeps naming what the code stopped having stays green forever. The sample
+    # pass is not run here — it needs a Go toolchain, and this job, like the two above it, reads the tree
+    # only. Mirrors run_citation_checks in `.dev/validate/all.sh`.
+    citation:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: document citations against the code of every major
+                run: .dev/validate/citation.sh
+
     # the race detector over the concurrency-carrying packages of the core majors
     # and the cron runner. The matrix job runs them without it, so a lost mutex or
     # an unsynchronized memo stays green there: these packages hold goroutines that
