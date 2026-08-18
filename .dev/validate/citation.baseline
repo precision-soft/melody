@@ -36,7 +36,6 @@ v1 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the strea
 v1 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
 v1 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
 v1 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
-v1 ~ symbol ~ runtime.FuncForPC      ~ runtime.FuncForPC, named where a frame is resolved to a function name
 v1 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
 
 v2 ~ symbol ~ debug.Stack            ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
@@ -44,7 +43,6 @@ v2 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the strea
 v2 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
 v2 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
 v2 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
-v2 ~ symbol ~ runtime.FuncForPC      ~ runtime.FuncForPC, named where a frame is resolved to a function name
 v2 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
 
 # ------------------------------------------------------------------------------------------------------
@@ -70,8 +68,6 @@ v2 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, name
 
 v1 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
 v1 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
-v1 ~ symbol ~ security.Sha256Hex       ~ replaced in the example by HashPassword/MustHashPassword; the changelog entry names it to say so
-v2 ~ symbol ~ security.Sha256Hex       ~ replaced in the example by HashPassword/MustHashPassword; the changelog entry names it to say so
 
 v2 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
 v2 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
