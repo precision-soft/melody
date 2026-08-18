@@ -3,7 +3,7 @@ module github.com/precision-soft/melody/.example
 go 1.25.0
 
 require (
-	github.com/precision-soft/melody v1.18.0
+	github.com/precision-soft/melody v1.19.0
 	github.com/precision-soft/melody/integrations/bunorm v1.0.1
 	github.com/precision-soft/melody/integrations/bunorm/migrate v1.1.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql v1.1.5

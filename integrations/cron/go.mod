@@ -3,7 +3,7 @@ module github.com/precision-soft/melody/integrations/cron
 go 1.24.0
 
 require (
-	github.com/precision-soft/melody v1.13.0
+	github.com/precision-soft/melody v1.19.0
 	github.com/urfave/cli/v3 v3.6.1
 )
 

@@ -2,10 +2,14 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD/E=
 github.com/jinzhu/inflection v1.0.0/go.mod h1:h+uFLlag+Qp1Va5pdKtLDYj+kHp5pxUVkryuEj+Srlc=
+github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
+github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/precision-soft/melody v1.6.3 h1:KcY9/p1pbGVRJMXcfrFeLPf77dY93Wb+TxEVxyzhAVw=
 github.com/precision-soft/melody v1.6.3/go.mod h1:Yx5qu2/oZN+up7lxPnHZq3cdv/n3PQ7L9N/My8I99E8=
+github.com/precision-soft/melody v1.19.0 h1:pv7B52T2GPudIoWO1lJnSfimRoOzC9G4ITHWmDy+vvE=
+github.com/precision-soft/melody v1.19.0/go.mod h1:HrsrI8DN92qrvXSB/FANxpiym6evQRO4FB/tJ5UC3YY=
 github.com/precision-soft/melody/integrations/bunorm v1.0.0 h1:TzRmn264Gvkv6FvMS0HcY5fAkdiKwC5KSgRBij86Buk=
 github.com/precision-soft/melody/integrations/bunorm v1.0.0/go.mod h1:C63jwkbCwdS5Px3Z8YnKt6knjKspaDMGJDSzFzjfKgQ=
 github.com/puzpuzpuz/xsync/v3 v3.5.1 h1:GJYJZwO6IdxN/IKbneznS6yPkVC+c3zyY/j19c++5Fg=

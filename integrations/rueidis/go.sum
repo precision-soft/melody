@@ -8,6 +8,10 @@ github.com/precision-soft/melody v1.16.0 h1:Vi+uacpHxNpHUit5sNJQsfaFlr7CHd/P+PmF
 github.com/precision-soft/melody v1.16.0/go.mod h1:HrsrI8DN92qrvXSB/FANxpiym6evQRO4FB/tJ5UC3YY=
 github.com/precision-soft/melody v1.18.0 h1:ltygw43RpMXrhxvAmo+HjrfHrPPrNJI39bPCcJRW2Fg=
 github.com/precision-soft/melody v1.18.0/go.mod h1:HrsrI8DN92qrvXSB/FANxpiym6evQRO4FB/tJ5UC3YY=
+github.com/precision-soft/melody v1.18.1 h1:DzRTnDgr9zhVZl4YyVjX3uJaJxf3npfKLA2omB4WUkU=
+github.com/precision-soft/melody v1.18.1/go.mod h1:HrsrI8DN92qrvXSB/FANxpiym6evQRO4FB/tJ5UC3YY=
+github.com/precision-soft/melody v1.19.0 h1:pv7B52T2GPudIoWO1lJnSfimRoOzC9G4ITHWmDy+vvE=
+github.com/precision-soft/melody v1.19.0/go.mod h1:HrsrI8DN92qrvXSB/FANxpiym6evQRO4FB/tJ5UC3YY=
 github.com/redis/rueidis v1.0.71 h1:pODtnAR5GAB7j4ekhldZ29HKOxe4Hph0GTDGk1ayEQY=
 github.com/redis/rueidis v1.0.71/go.mod h1:lfdcZzJ1oKGKL37vh9fO3ymwt+0TdjkkUCJxbgpmcgQ=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
