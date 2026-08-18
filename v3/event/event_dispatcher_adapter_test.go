@@ -51,15 +51,15 @@ func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *test
     dispatcher, clockInstance := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(nil)
-    })
+    }, "event subscriber may not be nil")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(&testAdapterSubscriber{events: nil})
-    })
+    }, "subscribed events may not be nil")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(
             &testAdapterSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
@@ -69,9 +69,9 @@ func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *test
                 },
             },
         )
-    })
+    }, "event name may not be empty")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(
             &testAdapterSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
@@ -79,9 +79,9 @@ func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *test
                 },
             },
         )
-    })
+    }, "subscribed event list may not be nil")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(
             &testAdapterSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
@@ -89,9 +89,9 @@ func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *test
                 },
             },
         )
-    })
+    }, "subscribed event may not be nil")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(
             &testAdapterSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
@@ -99,18 +99,19 @@ func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *test
                 },
             },
         )
-    })
+    }, "subscribed event listener is required")
 }
 
 func TestEventDispatcherAdapter_Dispatch_ReturnsErrorOnNilEvent(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
 
-    testhelper.AssertPanics(
+    testhelper.AssertPanicsWithError(
         t,
         func() {
             _, _ = adapter.Dispatch(nil, nil)
         },
+        "event may not be nil",
     )
 }
 
@@ -118,11 +119,12 @@ func TestEventDispatcherAdapter_DispatchName_ReturnsErrorOnEmptyName(t *testing.
     dispatcher, clockInstance := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher, clockInstance)
 
-    testhelper.AssertPanics(
+    testhelper.AssertPanicsWithError(
         t,
         func() {
             _, _ = adapter.DispatchName(nil, "", nil)
         },
+        "event name may not be empty",
     )
 }
 

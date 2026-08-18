@@ -12,6 +12,11 @@ const forwardedForHeaderName = "X-Forwarded-For"
 
 /* NewForwardedClientIpResolver returns a ClientIpResolver that walks X-Forwarded-For right-to-left, skipping addresses that match the trusted proxy list, and returns the first untrusted address — the real client as attested by the trusted edge. It reuses the same ForwardedHeadersPolicy handed to Kernel.SetForwardedHeadersPolicy, so there is a single trusted-proxy list to maintain. It falls back to DefaultClientIp — the direct peer — whenever the forwarded chain cannot be trusted: forwarded headers are not trusted by policy, the trusted list is empty, the direct peer is not a trusted proxy (the header is then attacker-controlled), the chain has no parseable untrusted address, or every entry is a trusted proxy. Plug it into a rate-limit config with SetClientIpResolver so per-IP limits behind a reverse proxy key on the client instead of the proxy. */
 func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) ClientIpResolver {
+    /* the trusted list is copied at construction rather than captured live: the closure reads it on every request to pick the limiter key, and a caller reusing its slice after construction would rewrite the trust decision mid-serving as a data race — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
+    copiedTrustedProxyList := make([]string, len(policy.TrustedProxyList))
+    copy(copiedTrustedProxyList, policy.TrustedProxyList)
+    policy.TrustedProxyList = copiedTrustedProxyList
+
     return func(request httpcontract.Request) string {
         if false == policy.TrustForwardedHeaders {
             return DefaultClientIp(request)
@@ -35,11 +40,7 @@ func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) Cl
             }
 
             /* the first untrusted hop from the right is the client the nearest trusted proxy attested; anything further left is client-controlled and must not be believed */
-            hopHostString := hop
-            if hostFromSplit, _, splitErr := net.SplitHostPort(hopHostString); nil == splitErr && "" != strings.TrimSpace(hostFromSplit) {
-                /* proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For; strip the port exactly as the trusted-hop check does so the real client is not mistaken for garbage */
-                hopHostString = hostFromSplit
-            }
+            hopHostString := bareAddressFromAuthority(hop)
 
             hopAddress, hopAddressErr := netip.ParseAddr(hopHostString)
             if nil != hopAddressErr {
@@ -54,6 +55,24 @@ func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) Cl
         /* every hop was a trusted proxy: the client is the leftmost infrastructure address; fall back to the direct peer rather than guess */
         return DefaultClientIp(request)
     }
+}
+
+/* bareAddressFromAuthority reduces a peer address or an X-Forwarded-For entry to the bare address literal netip.ParseAddr accepts. A trusted edge may write any of four shapes: a bare address, host:port, a bracketed IPv6 literal with a port, or a bracketed IPv6 literal without one. net.SplitHostPort covers only the two ported shapes, and netip.ParseAddr rejects the brackets the fourth still carries, so a bracketed literal without a port would be read as garbage — every IPv6 client behind such an edge would then collapse onto the proxy's own rate limit bucket while IPv4 clients kept theirs. Proxies such as IIS/ARR and Azure Application Gateway append the port, so strip it here too and the real client is not mistaken for garbage either way. */
+func bareAddressFromAuthority(value string) string {
+    trimmedValue := strings.TrimSpace(value)
+    if "" == trimmedValue {
+        return ""
+    }
+
+    if hostFromSplit, _, splitErr := net.SplitHostPort(trimmedValue); nil == splitErr && "" != strings.TrimSpace(hostFromSplit) {
+        return strings.TrimSpace(hostFromSplit)
+    }
+
+    if true == strings.HasPrefix(trimmedValue, "[") && true == strings.HasSuffix(trimmedValue, "]") {
+        return strings.TrimSpace(trimmedValue[1 : len(trimmedValue)-1])
+    }
+
+    return trimmedValue
 }
 
 func forwardedForAddresses(request httpcontract.Request) []string {
@@ -76,13 +95,9 @@ func forwardedForAddresses(request httpcontract.Request) []string {
 
 /* isTrustedProxyAddress reports whether the host string matches the trusted proxy list of exact addresses and CIDR prefixes — the per-address form of the request-level check the http kernel applies for scheme detection. */
 func isTrustedProxyAddress(hostString string, trustedProxyList []string) bool {
-    trimmedHostString := strings.TrimSpace(hostString)
+    trimmedHostString := bareAddressFromAuthority(hostString)
     if "" == trimmedHostString {
         return false
-    }
-
-    if hostFromSplit, _, splitErr := net.SplitHostPort(trimmedHostString); nil == splitErr && "" != strings.TrimSpace(hostFromSplit) {
-        trimmedHostString = hostFromSplit
     }
 
     hostAddress, hostAddressErr := netip.ParseAddr(trimmedHostString)

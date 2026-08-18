@@ -86,3 +86,22 @@ func indexOf(value string, needle string) int {
 
     return -1
 }
+
+/* Nil headers are a state the contract permits — SetHeaders stores the nil it is given — and every other
+consumer of Headers() in the chain checks for it before writing. */
+func TestSetCookie_AllocatesTheHeaderMapWhenTheResponseHasNone(t *testing.T) {
+    response := EmptyResponse(200)
+    response.SetHeaders(nil)
+
+    SetCookie(
+        response,
+        &nethttp.Cookie{
+            Name:  "a",
+            Value: "b",
+        },
+    )
+
+    if "" == response.Headers().Get("Set-Cookie") {
+        t.Fatalf("expected the cookie to be set on a response whose header map was nil")
+    }
+}

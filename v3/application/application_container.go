@@ -64,6 +64,17 @@ func (instance *Application) Register(
         return nil
     }
 
+    /* the name — or the type — is already claimed at the scoped lifetime. The collision is the same wiring mistake reported from the other side, so it joins the same report rather than ending the boot on its own */
+    if true == errors.Is(registerErr, container.ErrScopedServiceIdAlreadyRegistered) {
+        instance.recordBootCollision(bootCollisionKindScopedService, serviceName)
+        return nil
+    }
+
+    if true == errors.Is(registerErr, container.ErrScopedServiceTypeAlreadyRegistered) {
+        instance.recordBootCollision(bootCollisionKindScopedServiceType, serviceName)
+        return nil
+    }
+
     return registerErr
 }
 
@@ -75,6 +86,63 @@ func (instance *Application) MustRegister(
     registerErr := instance.Register(serviceName, provider, options...)
     if nil != registerErr {
         exception.Panic(exception.FromError(registerErr))
+    }
+}
+
+func (instance *Application) RegisterScopedService(
+    serviceName string,
+    provider any,
+    options ...containercontract.RegisterOption,
+) {
+    instance.MustRegisterScoped(serviceName, provider, options...)
+}
+
+/* RegisterScoped declares a service the application's scopes own: one instance per request, closed with the request. It mirrors Register in everything but lifetime, collisions included — a name claimed at both lifetimes is absorbed into the aggregated boot report, so a module that scopes a name the framework registers later hears about it beside every other collision instead of one panic per boot attempt. */
+func (instance *Application) RegisterScoped(
+    serviceName string,
+    provider any,
+    options ...containercontract.RegisterOption,
+) error {
+    if true == instance.booted {
+        exception.Panic(exception.NewError("may not register scoped services after boot", nil, nil))
+    }
+
+    registerScopedErr := instance.kernel.ServiceContainer().RegisterScoped(serviceName, provider, options...)
+    if nil == registerScopedErr {
+        return nil
+    }
+
+    if true == errors.Is(registerScopedErr, container.ErrScopedServiceIdAlreadyRegistered) {
+        instance.recordBootCollision(bootCollisionKindScopedService, serviceName)
+        return nil
+    }
+
+    if true == errors.Is(registerScopedErr, container.ErrScopedServiceTypeAlreadyRegistered) {
+        instance.recordBootCollision(bootCollisionKindScopedServiceType, serviceName)
+        return nil
+    }
+
+    if true == errors.Is(registerScopedErr, container.ErrServiceIdAlreadyRegistered) {
+        instance.recordBootCollision(bootCollisionKindScopedService, serviceName)
+        return nil
+    }
+
+    if true == errors.Is(registerScopedErr, container.ErrServiceTypeAlreadyRegistered) {
+        instance.recordBootCollision(bootCollisionKindScopedServiceType, serviceName)
+        return nil
+    }
+
+    return registerScopedErr
+}
+
+func (instance *Application) MustRegisterScoped(
+    serviceName string,
+    provider any,
+    options ...containercontract.RegisterOption,
+) {
+    registerScopedErr := instance.RegisterScoped(serviceName, provider, options...)
+    if nil != registerScopedErr {
+        exception.Panic(exception.FromError(registerScopedErr))
     }
 }
 
@@ -207,6 +275,9 @@ func (instance *Application) registerCache() {
     }
 
     if false == serviceContainer.Has(cache.ServiceCacheBackend) {
+        /* the fallback backend is deliberately left unarmed in both dimensions — an item ceiling melody picked would evict an application's entries behind its back, and an expiry melody picked would drop them early — so what it costs is carried to the http path as a warning instead of being decided here */
+        instance.unboundedDefaultCacheBackend = true
+
         instance.RegisterService(
             cache.ServiceCacheBackend,
             func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
@@ -241,6 +312,9 @@ func (instance *Application) registerHttpSession() {
     serviceContainer := instance.kernel.ServiceContainer()
 
     if false == serviceContainer.Has(session.ServiceSessionStorage) {
+        /* the fallback storage keeps its entries in this process and nothing outside it can expire them, so what it costs is carried to the http path as a warning rather than being decided here — the same shape the fallback cache backend uses, and for the same reason: a lifetime melody picked would end sessions the application never agreed to end */
+        instance.defaultInMemorySessionStorage = true
+
         instance.RegisterService(
             session.ServiceSessionStorage,
             func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
@@ -292,3 +366,4 @@ func (instance *Application) registerHttpSecurity() error {
 }
 
 var _ applicationcontract.ServiceRegistrar = (*Application)(nil)
+var _ applicationcontract.ScopedServiceRegistrar = (*Application)(nil)

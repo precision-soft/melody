@@ -7,7 +7,16 @@ import (
 )
 
 func (instance *Configuration) Resolve() error {
-    /* Resolve iterates and mutates the shared parameter map, so it holds the write lock the runtime accessors read under; the body reaches parameters only through the lock-free getInternalParameter, never a locking accessor, so the lock is not re-entered. */
+    /* once the application serves, a re-resolution can no longer reconfigure it: every service that needed a parameter copied the value out of it while it was being built, and none of them ever looks again. What it still does is rewrite the whole store underneath readers that are entitled to treat it as settled — so it is refused rather than half-honoured. The documented manual construction resolves before it serves and is untouched. */
+    if true == instance.serving.Load() {
+        return exception.NewError(
+            "cannot resolve the configuration once the application has begun serving; parameters must be registered and resolved during boot",
+            nil,
+            nil,
+        )
+    }
+
+    /* Resolve iterates and mutates the shared parameter map, so it holds the write lock the runtime accessors read under; the body reaches parameters only through the lock-free getInternalParameter, never a locking accessor, so the lock is not re-entered. Each parameter's value is written through storeValue, since a consumer holding the pointer reads it through the parameter's own lock and never through this one. */
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -20,13 +29,13 @@ func (instance *Configuration) Resolve() error {
 
         stringValue, ok := environmentValue.(string)
         if false == ok {
-            parameter.value = environmentValue
+            parameter.storeValue(environmentValue)
 
             continue
         }
 
         if "" == stringValue {
-            parameter.value = stringValue
+            parameter.storeValue(stringValue)
 
             continue
         }
@@ -47,7 +56,7 @@ func (instance *Configuration) Resolve() error {
             )
         }
 
-        parameter.value = value
+        parameter.storeValue(value)
     }
 
     instance.resolved = true
@@ -316,7 +325,7 @@ func (instance *Configuration) resolveParameterReference(
     }
 
     if false == instance.resolved {
-        referencedParameter.value = resolvedReferencedValue
+        referencedParameter.storeValue(resolvedReferencedValue)
     }
 
     if true == referencedParameter.isSecret.Load() {

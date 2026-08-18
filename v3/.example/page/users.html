@@ -31,9 +31,11 @@
             <a class="btn btn-outline-secondary btn-sm" data-route="example.routes" href="#">
                 <i class="fa-solid fa-route me-1"></i>Routes (JSON)
             </a>
-            <a class="btn btn-outline-secondary btn-sm" data-route="example.websocket.demo" href="#" target="_blank">
-                <i class="fa-solid fa-satellite-dish me-1"></i>WebSocket demo
-            </a>
+            <button class="btn btn-outline-secondary btn-sm position-relative" id="catalogNotificationBell" type="button" disabled>
+                <i class="fa-solid fa-bell me-1"></i>Changes
+                <span class="badge rounded-pill bg-danger position-absolute top-0 start-100 translate-middle d-none"
+                      id="catalogNotificationCount">0</span>
+            </button>
             <a class="btn btn-outline-secondary btn-sm" data-route="example.logout" href="#">
                 <i class="fa-solid fa-right-from-bracket me-1"></i>Logout
             </a>
@@ -156,6 +158,52 @@
                 window.melodyExample.ui.setStatus(String(err?.message ?? err), 'danger');
             }
         });
+
+        /* every change to the directory is announced on the socket by the same listener that writes the journal
+           entry. Two administrators editing roles in two tabs is exactly the case this answers: the one who did
+           not make the change is the one holding a list that is no longer true. */
+        const bell = $('#catalogNotificationBell');
+        const bellCount = $('#catalogNotificationCount');
+        let pendingChanges = 0;
+
+        const connectCatalogNotifications = () => {
+            const scheme = 'https:' === location.protocol ? 'wss' : 'ws';
+            const socket = new WebSocket(scheme + '://' + location.host + '/ws');
+
+            socket.onopen = () => {
+                bell.prop('disabled', false).attr('title', 'watching for changes');
+            };
+
+            socket.onmessage = (event) => {
+                let notification;
+                try {
+                    notification = JSON.parse(event.data);
+                } catch (parseError) {
+                    return;
+                }
+
+                if ('user' !== notification.subject) {
+                    return;
+                }
+
+                pendingChanges = pendingChanges + 1;
+                bellCount.text(String(pendingChanges)).removeClass('d-none');
+                bell.attr('title', notification.subjectId + ' was ' + notification.action);
+            };
+
+            socket.onclose = () => {
+                bell.prop('disabled', true).attr('title', 'not watching');
+                window.setTimeout(connectCatalogNotifications, 1500);
+            };
+        };
+
+        bell.on('click', () => {
+            pendingChanges = 0;
+            bellCount.addClass('d-none').text('0');
+            void load();
+        });
+
+        connectCatalogNotifications();
 
         void load();
     });

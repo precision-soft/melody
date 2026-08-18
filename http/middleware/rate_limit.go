@@ -1,9 +1,13 @@
 package middleware
 
 import (
+    "context"
+    "errors"
     "fmt"
+    "math"
     "net"
     nethttp "net/http"
+    "sort"
     "sync"
     "time"
 
@@ -11,6 +15,7 @@ import (
     clockcontract "github.com/precision-soft/melody/clock/contract"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/logging"
@@ -19,6 +24,7 @@ import (
 
 const defaultMaxRateLimitKeys = 1_000_000
 
+/* NewFixedWindowLimiter builds a limiter whose counters live in THIS process and nowhere else, which is the one thing to weigh before it guards anything that matters. The map is built at construction and dies with the process, so every restart hands each caller a full budget back — under a supervisor that restarts quickly, a limit of five per hour becomes five per restart — and it is not shared across replicas, so a limit of five is five per instance and the deployment enforces five times the number of them. That is the right trade for shaping ordinary traffic and the wrong one for login, one-time-password or password-reset routes, where the limit is a security control: those want a store the whole deployment sees, which is what integrations/rueidis.RateLimiter is — the distributed drop-in for these limiters. Melody says the same thing at boot about the two other defaults that live in the process, its cache backend and its session storage; it cannot say it about a limiter, because a limiter is wired by the application rather than by the framework. */
 func NewFixedWindowLimiter(rate int, window time.Duration) *FixedWindowLimiter {
     return NewFixedWindowLimiterWithClock(clock.NewSystemClock(), rate, window)
 }
@@ -119,7 +125,7 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
         instance.buckets[key] = bucket
     }
 
-    /* @important the window is fixed, not a token bucket: the allowance is restored whole at the edge rather than proportionally to elapsed time, so up to twice the rate can pass across an instant straddling it. SlidingWindowLimiter holds the rate over every trailing window. */
+    /* the window is fixed, not a token bucket: the allowance is restored whole at the edge rather than proportionally to elapsed time, so up to twice the rate can pass across an instant straddling it. SlidingWindowLimiter holds the rate over every trailing window. */
     elapsed := now.Sub(bucket.lastRefill)
 
     if instance.window <= elapsed {
@@ -174,15 +180,27 @@ func (instance *FixedWindowLimiter) pruneAtCeilingLocked(now time.Time) {
 }
 
 func (instance *FixedWindowLimiter) pruneIdleLocked(now time.Time) {
+    idleThreshold := idlePruneThreshold(instance.window)
+
     for key, bucket := range instance.buckets {
-        if instance.window*2 < now.Sub(bucket.lastRefill) {
+        if idleThreshold < now.Sub(bucket.lastRefill) {
             delete(instance.buckets, key)
         }
     }
 }
 
+/* idlePruneThreshold is twice the window, saturating at the top of the duration range: past the midpoint the doubling would wrap negative, every entry would read as idle, and a budget the window promised to hold would refill at each cleanup. */
+func idlePruneThreshold(window time.Duration) time.Duration {
+    if window > math.MaxInt64/2 {
+        return math.MaxInt64
+    }
+
+    return window * 2
+}
+
 var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
 
+/* NewSlidingWindowLimiter holds its timestamps in THIS process, exactly as NewFixedWindowLimiter holds its counters: a restart returns every caller's full budget and each replica enforces the limit on its own, so the deployment allows the limit times the number of instances. Where the limit is a security control rather than traffic shaping, use the distributed drop-in in integrations/rueidis. */
 func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
     return NewSlidingWindowLimiterWithClock(clock.NewSystemClock(), limit, window)
 }
@@ -268,23 +286,27 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
         instance.windows[key] = window
     }
 
-    validRequests := make([]time.Time, 0, len(window.requests))
+    /* the marks are appended in clock order, so the expired ones are a contiguous prefix and the window is trimmed by index rather than rebuilt: the whole slice used to be reallocated and copied on every call, admitted or refused alike, under the lock every key shares — at a limit of ten thousand that is a full scan an attacker pays on each of his own refusals while every other client waits behind it. Dropping the prefix leaves the live marks in place; append reclaims the vacated head when it grows the slice, so the compaction is amortized rather than paid per call.
 
-    for _, requestTime := range window.requests {
-        if requestTime.After(windowStart) {
-            validRequests = append(validRequests, requestTime)
-        }
+       The cut is the first mark still inside the window, so everything it drops is genuinely expired whatever order the marks are in: a clock that answered an earlier instant than one already recorded — a fake clock in a test, a wall clock moved under the process — can only leave an expired mark standing, which shortens the caller's own budget, never widens it. */
+    liveFrom := sort.Search(
+        len(window.requests),
+        func(index int) bool {
+            return window.requests[index].After(windowStart)
+        },
+    )
+
+    if 0 < liveFrom {
+        window.requests = window.requests[liveFrom:]
     }
 
-    window.requests = validRequests
-
-    if instance.limit > len(window.requests) {
-        window.requests = append(window.requests, now)
-
-        return true
+    if instance.limit <= len(window.requests) {
+        return false
     }
 
-    return false
+    window.requests = append(window.requests, now)
+
+    return true
 }
 
 func (instance *SlidingWindowLimiter) Reset(key string) {
@@ -325,6 +347,8 @@ func (instance *SlidingWindowLimiter) pruneAtCeilingLocked(now time.Time) {
 }
 
 func (instance *SlidingWindowLimiter) pruneIdleLocked(now time.Time) {
+    idleThreshold := idlePruneThreshold(instance.window)
+
     for key, window := range instance.windows {
         if 0 == len(window.requests) {
             delete(instance.windows, key)
@@ -332,7 +356,7 @@ func (instance *SlidingWindowLimiter) pruneIdleLocked(now time.Time) {
         }
 
         lastRequest := window.requests[len(window.requests)-1]
-        if instance.window*2 < now.Sub(lastRequest) {
+        if idleThreshold < now.Sub(lastRequest) {
             delete(instance.windows, key)
         }
     }
@@ -405,7 +429,7 @@ func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
 }
 
 func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
-    if nil == config.Limiter() {
+    if nil == config || nil == config.Limiter() {
         exception.Panic(
             exception.NewError("limiter is required for rate limit middleware", nil, nil),
         )
@@ -429,14 +453,21 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
             if runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
                 var allowErr error
                 allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
-                if nil != allowErr {
-                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure */
+                if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
+                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. A limiter that filed its own record marks it, and then this is the second copy rather than the only one. */
                     logger := logging.LoggerFromRuntime(runtimeInstance)
                     if nil != logger {
-                        logger.Error(
-                            "rate limiter store failure",
-                            exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
-                        )
+                        if true == errors.Is(allowErr, context.Canceled) {
+                            logger.Warning(
+                                "rate limiter call cancelled",
+                                exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                            )
+                        } else {
+                            logger.Error(
+                                "rate limiter store failure",
+                                exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                            )
+                        }
                     }
                 }
             } else {
@@ -444,7 +475,17 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
             }
 
             if false == allowed {
-                return config.OnLimitExceeded()(request)
+                response, limitErr := config.OnLimitExceeded()(request)
+                if nil != limitErr {
+                    return response, limitErr
+                }
+
+                /* a limit handler that produced neither response nor error still refused the request, the reading the listener door gives the same outcome: passed through, the nil response would be normalized into an empty 204 and the refused request served as success */
+                if true == internal.IsNilInterface(response) {
+                    return http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"), nil
+                }
+
+                return response, nil
             }
 
             return next(runtimeInstance, writer, request)
@@ -452,20 +493,17 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
     }
 }
 
+/* SimpleRateLimit keys on the direct peer address, so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use SimpleRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
 func SimpleRateLimit(requestsPerMinute int) httpcontract.Middleware {
-    limiter := NewFixedWindowLimiter(requestsPerMinute, time.Minute)
-
-    return RateLimitMiddleware(
-        NewRateLimitConfig(
-            limiter,
-            nil,
-            nil,
-        ),
-    )
+    return SimpleRateLimitWithResolver(requestsPerMinute, nil)
 }
 
-func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
-    limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
+/* SimpleRateLimitWithResolver is SimpleRateLimit with the client address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so a per-IP budget behind a reverse proxy is charged to the client rather than to the proxy. A nil resolver keeps the direct peer. */
+func SimpleRateLimitWithResolver(
+    requestsPerMinute int,
+    clientIpResolver ClientIpResolver,
+) httpcontract.Middleware {
+    limiter := NewFixedWindowLimiter(requestsPerMinute, time.Minute)
 
     config := NewRateLimitConfig(
         limiter,
@@ -473,16 +511,20 @@ func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
         nil,
     )
 
-    config.SetKeyExtractor(func(request httpcontract.Request) string {
-        return config.clientIp(request)
-    })
+    config.SetClientIpResolver(clientIpResolver)
 
     return RateLimitMiddleware(config)
 }
 
-func UserRateLimit(
+/* IpRateLimit keys on the direct peer address, so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use IpRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
+    return IpRateLimitWithResolver(requestsPerMinute, nil)
+}
+
+/* IpRateLimitWithResolver is IpRateLimit with the client address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so a per-IP budget behind a reverse proxy is charged to the client rather than to the proxy. A nil resolver keeps the direct peer. */
+func IpRateLimitWithResolver(
     requestsPerMinute int,
-    getUserId KeyExtractor,
+    clientIpResolver ClientIpResolver,
 ) httpcontract.Middleware {
     limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
 
@@ -491,6 +533,46 @@ func UserRateLimit(
         nil,
         nil,
     )
+
+    config.SetClientIpResolver(clientIpResolver)
+
+    config.SetKeyExtractor(func(request httpcontract.Request) string {
+        return config.clientIp(request)
+    })
+
+    return RateLimitMiddleware(config)
+}
+
+/* UserRateLimit falls back to the direct peer address for a request that carries no user id, so behind a reverse proxy every anonymous client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use UserRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+func UserRateLimit(
+    requestsPerMinute int,
+    getUserId KeyExtractor,
+) httpcontract.Middleware {
+    return UserRateLimitWithResolver(requestsPerMinute, getUserId, nil)
+}
+
+/* UserRateLimitWithResolver is UserRateLimit with the anonymous fallback address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so unauthenticated traffic behind a reverse proxy is charged per client rather than to the proxy. A nil resolver keeps the direct peer. */
+func UserRateLimitWithResolver(
+    requestsPerMinute int,
+    getUserId KeyExtractor,
+    clientIpResolver ClientIpResolver,
+) httpcontract.Middleware {
+    /* refused at construction, the way the middleware constructor refuses its missing limiter: accepted here, the nil callback dies on the request path, once per request, inside a closure no caller can reach */
+    if nil == getUserId {
+        exception.Panic(
+            exception.NewError("get user id callback is required for user rate limit middleware", nil, nil),
+        )
+    }
+
+    limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
+
+    config := NewRateLimitConfig(
+        limiter,
+        nil,
+        nil,
+    )
+
+    config.SetClientIpResolver(clientIpResolver)
 
     config.SetKeyExtractor(func(request httpcontract.Request) string {
         userId := getUserId(request)

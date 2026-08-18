@@ -2,9 +2,10 @@ package output
 
 import (
     "testing"
+
+    "github.com/precision-soft/melody/internal/testhelper"
 )
 
-/* @info The block builder must not hold &Blocks[len-1]: a later AddBlock reallocates the slice, so rows added through the earlier builder would land in the old backing array and vanish. */
 func TestTableBuilder_RowsSurviveALaterAddBlock(t *testing.T) {
     builder := NewTableBuilder()
 
@@ -27,5 +28,27 @@ func TestTableBuilder_RowsSurviveALaterAddBlock(t *testing.T) {
     }
     if "kept" != table.Blocks[0].Rows[0][0] {
         t.Fatalf("unexpected row content %v", table.Blocks[0].Rows[0])
+    }
+}
+
+func TestTableBlockBuilder_AddRowPanicsOnACellCountMismatch(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewTableBuilder().AddBlock("BLOCK", []string{"name", "description"}).AddRow("a", "b", "c")
+    }, "table row cell count does not match the block columns")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        NewTableBuilder().AddBlock("BLOCK", []string{"name", "description"}).AddRow("a")
+    }, "table row cell count does not match the block columns")
+}
+
+func TestTableBlockBuilder_AddRowAdmitsTheSeparatorRow(t *testing.T) {
+    table := NewTableBuilder().AddBlock("BLOCK", []string{"name", "description"}).
+        AddRow("a", "b").
+        AddRow(TableRowSeparatorToken).
+        AddRow("c", "d").
+        owner.Build()
+
+    if 3 != len(table.Blocks[0].Rows) {
+        t.Fatalf("expected 3 rows, got %d", len(table.Blocks[0].Rows))
     }
 }

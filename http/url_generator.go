@@ -86,7 +86,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                     continue
                 }
 
-                /* @important matchPath refuses an empty segment for a named parameter, so emitting one here would mint a url this router answers with a 404 */
+                /* matchPath refuses an empty segment for a named parameter, so emitting one here would mint a url this router answers with a 404 */
                 return "", exception.NewError(
                     "route parameter may not be empty",
                     exceptioncontract.Context{

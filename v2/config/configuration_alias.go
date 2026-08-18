@@ -53,6 +53,10 @@ var environmentKeyAliasMap = map[string][]string{
         StaticCacheMaxAgeKey,
         KernelStaticCacheMaxAge,
     },
+    StaticExcludedPathsKey: {
+        StaticExcludedPathsKey,
+        KernelStaticExcludedPaths,
+    },
     HttpMaxRequestBodyBytesKey: {
         HttpMaxRequestBodyBytesKey,
         KernelHttpMaxRequestBodyBytes,
@@ -60,6 +64,14 @@ var environmentKeyAliasMap = map[string][]string{
     HttpSessionTtlKey: {
         HttpSessionTtlKey,
         KernelHttpSessionTtl,
+    },
+    HttpSessionTombstoneRetentionKey: {
+        HttpSessionTombstoneRetentionKey,
+        KernelHttpSessionTombstoneRetention,
+    },
+    HttpShutdownTimeoutKey: {
+        HttpShutdownTimeoutKey,
+        KernelHttpShutdownTimeout,
     },
 }
 

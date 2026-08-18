@@ -1,13 +1,16 @@
 package container
 
 import (
+    "errors"
     "reflect"
     "strconv"
+    "strings"
     "sync"
     "sync/atomic"
     "testing"
 
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 type resolverRaceProbeFirst struct{}
@@ -20,7 +23,6 @@ type resolverRaceRegisteredThree struct{}
 type resolverRaceRegisteredFour struct{}
 type resolverRaceRegisteredFive struct{}
 
-/* @info Get's create closure reads the providers map after serviceWithCreationGuardLocked releases the container mutex, racing Register's map writes (fatal concurrent map read/write). The provider must be snapshotted under the lock so this holds under -race. */
 func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -69,7 +71,6 @@ func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* @info GetByType's type-branch create closure reads the typeProviders map after the container mutex is released, racing RegisterType's map writes. The provider must be snapshotted under the lock so this holds under -race. */
 func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -147,4 +148,401 @@ func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T
 
     atomic.StoreInt32(&stop, 1)
     waitGroup.Wait()
+}
+
+type suspensionHasProbe struct {
+    value string
+}
+
+func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.only",
+        func(resolver containercontract.Resolver) (*suspensionHasProbe, error) {
+            return &suspensionHasProbe{value: "scoped"}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    hasDuringSuspension := true
+    hasTypeDuringSuspension := true
+
+    registerErr := serviceContainer.Register(
+        "app.container.owned",
+        func(resolver containercontract.Resolver) (*resolverRaceProbeFirst, error) {
+            hasDuringSuspension = resolver.Has("app.scoped.only")
+            hasTypeDuringSuspension = resolver.HasType(reflect.TypeOf((*suspensionHasProbe)(nil)))
+
+            return &resolverRaceProbeFirst{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.container.owned"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if true == hasDuringSuspension {
+        t.Fatalf("expected Has to refuse the scope-only name while the scope is suspended")
+    }
+
+    if true == hasTypeDuringSuspension {
+        t.Fatalf("expected HasType to refuse the scope-only type while the scope is suspended")
+    }
+
+    if false == scopeInstance.Has("app.scoped.only") {
+        t.Fatalf("expected the unsuspended scope to keep answering for its own name")
+    }
+}
+
+type resolverContextMustProbe struct {
+    value string
+}
+
+type resolverContextMustDependent struct {
+    dependency *resolverContextMustProbe
+}
+
+func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.dependency",
+        func(resolver containercontract.Resolver) (*resolverContextMustProbe, error) {
+            return &resolverContextMustProbe{value: "dependency"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.dependent",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            dependency := resolver.MustGet("app.dependency").(*resolverContextMustProbe)
+
+            return &resolverContextMustDependent{dependency: dependency}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    value, getErr := serviceContainer.Get("app.dependent")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    dependent, isDependent := value.(*resolverContextMustDependent)
+    if false == isDependent || "dependency" != dependent.dependency.value {
+        t.Fatalf("expected the provider to have resolved its dependency, got %#v", value)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.broken",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            _ = resolver.MustGet("app.never.declared")
+
+            return &resolverContextMustDependent{}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    _, brokenErr := serviceContainer.Get("app.broken")
+    if nil == brokenErr {
+        t.Fatalf("expected the provider's missing dependency to fail the resolution")
+    }
+
+    if false == strings.Contains(renderedCauseChain(brokenErr), "service is not registered") {
+        t.Fatalf("expected the original failure in the cause chain, got %q", renderedCauseChain(brokenErr))
+    }
+
+    if true == strings.Contains(renderedCauseChain(brokenErr), "failed to get service instance") {
+        t.Fatalf("expected no rebuilt wrapper in the cause chain, got %q", renderedCauseChain(brokenErr))
+    }
+
+    if "app.never.declared" != contextValueInChain(brokenErr, "serviceName") {
+        t.Fatalf("expected the service name written into the original failure's context, got chain %q", renderedCauseChain(brokenErr))
+    }
+}
+
+func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.dependency",
+        func(resolver containercontract.Resolver) (*resolverContextMustProbe, error) {
+            return &resolverContextMustProbe{value: "dependency"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.dependent",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            dependency := resolver.MustGetByType(reflect.TypeOf((*resolverContextMustProbe)(nil))).(*resolverContextMustProbe)
+
+            return &resolverContextMustDependent{dependency: dependency}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    value, getErr := serviceContainer.Get("app.dependent")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    dependent, isDependent := value.(*resolverContextMustDependent)
+    if false == isDependent || "dependency" != dependent.dependency.value {
+        t.Fatalf("expected the provider to have resolved its dependency by type, got %#v", value)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.broken",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            _ = resolver.MustGetByType(reflect.TypeOf((*resolverRaceProbeFirst)(nil)))
+
+            return &resolverContextMustDependent{}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    _, brokenErr := serviceContainer.Get("app.broken")
+    if nil == brokenErr {
+        t.Fatalf("expected the provider's missing dependency to fail the resolution")
+    }
+
+    if false == strings.Contains(renderedCauseChain(brokenErr), "service type is not registered") {
+        t.Fatalf("expected the original by-type failure in the cause chain, got %q", renderedCauseChain(brokenErr))
+    }
+
+    if "" == contextValueInChain(brokenErr, "type") {
+        t.Fatalf("expected the type written into the original failure's context, got chain %q", renderedCauseChain(brokenErr))
+    }
+}
+
+func TestResolverContext_MustGet_KeepsTheAlreadyLoggedMarkOfTheFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.logged.failure",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            return nil, exception.MarkLogged(exception.NewError("the provider refused after logging", nil, nil))
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the failing resolution to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if false == exception.IsAlreadyLogged(recoveredErr) {
+            t.Fatalf("expected the panic value to keep the already-logged mark of the provider's failure")
+        }
+
+        if "app.logged.failure" != contextValueInChain(recoveredErr, "serviceName") {
+            t.Fatalf("expected the service name written into the original failure's context, got %v", recoveredErr)
+        }
+    }()
+
+    _ = serviceContainer.MustGet("app.logged.failure")
+}
+
+/* contextValueInChain walks the wrap chain for the first melody error whose context carries key, because the original failure travels out whole and its coordinates live in its context, not in a wrapper's message. */
+func contextValueInChain(err error, key string) string {
+    for current := err; nil != current; current = errors.Unwrap(current) {
+        melodyErr, isMelodyErr := current.(*exception.Error)
+        if false == isMelodyErr || nil == melodyErr {
+            continue
+        }
+
+        value, exists := melodyErr.Context()[key]
+        if false == exists {
+            continue
+        }
+
+        stringValue, isString := value.(string)
+        if true == isString {
+            return stringValue
+        }
+    }
+
+    return ""
+}
+
+/* renderedCauseChain walks the whole chain because a provider panic is wrapped by the creation guard before it reaches the caller, and only the chain says what the provider itself refused. */
+func renderedCauseChain(err error) string {
+    rendered := ""
+    for current := err; nil != current; current = errors.Unwrap(current) {
+        rendered = rendered + current.Error() + "\n"
+    }
+
+    return rendered
+}
+
+func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    _, getErr := serviceContainer.Get("")
+    if nil == getErr {
+        t.Fatalf("expected an empty service name to be refused")
+    }
+
+    if "service name is required in get" != getErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", getErr.Error())
+    }
+}
+
+func TestResolverContext_GetByType_NilTypeRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    _, getByTypeErr := serviceContainer.GetByType(nil)
+    if nil == getByTypeErr {
+        t.Fatalf("expected a nil type to be refused")
+    }
+
+    if "service type is required in get by type" != getByTypeErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", getByTypeErr.Error())
+    }
+}
+
+func TestResolverContext_CarriesTheContainerThroughTheCarrierDoor(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var carried containercontract.Container
+    serviceContainer.MustRegister(
+        "probe.carrier",
+        func(resolver containercontract.Resolver) (string, error) {
+            carrier, isCarrier := resolver.(containercontract.ContainerCarrier)
+            if false == isCarrier {
+                return "", nil
+            }
+
+            carried = carrier.Container()
+
+            return "built", nil
+        },
+    )
+
+    if _, resolveErr := serviceContainer.Get("probe.carrier"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if serviceContainer != carried {
+        t.Fatalf("expected the provider's resolver to carry the container, got %v", carried)
+    }
+}
+
+type resolverContextGraphDependency struct{}
+
+type resolverContextGraphParent struct {
+    dependency *resolverContextGraphDependency
+}
+
+type resolverContextGraphControlParent struct {
+    dependency *resolverContextGraphDependency
+}
+
+/* the container's dependency graph is never pruned and its teardown walks only container-created representatives, so an edge recorded under a scoped parent would sit there unread for the life of the process — one permanent entry per distinct scoped name. The container-parent edge asserted beside it is the control that the filter removed only the scoped writes. */
+func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    serviceContainer.MustRegister(
+        "app.container.dependency",
+        func(resolver containercontract.Resolver) (*resolverContextGraphDependency, error) {
+            return &resolverContextGraphDependency{}, nil
+        },
+    )
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.parent",
+        func(resolver containercontract.Resolver) (*resolverContextGraphParent, error) {
+            dependency, getErr := resolver.Get("app.container.dependency")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            /* the by-type door runs the same filter at its own site, so both writes are exercised by the one scoped parent */
+            if _, getByTypeErr := resolver.GetByType(reflect.TypeOf((*resolverContextGraphDependency)(nil))); nil != getByTypeErr {
+                return nil, getByTypeErr
+            }
+
+            return &resolverContextGraphParent{dependency: dependency.(*resolverContextGraphDependency)}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+    defer scopeInstance.Close()
+
+    if _, getErr := scopeInstance.Get("app.scoped.parent"); nil != getErr {
+        t.Fatalf("unexpected scoped resolution error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    scopedKeys := make([]string, 0)
+    for dependentKey := range serviceContainer.dependencyGraph {
+        if true == isScopedNodeKey(dependentKey) {
+            scopedKeys = append(scopedKeys, dependentKey)
+        }
+    }
+    serviceContainer.mutex.Unlock()
+
+    if 0 != len(scopedKeys) {
+        t.Fatalf("expected the container graph to hold no scope-keyed dependent, got %v", scopedKeys)
+    }
+
+    serviceContainer.MustRegister(
+        "app.container.parent",
+        func(resolver containercontract.Resolver) (*resolverContextGraphControlParent, error) {
+            dependency, getErr := resolver.Get("app.container.dependency")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &resolverContextGraphControlParent{dependency: dependency.(*resolverContextGraphDependency)}, nil
+        },
+    )
+
+    if _, getErr := serviceContainer.Get("app.container.parent"); nil != getErr {
+        t.Fatalf("unexpected container resolution error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    containerParentDependencies, containerParentRecorded := serviceContainer.dependencyGraph["service:app.container.parent"]
+    _, containerEdgeRecorded := containerParentDependencies["service:app.container.dependency"]
+    serviceContainer.mutex.Unlock()
+
+    if false == containerParentRecorded || false == containerEdgeRecorded {
+        t.Fatalf("expected the container parent's edge to its dependency to be recorded")
+    }
 }

@@ -2,8 +2,8 @@
 
 This integration provides:
 
-* A small `Provider` that opens a `rueidis.Client` from Melody config parameters.
-* A Redis-backed distributed rate limiter for the core `http/middleware` rate-limit middleware.
+* A small [`Provider`](./provider.go) that opens a `rueidis.Client` from Melody config parameters.
+* A Redis-backed distributed [`RateLimiter`](./rate_limit.go) for the core `http/middleware` rate-limit middleware.
 * A Redis-backed Melody cache backend implemented on top of Rueidis.
 * A Redis-backed revocable token store for the core `security` package (v3 binding only).
 
@@ -13,10 +13,16 @@ Entry point: [`NewProvider`](./provider.go)
 
 The provider reads parameters (address, username, password) using the names you pass to the constructor. If you provide a comma-separated list of addresses, each item is used as an init address.
 
+The password parameter is redacted in the framework's introspection output — `debug:parameters` above all — only once something arms the marking. `Open` arms it at the first dial, which covers no process that never resolves the client, so call [`MarkSecretParameters`](./provider.go) at wiring time with the providers you construct: it reads each provider's [`SecretParameterNames`](./provider.go) and marks the parameters through the configuration's own `MarkSecret`, tolerating a resolver that carries no configuration service. This is the arming the bunorm drivers get from their registry at construction; this integration has no registry, so the wiring is the construction site.
+
 Optional configuration:
 
-* [`ClientConfig`](./client_config.go) (client name, DB selection, TLS, disable client-side cache, ping on start)
-* [`TimeoutConfig`](./timeout_config.go) (connect / command timeouts)
+* [`ClientConfig`](./client_config.go) (client name, DB selection, TLS, disable client-side cache, ping on start, and the two deadlines that actually reach the client: `DialTimeout` and `ConnWriteTimeout`)
+* [`TimeoutConfig`](./timeout_config.go) — **boot only**. `ConnectTimeout` and `CommandTimeout` bound the provider's own ping round trips; neither is passed into `rueidis.ClientOption`, so ordinary commands are not bounded by them. The network deadlines a running application answers to are the two `ClientConfig` fields above.
+
+Either configuration reaches the provider through the chainable [`WithClientConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) methods on the value `NewProvider` returns, or through [`NewProviderWithConfig`](./provider.go), which takes both beside the parameter names in one call.
+
+**A configuration is taken whole or not at all.** An absent one is replaced by [`DefaultClientConfig`](./client_config.go) or [`DefaultTimeoutConfig`](./timeout_config.go) entirely; a supplied one is used as it stands, with no field-by-field fill-in — unlike the bunorm drivers, which do fill in field by field. So a partial literal is not "the defaults plus my change": every field left at its zero value is what the provider gets, which turns `PingOnStart` off, so a store that cannot be reached is discovered by the first request rather than at boot, and turns `DisableCache` off, which switches client-side caching on where the shipped default keeps it off. Start from the two constructors above and change what you mean to change.
 
 ## Rate limiter
 
@@ -40,9 +46,9 @@ The limiter surface:
 
 * `Allow(key)` — the context-less entry point; it bounds its own round trip with the call timeout.
 * `AllowWithRuntime(runtimeInstance, key)` — the entry point the rate-limit middleware prefers; it caps the request context with the call timeout, so a request that already carries a tighter deadline keeps it while a request with no deadline still fails fast, and it reports the store failure alongside the decision.
-* `Reset(key)` — drops the counter for one key, best-effort; a store failure is only reported through the error observer.
+* `Reset(key)` — drops the counter for one key, best-effort; a store failure reaches the error observer where one was given, and is otherwise written as a `rate limiter store failure` record through the request's logger or the emergency logger, marked already-logged.
 
-Keys live under the `melody:rate_limit:` prefix, so the limiter shares a Redis instance with the cache and the lock without colliding.
+Keys live under the `melody:rate_limit:` prefix, so inside one application the limiter shares a Redis instance with the cache — the other namespace this major ships — without colliding. Between two applications it is the opposite: the shipped prefixes are the same strings in every melody application and the client's `SelectDb` defaults to `0`, so two applications on one Redis with the defaults share every namespace — give each one its own prefix.
 
 Optional configuration:
 
@@ -59,7 +65,7 @@ Package: [`cache`](./cache)
 
 ### Backend
 
-Entry point: [`cache.NewBackend`](./cache/backend.go)
+Entry point: [`cache.NewBackend`](./cache/backend.go), or [`cache.NewBackendWithCommandTimeout`](./cache/backend.go) to bound the half of the surface that carries no context. `NewBackend` leaves those unbounded, which is the case worth knowing: against a store that accepts connections and stops answering, a ctx-less call has no deadline of its own to fall back on. A non-positive timeout reads as unbounded, so the two constructors agree by construction.
 
 `Backend` wraps a `rueidis.Client`. It exposes two parallel surfaces:
 
@@ -92,7 +98,7 @@ func main() {
 
 ### BackendService
 
-Entry point: [`cache.NewBackendService`](./cache/backend_service.go)
+Entry point: [`cache.NewBackendService`](./cache/backend_service.go), or [`cache.NewBackendServiceWithCommandTimeout`](./cache/backend_service.go) to bound every contract call. The `cache/contract.Backend` methods carry no context at all, so without a bound a read on the request path against an unanswering store hangs the handler; a non-positive timeout is the unbounded behaviour of `NewBackendService`.
 
 `BackendService` is a singleton wrapper intended for service container registration. It holds a `Backend` (built with `context.Background()`) and implements [`cache/contract.Backend`](../../cache/contract/backend.go) by forwarding each call to the underlying `Backend`.
 
@@ -117,7 +123,7 @@ func main() {
 
 Helper: [`cache.BackendFromRuntime`](./cache/backend_service.go)
 
-Returns a `*Backend` bound to the runtime request context, following the same pattern as Melody's repository `FromRuntime` helpers:
+Returns a `*Backend` bound to the runtime request context. Despite carrying no `Must` in its name, it panics when the service is absent or mistyped — treat it as the Must door it is:
 
 ```go
 package main
@@ -146,7 +152,6 @@ import (
 	containercontract "github.com/precision-soft/melody/container/contract"
 	rueidisintegration "github.com/precision-soft/melody/integrations/rueidis"
 	rueidiscache "github.com/precision-soft/melody/integrations/rueidis/cache"
-	"github.com/redis/rueidis"
 )
 
 const (
@@ -155,16 +160,24 @@ const (
 )
 
 func RegisterCacheServices(app *application.Application) {
+	/* the client is registered wrapped in a Connection: rueidis.Client.Close returns nothing, so a
+	   bare client can never join the container's ordered teardown and its connections outlive the
+	   process's own shutdown. Everything below reaches the client through Connection.Client(). */
 	app.RegisterService(
 		ServiceRedisClient,
-		func(resolver containercontract.Resolver) (rueidis.Client, error) {
+		func(resolver containercontract.Resolver) (*rueidisintegration.Connection, error) {
 			provider := rueidisintegration.NewProvider(
 				"CACHE_REDIS_ADDRESS",
 				"CACHE_REDIS_USER",
 				"CACHE_REDIS_PASSWORD",
 			)
 
-			return provider.Open(resolver)
+			client, openErr := provider.Open(resolver)
+			if nil != openErr {
+				return nil, openErr
+			}
+
+			return rueidisintegration.NewConnection(client), nil
 		},
 	)
 
@@ -172,7 +185,8 @@ func RegisterCacheServices(app *application.Application) {
 		ServiceCacheRueidis,
 		func(resolver containercontract.Resolver) (*rueidiscache.BackendService, error) {
 			configuration := config.ConfigMustFromResolver(resolver)
-			client := container.MustFromResolver[rueidis.Client](resolver, ServiceRedisClient)
+			connection := container.MustFromResolver[*rueidisintegration.Connection](resolver, ServiceRedisClient)
+			client := connection.Client()
 			prefix := configuration.MustGet("CACHE_REDIS_PREFIX").String()
 
 			return rueidiscache.NewBackendService(client, prefix, 0, 0)
@@ -254,20 +268,30 @@ Context: the context-less mutators (`Put`/`Delete`/`DeleteByUser`/`PurgeExpired`
 package main
 
 import (
-	rueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
-	"github.com/precision-soft/melody/v3/security"
-	securitycontract "github.com/precision-soft/melody/v3/security/contract"
+	melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
+	"github.com/precision-soft/melody/v3/application"
+	"github.com/precision-soft/melody/v3/container"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	"github.com/redis/rueidis"
 )
 
-const ServiceTokenStore = "security.token_store"
+const (
+	ServiceRedisClient = "service.redis.client"
+	ServiceTokenStore  = "security.token_store"
+)
 
-func registerTokenStore(builder containercontract.Builder, client redis.Client) {
-	builder.Set(ServiceTokenStore, func(runtimeInstance runtimecontract.Runtime) any {
-		return rueidis.NewTokenStore(
-			client,
-			rueidis.WithTokenStorePrefix("myapp:token"),
-		)
-	})
+func registerTokenStore(app *application.Application) {
+	app.RegisterService(
+		ServiceTokenStore,
+		func(resolver containercontract.Resolver) (*melodyrueidis.RedisTokenStore, error) {
+			client := container.MustFromResolver[rueidis.Client](resolver, ServiceRedisClient)
+
+			return melodyrueidis.NewTokenStore(
+				client,
+				melodyrueidis.WithTokenStorePrefix("myapp:token"),
+			), nil
+		},
+	)
 }
 ```
 

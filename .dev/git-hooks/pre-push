@@ -24,6 +24,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# git opened the connection to the remote before it ran this hook — it had to, because the remote sha below on
+# stdin comes from that connection's ref advertisement. The validation then holds it idle for minutes and the
+# server closes it, so git dies with SIGPIPE while sending the pack, right after this hook reports success.
+#
+# Keepalives are the remedy and they cannot be applied to a push already under way, so this only arms the next
+# one. ./dc does the same on every invocation; this is here for whoever pushes from a fresh clone without
+# having run the wrapper first, and it says so rather than fixing it silently.
+if [[ "" = "$(git config --get core.sshCommand || true)" ]]; then
+    git config core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20"
+    info "armed ssh keepalives for the next push (core.sshCommand); if this push dies without a message, that is why — run it again"
+fi
+
 info "running full validations (unconditional)"
 bash "${ROOT_DIR}/.dev/validate/all.sh" --all
 

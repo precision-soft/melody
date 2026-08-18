@@ -1,6 +1,8 @@
 package session
 
 import (
+    "errors"
+    "sync"
     "testing"
     "time"
 
@@ -26,35 +28,107 @@ func (instance *nilMapStorage) Close() error {
     return nil
 }
 
-func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {
-    testhelper.AssertPanics(t, func() {
-        _ = NewManager(nil, time.Minute)
-    })
+/* probeFailingStorage answers every existence probe with a failure, which is what the id minting must not swallow: a storage outage while probing would otherwise hand out an id that was never checked against anything. */
+type probeFailingStorage struct{}
+
+func (instance *probeFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, exception.NewError("the probe storage is unavailable", nil, nil)
 }
 
-func TestManager_NewSession_HasId(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+func (instance *probeFailingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return nil
+}
+
+func (instance *probeFailingStorage) Delete(sessionId string) error {
+    return nil
+}
+
+func (instance *probeFailingStorage) Close() error {
+    return nil
+}
+
+func TestManager_NewSession_PanicsWhenEveryCandidateIdIsAlreadyTaken(t *testing.T) {
+    manager := NewManager(&nilMapStorage{}, time.Minute)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = manager.NewSession()
+    }, "could not generate unique session id")
+}
+
+func TestManager_NewSession_PanicsWhenTheStorageProbeFails(t *testing.T) {
+    manager := NewManager(&probeFailingStorage{}, time.Minute)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = manager.NewSession()
+    }, "the probe storage is unavailable")
+}
+
+/* deleteFailingStorage mints ids freely and refuses to delete, which is the outage a rotation has to survive without retiring the id it could not remove */
+type deleteFailingStorage struct{}
+
+func (instance *deleteFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, nil
+}
+
+func (instance *deleteFailingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return nil
+}
+
+func (instance *deleteFailingStorage) Delete(sessionId string) error {
+    return exception.NewError("the probe storage refuses to delete", nil, nil)
+}
+
+func (instance *deleteFailingStorage) Close() error {
+    return nil
+}
+
+func TestManager_Session_PanicsWhenTheStorageCannotAnswer(t *testing.T) {
+    manager := NewManager(&probeFailingStorage{}, time.Minute)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = manager.Session("0123456789abcdef0123456789abcdef")
+    }, "the probe storage is unavailable")
+}
+
+func TestManager_Session_AcceptsAStoredSessionWithNoValues(t *testing.T) {
+    manager := NewManager(&nilMapStorage{}, time.Minute)
+
+    sessionInstance := manager.Session("0123456789abcdef0123456789abcdef")
+    if nil == sessionInstance {
+        t.Fatalf("expected a session for an id the storage reports as existing")
+    }
+
+    sessionInstance.Set("k", "v")
+
+    if "v" != sessionInstance.String("k") {
+        t.Fatalf("expected the session to be writable, got %q", sessionInstance.String("k"))
+    }
+}
+
+func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing.T) {
+    manager := NewManager(&deleteFailingStorage{}, time.Minute)
 
     sessionInstance := manager.NewSession()
-    if "" == sessionInstance.Id() {
-        t.Fatalf("expected id")
+    sessionInstance.Set("user", "alice")
+
+    rotated, rotateErr := manager.RegenerateSession(sessionInstance)
+    if nil == rotateErr {
+        t.Fatalf("expected the rotation to fail when the previous entry cannot be removed")
+    }
+
+    if nil != rotated {
+        t.Fatalf("expected no rotated session when the rotation failed")
+    }
+
+    if true == sessionInstance.IsCleared() {
+        t.Fatalf("expected the original session to stay usable when the rotation failed")
     }
 }
 
-func TestManager_NewSession_GeneratesUniqueId(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
-
-    s1 := manager.NewSession()
-    s2 := manager.NewSession()
-
-    if "" == s1.Id() || "" == s2.Id() {
-        t.Fatalf("expected ids")
-    }
-
-    if s1.Id() == s2.Id() {
-        t.Fatalf("expected unique ids")
-    }
+func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewManager(nil, time.Minute)
+    }, "session storage is nil")
 }
 
 func TestManager_Session_ReturnsNilWhenIdEmpty(t *testing.T) {
@@ -121,6 +195,31 @@ func TestManager_Session_NormalizesNilValuesMap(t *testing.T) {
 
     if "v" != sessionInstance.String("k") {
         t.Fatalf("expected stored value")
+    }
+}
+
+func TestManager_NewSession_HasId(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, 30*time.Minute)
+
+    sessionInstance := manager.NewSession()
+    if "" == sessionInstance.Id() {
+        t.Fatalf("expected id")
+    }
+}
+
+func TestManager_NewSession_GeneratesUniqueId(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    s1 := manager.NewSession()
+    s2 := manager.NewSession()
+
+    if "" == s1.Id() || "" == s2.Id() {
+        t.Fatalf("expected ids")
+    }
+
+    if s1.Id() == s2.Id() {
+        t.Fatalf("expected unique ids")
     }
 }
 
@@ -368,5 +467,616 @@ func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t
 
     if "u-1" != reloaded.String("userId") {
         t.Fatalf("expected the rotated session to carry the identity, got %q", reloaded.String("userId"))
+    }
+}
+
+func TestManager_SaveSessionRefusesATypedNilSession(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    var typedNil *Session
+
+    err := manager.SaveSession(typedNil)
+    if nil == err {
+        t.Fatalf("expected a typed nil session to be refused")
+    }
+
+    if "session is nil in save session" != err.Error() {
+        t.Fatalf("expected the nil-session error, got %q", err.Error())
+    }
+}
+
+func TestManager_SaveSessionRefusesAnIdTheDeletePathWouldRefuse(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, time.Minute)
+
+    foreign := &foreignIdSession{id: "abc", modified: true}
+
+    err := manager.SaveSession(foreign)
+    if nil == err {
+        t.Fatalf("expected an id the delete path refuses to be refused by the save path too")
+    }
+
+    if _, exists, _ := storage.Load("abc"); true == exists {
+        t.Fatalf("expected nothing to be stored under an id that can never be read back")
+    }
+}
+
+func TestNewManager_RefusesANegativeTtl(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewManager(NewInMemoryStorage(), -time.Hour)
+        },
+        "session ttl must be zero or positive",
+    )
+}
+
+func TestNewManager_AcceptsAZeroTtlAsNoExpiry(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), 0)
+    if nil == manager {
+        t.Fatalf("expected a zero ttl to be accepted as no expiry")
+    }
+}
+
+func TestNewManager_RefusesASubSecondPositiveTtl(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewManager(NewInMemoryStorage(), 500*time.Millisecond)
+        },
+        "session ttl is positive but shorter than one second, which stores no usable session; use zero for no expiry",
+    )
+}
+
+func TestNewManager_AcceptsExactlyOneSecond(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Second)
+    if nil == manager {
+        t.Fatalf("expected a one-second ttl to be accepted")
+    }
+}
+
+type foreignIdSession struct {
+    id       string
+    modified bool
+    cleared  bool
+}
+
+func (instance *foreignIdSession) Id() string           { return instance.id }
+func (instance *foreignIdSession) Get(string) any       { return nil }
+func (instance *foreignIdSession) String(string) string { return "" }
+func (instance *foreignIdSession) Set(string, any)      {}
+func (instance *foreignIdSession) Has(string) bool      { return false }
+func (instance *foreignIdSession) Delete(string)        {}
+func (instance *foreignIdSession) Clear()               { instance.cleared = true }
+func (instance *foreignIdSession) All() map[string]any  { return map[string]any{"a": 1} }
+func (instance *foreignIdSession) IsModified() bool     { return instance.modified }
+func (instance *foreignIdSession) IsCleared() bool      { return instance.cleared }
+func (instance *foreignIdSession) Snapshot() (map[string]any, bool, bool) {
+    return instance.All(), instance.modified, instance.cleared
+}
+
+func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, time.Minute)
+
+    victim := manager.NewSession()
+    victim.Set("userId", "u-42")
+
+    if nil != manager.SaveSession(victim) {
+        t.Fatalf("unexpected error seeding the session")
+    }
+
+    sessionId := victim.Id()
+
+    /* a second request loaded the same session before the logout ran */
+    concurrentView := manager.Session(sessionId)
+    if nil == concurrentView {
+        t.Fatalf("expected the concurrent request to load the session")
+    }
+
+    victim.Clear()
+    if nil != manager.SaveSession(victim) {
+        t.Fatalf("unexpected error deleting the session on logout")
+    }
+
+    if _, exists, _ := storage.Load(sessionId); true == exists {
+        t.Fatalf("expected the logout to have removed the session")
+    }
+
+    concurrentView.Set("lastSeen", "now")
+
+    saveErr := manager.SaveSession(concurrentView)
+    if nil == saveErr {
+        t.Fatalf("expected the in-flight request to be refused the write")
+    }
+
+    if false == errors.Is(saveErr, ErrSessionDeleted) {
+        t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", saveErr)
+    }
+
+    if _, exists, _ := storage.Load(sessionId); true == exists {
+        t.Fatalf("expected the deleted session to stay deleted rather than being resurrected under the same id")
+    }
+}
+
+func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, time.Minute)
+
+    original := manager.NewSession()
+    original.Set("userId", "u-42")
+
+    if nil != manager.SaveSession(original) {
+        t.Fatalf("unexpected error seeding the session")
+    }
+
+    previousId := original.Id()
+
+    concurrentView := manager.Session(previousId)
+    if nil == concurrentView {
+        t.Fatalf("expected the concurrent request to load the session")
+    }
+
+    if _, err := manager.RegenerateSession(original); nil != err {
+        t.Fatalf("unexpected error rotating the session: %v", err)
+    }
+
+    concurrentView.Set("lastSeen", "now")
+
+    if nil == manager.SaveSession(concurrentView) {
+        t.Fatalf("expected the in-flight request to be refused the write to the rotated-away id")
+    }
+
+    if _, exists, _ := storage.Load(previousId); true == exists {
+        t.Fatalf("expected the rotated-away id to stay gone")
+    }
+}
+
+func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    staleId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    freshId := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+    /* the burial is seeded through the door that records it, not by writing the map behind it: pruning walks the burials in the order they happened, so a record entry with no burial behind it is a state no caller can produce */
+    manager.buryTombstoneAt(staleId, time.Now().Add(-TombstoneRetention-time.Minute))
+
+    if true == manager.isTombstoned(staleId) {
+        t.Fatalf("expected a tombstone older than the retention window to have lapsed")
+    }
+
+    manager.buryTombstone(freshId)
+
+    manager.tombstoneMutex.Lock()
+    _, staleStillHeld := manager.deletedAtById[staleId]
+    entryCount := len(manager.deletedAtById)
+    manager.tombstoneMutex.Unlock()
+
+    if true == staleStillHeld {
+        t.Fatalf("expected the lapsed tombstone to be pruned by the next burial")
+    }
+
+    if 1 != entryCount {
+        t.Fatalf("expected only the fresh tombstone to remain, got %d entries", entryCount)
+    }
+
+    if false == manager.isTombstoned(freshId) {
+        t.Fatalf("expected the fresh tombstone to be held")
+    }
+}
+
+func TestManager_ClosePassesThroughOnlyForAnOwnedStorage(t *testing.T) {
+    injected := &closeCountingStorage{}
+    if nil != NewManager(injected, time.Minute).Close() {
+        t.Fatalf("unexpected error closing the manager")
+    }
+
+    if 0 != injected.closeCount {
+        t.Fatalf("expected an injected storage to be left open, it was closed %d time(s)", injected.closeCount)
+    }
+
+    owned := &closeCountingStorage{}
+    if nil != NewManagerOwningStorage(owned, time.Minute).Close() {
+        t.Fatalf("unexpected error closing the owning manager")
+    }
+
+    if 1 != owned.closeCount {
+        t.Fatalf("expected an owned storage to be closed exactly once, got %d", owned.closeCount)
+    }
+}
+
+type closeCountingStorage struct {
+    closeCount int
+}
+
+func (instance *closeCountingStorage) Load(string) (map[string]any, bool, error) {
+    return nil, false, nil
+}
+
+func (instance *closeCountingStorage) Save(string, map[string]any, time.Duration) error {
+    return nil
+}
+
+func (instance *closeCountingStorage) Delete(string) error { return nil }
+
+func (instance *closeCountingStorage) Close() error {
+    instance.closeCount++
+
+    return nil
+}
+
+func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
+    storage := NewInMemoryStorageWithCleanupInterval(time.Millisecond)
+    defer storage.Close()
+
+    manager := NewManager(storage, time.Minute)
+
+    seeded := make([]string, 0, 16)
+    for index := 0; index < 16; index++ {
+        sessionInstance := manager.NewSession()
+        sessionInstance.Set("index", index)
+
+        if nil != manager.SaveSession(sessionInstance) {
+            t.Fatalf("unexpected error seeding session %d", index)
+        }
+
+        seeded = append(seeded, sessionInstance.Id())
+    }
+
+    var waitGroup sync.WaitGroup
+
+    for index := 0; index < 16; index++ {
+        sessionId := seeded[index]
+
+        waitGroup.Add(3)
+
+        go func() {
+            defer waitGroup.Done()
+
+            if loaded := manager.Session(sessionId); nil != loaded {
+                loaded.Set("touched", true)
+                _ = manager.SaveSession(loaded)
+            }
+        }()
+
+        go func() {
+            defer waitGroup.Done()
+
+            _ = manager.DeleteSession(sessionId)
+        }()
+
+        go func() {
+            defer waitGroup.Done()
+
+            if loaded := manager.Session(sessionId); nil != loaded {
+                _, _ = manager.RegenerateSession(loaded)
+            }
+        }()
+    }
+
+    waitGroup.Wait()
+
+    /* whatever the interleaving, a deleted id must not be live again */
+    for _, sessionId := range seeded {
+        if true == manager.isTombstoned(sessionId) {
+            if _, exists, _ := storage.Load(sessionId); true == exists {
+                t.Fatalf("expected a buried id to stay gone, %q is live again", sessionId)
+            }
+        }
+    }
+}
+
+func TestInMemoryStorage_CloseConcurrentWithLoadAndSaveIsRaceFree(t *testing.T) {
+    storage := NewInMemoryStorageWithCleanupInterval(time.Millisecond)
+
+    var waitGroup sync.WaitGroup
+
+    for index := 0; index < 8; index++ {
+        waitGroup.Add(2)
+
+        go func() {
+            defer waitGroup.Done()
+
+            _ = storage.Save("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"k": "v"}, time.Minute)
+        }()
+
+        go func() {
+            defer waitGroup.Done()
+
+            _, _, _ = storage.Load("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        }()
+    }
+
+    if nil != storage.Close() {
+        t.Fatalf("unexpected error closing the storage")
+    }
+
+    waitGroup.Wait()
+
+    if _, _, err := storage.Load("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
+        t.Fatalf("expected the closed storage to refuse a load")
+    }
+}
+
+type blockingSaveStorage struct {
+    inner       *InMemoryStorage
+    enteredSave chan struct{}
+    releaseSave chan struct{}
+    enterOnce   sync.Once
+}
+
+func (instance *blockingSaveStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *blockingSaveStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    instance.enterOnce.Do(
+        func() {
+            close(instance.enteredSave)
+            <-instance.releaseSave
+        },
+    )
+
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *blockingSaveStorage) Delete(sessionId string) error {
+    return instance.inner.Delete(sessionId)
+}
+
+func (instance *blockingSaveStorage) Close() error { return instance.inner.Close() }
+
+func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *testing.T) {
+    inner := NewInMemoryStorage()
+    defer inner.Close()
+
+    storage := &blockingSaveStorage{
+        inner:       inner,
+        enteredSave: make(chan struct{}),
+        releaseSave: make(chan struct{}),
+    }
+
+    manager := NewManager(storage, time.Minute)
+
+    sessionInstance := manager.NewSession()
+    sessionInstance.Set("userId", "u-42")
+
+    sessionId := sessionInstance.Id()
+
+    saveDone := make(chan error, 1)
+    go func() {
+        saveDone <- manager.SaveSession(sessionInstance)
+    }()
+
+    select {
+    case <-storage.enteredSave:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the save never reached the storage")
+    }
+
+    /* let the held save finish shortly, so a delete that must wait for the lock is not deadlocked by this test */
+    go func() {
+        time.Sleep(50 * time.Millisecond)
+        close(storage.releaseSave)
+    }()
+
+    if nil != manager.DeleteSession(sessionId) {
+        t.Fatalf("unexpected error deleting the session")
+    }
+
+    <-saveDone
+
+    if _, exists, _ := inner.Load(sessionId); true == exists {
+        t.Fatalf("expected the deleted session to stay deleted: a delete interleaved between the tombstone check and the write, and the write resurrected it")
+    }
+}
+
+/* the double holds the save of ONE named session open and lets every other one through, announcing each as it arrives: that is what tells a per-session critical section apart from a per-manager one, since only the second makes an unrelated session wait behind this one's round trip */
+type heldSaveStorage struct {
+    inner       *InMemoryStorage
+    heldId      string
+    enteredSave chan string
+    releaseSave chan struct{}
+}
+
+func (instance *heldSaveStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *heldSaveStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    instance.enteredSave <- sessionId
+
+    if sessionId == instance.heldId {
+        <-instance.releaseSave
+    }
+
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *heldSaveStorage) Delete(sessionId string) error {
+    return instance.inner.Delete(sessionId)
+}
+
+func (instance *heldSaveStorage) Close() error { return instance.inner.Close() }
+
+func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
+    inner := NewInMemoryStorage()
+    defer inner.Close()
+
+    storage := &heldSaveStorage{
+        inner:       inner,
+        enteredSave: make(chan string, 4),
+        releaseSave: make(chan struct{}),
+    }
+
+    manager := NewManager(storage, time.Minute)
+
+    heldSession := manager.NewSession()
+    heldSession.Set("userId", "u-1")
+
+    /* the two sessions have to sit on different locks for the question to mean anything; ids are random, so the pair is chosen rather than assumed */
+    otherSession := manager.NewSession()
+    for attempt := 0; manager.sessionMutexOf(heldSession.Id()) == manager.sessionMutexOf(otherSession.Id()); attempt++ {
+        if 64 < attempt {
+            t.Fatalf("could not mint two session ids on different locks")
+        }
+
+        otherSession = manager.NewSession()
+    }
+    otherSession.Set("userId", "u-2")
+
+    storage.heldId = heldSession.Id()
+
+    heldDone := make(chan error, 1)
+    go func() {
+        heldDone <- manager.SaveSession(heldSession)
+    }()
+
+    select {
+    case arrived := <-storage.enteredSave:
+        if heldSession.Id() != arrived {
+            t.Fatalf("expected the held save to reach the storage first, got %q", arrived)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the held save never reached the storage")
+    }
+
+    otherDone := make(chan error, 1)
+    go func() {
+        otherDone <- manager.SaveSession(otherSession)
+    }()
+
+    select {
+    case saveErr := <-otherDone:
+        if nil != saveErr {
+            t.Fatalf("unexpected error saving the unrelated session: %v", saveErr)
+        }
+    case <-time.After(5 * time.Second):
+        close(storage.releaseSave)
+        t.Fatalf("an unrelated session waited on a save that was still inside the storage")
+    }
+
+    close(storage.releaseSave)
+
+    if saveErr := <-heldDone; nil != saveErr {
+        t.Fatalf("unexpected error saving the held session: %v", saveErr)
+    }
+}
+
+/* the pruning walks the burials in the order they happened and stops at the first one still inside its window, so it has to free exactly the lapsed prefix: one short and the record keeps growing, one long and a tombstone that is still refusing write-backs is forgotten */
+func TestManager_TheBurialPruningStopsAtTheFirstLivingTombstone(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    lapsedId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    livingId := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    freshId := "cccccccccccccccccccccccccccccccc"
+
+    manager.buryTombstoneAt(lapsedId, time.Now().Add(-TombstoneRetention-time.Minute))
+    manager.buryTombstoneAt(livingId, time.Now().Add(-time.Minute))
+
+    manager.buryTombstone(freshId)
+
+    if true == manager.isTombstoned(lapsedId) {
+        t.Fatalf("expected the lapsed tombstone to be gone")
+    }
+
+    if false == manager.isTombstoned(livingId) {
+        t.Fatalf("expected the tombstone still inside the window to be held")
+    }
+
+    if false == manager.isTombstoned(freshId) {
+        t.Fatalf("expected the fresh tombstone to be held")
+    }
+
+    manager.tombstoneMutex.Lock()
+    entryCount := len(manager.deletedAtById)
+    queuedCount := len(manager.buriedInOrder)
+    manager.tombstoneMutex.Unlock()
+
+    if 2 != entryCount {
+        t.Fatalf("expected two tombstones to remain, got %d", entryCount)
+    }
+
+    if 2 != queuedCount {
+        t.Fatalf("expected the lapsed burial to leave the queue, got %d queued", queuedCount)
+    }
+}
+
+/* an id buried twice inside one window has two burials in the queue and one entry in the record, and the entry belongs to the later burial: pruning the earlier one must not take it, or the session stops being refused a write-back while it is still inside its window — the exact resurrection the record exists to prevent */
+func TestManager_AReburiedTombstoneSurvivesThePruningOfItsEarlierBurial(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    reburiedId := "dddddddddddddddddddddddddddddddd"
+    freshId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+    /* both burials have to be in the queue when the pruning reaches the first one, which is what puts a lapsed queue entry in front of a record entry that belongs to a later burial: the second burial happens while the first is still inside the window, so it prunes nothing */
+    now := time.Now()
+
+    manager.buryTombstoneAt(reburiedId, now.Add(-TombstoneRetention-time.Minute))
+    manager.buryTombstoneAt(reburiedId, now.Add(-TombstoneRetention+time.Minute))
+
+    manager.buryTombstoneAt(freshId, now)
+
+    if false == manager.isTombstoned(reburiedId) {
+        t.Fatalf("expected the re-burial to keep refusing write-backs after its earlier burial lapsed")
+    }
+}
+
+func TestNewManagerWithTombstoneRetention_RefusesANonPositiveRetention(t *testing.T) {
+    for _, invalidRetention := range []time.Duration{0, -time.Second} {
+        testhelper.AssertPanicsWithError(
+            t,
+            func() {
+                NewManagerWithTombstoneRetention(NewInMemoryStorage(), time.Minute, invalidRetention)
+            },
+            "session tombstone retention must be positive",
+        )
+    }
+}
+
+func TestNewManagerWithTombstoneRetention_SizesTheRefusalWindow(t *testing.T) {
+    manager := NewManagerWithTombstoneRetention(NewInMemoryStorage(), time.Minute, time.Hour)
+
+    buriedId := "dddddddddddddddddddddddddddddddd"
+
+    manager.buryTombstoneAt(buriedId, time.Now().Add(-TombstoneRetention-time.Minute))
+
+    if false == manager.isTombstoned(buriedId) {
+        t.Fatalf("expected a burial older than the default window to still refuse under the sized one")
+    }
+
+    manager.buryTombstoneAt(buriedId, time.Now().Add(-time.Hour-time.Minute))
+
+    if true == manager.isTombstoned(buriedId) {
+        t.Fatalf("expected a burial older than the sized window to have lapsed")
+    }
+}
+
+/* the divergent fake constructs the interleaving instead of awaiting it: its Snapshot answers a cleared session while IsCleared still answers live — the state a Clear landing mid-decision produces. The manager must follow the snapshot. */
+type snapshotClearedSession struct {
+    foreignIdSession
+}
+
+func (instance *snapshotClearedSession) Id() string { return "1234567890abcdef1234567890abcdef" }
+
+func (instance *snapshotClearedSession) Snapshot() (map[string]any, bool, bool) {
+    return map[string]any{}, true, true
+}
+
+func TestSaveSession_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManagerOwningStorage(storage, 0)
+    defer func() { _ = manager.Close() }()
+
+    sessionInstance := &snapshotClearedSession{}
+    sessionInstance.modified = true
+    sessionInstance.cleared = false
+
+    if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("expected the delete branch to answer nil, got %v", saveErr)
+    }
+
+    if _, exists, _ := storage.Load(sessionInstance.Id()); true == exists {
+        t.Fatalf("expected the snapshot's cleared flag to have taken the delete branch")
     }
 }

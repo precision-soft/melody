@@ -82,6 +82,9 @@ func serializeByAcceptHeader(acceptHeader string, value any) ([]byte, error) {
 
 - [`NewSerializerManager`](../../serializer/serializer_manager.go)
 - [`type SerializerManager`](../../serializer/serializer_manager.go)
+    - [`Get(mime string) (serializercontract.Serializer, bool)`](../../serializer/serializer_manager.go) — the serializer registered for one media type, with the flag that tells an unregistered type from a nil one
+    - [`ResolveByAcceptHeader(acceptHeader string)`](../../serializer/serializer_manager.go)
+- [`ErrNotAcceptable`](../../serializer/serializer_manager.go) — reports that the accept header refused every media type the manager can produce, so no representation can be served
 
 ### Runtime integration (`serializer`)
 

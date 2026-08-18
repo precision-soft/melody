@@ -134,7 +134,7 @@ func TestForwardedClientIpResolver_MatchesCidrAndExactEntries(t *testing.T) {
     }
 }
 
-/* @info A proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4. Left mapped, the two forms key two different rate limit buckets, and an IPv4 CIDR in the trusted proxy list never matches a 4-in-6 peer. */
+/* a proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4; left mapped, the two forms key two different rate limit buckets and an IPv4 CIDR never matches a 4-in-6 peer */
 func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -149,7 +149,7 @@ func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
     }
 }
 
-/* @info Proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For. The untrusted client hop must be resolved to its bare address, not rejected as garbage — which would collapse every client into the proxy's own rate-limit bucket. */
+/* proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For, so the untrusted client hop resolves to its bare address rather than being refused as garbage */
 func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -159,7 +159,7 @@ func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
     }
 }
 
-/* @info A dual-stack proxy may write its hop as an IPv4-mapped address (::ffff:10.0.0.5) and the operator lists that literal in the trusted proxy list. The mapped trusted entry must still match the unmapped hop, otherwise the trusted hop is treated as the first untrusted client and the proxy's own address leaks as the limiter key. */
+/* a dual-stack proxy may write its hop as an IPv4-mapped address and the operator lists that literal as trusted, so the mapped entry has to match the unmapped hop */
 func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "::ffff:192.168.1.1"))
 
@@ -169,12 +169,64 @@ func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) 
     }
 }
 
-/* @info A trusted proxy CIDR written in IPv4-mapped form (::ffff:192.168.0.0/120) must still contain the unmapped direct peer, otherwise the peer is rejected as untrusted and the forwarded chain is never walked. */
+/* a trusted proxy CIDR written in IPv4-mapped form (::ffff:192.168.0.0/120) still contains the unmapped direct peer */
 func TestForwardedClientIpResolver_MatchesMappedTrustedPrefix(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("::ffff:192.168.0.0/120"))
 
     ip := resolver(forwardedRequest("192.168.0.5:5555", "203.0.113.7"))
     if "203.0.113.7" != ip {
         t.Fatalf("expected the client behind the mapped trusted prefix, got: %s", ip)
+    }
+}
+
+/* A trusted edge may write an IPv6 hop as a bracketed literal with no port. net.SplitHostPort rejects that shape and netip.ParseAddr rejects the brackets it still carries, so the hop read as garbage and the resolver fell back to the direct peer — every IPv6 client behind such an edge collapsed onto the proxy's single rate limit bucket while IPv4 clients kept their own. */
+func TestForwardedClientIpResolver_ResolvesBracketedIpv6HopWithoutPort(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "[2001:db8::1]"))
+    if "2001:db8::1" != ip {
+        t.Fatalf("expected the bracketed ipv6 client, got: %s", ip)
+    }
+}
+
+/* The bracketed form must also be recognized as a trusted hop, otherwise a bracketed proxy is walked as if it were the client and the chain behind it is never reached. */
+func TestForwardedClientIpResolver_TrustsBracketedIpv6Proxy(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "2001:db8:aaaa::/48"))
+
+    ip := resolver(forwardedRequest("10.0.0.1:5555", "203.0.113.7, [2001:db8:aaaa::5]"))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the client past the bracketed trusted hop, got: %s", ip)
+    }
+}
+
+/* Bracketed and bare forms of one address name one client, so they must key one bucket. */
+func TestForwardedClientIpResolver_BracketedAndBareIpv6KeyTheSameClient(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    bracketed := resolver(forwardedRequest("10.0.0.1:5555", "[2001:db8::1]"))
+    bare := resolver(forwardedRequest("10.0.0.1:5555", "2001:db8::1"))
+    ported := resolver(forwardedRequest("10.0.0.1:5555", "[2001:db8::1]:54321"))
+
+    if bracketed != bare {
+        t.Fatalf("a bracketed ipv6 hop must key the same bucket as its bare form: %q vs %q", bracketed, bare)
+    }
+    if ported != bare {
+        t.Fatalf("a ported ipv6 hop must key the same bucket as its bare form: %q vs %q", ported, bare)
+    }
+}
+
+/* the closure reads the trusted list on every request: retained live, a caller reusing its slice rewrote the trust decision mid-serving — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
+func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *testing.T) {
+    trustedProxyList := []string{"10.0.0.0/8"}
+    resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      trustedProxyList,
+    })
+
+    trustedProxyList[0] = "192.0.2.0/24"
+
+    clientIp := resolver(forwardedRequest("10.0.0.1:4711", "203.0.113.9"))
+    if "203.0.113.9" != clientIp {
+        t.Fatalf("expected the construction-time trusted list to keep deciding, got %q", clientIp)
     }
 }

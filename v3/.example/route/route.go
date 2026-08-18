@@ -98,3 +98,20 @@ const (
     EventsPublishName    = "example.events.publish"
     EventsPublishPattern = EventsPrefix + "/publish/"
 )
+
+const (
+    AccessTokenPrefix = "/access-token"
+
+    AccessTokenIssueName    = "example.access_token.issue"
+    AccessTokenIssuePattern = AccessTokenPrefix + "/issue/"
+
+    AccessTokenRevokeDeviceName    = "example.access_token.revoke.device"
+    AccessTokenRevokeDevicePattern = AccessTokenPrefix + "/revoke/device/"
+
+    AccessTokenRevokeUserName    = "example.access_token.revoke.user"
+    AccessTokenRevokeUserPattern = AccessTokenPrefix + "/revoke/user/"
+    DevicePrefix                 = "/device"
+
+    DeviceIdentityName    = "example.device.identity"
+    DeviceIdentityPattern = DevicePrefix + "/identity/"
+)

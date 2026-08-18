@@ -4,6 +4,7 @@ import (
     "errors"
     "testing"
 
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
@@ -54,6 +55,41 @@ func TestNewError_CopiesContextInConstructor(t *testing.T) {
 
     if "value" != err.Context()["key"] {
         t.Fatalf("expected constructor to copy context")
+    }
+}
+
+func TestNamedConstructors_CarryTheirLevel(t *testing.T) {
+    constructorList := []struct {
+        name        string
+        constructor func(string, exceptioncontract.Context, error) *Error
+        level       loggingcontract.Level
+    }{
+        {"NewEmergency", NewEmergency, loggingcontract.LevelEmergency},
+        {"NewError", NewError, loggingcontract.LevelError},
+        {"NewWarning", NewWarning, loggingcontract.LevelWarning},
+        {"NewInfo", NewInfo, loggingcontract.LevelInfo},
+    }
+
+    cause := errors.New("cause")
+
+    for _, constructorEntry := range constructorList {
+        err := constructorEntry.constructor("message", map[string]any{"key": "value"}, cause)
+
+        if constructorEntry.level != err.Level() {
+            t.Fatalf("%s: expected level %q, got %q", constructorEntry.name, constructorEntry.level, err.Level())
+        }
+
+        if "message" != err.Message() {
+            t.Fatalf("%s: unexpected message %q", constructorEntry.name, err.Message())
+        }
+
+        if "value" != err.Context()["key"] {
+            t.Fatalf("%s: unexpected context %v", constructorEntry.name, err.Context())
+        }
+
+        if cause != err.CauseErr() {
+            t.Fatalf("%s: unexpected cause", constructorEntry.name)
+        }
     }
 }
 

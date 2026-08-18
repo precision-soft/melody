@@ -262,3 +262,56 @@ func TestBuildCauseContextChain_HugeMaxDepthDoesNotPanic(t *testing.T) {
         t.Fatalf("unexpected context entry: %v", chain[0])
     }
 }
+
+func TestBuildCauseContextChain_MixedErrorTypes_IncludesNilForPlainErrors(t *testing.T) {
+    plainErr := errors.New("plain")
+    exceptionErr := NewError("exception", map[string]any{"key": "value"}, plainErr)
+
+    chain := BuildCauseContextChain(exceptionErr, 8)
+    if nil == chain {
+        t.Fatalf("expected non-nil chain")
+    }
+
+    if 2 != len(chain) {
+        t.Fatalf("expected chain length 2, got %d", len(chain))
+    }
+
+    if nil == chain[0] {
+        t.Fatalf("expected first entry to have context")
+    }
+
+    if nil != chain[1] {
+        t.Fatalf("expected second entry to be nil for plain error")
+    }
+}
+
+func TestLogContext_PlainError_SetsErrorField(t *testing.T) {
+    plainErr := errors.New("plain error")
+
+    context := LogContext(plainErr)
+    if nil == context {
+        t.Fatalf("expected non-nil context")
+    }
+
+    if "plain error" != context["error"] {
+        t.Fatalf("unexpected error value: %v", context["error"])
+    }
+}
+
+func TestLogContext_WithExtra_MergesExtraIntoContext(t *testing.T) {
+    exceptionErr := NewError("msg", map[string]any{"existing": "yes"}, nil)
+    extra := map[string]any{"extra": "value"}
+
+    context := LogContext(exceptionErr, extra)
+    if nil == context {
+        t.Fatalf("expected non-nil context")
+    }
+
+    if "yes" != context["existing"] {
+        t.Fatalf("expected existing context to be preserved")
+    }
+
+    if "value" != context["extra"] {
+        t.Fatalf("expected extra context to be merged")
+    }
+}

@@ -6,6 +6,7 @@ import (
     "sync"
 
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/internal"
     sessioncontract "github.com/precision-soft/melody/v2/session/contract"
 )
 
@@ -22,6 +23,10 @@ func (instance *Session) Id() string {
     return instance.id
 }
 
+/* Get hands out a copy at the depth All copies at, for the same reason All does: the live nested
+value, mutated in place, would change the session without passing through Set — the session would
+not be marked modified, SaveSession would skip the write and report success, and the mutation would
+silently never persist. Read, mutate the copy, Set it back. */
 func (instance *Session) Get(key string) any {
     instance.mutex.RLock()
     value, exists := instance.values[key]
@@ -31,7 +36,7 @@ func (instance *Session) Get(key string) any {
         return nil
     }
 
-    return value
+    return internal.CopyAnyValue(value)
 }
 
 func (instance *Session) String(key string) string {
@@ -74,16 +79,10 @@ func (instance *Session) Delete(key string) {
     instance.mutex.Unlock()
 }
 
-func (instance *Session) Clear() {
-    instance.mutex.Lock()
-    instance.values = make(map[string]any)
-    instance.modified = true
-    instance.cleared = true
-    instance.mutex.Unlock()
-}
+/* Clear ends the session, and the ending latches: a later Set puts a value back and marks the session modified, but it cannot make the session look live again. Without the latch a logout handler that clears the session and is followed by anything writing to the same object — a middleware or an event listener leaving a farewell message — had the response path take the save branch instead of the delete branch, so the values were overwritten but the pre-logout id stayed alive in the storage and was re-issued to the browser under the same cookie. A caller that wants a usable session after clearing one asks the manager for a new session.
 
-/* abandon is Clear with a latch: Set lifts the cleared flag, the latch nothing lifts. A session whose id the manager already deleted must never look live again, or the response path would save it back under that id and re-issue it. */
-func (instance *Session) abandon() {
+A Clear must land before the handler returns to be guaranteed effective: the response path decides the session's fate from one Snapshot, and a Clear arriving from a goroutine that outlives the handler can land after that snapshot was taken — the save it raced then persists the pre-logout state and the live cookie is re-issued, with the latch only reaching the NEXT request that loads this session. */
+func (instance *Session) Clear() {
     instance.mutex.Lock()
     instance.values = make(map[string]any)
     instance.modified = true
@@ -92,15 +91,24 @@ func (instance *Session) abandon() {
     instance.mutex.Unlock()
 }
 
+/* All hands out a copy that reaches all the way down, the depth both storages already copy at. A copy of only the top level would hand the caller the very map or slice a nested value holds, so mutating it would change the live session without passing through Set — the session would not be marked modified and the change would never be persisted, while a caller that mutates it after the response path has handed the same value to the storage races the copy the storage makes. */
 func (instance *Session) All() map[string]any {
     instance.mutex.RLock()
-    result := make(map[string]any, len(instance.values))
-    for key, value := range instance.values {
-        result[key] = value
-    }
+    result := internal.CopyAnyMap(instance.values)
     instance.mutex.RUnlock()
 
     return result
+}
+
+/* Snapshot reads the values, the modified flag and the cleared flag under one lock acquisition: the response path pairs the branch decision with the values it acts on, and reading them through the individual accessors let a concurrent Clear slip between the reads — the save branch then wrote the emptied map under a live id, a session neither alive nor deleted. */
+func (instance *Session) Snapshot() (map[string]any, bool, bool) {
+    instance.mutex.RLock()
+    values := internal.CopyAnyMap(instance.values)
+    modified := instance.modified
+    cleared := instance.cleared || instance.abandoned
+    instance.mutex.RUnlock()
+
+    return values, modified, cleared
 }
 
 func (instance *Session) IsModified() bool {

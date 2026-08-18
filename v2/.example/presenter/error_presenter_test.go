@@ -5,14 +5,21 @@ import (
     "errors"
     "fmt"
     nethttp "net/http"
+    "net/http/httptest"
     "testing"
+    "time"
 
     melodyconfig "github.com/precision-soft/melody/v2/config"
     melodyconfigcontract "github.com/precision-soft/melody/v2/config/contract"
     melodycontainer "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v2/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodyruntime "github.com/precision-soft/melody/v2/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+    melodyserializer "github.com/precision-soft/melody/v2/serializer"
+    melodyserializercontract "github.com/precision-soft/melody/v2/serializer/contract"
+    melodyvalidation "github.com/precision-soft/melody/v2/validation"
 )
 
 const causeSecret = "connection to 10.0.0.7 refused: password=hunter2"
@@ -60,8 +67,76 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
 
-/* @important the presenter must reach the same decision the framework exception listener reaches, and
-must reach "no debug material" whenever the environment cannot be read at all */
+/* runtimeServingJsonAlone hands back a runtime whose serializer manager can answer json and nothing else, which is what lets an assertion tell a refused media type from an accepted one. */
+func runtimeServingJsonAlone(t *testing.T) melodyruntimecontract.Runtime {
+    t.Helper()
+
+    containerInstance := melodycontainer.NewContainer()
+
+    registerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
+        containerInstance,
+        melodyserializer.ServiceSerializerManager,
+        func(resolver melodycontainercontract.Resolver) (*melodyserializer.SerializerManager, error) {
+            return melodyserializer.NewSerializerManager(
+                map[string]melodyserializercontract.Serializer{
+                    melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
+                },
+            )
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register serializer manager: %v", registerErr)
+    }
+
+    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+}
+
+func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, acceptLineList ...string) melodyhttpcontract.Request {
+    t.Helper()
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
+    for _, acceptLine := range acceptLineList {
+        httpRequest.Header.Add("Accept", acceptLine)
+    }
+
+    return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+}
+
+/* falling through to the default serializer rendered the failure in the very representation the client refused; the success path already answered not acceptable, so the two paths disagreed about the same header */
+func TestBuildApiResponseHonoursAnExplicitRefusal(t *testing.T) {
+    runtimeInstance := runtimeServingJsonAlone(t)
+
+    request := requestAcceptingLines(t, runtimeInstance, "*/*;q=0")
+
+    response := buildApiResponse(runtimeInstance, request, nethttp.StatusForbidden, apiResponse{Success: false})
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    if nethttp.StatusNotAcceptable != response.StatusCode() {
+        t.Fatalf("expected the explicit refusal to be answered 406 on the error path, got %d", response.StatusCode())
+    }
+}
+
+/* the Accept field is list-typed and a client may spell it over several lines; reading only the first one saw a blanket refusal and answered 406 to a client that named an available type on the second. The first line has to REFUSE rather than merely miss: an unmatched type falls back to the default serializer, so a pair like "application/xml" then "application/json" cannot tell the two readings apart. */
+func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
+    runtimeInstance := runtimeServingJsonAlone(t)
+
+    request := requestAcceptingLines(t, runtimeInstance, "*/*;q=0", "application/json")
+
+    response := buildApiResponse(runtimeInstance, request, nethttp.StatusForbidden, apiResponse{Success: false})
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    if nethttp.StatusNotAcceptable == response.StatusCode() {
+        t.Fatalf("a client that named an available type on its second Accept line was refused")
+    }
+
+    if nethttp.StatusForbidden != response.StatusCode() {
+        t.Fatalf("expected the refusal to keep its own status, got %d", response.StatusCode())
+    }
+}
 
 func TestDebugModeFollowsTheKernelEnvironment(t *testing.T) {
     if true == debugMode(runtimeForEnvironment(t, melodyconfig.EnvProduction)) {
@@ -118,6 +193,49 @@ func TestBuildErrorContextCarriesTheCauseWhenDebugIsEnabled(t *testing.T) {
 
     if causeSecret != errorEntry["message"] {
         t.Fatalf("expected the raw message under debug, got %v", errorEntry["message"])
+    }
+}
+
+func TestValidationErrorMessagesAnswerOneEntryPerViolation(t *testing.T) {
+    validationErrors := melodyvalidation.ValidationErrors{
+        melodyvalidation.NewValidationError("name", "must be at least 2 characters", "min", nil),
+        melodyvalidation.NewValidationError("price", "must be greater than 0", "greaterThan", nil),
+    }
+
+    messages := validationErrorMessages(validationErrors)
+
+    if 2 != len(messages) {
+        t.Fatalf("expected one message per violation, got %v", messages)
+    }
+
+    if "name: must be at least 2 characters" != messages[0] {
+        t.Fatalf("unexpected first message: %q", messages[0])
+    }
+
+    if "price: must be greater than 0" != messages[1] {
+        t.Fatalf("unexpected second message: %q", messages[1])
+    }
+}
+
+func TestValidationErrorMessagesSkipANilViolation(t *testing.T) {
+    validationErrors := melodyvalidation.ValidationErrors{
+        nil,
+        melodyvalidation.NewValidationError("price", "must be greater than 0", "greaterThan", nil),
+    }
+
+    messages := validationErrorMessages(validationErrors)
+
+    if 1 != len(messages) {
+        t.Fatalf("expected the nil violation to be skipped, got %v", messages)
+    }
+}
+
+/* A plain error can reach the door when the validator refuses for a reason that is not a per-field collection; the answer is its message, not a panic and not silence. */
+func TestValidationErrorMessagesDegradeANonCollectionError(t *testing.T) {
+    messages := validationErrorMessages(errors.New("the payload could not be validated"))
+
+    if 1 != len(messages) || "the payload could not be validated" != messages[0] {
+        t.Fatalf("unexpected messages: %v", messages)
     }
 }
 

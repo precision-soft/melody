@@ -4,11 +4,12 @@ import (
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 func FromRuntime[T any](runtimeInstance runtimecontract.Runtime, serviceName string) (T, error) {
-    if nil == runtimeInstance {
+    if true == internal.IsNilInterface(runtimeInstance) {
         var zero T
 
         return zero, exception.NewError("runtime may not be nil", nil, nil)
@@ -25,7 +26,7 @@ func FromRuntime[T any](runtimeInstance runtimecontract.Runtime, serviceName str
 }
 
 func MustFromRuntime[T any](runtimeInstance runtimecontract.Runtime, serviceName string) T {
-    if nil == runtimeInstance {
+    if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(
             exception.NewError("runtime may not be nil", nil, nil),
         )
@@ -41,12 +42,13 @@ func MustFromRuntime[T any](runtimeInstance runtimecontract.Runtime, serviceName
     return container.MustFromResolver[T](resolver, serviceName)
 }
 
+/* selectRuntimeResolver prefers the scope and falls back to the container. The absence checks read through the interface: a custom Runtime whose Scope() yields a typed nil used to have its healthy container silently bypassed, turning the promised may-not-be-nil error into a panic inside the resolution on the request path. */
 func selectRuntimeResolver(runtimeInstance runtimecontract.Runtime) (containercontract.Resolver, error) {
-    if nil != runtimeInstance.Scope() {
+    if false == internal.IsNilInterface(runtimeInstance.Scope()) {
         return runtimeInstance.Scope(), nil
     }
 
-    if nil != runtimeInstance.Container() {
+    if false == internal.IsNilInterface(runtimeInstance.Container()) {
         return runtimeInstance.Container(), nil
     }
 

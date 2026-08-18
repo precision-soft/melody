@@ -15,7 +15,7 @@ require (
 	github.com/precision-soft/melody/integrations/websocket/v3 v3.0.0
 	github.com/precision-soft/melody/v3 v3.11.0
 	github.com/redis/rueidis v1.0.71
-	github.com/uptrace/bun v1.2.16
+	github.com/uptrace/bun v1.2.17
 )
 
 require (
@@ -47,7 +47,7 @@ require (
 	github.com/rabbitmq/amqp091-go v1.10.0 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
-	github.com/uptrace/bun/dialect/mysqldialect v1.2.16 // indirect
+	github.com/uptrace/bun/dialect/mysqldialect v1.2.17 // indirect
 	github.com/urfave/cli/v3 v3.6.1 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect

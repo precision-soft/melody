@@ -45,6 +45,7 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`cli.AnsiYellow`](../../cli/style.go)
 - [`cli.AnsiRed`](../../cli/style.go)
 - [`cli.AnsiBackgroundGreen`](../../cli/style.go)
+- [`cli.AnsiBackgroundRed`](../../cli/style.go)
 - [`cli.AnsiWhite`](../../cli/style.go)
 - [`cli.AnsiEraseLine`](../../cli/style.go)
 
@@ -69,27 +70,33 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 - Table output:
     - [`output.NewTableBuilder() *output.TableBuilder`](../../cli/output/table_builder.go)
+    - [`output.NewTablePrinter(tableMaxWidth int) *output.TablePrinter`](../../cli/output/table_printer.go)
     - [`output.NewDefaultTablePrinter() *output.TablePrinter`](../../cli/output/table_printer.go)
 
 - Structured envelopes:
     - [`output.NewEnvelope(...)`](../../cli/output/envelope_factory.go)
+    - [`output.NewMeta(...)`](../../cli/output/envelope_factory.go)
+    - [`output.NewWarning(code, message, details)`](../../cli/output/envelope_factory.go)
+    - [`output.NewError(code, message, details, cause)`](../../cli/output/envelope_factory.go)
+    - [`output.NewErrorCause(message, details)`](../../cli/output/envelope_factory.go)
+    - [`output.NewListPayload[T](...)`](../../cli/output/list_payload.go)
     - [`output.Envelope`](../../cli/output/envelope.go)
 
 ### Standard output flags
 
 [`output.StandardFlags()`](../../cli/output/standard_flag.go) is the shared flag set for a command that renders an envelope. [`output.DebugFlags()`](../../cli/output/standard_flag.go) returns the same flags with `--quiet` defaulted to `false` instead of `true`; the flag set is otherwise identical.
 
-| Flag             | Type   | Default (`StandardFlags`)             |
-|------------------|--------|---------------------------------------|
-| `--format`       | string | `table`                               |
-| `--no-color`     | bool   | `false`                               |
-| `--verbose`      | bool   | `false`                               |
-| `--verbosity`    | int    | `0` (accepts `-v`/`-vv`/`-vvv` through argument normalization) |
-| `--quiet`        | bool   | `true` (`false` under `DebugFlags`)   |
-| `--order`        | string | `asc`                                 |
-| `--limit`        | int    | `0` (unlimited)                       |
-| `--offset`       | int    | `0`                                   |
-| `--table-width`  | int    | `0` (built-in default)                |
+| Flag            | Type   | Default (`StandardFlags`)                                      |
+|-----------------|--------|----------------------------------------------------------------|
+| `--format`      | string | `table`                                                        |
+| `--no-color`    | bool   | `false`                                                        |
+| `--verbose`     | bool   | `false`                                                        |
+| `--verbosity`   | int    | `0` (accepts `-v`/`-vv`/`-vvv` through argument normalization) |
+| `--quiet`       | bool   | `true` (`false` under `DebugFlags`)                            |
+| `--order`       | string | `asc`                                                          |
+| `--limit`       | int    | `0` (unlimited)                                                |
+| `--offset`      | int    | `0`                                                            |
+| `--table-width` | int    | `0` (built-in default)                                         |
 
 Note the flag is spelled `--table-width`, though its constant is `FlagNameTableMaxWidth`.
 

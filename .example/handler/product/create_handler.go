@@ -31,7 +31,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
         validationErrors := validatorInstance.Validate(dto)
         if nil != validationErrors {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, validationErrors.Error()), nil
+            return presenter.ApiValidationError(runtimeInstance, request, validationErrors), nil
         }
 
         productService := service.MustGetProductService(runtimeInstance.Container())
@@ -55,7 +55,8 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 }
 
 type createRequest struct {
-    Id          string  `json:"id" validate:"max=60"`
+    /* the id becomes a cache key component and the backend grammar refuses spaces and newlines inside a key, so a spelling the grammar refuses is turned away here instead of landing in the database and failing every later cache write */
+    Id          string  `json:"id" validate:"max=60,regex=^[^[:space:]]+$"`
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`
     CategoryId  string  `json:"categoryId" validate:"notBlank"`

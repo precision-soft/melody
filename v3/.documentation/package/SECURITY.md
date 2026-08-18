@@ -47,9 +47,9 @@ The `security/config` subpackage provides the user-facing builder and the compil
 When a firewall defines both global and local access control, `security/config` merges them according to:
 
 - [`securityconfig.AccessControlMergeStrategy`](../../security/config/security_module.go)
-    - `localFirst`
-    - `globalFirst`
-    - `overrideOnly`
+    - [`AccessControlMergeLocalFirst`](../../security/config/security_module.go) — `localFirst`
+    - [`AccessControlMergeGlobalFirst`](../../security/config/security_module.go) — `globalFirst`
+    - [`AccessControlMergeOverrideOnly`](../../security/config/security_module.go) — `overrideOnly`
 
 ## Container integration
 
@@ -246,8 +246,8 @@ var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 For stateless APIs, [`BearerTokenSource`](../../security/bearer_token_source.go) extracts an `Authorization: Bearer <token>` header and delegates validation to a pluggable [`TokenValidator`](../../security/contract/token_validator.go). Two validators ship in the package:
 
 - [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs with a shared secret (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). The `exp` (expiry) claim is **required by default** — a token without `exp` is rejected unless `JwtConfig{AllowWithoutExpiry: true}` is set, so a missing expiry never silently yields a non-expiring token. Out-of-range or non-finite `exp`/`nbf`/`iat` `NumericDate` values are rejected as malformed rather than saturating on the int64 conversion. A token with an empty, absent, or non-string subject is rejected (it must never authenticate as the empty principal `""`). A future `iat` is accepted by default (RFC 7519 treats `iat` as informational); set `JwtConfig.RejectFutureIssuedAt` to reject it instead. Self-contained; no per-request lookup.
-- [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable (a stored token with an empty subject is rejected). [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; the `integrations/rueidis` `NewTokenStore` is a production Redis-backed [`RevocableTokenStore`](../../security/contract/token_store.go) (the `TokenStore` lookup interface plus `Put`/`PutWithTtl`/`Delete`/`DeleteByUser`/`PurgeExpired`), keeping the full revocation surface behind the interface so the firewall wiring is identical. Behind a load balancer use the Redis store: the in-memory store is per-process, so a token issued or revoked on one instance is invisible to the others (revocation would not take effect cluster-wide). Run `PurgeExpired` on a schedule from a single instance (e.g. a cron command) rather than from every instance — Redis expires the token keys natively; the
-  purge only reconciles the user index. Roles enrichment runs only via the bearer source's enricher, not the validator.
+- [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable (a stored token with an empty subject is rejected). [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; the `integrations/rueidis` `NewTokenStore` is a production Redis-backed [`RevocableTokenStore`](../../security/contract/token_store.go) (the `TokenStore` lookup interface plus `Put`/`PutWithTtl`/`Delete`/`DeleteByUser`/`PurgeExpired`), keeping the full revocation surface behind the interface so the firewall wiring is identical. Behind a load balancer use the Redis store: the in-memory store is per-process, so a token issued or revoked on one instance is invisible to the others (revocation would not take effect cluster-wide). A revocation is a boundary, not a walk: [`RevokeBefore`](../../security/contract/token_store.go) publishes one instant for a user, or for one device of a
+  user, and every later lookup refuses a token issued before the later of the two. That is what `DeleteByUser` cannot give — it walks the user index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during the revocation survives it; treat `DeleteByUser` as cleanup and `RevokeBefore` as the thing that ends sessions. The instant a token is compared against is `Claims.IssuedAt`, stamped by the store on every write, so a token stored before revocation epochs existed carries none and is refused as soon as a boundary exists for its user. Run `PurgeExpired` on a schedule from a single instance (e.g. a cron command) rather than from every instance — Redis expires the token keys natively; the purge only reconciles the user index. Roles enrichment runs only via the bearer source's enricher, not the validator.
 
 A failed or missing token resolves to an anonymous token, so the firewall's entry point decides the response. [`JsonEntryPoint`](../../security/json_entry_point.go) (401) and [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go) (403) return JSON instead of redirecting — set them globally for pure-API apps.
 
@@ -387,6 +387,8 @@ request.Attributes().Set(melodyhttp.RequestAttributeSession, rotated)
 rotated.Set(sessionKeyUserId, user.Id())
 ```
 
+Inside an http handler the two steps above are one call: [`http.RegenerateRequestSession(request)`](../../http/session.go) rotates the id and republishes the rotated session on the request, and the response path saves that session and emits its cookie. Reach for it rather than the manager — rotating without republishing destroys the id the browser holds without ever telling it the new one — and write the identity to the session it returns.
+
 Rotate on the way out too: logout should clear the session ([`Session.Clear`](../../session/session.go)), which deletes the stored entry and expires the browser cookie. See [SESSION](SESSION.md#rotating-the-session-id) for the full contract and its footguns, and the [session cookie](HTTP.md#session-cookie) section for the `Secure`/`SameSite` attributes that keep the rotated cookie from leaking in the first place.
 
 ## Footguns & caveats
@@ -396,6 +398,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - A session-backed login that does not call [`RegenerateSession`](../../session/manager.go) is vulnerable to **session fixation**: the id the victim arrived with stays valid and authenticated. Rotating is a per-application responsibility — the framework cannot do it for you, because only the login handler knows when the privilege change happens. See [Session fixation](#session-fixation).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
 - `JwtTokenValidator` requires the `exp` claim by default: a signed token without `exp` is rejected unless you set `JwtConfig{AllowWithoutExpiry: true}`. This differs from RFC 7519, which treats registered claims as optional — so a token that looks valid but omits `exp` resolves to an anonymous token, not an authenticated one.
+- [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go) compares the supplied header against the expected value with [`crypto/subtle.ConstantTimeCompare`](https://pkg.go.dev/crypto/subtle#ConstantTimeCompare) so timing differences do not leak the expected key.
 
 ## Userland API
 
@@ -412,6 +415,9 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`TokenEnricher`](../../security/contract/token_enricher.go)
 - [`Claims`](../../security/contract/token_validator.go)
 - [`TokenStore`](../../security/contract/token_store.go)
+- [`RevocableTokenStore`](../../security/contract/token_store.go)
+- [`RevocationEpochStore`](../../security/contract/token_store.go)
+- [`EpochRevocableTokenStore`](../../security/contract/token_store.go)
 - [`Firewall`](../../security/contract/firewall.go)
 - [`FirewallManager`](../../security/contract/firewall_manager.go)
 - [`AccessDecisionManager`](../../security/contract/access_decision_manager.go)
@@ -461,6 +467,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`NewBearerTokenSource(validator securitycontract.TokenValidator)`](../../security/bearer_token_source.go)
 - [`NewBearerTokenSourceWithEnricher(validator securitycontract.TokenValidator, enricher securitycontract.TokenEnricher)`](../../security/bearer_token_source.go)
 - [`NewJwtTokenValidator(config JwtConfig)`](../../security/jwt_token_validator.go)
+- [`NewJwtTokenValidatorWithRevocationEpoch(config JwtConfig, epochStore securitycontract.RevocationEpochStore)`](../../security/jwt_token_validator.go)
 - [`NewOpaqueTokenValidator(store securitycontract.TokenStore)`](../../security/opaque_token_validator.go)
 - [`NewInMemoryTokenStore()`](../../security/in_memory_token_store.go)
 - [`NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock)`](../../security/in_memory_token_store.go)
@@ -472,6 +479,9 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - [`NewRoleVoter()`](../../security/voter.go)
 - [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
+- [`NewFirewall(rules ...securitycontract.Rule)`](../../security/firewall.go)
+- [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)
+- [`NewFirewallRegistry(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_registry.go)
 - [`NewCompiledFirewall(...)`](../../security/compiled_configuration.go)
 - [`NewCompiledConfiguration(...)`](../../security/compiled_configuration.go)
 

@@ -6,7 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v3.1.5] - 2026-07-25 - Connection-Abort Retry Markers
+### Changed
+
+- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
+
+### Added
+
+- the provider implements `bunorm.MigrationProvider`: `OpenForMigration` opens the same database with the read and write deadlines lifted and the connect timeout kept — a down database must still fail fast — over a pool of the two connections a sequential migration run needs, with no mid-run connection recycling, because a lifetime rotation under a running statement is the same mid-statement cut by another name. This is what lets a migration whose DDL legitimately runs past the request-sized 30s deadlines finish instead of dying with `invalid connection` at step N of M
 
 ### Fixed
 
@@ -88,9 +94,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code duplicated into `integrations/bunorm/mysql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.5...HEAD
-
-[v3.1.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.4...integrations/bunorm/mysql/v3.1.5
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.4...HEAD
 
 [v3.1.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.3...integrations/bunorm/mysql/v3.1.4
 

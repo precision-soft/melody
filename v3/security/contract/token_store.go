@@ -18,3 +18,13 @@ type RevocableTokenStore interface {
     DeleteByUser(userIdentifier string) int
     PurgeExpired() int
 }
+
+type RevocationEpochStore interface {
+    RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time)
+    RevocationEpoch(runtimeInstance runtimecontract.Runtime, userIdentifier string, deviceIdentifier string) (time.Time, error)
+}
+
+type EpochRevocableTokenStore interface {
+    RevocableTokenStore
+    RevocationEpochStore
+}

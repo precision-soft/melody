@@ -1,23 +1,59 @@
 package config
 
 import (
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/generated"
+    "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodymailer "github.com/precision-soft/melody/v3/mailer"
     melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
+    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodytranslation "github.com/precision-soft/melody/v3/translation"
     melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
 
 func (instance *Module) RegisterServices(registrar melodyapplicationcontract.ServiceRegistrar) {
+    /* the storage handle is registered whether or not there is a connection behind it, because the generated wiring fills the repository constructors by resolving their arguments from the container by type: a handle that were absent without a database would take the whole nomenclature with it. */
+    database := instance.database
+
+    registrar.RegisterService(
+        persistence.ServiceCatalogStorage,
+        func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
+            return persistence.NewCatalogStorage(database), nil
+        },
+    )
+
+    /* the hub is registered so the event listeners can reach it. They follow every change to the nomenclature and are where the notification belongs, beside the cache invalidation and the journal entry — but a listener is handed a runtime rather than this module, and the container is what the two have in common. */
+    serverSentEventHub := instance.serverSentEventHub
+
+    registrar.RegisterService(
+        subscriber.ServiceCatalogNotificationHub,
+        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+            return serverSentEventHub, nil
+        },
+    )
+
+    if nil == instance.redisClient {
+        opaqueTokenStore := instance.opaqueTokenStore
+
+        registrar.RegisterService(
+            melodyrueidis.ServiceTokenStore,
+            func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.RevocableTokenStore, error) {
+                return opaqueTokenStore, nil
+            },
+        )
+    }
+
     registrar.RegisterService(
         melodycache.ServiceCacheSerializer,
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Serializer, error) {
@@ -85,3 +121,15 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 }
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
+
+/* RegisterScopedServices declares the services that belong to one scope — one http request here. The
+generator emits them into their own function because the two registrars share no method: this hook receives a
+scoped registrar, RegisterServices receives a container one, and handing either to the other does not compile.
+
+What lands here is built on the first resolution through a scope, shared by everything inside that request,
+and closed when the request ends. Regenerate with the same command the container services use. */
+func (instance *Module) RegisterScopedServices(registrar melodyapplicationcontract.ScopedServiceRegistrar) {
+    generated.RegisterGeneratedServicesScoped(registrar)
+}
+
+var _ melodyapplicationcontract.ScopedServiceModule = (*Module)(nil)

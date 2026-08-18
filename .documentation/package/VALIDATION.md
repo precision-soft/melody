@@ -29,7 +29,7 @@ Resolution helpers are documented alongside the userland API in the [Container a
 
 ## Usage
 
-The example below validates a struct using `validate` tags. Constraints are comma-separated. Constraints with parameters use `name(key=value)`.
+The example below validates a struct using `validate` tags. Constraints are comma-separated. Constraints with parameters use `name(key=value)`. The parser accepts a second spelling, `name=value`, which fills the single parameter `value` — that is what makes `regex=^[a-z]+$` below legal — so a one-parameter constraint has two equivalent forms.
 
 ```go
 package main
@@ -73,8 +73,15 @@ func validateInput(input CreateUserInput) error {
 - `json:"name"` influences the error field name when a non-empty json name is present.
 - `validate:"-"` disables validation for a field.
 - A struct whose **promoted json codec is `time.Time`'s** is skipped: such a value is an RFC 3339 string on the wire, `encoding/json` hands a body like that to the embedded time and populates nothing else, so no constraint declared inside the struct could be satisfied by any payload and enforcing one would reject every body the type is able to decode ([`promotesValidationTimeCodec`](../../validation/validator.go)). A tag on the **field holding** such a struct still applies. The promoted codec is resolved by Go's own selector rule — shallowest embedding depth wins, a tie promotes nothing — so a shallower marshaler embed that writes an object leaves the struct validated as the object it is. The skip also requires the type to refuse an object body — a struct that declares its own `UnmarshalJSON` accepting an object keeps its constraints enforced, since what a body can populate is decided by the unmarshaler, not by the marshaler the spec advertises.
-- `min`/`max` are **string byte-length** constraints (`MinLength`/`MaxLength`), not numeric range and not rune count. They stringify the value and compare `len()`, so on a numeric field they bound the number of digits, not the value — `max(value=130)` on an `int` accepts any value up to 130 bytes long. Use `greaterThan`/`lessThan` for a numeric range (as the `Age` field above does).
-- `greaterThan`/`lessThan` operate on numeric fields only and reject a non-numeric value with `value must be numeric`; a floating-point `NaN` is rejected rather than silently passing the bound (`NaN` compares false against every threshold). The bound is an integer: a fractional one is truncated toward zero (`value=1.5` bounds at `1`, `value=-1.5` at `-1`), and one that is not a number at all fails the constraint's construction.
+- `min`/`max` are **string rune-count** constraints (`MinLength`/`MaxLength`), not numeric range and not byte length. They operate on string fields only and reject any other type with `value must be a string`; a string of multi-byte runes therefore passes a `max` its byte length exceeds, so a byte-denominated downstream limit (a `VARCHAR` sized in bytes) needs its own headroom. Use `greaterThan`/`lessThan` for a numeric range (as the `Age` field above does) and `notEmpty` for collections. A negative bound is refused on **both** doors: the tag door answers `min length parameter must not be negative` and fails the rule closed, and `NewMinLength`/`NewMaxLength` panic — a length is never negative, so a negative bound is a declaration mistake, and the constraints it used to build accepted every value in silence (`min`) or refused every value with a message naming an impossible limit (`max`).
+- The string-form constraints — `regex`, `email`, `alpha`, `alphanumeric`, `numeric`, `notBlank`, `min`, `max` — refuse a value that is not a string. A nil pointer and the empty string still pass `regex`/`email`/`alpha`/`alphanumeric`/`numeric`, which is what lets them compose with `notBlank` on optional fields; `notBlank` itself rejects a nil pointer, and `min` counts the empty string as zero runes. The numeric comparisons are the opposite: `greaterThan` and `lessThan` **reject** a nil pointer rather than passing it, so an optional `*int` carrying `greaterThan(value=0)` fails on every payload that omits it — pair the comparison with a presence check on the caller's side, or take the field by value.
+- `greaterThan`/`lessThan` operate on numeric fields only and reject a non-numeric value with `value must be numeric`; a floating-point `NaN` is rejected rather than silently passing the bound (`NaN` compares false against every threshold). The bound is an integer in its entirety: a fractional, suffixed or otherwise non-integer bound (`value=1.5`, `value=1e3`) fails the constraint's construction and the rule reports `invalidRuleSyntax` on every value it reaches. For a **float-typed** field the integer bound is converted to `float64` for the comparison, and a bound above 2^53 is not exactly representable there: it rounds to a neighbour up to one ULP away, so a float value adjacent to such a bound can be misjudged against the declared number (a field holding `9007199254740996.0` is refused by `greaterThan` with bound `9007199254740995`, which rounds to `9007199254740996`). Integer-typed fields compare exactly at every magnitude, and below 2^53 the float comparison is exact as well.
+- A parameterized rule named **without parameters** (`regex`, `max()`, `lessThan`) fails closed with `invalidRuleSyntax` — the registered instance is a template for `WithParams`, never a fallback configuration. The regex constraint additionally refuses an empty pattern (`regex=`), which would otherwise compile to a match-everything expression. A tag that parses to no rule at all (`validate:","`) is refused the same way.
+- A rejected rule parameter carries the constraint's own refusal reason under `cause` in the error context, and a tag-syntax error names the comma-separated `part` the parser refused.
+- The nesting-depth ceiling counts **indirections**, not payload nesting levels: every pointer, interface, struct-field and collection-element hop costs one of the 64, so a `[]*T` chain spends three per JSON level and the deepest reachable payload nesting is correspondingly shallower than 64.
+- A `validate` tag next to `json:"-"` is never enforced: `encoding/json` cannot populate the field, so enforcing its zero value would reject every request. On the direct `Validate` path — a handler-built DTO — that field is skipped all the same; use a field the payload can spell, or validate it in the handler.
+- **Where a custom constraint is registered.** `RegisterConstraint` is a method on the resolved `*Validator`, and no module hook can reach a framework service: the container is built after the module phases, so a hook body that resolves the validator finds an empty container ([`application/contract.Module`](../../application/contract/module.go) says so at the door). The two places that work are the **composition root between `Boot()` and `Run()`** — resolve the validator through `ValidatorMustFromContainer(kernel.ServiceContainer())` and register there — and a **service provider** the module registers, which resolves the validator at resolution time and registers the constraint then. The provider door only fires if something resolves that service, so a module whose only contribution is a constraint should say so and be resolved, or leave the registration to the application. Registering after `Boot()` is safe for concurrency — the registry is guarded by a mutex — but it is not safe
+  *after serving starts*: a request validating against a rule name that is registered mid-flight sees one answer before and another after. Register everything during boot, in one of the two places above.
 
 ## Userland API
 
@@ -88,21 +95,31 @@ func validateInput(input CreateUserInput) error {
 - **ValidationError** (`validation/contract.ValidationError`)  
   A typed error describing a single validation failure.
 
+- **ParameterizedConstraint** (`validation/contract.ParameterizedConstraint`) ([`validation/contract/constraint.go`](../../validation/contract/constraint.go))  
+  What a constraint implements to accept tag parameters such as `min(value=2)`. `WithParams` answers a NEW constraint configured from them and must not mutate the receiver; a rule whose parameters cannot be consumed fails closed, and so does a rule that names a parameterized constraint without parameters — the registered instance is a template for `WithParams`, never a fallback configuration.
+
 ### Types
 
 - **validation.Validator**  
   Tag-driven validator that can register constraints.
+    - [`Validate(data any) error`](../../validation/validator.go) — the door: it answers `ValidationErrors` when a field fails and nil when none does
 
 - **validation.ValidationError**  
   Default `validation/contract.ValidationError` implementation.
+    - [`ToExceptionError() error`](../../validation/error.go) — the same failure as an `exception.Error` carrying `field` and `code` in its loggable context, and the field's own context map under `context`
 
 - **validation.ValidationErrors**  
-  Slice of validation errors returned as `error` by `Validator.Validate`.
+  Slice of validation errors returned as `error` by `Validator.Validate`. `Error()` flattens the messages into one sorted string; `MarshalJSON` renders the collection as the array it is, each element through its own marshaler, which is what lets a log record carry the same per-field structure the http response body carries.
+    - [`HasErrors() bool`](../../validation/error.go)
 
 ### Constructors
 
 - [`validation.NewValidator()`](../../validation/validator.go)
 - [`validation.NewValidationError(field, message, code string, context map[string]any)`](../../validation/error.go)
+
+### Registration
+
+- [`(*Validator).RegisterConstraint(name string, constraint validationcontract.Constraint)`](../../validation/validator.go) — adds a constraint under the name a `validate` tag spells. It refuses an empty or untrimmed name, a nil constraint, and a **name already taken** — all four with a panic, since all four are declaration mistakes. The last means a name is claimed once: a builtin cannot be replaced by registering over it, so a custom rule needs a name of its own. A parameterized constraint is registered as a **template**: the registered instance is never used as a fallback configuration, only as the receiver of `WithParams`. See the footgun above for *when* to call it.
 
 ### Container access (validation)
 
@@ -115,6 +132,8 @@ func validateInput(input CreateUserInput) error {
 - Constraints: [`ConstraintNotBlank`, `ConstraintEmail`, `ConstraintMinLength`, `ConstraintMaxLength`, `ConstraintRegex`, `ConstraintNumeric`, `ConstraintAlpha`, `ConstraintAlphanumeric`, `ConstraintGreaterThan`, `ConstraintLessThan`, `ConstraintNotEmpty`](../../validation)
 - Deprecated constraint aliases (kept for compatibility): [`ConstraintMin`, `ConstraintMax`](../../validation/const.go)
 - Error codes (core): [`ErrorInvalidRuleSyntax`, `ErrorUnknownRule`, `ErrorNestingDepthExceeded`](../../validation/const.go) — the last is reported against a field nested deeper than the 64-level ceiling recursive validation walks, and only when that field's type could carry a `validate` tag at all — an interface-typed member counts as one, its dynamic type being unknowable statically
+- **Rule-declaration faults.** `ErrorUnknownRule`, `ErrorInvalidRuleSyntax` and `ConstraintRegexErrorInvalidPattern` blame the DECLARATION, not the submitted value: a rule the registry does not know, a parameter set the constraint refuses, a tag the parser cannot read, a pattern that does not compile. None of them is reachable from any input a client can send — the struct tag is what is wrong, and it is wrong for every request that route will ever serve. They stay field errors with the codes above, because the validator fails closed on a rule it cannot honour rather than passing the value; what changes is who hears about them. [`IsRuleWiringErrorCode`](../../validation/error.go) names the three, [`ValidationErrors.HasRuleWiringError`](../../validation/error.go) answers whether a collection carries one, and [`ValidationErrors.WithoutRuleWiringContext`](../../validation/error.go) projects the collection onto what a client may see. The http error path uses all three: a 4xx carrying one of
+  these codes is recorded at **error** rather than the warning a deliberate 4xx earns — the deliberation is exactly what is missing — and the internal context of those entries (`rule`, `params`, `cause`, which name the developer's own typo and the constraint's reason) stays in the record and is stripped from the response body. Every other entry keeps its context in both places, so the bounds a numeric constraint reports still reach the client that has to correct its request.
 - Error codes (per-constraint):
     - `notBlank`: [`ConstraintNotBlankErrorIsBlank`](../../validation/constraint_not_blank.go)
     - `email`: [`ConstraintEmailErrorInvalidEmail`](../../validation/constraint_email.go)

@@ -5,6 +5,7 @@ import (
     "log"
     "sort"
 
+    "github.com/precision-soft/melody/v2/internal"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
 
@@ -13,7 +14,13 @@ func NewDefaultLogger() loggingcontract.Logger {
 }
 
 func NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels) loggingcontract.Logger {
-    return &defaultLogger{levelLabels: labels}
+    /* the labels are copied for the reason the json logger and the logging configuration name at their own doors: the map is read lock-free on every Log call, so a caller mutating the map it still holds is a fatal concurrent map access no recover reaches */
+    copiedLabels := make(loggingcontract.LevelLabels, len(labels))
+    for level, label := range labels {
+        copiedLabels[level] = label
+    }
+
+    return &defaultLogger{levelLabels: copiedLabels}
 }
 
 type defaultLogger struct {
@@ -25,7 +32,13 @@ func (instance *defaultLogger) Log(level loggingcontract.Level, message string, 
         context = loggingcontract.Context{}
     }
 
-    log.Printf("[%s] %s %s", instance.levelLabels.LabelFor(level), message, instance.formatContext(context))
+    /* one record stays one line: the message and the context values regularly embed request-derived text, and an unescaped line break would end this record and start a fully-formed fake one at whatever level the payload names — the json sibling gets the same guarantee from its encoder */
+    log.Printf(
+        "[%s] %s %s",
+        instance.levelLabels.LabelFor(level),
+        internal.EscapeControlCharacters(message),
+        internal.EscapeControlCharacters(instance.formatContext(context)),
+    )
 }
 
 func (instance *defaultLogger) Debug(message string, context loggingcontract.Context) {

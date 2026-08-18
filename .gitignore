@@ -4,7 +4,10 @@
 /*.zip
 /*.rar
 /*Zone.Identifier
-/.temp/
+# scratch, in any module rather than at the root alone: the citation band type-checks the code samples of a
+# document by writing them into `<major>/.temp/`, which has to be inside that major's module for its own
+# imports to resolve, and has to be ignored so the bands that enumerate the tree never see it
+.temp/
 /var/
 /application/var/
 /diff*.txt
@@ -13,6 +16,9 @@
 /AUDIT_REPORT.md
 zz_*_test.go
 /.dev/e2e/e2e
+
+# per-lot mutation tables are session artifacts: the harness that reads them is tracked, the tables are not
+/.dev/mutate/
 
 # a hook-install run once left a self-referential broken symlink here; keep it out of the tree
 .dev/git-hooks/git-hooks

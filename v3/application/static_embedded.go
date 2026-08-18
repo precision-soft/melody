@@ -38,6 +38,8 @@ func newStaticFileServerOptions(
         false,
     )
 
+    fileServerConfig.SetExcludedPathList(configuration.Http().StaticExcludedPaths())
+
     return static.NewOptions(
         fileServerConfig,
         "",

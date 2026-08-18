@@ -404,3 +404,59 @@ func TestScan_BuildTaggedConstructorIsExcludedUntilTagIsPassed(t *testing.T) {
         t.Fatalf("expected no excluded files once the tag is passed, got %v", withTag.ExcludedFiles)
     }
 }
+
+const scopedScanFixtureDirectory = "wiring/internal/fixture/scoped"
+
+func scanScopedFixture(t *testing.T) *ScanResult {
+    t.Helper()
+
+    scanResult, scanErr := Scan(
+        fixtureProjectDir,
+        NewBindSet().Package(scopedFixtureImportPath, scopedScanFixtureDirectory),
+        nil,
+    )
+    if nil != scanErr {
+        t.Fatalf("expected the scoped fixture to scan, got %v", scanErr)
+    }
+
+    return scanResult
+}
+
+/* @info the lifetime a constructor declares is the whole of what the generator has to carry into the emitted call; losing it makes a per-request service register as a process singleton, which never fails and never gets closed with the request. */
+func TestScan_RecordsTheScopedDirective(t *testing.T) {
+    scanResult := scanScopedFixture(t)
+
+    trail := constructorByName(scanResult, "NewRequestTrail")
+    if nil == trail {
+        t.Fatalf("expected the scoped constructor to be found")
+    }
+
+    if false == trail.IsScoped {
+        t.Fatalf("expected the constructor to be marked scoped")
+    }
+
+    if "ServiceRequestTrail" != trail.ServiceNameIdentifier {
+        t.Fatalf("expected the scoped directive to leave the service directive alone, got %q", trail.ServiceNameIdentifier)
+    }
+
+    writer := constructorByName(scanResult, "NewProcessWriter")
+    if nil == writer {
+        t.Fatalf("expected the container constructor to be found")
+    }
+
+    if true == writer.IsScoped {
+        t.Fatalf("expected a constructor without the directive to stay container-owned")
+    }
+}
+
+/* @info a plain prefix match would claim a longer word — //melody:scopedLater — and silently move a process singleton to a per-request lifetime on the strength of a comment that says something else. */
+func TestScan_ScopedDirectiveDoesNotMatchALongerWord(t *testing.T) {
+    nearly := constructorByName(scanScopedFixture(t), "NewNearlyScoped")
+    if nil == nearly {
+        t.Fatalf("expected the constructor to be found")
+    }
+
+    if true == nearly.IsScoped {
+        t.Fatalf("expected a longer word not to be read as the scoped directive")
+    }
+}

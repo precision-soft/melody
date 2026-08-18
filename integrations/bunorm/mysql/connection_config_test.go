@@ -24,8 +24,6 @@ func TestConnectionConfigAccessors(t *testing.T) {
     }
 }
 
-/* @info SafeContext must redact the password while keeping the addressing fields */
-
 func TestConnectionConfigSafeContextOmitsPassword(t *testing.T) {
     connectionConfig := NewConnectionConfig("db.internal", "3306", "melody", "melody_user", "melody_password")
 

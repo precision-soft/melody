@@ -34,7 +34,7 @@ func NewCompiledFirewall(
         name:                        name,
         matcher:                     matcher,
         matcherDescription:          matcherDescription,
-        rules:                       rules,
+        rules:                       append([]securitycontract.Rule{}, rules...),
         tokenSource:                 tokenSource,
         accessControl:               accessControl,
         accessDecisionManager:       accessDecisionManager,
@@ -144,7 +144,15 @@ func (instance *CompiledFirewall) Login(
     if nil != err {
         dispatchErr := instance.dispatchLoginFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            return nil, dispatchErr
+            /* keep the login error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
+            return nil, exception.NewError(
+                "security login failure event dispatch failed",
+                exceptioncontract.Context{
+                    "firewallName":  instance.name,
+                    "dispatchError": dispatchErr.Error(),
+                },
+                err,
+            )
         }
 
         return nil, err
@@ -187,10 +195,29 @@ func (instance *CompiledFirewall) Logout(
     if nil != err {
         dispatchErr := instance.dispatchLogoutFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            return nil, dispatchErr
+            /* keep the logout error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
+            return nil, exception.NewError(
+                "security logout failure event dispatch failed",
+                exceptioncontract.Context{
+                    "firewallName":  instance.name,
+                    "dispatchError": dispatchErr.Error(),
+                },
+                err,
+            )
         }
 
         return nil, err
+    }
+
+    if nil == result {
+        /* fail closed on a nil result the same way Login does: the caller would otherwise dereference result.Response after the logout success event was already emitted, panicking on the request path instead of receiving a clean error */
+        return nil, exception.NewError(
+            "firewall logout handler returned nil result",
+            exceptioncontract.Context{
+                "firewallName": instance.name,
+            },
+            nil,
+        )
     }
 
     dispatchErr := instance.dispatchLogoutSuccess(runtimeInstance, request)
@@ -278,7 +305,7 @@ type CompiledConfiguration struct {
 
 func NewCompiledConfiguration(firewalls []*CompiledFirewall, globalAccessControl *AccessControl) *CompiledConfiguration {
     return &CompiledConfiguration{
-        firewalls:           firewalls,
+        firewalls:           append([]*CompiledFirewall{}, firewalls...),
         globalAccessControl: globalAccessControl,
     }
 }

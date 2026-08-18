@@ -4,7 +4,7 @@
 
 # Melody
 
-[![Go >= 1.22](https://img.shields.io/badge/go-%3E%3D1.22-00ADD8)](https://go.dev/)
+[![Go >= 1.22 (v1/v2) · 1.25 (v3)](https://img.shields.io/badge/go-%3E%3D1.22%20(v1%2Fv2)%20%C2%B7%201.25%20(v3)-00ADD8)](https://go.dev/)
 [![Go Report Card](https://goreportcard.com/badge/github.com/precision-soft/melody)](https://goreportcard.com/report/github.com/precision-soft/melody)
 [![Go Reference](https://pkg.go.dev/badge/github.com/precision-soft/melody.svg)](https://pkg.go.dev/github.com/precision-soft/melody)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -92,6 +92,7 @@ At a high level, a Melody application is assembled as follows:
 
 - **Application** ([code](./application/)) wires modules and services into a **container** ([code](./container/)).
 - A **runtime** ([code](./runtime/)) owns the lifecycle (boot/compile/run/shutdown) and creates request/command scopes.
+- The **kernel** ([code](./kernel/)) is the compiled heart handed to both fronts: it holds the container, the clock and the event dispatcher, and dispatches the kernel events a request travels through.
 - **HTTP** ([code](./http/)) uses the runtime + container scopes to run middleware and dispatch handlers.
 - **CLI** ([code](./cli/)) runs commands inside the same runtime/container infrastructure.
 - Cross-cutting packages are wired as services: [logging](./logging/), [event](./event/), [validation](./validation/), [cache](./cache/), [session](./session/), [security](./security/).
@@ -100,15 +101,17 @@ At a high level, a Melody application is assembled as follows:
 
 Melody ships as three parallel Go module lines:
 
-| Version line | Module path                                              | Status                                                       |
-|--------------|----------------------------------------------------------|--------------------------------------------------------------|
-| **v3**       | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | **Stable, actively maintained — use this for new projects.** |
-| v2           | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | Maintenance — fixes only.                                    |
-| v1           | `github.com/precision-soft/melody` (repository root)     | Maintenance — fixes only.                                    |
+| Version line | Module path                                              | Status                                                               |
+|--------------|----------------------------------------------------------|----------------------------------------------------------------------|
+| **v3**       | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | **Stable, actively maintained — use this for new projects.**         |
+| v2           | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | Feature-frozen — security and critical correctness fixes still land. |
+| v1           | `github.com/precision-soft/melody` (repository root)     | Feature-frozen — security and critical correctness fixes still land. |
 
 Three versions exist for historical reasons: earlier major versions introduced changes that were not backwards compatible, and each was maintained in parallel. **Going forward, all new features land on v3 only.**
-v1 and v2 receive security and critical correctness fixes (see [`SECURITY.md`](./SECURITY.md) and
-[`CONTRIBUTING.md`](./CONTRIBUTING.md)).
+v1 and v2 are feature-frozen and receive security and critical correctness fixes (see [`SECURITY.md`](./SECURITY.md) and
+[`CONTRIBUTING.md`](./CONTRIBUTING.md)). An application moving off a frozen major starts at the
+"Migrating to v3" section of its upgrade guide: [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md)
+for v1, [`v2/.documentation/UPGRADE.md`](./v2/.documentation/UPGRADE.md) for v2.
 
 Within v3, evolution follows the standard Go approach: APIs that need to change are first marked with a
 `/* Deprecated: ... */` doc comment and kept working, and a future **v4** will be cut once enough breaking changes have accumulated.
@@ -216,7 +219,7 @@ Key entry points:
 ## Packages
 
 The list below is the **v1** package surface (repository root). The actively maintained **v3** line adds
-`lock`, `mailer`, `messagebus`, `openapi`, `storage`, and `translation` — see the
+`lock`, `mailer`, `messagebus`, `openapi`, `storage`, `translation`, and `wiring` — see the
 [v3 package list](./v3/README.md#packages).
 
 Each package below links to its source folder and its package documentation.
@@ -243,7 +246,7 @@ Each package below links to its source folder and its package documentation.
   Dependency injection container, scopes, service factories, and lifecycle.
 
 * **DEBUG** — [code](./debug/) | [docs](.documentation/package/DEBUG.md)  
-  Built-in CLI debug commands (container, events, router, middleware, parameters, versions).
+  Built-in CLI debug commands (container, events, router, middleware, parameters, version).
 
 * **EVENT** — [code](./event/) | [docs](.documentation/package/EVENT.md)  
   Deterministic event dispatching and subscriber/listener contracts.

@@ -1,16 +1,24 @@
 package bunorm
 
 import (
+    "context"
+    "fmt"
+    "reflect"
+    "runtime/debug"
+    "sort"
     "sync"
 
     "github.com/uptrace/bun"
 
+    configcontract "github.com/precision-soft/melody/v2/config/contract"
     "github.com/precision-soft/melody/v2/exception"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
 
 type ManagerRegistry struct {
     logger loggingcontract.Logger
+    /* openContext bounds the lazy opens of providers that implement ContextOpener, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole retry budget. */
+    openContext context.Context
 
     providerDefinitionByName      map[string]ProviderDefinition
     defaultProviderDefinitionName string
@@ -18,7 +26,9 @@ type ManagerRegistry struct {
     lock              sync.Mutex
     managers          map[string]*Manager
     pendingOpenByName map[string]*managerOpen
-    closed            bool
+    /* the migration databases live beside the request pools, never inside them: a migration connection lifts the driver deadlines, and handing it to request traffic would trade one failure mode for another */
+    migrationDatabases map[string]*bun.DB
+    closed             bool
 }
 
 /*
@@ -32,9 +42,19 @@ type managerOpen struct {
     openError error
 }
 
+/* NewManagerRegistry builds a container-level registry over lazily-dialed pools. Container-level deliberately: a *bun.DB is a connection pool — the process-lifetime shape of database/sql — and per-unit work takes a transaction or a Conn from the pool, not a pool per scope. */
 func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
-    if nil == logger {
+    return NewManagerRegistryWithContext(context.Background(), logger, providerDefinitions...)
+}
+
+/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context refuses an open not yet started, reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, and pays at most the dialect handshake bun bounds by the connect timeout. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
+func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.Logger, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
+    if true == isNilInterface(logger) {
         return nil, ErrLoggerIsRequired
+    }
+
+    if nil == ctx {
+        ctx = context.Background()
     }
 
     if 0 == len(providerDefinitions) {
@@ -45,17 +65,17 @@ func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions ...Pr
     defaultProviderDefinitionName := ""
     defaultCount := 0
 
-    for _, providerDefinition := range providerDefinitions {
+    for position, providerDefinition := range providerDefinitions {
         if "" == providerDefinition.Name {
-            return nil, ErrProviderDefinitionNameIsRequired
+            return nil, providerDefinitionRefusal(ErrProviderDefinitionNameIsRequired, position, providerDefinition.Name)
         }
 
-        if nil == providerDefinition.Provider {
-            return nil, ErrProviderIsRequired
+        if true == isNilInterface(providerDefinition.Provider) {
+            return nil, providerDefinitionRefusal(ErrProviderIsRequired, position, providerDefinition.Name)
         }
 
         if _, exists := providerDefinitionByName[providerDefinition.Name]; true == exists {
-            return nil, ErrProviderDefinitionNameMustBeUnique
+            return nil, providerDefinitionRefusal(ErrProviderDefinitionNameMustBeUnique, position, providerDefinition.Name)
         }
 
         providerDefinitionByName[providerDefinition.Name] = providerDefinition
@@ -76,11 +96,148 @@ func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions ...Pr
 
     return &ManagerRegistry{
         logger:                        logger,
+        openContext:                   ctx,
         providerDefinitionByName:      providerDefinitionByName,
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
         pendingOpenByName:             make(map[string]*managerOpen),
+        migrationDatabases:            make(map[string]*bun.DB),
     }, nil
+}
+
+/* MarkSecretParameters arms the framework's redaction for the configuration parameters that hold this registry's credentials: those the caller names here, and those any definition's provider declares through SecretParameterProvider. It is a setter rather than a constructor argument because this major hands the connection values to the provider instead of the names it would read them under, so the application — the party that resolved the values — is the party that knows the keys, and because MarkSecret propagates to a parameter the configuration has already read, arming after construction redacts exactly as much as arming during it would.
+
+Marking here rather than inside an open is what covers a process that never dials: a console run, a boot that fails before the first query, a debug:parameters invocation. A nil configuration, an empty name, or a name no parameter answers to leaves the marking undone, the same way MarkSecret leaves an absent parameter alone. */
+func (instance *ManagerRegistry) MarkSecretParameters(configuration configcontract.Configuration, parameterNames ...string) {
+    if true == isNilInterface(configuration) {
+        return
+    }
+
+    for _, parameterName := range parameterNames {
+        if "" == parameterName {
+            continue
+        }
+
+        configuration.MarkSecret(parameterName)
+    }
+
+    /* the definition map is written once, by the constructor, and never again — so it is read here without the lock the opening paths take */
+    for _, providerDefinition := range instance.providerDefinitionByName {
+        secretProvider, isSecretProvider := providerDefinition.Provider.(SecretParameterProvider)
+        if false == isSecretProvider {
+            continue
+        }
+
+        for _, parameterName := range secretProvider.SecretParameterNames() {
+            if "" == parameterName {
+                continue
+            }
+
+            configuration.MarkSecret(parameterName)
+        }
+    }
+}
+
+/* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */
+func isNilInterface(value any) bool {
+    if nil == value {
+        return true
+    }
+
+    reflected := reflect.ValueOf(value)
+
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
+}
+
+/* panicCause reads a recovered panic value as the cause of the error the recovery boundary fabricates in its place. It mirrors exception.PanicCause rather than calling it, because this module's go.mod pins a framework version that predates that door. A typed nil answers no cause: its Error() would dereference a nil receiver at the first render of the very record the boundary exists to hand on. */
+func panicCause(recovered any) error {
+    recoveredErr, isRecoveredError := recovered.(error)
+    if false == isRecoveredError || true == isNilInterface(recoveredErr) {
+        return nil
+    }
+
+    return recoveredErr
+}
+
+/* MigrationDatabase answers the connection the migration commands should run on: a dedicated one with the driver deadlines lifted when the provider implements MigrationProvider — reported through the second return — and the ordinary pooled connection otherwise. A request pool carries read and write deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back; the dedicated connection exists so a long migration finishes instead. An empty name selects the default definition. The dedicated database is opened once per name, cached, and closed by Close. */
+func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, error) {
+    if "" == name {
+        name = instance.defaultProviderDefinitionName
+    }
+
+    instance.lock.Lock()
+
+    if true == instance.closed {
+        instance.lock.Unlock()
+
+        return nil, false, ErrManagerRegistryClosed
+    }
+
+    if database, exists := instance.migrationDatabases[name]; true == exists {
+        instance.lock.Unlock()
+
+        return database, true, nil
+    }
+
+    providerDefinition, exists := instance.providerDefinitionByName[name]
+    if false == exists {
+        notFoundErr := instance.providerDefinitionNotFoundErrorLocked(name)
+        instance.lock.Unlock()
+
+        return nil, false, notFoundErr
+    }
+
+    migrationProvider, isMigrationProvider := providerDefinition.Provider.(MigrationProvider)
+    if false == isMigrationProvider {
+        instance.lock.Unlock()
+
+        manager, managerErr := instance.Manager(name)
+        if nil != managerErr {
+            return nil, false, managerErr
+        }
+
+        return manager.Database(), false, nil
+    }
+
+    /* the dial runs outside the registry-wide lock for the same reason Manager's does: a down database must not serialize cache hits or a concurrent Close. Migrations run from a sequential cli command, so no coalescing machinery is warranted — a concurrent duplicate open is resolved below by closing the loser. */
+    instance.lock.Unlock()
+
+    database, openErr := instance.openProviderMigrationDatabase(migrationProvider, providerDefinition.Params)
+    if nil != openErr {
+        if nil != database {
+            _ = database.Close()
+        }
+
+        return nil, false, openErr
+    }
+
+    if nil == database {
+        return nil, false, ErrProviderReturnedNilDatabase
+    }
+
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    if true == instance.closed {
+        _ = database.Close()
+
+        return nil, false, ErrManagerRegistryClosed
+    }
+
+    if existingDatabase, exists := instance.migrationDatabases[name]; true == exists {
+        _ = database.Close()
+
+        return existingDatabase, true, nil
+    }
+
+    instance.migrationDatabases[name] = database
+
+    return database, true, nil
 }
 
 func (instance *ManagerRegistry) DefaultManager() (*Manager, error) {
@@ -114,12 +271,51 @@ func (instance *ManagerRegistry) MustDefaultDatabase() *bun.DB {
     return database
 }
 
+/* providerDefinitionRefusal names the definition a construction-time refusal is about, the way providerDefinitionNotFoundErrorLocked names the one that was asked for. Over a configuration carrying three definitions, a bare "provider is required" does not say which of the three is broken and a duplicate name does not say its own name, so the operator reading the boot failure is left to guess. The position is always known — it is the definition's place in the argument list — and the name is empty exactly for the refusal that exists because it is. The sentinel stays the CAUSE: every caller testing errors.Is against it keeps its answer through Unwrap. */
+func providerDefinitionRefusal(sentinel error, position int, name string) error {
+    return exception.NewError(
+        sentinel.Error(),
+        map[string]any{
+            "position": position,
+            "name":     name,
+        },
+        sentinel,
+    )
+}
+
+/* providerDefinitionNotFoundErrorLocked names the definition that was asked for and the ones that are registered, the way the framework's own container names an unregistered service id rather than answering a bare sentinel. It is called with the registry lock held, because it reads the definition map. The sentinel stays the CAUSE: every caller testing errors.Is(err, ErrProviderDefinitionNotFound) keeps its answer through Unwrap, and a replacement that dropped it would break them silently. */
+func (instance *ManagerRegistry) providerDefinitionNotFoundErrorLocked(name string) error {
+    registered := make([]string, 0, len(instance.providerDefinitionByName))
+    for definitionName := range instance.providerDefinitionByName {
+        registered = append(registered, definitionName)
+    }
+
+    /* sorted so one misspelling always prints one list: the map walk is random, and an operator comparing two runs would otherwise read two different answers to the same question */
+    sort.Strings(registered)
+
+    return exception.NewError(
+        "provider definition not found",
+        map[string]any{
+            "requested":  name,
+            "registered": registered,
+        },
+        ErrProviderDefinitionNotFound,
+    )
+}
+
 func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     if "" == name {
         return nil, ErrProviderDefinitionNameIsRequired
     }
 
     instance.lock.Lock()
+
+    /* the refusal stands at the entry, ahead of the cache: Close ends every pool it memoized without emptying the map, so a cache hit would hand back a manager over a dead pool with a nil error, while the open path below refuses the same call by name — one registry answering the same question two ways, and the answer that looks like success fails at the first query instead */
+    if true == instance.closed {
+        instance.lock.Unlock()
+
+        return nil, ErrManagerRegistryClosed
+    }
 
     if manager, exists := instance.managers[name]; true == exists {
         instance.lock.Unlock()
@@ -129,9 +325,10 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
 
     providerDefinition, exists := instance.providerDefinitionByName[name]
     if false == exists {
+        notFoundErr := instance.providerDefinitionNotFoundErrorLocked(name)
         instance.lock.Unlock()
 
-        return nil, ErrProviderDefinitionNotFound
+        return nil, notFoundErr
     }
 
     if pendingOpen, inFlight := instance.pendingOpenByName[name]; true == inFlight {
@@ -155,6 +352,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     */
 
     settled := false
+    providerReturned := false
     defer func() {
         if true == settled {
             return
@@ -166,10 +364,33 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         delete(instance.pendingOpenByName, name)
         instance.lock.Unlock()
 
+        /* the refusal names what actually unwound, because two different failures were arriving under one sentence. An unwind that reaches here after the provider already returned is the registry's own publish — it calls into the freshly opened database — and blaming the provider for it sends whoever reads the record to the wrong code. An unwind carrying no value at all is a goroutine exit rather than a panic: a t.Fatalf inside a provider, or any runtime.Goexit, left the waiters holding "panic: <nil>" over something that never panicked. */
+        stage := "provider"
+        detail := "while opening"
+        if true == providerReturned {
+            stage = "registry"
+            detail = "while publishing the opened database"
+        }
+
+        outcome := "panicked"
+        if nil == recovered {
+            outcome = "exited its goroutine"
+        }
+
+        /* the panic value rides along for the coalesced waiters: they receive this error instead of the re-raised panic, and without the value their log names the definition but not the refusal that produced it. It travels as the CAUSE as well as in the context, and the stack is captured here: the re-raised panic reaches a boundary that records both, so the waiters — who never see that panic — were the only callers handed a flattened message, for the same failure, decided by which goroutine they were on. */
+        refusalContext := map[string]any{
+            "name":       name,
+            "panicStack": string(debug.Stack()),
+        }
+
+        if nil != recovered {
+            refusalContext["panic"] = fmt.Sprintf("%v", recovered)
+        }
+
         pendingOpen.openError = exception.NewError(
-            "bunorm manager provider panicked while opening",
-            map[string]any{"name": name},
-            nil,
+            fmt.Sprintf("bunorm manager %s %s %s", stage, outcome, detail),
+            refusalContext,
+            panicCause(recovered),
         )
         close(pendingOpen.done)
 
@@ -177,9 +398,10 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
             panic(recovered)
         }
     }()
-    database, openErr := providerDefinition.Provider.Open(providerDefinition.Params, instance.logger)
+    database, openErr := instance.openProviderDatabase(providerDefinition.Provider, providerDefinition.Params)
+    providerReturned = true
 
-    /* @important the publish runs in a closure with a deferred unlock: it calls into the freshly opened database, and a panic there would otherwise unwind with the lock held, whereupon the recovery defer above re-acquires the same non-reentrant mutex and wedges the whole registry with no waiter ever released */
+    /* the publish runs in a closure with a deferred unlock: it calls into the freshly opened database, and a panic there would otherwise unwind with the lock held, whereupon the recovery defer above re-acquires the same non-reentrant mutex and wedges the whole registry with no waiter ever released */
     func() {
         instance.lock.Lock()
         defer instance.lock.Unlock()
@@ -187,7 +409,19 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         delete(instance.pendingOpenByName, name)
 
         if nil != openErr {
+            /* the Provider contract does not promise a nil database beside a non-nil error, and a pool handed over with an error would otherwise be the last reference anyone holds */
+            if nil != database {
+                _ = database.Close()
+            }
+
             pendingOpen.openError = openErr
+
+            return
+        }
+
+        if nil == database {
+            /* a provider answering neither a database nor an error would otherwise be memoized as a manager wrapping nil, turning a wiring bug into a nil dereference at the first query, far from its cause */
+            pendingOpen.openError = ErrProviderReturnedNilDatabase
 
             return
         }
@@ -214,6 +448,24 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     close(pendingOpen.done)
 
     return pendingOpen.manager, pendingOpen.openError
+}
+
+/* openProviderDatabase runs one provider open, under the registry's context when the provider can honour one. */
+func (instance *ManagerRegistry) openProviderDatabase(provider Provider, params ConnectionParameters) (*bun.DB, error) {
+    if contextOpener, isContextOpener := provider.(ContextOpener); true == isContextOpener {
+        return contextOpener.OpenContext(instance.openContext, params, instance.logger)
+    }
+
+    return provider.Open(params, instance.logger)
+}
+
+/* openProviderMigrationDatabase runs one migration open, under the registry's context when the provider can honour one — the same preference its sibling above applies to the ordinary open, on the door the promise had not reached. */
+func (instance *ManagerRegistry) openProviderMigrationDatabase(provider MigrationProvider, params ConnectionParameters) (*bun.DB, error) {
+    if contextOpener, isContextOpener := provider.(MigrationContextOpener); true == isContextOpener {
+        return contextOpener.OpenForMigrationContext(instance.openContext, params, instance.logger)
+    }
+
+    return provider.OpenForMigration(params, instance.logger)
 }
 
 func (instance *ManagerRegistry) MustManager(name string) *Manager {
@@ -244,22 +496,76 @@ func (instance *ManagerRegistry) MustDatabase(name string) *bun.DB {
 }
 
 func (instance *ManagerRegistry) Close() error {
+    /* the refusal is published under the lock and the pools are torn down outside it. A pool close travels the wire — COM_QUIT to a peer that may be partitioned, and the migration connection deliberately lifts its write deadlines — so a teardown held inside the critical section parks every caller on the registry lock for as long as the driver waits, including the ones the closed flag above exists to refuse at once. The maps are snapshotted, never emptied: the entry refusal reads the flag rather than the map, and a manager handed out before the snapshot keeps working through its own pool's close. */
     instance.lock.Lock()
-    defer instance.lock.Unlock()
 
     instance.closed = true
 
-    var closeErr error
+    /* both maps are walked in sorted name order so the carried cause and the failed-name list are the same for the same failing teardown on every run: a map walk let two identical failures report different causes and different orders, and the rueidis batch reporting sorts for the same reason */
+    managerNames := make([]string, 0, len(instance.managers))
+    for name := range instance.managers {
+        managerNames = append(managerNames, name)
+    }
+    sort.Strings(managerNames)
 
-    for _, manager := range instance.managers {
+    managers := make([]*Manager, 0, len(managerNames))
+    for _, name := range managerNames {
+        managers = append(managers, instance.managers[name])
+    }
+
+    migrationNames := make([]string, 0, len(instance.migrationDatabases))
+    for name := range instance.migrationDatabases {
+        migrationNames = append(migrationNames, name)
+    }
+    sort.Strings(migrationNames)
+
+    migrationDatabases := make([]*bun.DB, 0, len(migrationNames))
+    for _, name := range migrationNames {
+        migrationDatabases = append(migrationDatabases, instance.migrationDatabases[name])
+    }
+
+    instance.lock.Unlock()
+
+    var closeErr error
+    failedNames := make([]string, 0)
+
+    for index, name := range managerNames {
+        manager := managers[index]
         if nil == manager {
             continue
         }
 
         managerCloseErr := manager.Close()
+        if nil != managerCloseErr {
+            failedNames = append(failedNames, name)
+        }
         if nil == closeErr && nil != managerCloseErr {
             closeErr = managerCloseErr
         }
+    }
+
+    for index, name := range migrationNames {
+        migrationDatabase := migrationDatabases[index]
+        if nil == migrationDatabase {
+            continue
+        }
+
+        migrationDatabaseCloseErr := migrationDatabase.Close()
+        if nil != migrationDatabaseCloseErr {
+            failedNames = append(failedNames, name+" (migration)")
+        }
+        if nil == closeErr && nil != migrationDatabaseCloseErr {
+            closeErr = migrationDatabaseCloseErr
+        }
+    }
+
+    /* teardown diagnostics must name every pool that failed to close, not the first alone: the caller gets one error, so the other failures would otherwise leave no trace anywhere */
+    if 1 < len(failedNames) {
+        return exception.NewError(
+            "bunorm manager registry close failed for multiple databases",
+            map[string]any{"names": failedNames},
+            closeErr,
+        )
     }
 
     return closeErr

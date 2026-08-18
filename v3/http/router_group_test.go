@@ -193,3 +193,57 @@ func TestRouteGroup_RejectsAnOptionalSegmentInThePrefix(t *testing.T) {
         "optional route parameter must be the last pattern segment unless it has a default",
     )
 }
+
+func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    group := router.Group("/api")
+    group.WithNamePrefix("api.")
+    group.WithRequirements(map[string]string{"id": "[0-9]+"})
+
+    options := NewRouteOptions(
+        "users.show",
+        []string{nethttp.MethodGet},
+        "",
+        nil,
+        nil,
+        nil,
+        nil,
+        0,
+        nil,
+    )
+
+    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return TextResponse(200, "users"), nil
+    }
+
+    group.HandleWithOptions("/users/:id", handler, options)
+
+    if "users.show" != options.Name() {
+        t.Fatalf("expected the caller's options to keep its own name, got %q", options.Name())
+    }
+
+    if _, carried := options.Requirements()["id"]; true == carried {
+        t.Fatalf("expected the group requirement to stay out of the caller's options, got %v", options.Requirements())
+    }
+
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    generatedPath, generateErr := urlGenerator.GeneratePath("api.users.show", map[string]string{"id": "7"})
+    if nil != generateErr {
+        t.Fatalf("unexpected generate error: %v", generateErr)
+    }
+
+    if "/api/users/7" != generatedPath {
+        t.Fatalf("expected the group prefix to be applied once, got %q", generatedPath)
+    }
+
+    assertPanicWithExceptionMessage(
+        t,
+        func() {
+            group.HandleWithOptions("/users/:id/edit", handler, options)
+        },
+        "route name already exists",
+    )
+}

@@ -109,8 +109,9 @@ func ValidateNoForbiddenCharacters(tokens []string, forbidden []ForbiddenCharact
     return nil
 }
 
+/* validateUserField reads the same whitespace rule the schedule fields read: any unicode space, not the ascii four. The user column sits on the generated line beside them, and crond splits that line on a vertical tab or a no-break space exactly as it splits on a plain space — so a user carrying one either fails the daemon's user lookup, and the entry silently never runs, or shifts the column boundary and hands part of the name to the shell as the command. */
 func validateUserField(label string, value string) error {
-    if true == strings.ContainsAny(value, " \t\n\r") {
+    if -1 != strings.IndexFunc(value, unicode.IsSpace) {
         return exception.NewError(
             fmt.Sprintf("cron: %s %q contains whitespace; user fields must be single tokens", label, value),
             exceptioncontract.Context{
@@ -168,6 +169,77 @@ func exampleSteppedRangeOf(item string, fieldName string) string {
     }
 
     return item[:slashIndex] + "-" + maximum + item[slashIndex:]
+}
+
+/* busyboxDayFieldsDiverge reports whether busybox crond would run this pair of day fields under a different rule than vixie crond and the in-process matcher. The two daemons classify a day field differently: vixie reads the spelling's first character — a star-based field counts as unrestricted — while busybox reads the expanded value set — a field admitting every value counts as unused and the other field alone governs (measured on busybox 1.37: DayOfWeek "0-6" beside DayOfMonth "16" runs only on the 16th, where vixie and the matcher run every day). The check is semantic rather than a shape list: both models are evaluated over every day-of-month / day-of-week combination and any disagreement is the divergence, so a pair the two daemons happen to read identically — a stepped wildcard beside the plain one, or "0-6" beside it — passes. It expects fields that already passed validateScheduleFields; a spelling that does not parse is answered as non-divergent and left to that refusal. */
+func busyboxDayFieldsDiverge(dayOfMonthExpression string, dayOfWeekExpression string) bool {
+    dayOfMonth, dayOfMonthErr := parseCronField(dayOfMonthExpression, cronFieldBounds{name: "DayOfMonth", minimum: dayOfMonthMinimum, maximum: dayOfMonthMaximum})
+    if nil != dayOfMonthErr {
+        return false
+    }
+
+    dayOfWeek, dayOfWeekErr := parseCronField(dayOfWeekExpression, cronFieldBounds{name: "DayOfWeek", minimum: dayOfWeekMinimum, maximum: dayOfWeekMaximum})
+    if nil != dayOfWeekErr {
+        return false
+    }
+
+    /* the same Sunday fold the matcher applies: a field naming 7 also matches 0 */
+    if true == dayOfWeek.allowed[dayOfWeekMaximum] {
+        dayOfWeek.allowed[dayOfWeekSunday] = true
+    }
+
+    dayOfMonthUnusedForBusybox := fieldCoversWholeRange(dayOfMonth, dayOfMonthMinimum, dayOfMonthMaximum)
+    dayOfWeekUnusedForBusybox := fieldCoversWholeRange(dayOfWeek, dayOfWeekSunday, dayOfWeekMaximumKubernetes)
+
+    vixieCombinesWithOr := false == dayOfMonth.starBased && false == dayOfWeek.starBased
+
+    for dayValue := dayOfMonthMinimum; dayValue <= dayOfMonthMaximum; dayValue++ {
+        for weekdayValue := dayOfWeekSunday; weekdayValue <= dayOfWeekMaximumKubernetes; weekdayValue++ {
+            dayMatches := dayOfMonth.allowed[dayValue]
+            weekdayMatches := dayOfWeek.allowed[weekdayValue]
+
+            vixieFires := dayMatches && weekdayMatches
+            if true == vixieCombinesWithOr {
+                vixieFires = dayMatches || weekdayMatches
+            }
+
+            busyboxFires := busyboxDayDecision(dayMatches, dayOfMonthUnusedForBusybox, weekdayMatches, dayOfWeekUnusedForBusybox)
+
+            if vixieFires != busyboxFires {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+/* fieldCoversWholeRange reports whether the field admits every value of its range — the busybox classification of an unused day field, which reads the expanded set rather than the spelling. */
+func fieldCoversWholeRange(field cronFieldMatcher, minimum int, maximum int) bool {
+    for value := minimum; value <= maximum; value = value + 1 {
+        if false == field.allowed[value] {
+            return false
+        }
+    }
+
+    return true
+}
+
+/* busyboxDayDecision is busybox crond's FixDayDow rule: both day fields unused fires every day, exactly one used lets it govern alone, and two used fields combine with or. */
+func busyboxDayDecision(dayMatches bool, dayUnused bool, weekdayMatches bool, weekdayUnused bool) bool {
+    if true == dayUnused && true == weekdayUnused {
+        return true
+    }
+
+    if true == dayUnused {
+        return weekdayMatches
+    }
+
+    if true == weekdayUnused {
+        return dayMatches
+    }
+
+    return dayMatches || weekdayMatches
 }
 
 func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
@@ -233,8 +305,11 @@ func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter) error {
             return forbiddenErr
         }
 
-        /* @important the rendered field must parse under the bounds crond enforces: crond treats one bad field as a parse error and refuses the whole crontab file with it — so an out-of-range value fails generation instead. */
-        if _, parseErr := parseCronField(fieldOrWildcard(normalizeCronNameTokens(field.value, field.names)), field.minimum, field.maximum); nil != parseErr {
+        /* the rendered field must parse under the bounds crond enforces: crond treats one bad field as a parse error and refuses the whole crontab file with it — so an out-of-range value fails generation instead. */
+        /* the bounds here name no dialect on purpose: the generator judges every field against the crontab limits whatever runner dialect the same Configuration drives, so filling one in would name a chooser that never chose */
+        fieldBounds := cronFieldBounds{name: field.name, minimum: field.minimum, maximum: field.maximum}
+
+        if _, parseErr := parseCronField(fieldOrWildcard(normalizeCronNameTokens(field.value, field.names)), fieldBounds); nil != parseErr {
             return exception.NewError(
                 fmt.Sprintf("cron: entry %q has an invalid Schedule.%s (%q)", entry.Name, field.name, field.value),
                 exceptioncontract.Context{

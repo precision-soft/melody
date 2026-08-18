@@ -136,6 +136,8 @@ func RegisterDatabaseServices(app *application.Application) {
 }
 ```
 
+[`NewManagerRegistry`](./manager_registry.go) takes a `container/contract.Resolver` as its first argument, then the provider definitions as variadic values. It fails with `ErrResolverIsRequired` on a nil resolver and `ErrNoProviderDefinitions` when no definition is given. The resolver is what a lazy open replays through long after the construction-time resolution has ended, so the registry keeps the container behind it where the value implements `container/contract.ContainerCarrier` — a resolution context is single-threaded and dies with its scope, while the pools this registry hands out outlive both.
+
 ### Consuming the default database
 
 ```go
@@ -199,49 +201,4 @@ The hook is executed during provider open, after Melody defaults and typed confi
 
 ## Enhancements
 
-The core `bunorm` module ships three optional, dependency-free enhancements (standard library + Bun only). Paths below reference the v3 binding.
-
-### Read/write split
-
-[`ReadWriteSplitter`](v3/split.go) routes reads to replica managers and writes to the primary manager, resolving named managers from a [`ManagerRegistry`](v3/manager_registry.go). It is explicit: call `Writer()` for writes and `Reader()` for reads (replicas are chosen round-robin; with no replicas, the reader falls back to the primary).
-
-```go
-splitter := bunorm.NewReadWriteSplitter(registry, "primary", "replica-a", "replica-b")
-
-writeDatabase, _ := splitter.Writer()
-readDatabase, _ := splitter.Reader()
-```
-
-### Field encryption
-
-The [`encrypt`](v3/encrypt) subpackage encrypts column values at rest with AES-256-GCM. Declare a field as [`encrypt.EncryptedString`](v3/encrypt/encrypted_string.go) (it implements `driver.Valuer`/`sql.Scanner`) and configure a process-wide cipher once at boot via [`encrypt.UseCipher`](v3/encrypt/encrypted_string.go). Keys are resolved by id through a [`KeyProvider`](v3/encrypt/key_provider.go), so ciphertext carries its key id for rotation.
-
-```go
-encrypt.UseCipher(encrypt.NewCipher(
-	encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": key32}),
-))
-
-type Customer struct {
-	Email encrypt.EncryptedString `bun:"email,type:varchar(255)"`
-}
-```
-
-The value is stored as `<keyId>:<base64(nonce||ciphertext)>` and is not searchable in encrypted form. `EncryptedString` masks its decrypted plaintext in `fmt`/`slog`/error output (its `String`/`LogValue` return `<redacted>`); use an explicit `string(value)` conversion when the real value is needed.
-
-### Audit trail
-
-The [`audit`](v3/audit) subpackage records a **per-field before/after change-set** for entity writes into a separate audit database via a [`Recorder`](v3/audit/recorder.go). Recording is explicit (called from the repository/service layer with the `before`/`after` entity values): Bun has no Doctrine-style unit-of-work, so the original row is not available to a transparent hook — passing both states is the robust, exact approach.
-
-```go
-recorder := audit.NewRecorder(auditDatabase, "melody_audit")
-
-ctx := audit.WithActor(requestContext, "user-42")
-
-recorder.RecordInsert(ctx, "order", order.Id, order)
-recorder.RecordUpdate(ctx, "order", order.Id, before, after)
-recorder.RecordDelete(ctx, "order", order.Id, before)
-```
-
-[`ChangeSet`](v3/audit/change.go) diffs two struct values field by field (using `bun` column names, skipping relations and the embedded base model): `INSERT` records new values, `DELETE` records old values, `UPDATE` records only the changed fields as `{field, old, new}`. Each [`audit.Entry`](v3/audit/entry.go) stores the entity name, entity id, operation, the change-set as JSON, the actor (from context), and a timestamp — in a distinct audit `*bun.DB`.
-
-Sensitive fields are recorded as changed but with their values masked to `<redacted>`: tag a field with `audit:"redact"`, or use an [`encrypt.EncryptedString`](v3/encrypt/encrypted_string.go) field (auto-redacted). A field tagged `bun:"-"` is excluded from the change-set entirely.
+Read/write splitting, encrypted columns and an audit trail ship in the **v3 binding alone** — no `split.go`, `encrypt/` or `audit/` exists outside `integrations/bunorm/v3`, so nothing here can be reached from this module. They are documented where they live: read/write splitting in [`v3/README.md`](v3/README.md), field encryption in [`v3/encrypt/README.md`](v3/encrypt/README.md), and the audit trail in [`v3/audit/README.md`](v3/audit/README.md).

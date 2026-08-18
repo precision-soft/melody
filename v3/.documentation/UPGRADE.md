@@ -18,6 +18,65 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
+
+**What changed.** Every module of the `bunorm` family — the manager, `mysql`, `pgsql` and the three `migrate` modules — requires `github.com/uptrace/bun v1.2.17` and, where they carry one, `dialect/mysqldialect`, `dialect/pgdialect` or `driver/pgdriver` at the same version. v1.2.16 swallowed the failure of a migration read from a `.sql` file: the deferred `conn.Close()` / `tx.Rollback()` overwrote the exec error with its own nil return, so `db:migrate` printed `[success]`, exited 0 and marked a migration applied that never ran.
+
+**Symptom.** If your application pins a bun dialect or driver of its own, the build now selects `bun v1.2.17` through this dependency while your dialect stays where it was, and the process **panics at init**: `mysqldialect and Bun must have the same version: v1.2.16 != v1.2.17`. The dialect packages check this themselves; it is not a melody rule.
+
+**Remedy.** Move your own `github.com/uptrace/bun/...` requirements to `v1.2.17` in the same change — `go get github.com/uptrace/bun@v1.2.17 github.com/uptrace/bun/dialect/mysqldialect@v1.2.17` and the equivalent for `pgdialect` / `pgdriver`. Applications that declare no bun dependency of their own need no action.
+
+### Opaque tokens: a stored token with no issue instant is refused once its user is revoked
+
+**What changed.** A revocation is no longer an enumeration. [`security/contract.RevocationEpochStore`](../security/contract/token_store.go) publishes a boundary per user, and per device of a user, and [`Lookup`](../security/in_memory_token_store.go) refuses a token issued before the boundary that governs it. This closes the window [`DeleteByUser`](../../integrations/rueidis/v3/token_store.go) could never close: it walks an index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during a revocation survived it. The comparison needs an issue instant, so [`security/contract.Claims`](../security/contract/token_validator.go) carries `IssuedAt`, stamped by the store on every write.
+
+Nothing breaks at compile time. The new methods live on their own interface, composed into `EpochRevocableTokenStore` rather than added to `RevocableTokenStore`, so an out-of-tree token store still satisfies the interface it was written against — it simply cannot publish boundaries, and a caller that needs one is told so by `EpochRevocableTokenStoreMustFromResolver` at the moment the service is asked for.
+
+**Symptom.** A token stored by an earlier release carries no issue instant. The zero instant precedes every boundary, so the first time `RevokeBefore` is called for a user, that user's pre-upgrade tokens stop resolving — including ones an operator did not mean to end. Users nobody revokes are unaffected: with no boundary there is nothing to compare against and the token resolves exactly as before.
+
+**Remedy.** None is needed in the ordinary case, and the behaviour is the safe direction: the tokens that stop resolving belong to an account somebody deliberately revoked. If an upgrade must not end any pre-upgrade session, do not call `RevokeBefore` until the longest token lifetime has passed since the deploy; every token written after it carries an instant and is compared normally.
+
+Two consequences worth knowing before wiring it up. A token whose issue was in flight across a revocation is refused — the instant is stamped before the write reaches the store, so a token stamped just before the boundary and written just after it is treated as predating it. That is over-strict rather than under-strict, and deliberate. And the instants come from application clocks, so a node whose clock runs ahead of the node a revocation is issued from stamps tokens that read as later than the boundary and survive it: the window is exactly the skew between the two, and a single node whose clock steps backwards — an NTP correction, a restored snapshot, a resumed virtual machine — produces the same thing without any second node. `WithTokenStoreMaximumClockSkew` on the redis store, and `JwtConfig.RevocationEpochSkew` on the json web token path, bound that window: they widen the boundary by the stated amount and, on the store, additionally refuse a stamp further ahead of the verifying
+node than the same amount. Both default to zero, which leaves the behaviour of this release unchanged; set them to the worst skew the fleet can carry. The cost is symmetrical and deliberate: a token issued within that window AFTER a revocation is refused too. `WithRevocationEpochRetention` is unrelated to any of this — it floors how long a boundary is kept when there is no index deadline to adopt, and does not affect the comparison.
+
+### Compile-level: `container/contract.ScopeManager` and `container/contract.Scope` gained `RegisterScoped`
+
+**What changed.** A scope is now a registrar of its own. [`container/contract.ScopeManager`](../container/contract/scope.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. [`container/contract.Scope`](../container/contract/scope.go) declares the same two verbs through [`ScopedRegistrar`](../container/contract/scoped_registrar.go), for adding a service to one live scope.
+
+The declaration sits on `ScopeManager` rather than beside the container's own registrations because a scope does not exist until a request arrives: what a scope will own has to be declared at boot by whatever will be creating the scopes.
+
+**Symptom.** An out-of-tree implementation of `container/contract.Scope`, of `container/contract.ScopeManager`, or of `container/contract.Container` — which embeds `ScopeManager` — no longer satisfies the interface, so the assignment fails to compile with `missing method RegisterScoped` or `missing method MustRegisterScoped`. In practice the implementations that break are test doubles: the framework's own sweep had to repair twelve of them, and none of them was production code.
+
+**Remedy.** A double that only stands in for a scope can answer that it registers nothing, which is truthful for a stub and keeps the compiler satisfied:
+
+```go
+func (instance *TestScope) RegisterScoped(
+	serviceName string,
+	provider any,
+	options ...containercontract.RegisterOption,
+) error {
+	return exception.NewError(
+		"this scope holds no registrations of its own",
+		map[string]any{"serviceName": serviceName},
+		nil,
+	)
+}
+
+func (instance *TestScope) MustRegisterScoped(
+	serviceName string,
+	provider any,
+	options ...containercontract.RegisterOption,
+) {
+	exception.Panic(exception.FromError(instance.RegisterScoped(serviceName, provider, options...)))
+}
+```
+
+A double built by embedding `containercontract.Scope` or `containercontract.Container` in a struct keeps compiling untouched and needs nothing — but it will panic on a nil embed if anything calls the new methods, so give it the two methods above if the code under test can reach them.
+
+An implementation that means to carry real scoped registrations should hold the providers apart from the instances it already keeps, build one instance per scope on first resolution, and close what it built when the scope closes. The framework's own implementation is the reference; see [`package/CONTAINER.md`](./package/CONTAINER.md) for what the two lifetimes may read from each other.
+
+See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR.
+
 ### Compile-level: `session/contract.Manager` gained `RegenerateSession`
 
 **What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `RegenerateSession(session Session) (Session, error)`, the session-fixation defence: it mints a fresh id, carries the values over, removes the entry the previous id pointed at, and latches the session passed in out of use. The framework's own [`session.Manager`](../session/manager.go) implements it, and [`http.RegenerateRequestSession`](../http/session.go) rotates and republishes in one call.
@@ -54,7 +113,37 @@ func (instance *CustomSessionManager) RegenerateSession(
 
 The framework's own `Session` is latched out of use rather than merely cleared, because `Session.Set` lifts the cleared flag and a caller that rotated and then kept writing to the original object would otherwise have the response path re-create the just-deleted id and re-issue it as the cookie. That latch is unexported and no contract method was added for it, so an out-of-tree `Session` implementation is only `Clear()`ed — which a later write still undoes. An application that supplies its own `Session` must therefore not write to the object it rotated away.
 
-This is the release's only added contract method. See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why it ships as a MINOR, and [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
+See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR, and [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
+
+### Compile-level: `session/contract.Session` gained `SetShared`
+
+**What changed.** [`session/contract.Session`](../session/contract/session.go) declares `SetShared(key string, value any)`. `Set` stores a value the storage layer is free to copy — every entry is deep-copied on the way into the store and on the way out of it, which is what keeps a session read on one request from writing into another request's data — while `SetShared` stores the handle itself, so `Get` hands back that very value and every reader of the session reaches the one object. The write decides the semantics and `Get` honours whichever was chosen, so there is no `GetShared` and no `IsShared` to implement alongside it.
+
+**Symptom.** An out-of-tree implementation of `session/contract.Session` no longer satisfies the interface, so the assignment that hands it to the framework fails to compile with `missing method SetShared`.
+
+**Remedy.** Implement it. An implementation backed by an in-process map already stores what it is given, so delegating is both the shortest implementation and the honest one:
+
+```go
+func (instance *CustomSession) SetShared(key string, value any) {
+	instance.Set(key, value)
+}
+```
+
+An implementation whose storage serialises cannot carry a handle across a round trip, and should refuse the save rather than write something that loads back as a plain copy — [`FileStorage.Save`](../session/file_storage.go) refuses the whole session before touching anything and names the offending key. See [`package/SESSION.md`](./package/SESSION.md) for the distinction and what each write is for.
+
+### Compile-level: `config/contract.HttpConfiguration` gained `StaticExcludedPaths`
+
+**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `StaticExcludedPaths() []string`, the path prefixes the built-in file server declines before it looks at the disk. The framework's own implementation reads them from `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`), a comma-separated list that is empty by default. Since the built-in file server sits outermost in the pipeline, excluding a prefix is how an application takes a part of the url back — to put authentication in front of a directory, or to serve it from a root of its own.
+
+**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` — a test double, or a configuration assembled in code rather than from `.env` artifacts — no longer satisfies the interface, and the assignment fails to compile with `missing method StaticExcludedPaths`.
+
+**Remedy.** Implement it. An empty list excludes nothing, so returning an empty slice keeps the behaviour the interface had without the method. Return a copy rather than the field itself: the configuration is read on every request while the caller is free to keep the slice it was handed.
+
+```go
+func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
+	return append([]string{}, instance.staticExcludedPaths...)
+}
+```
 
 ### Compile-level: `cli/output.Option` lost `Fields` and `SortKey`
 
@@ -130,7 +219,7 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 }
 ```
 
-`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/builder.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order that was built, and `debug:middleware` renders it.
+`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order that was built, and `debug:middleware` renders it.
 
 ### Object storage: `awss3` `Put` enforces the declared size
 
@@ -275,9 +364,70 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 
 **Remedy.** Size the grace to the slowest handler with `WithShutdownGrace`, and make sure a handler that must not be interrupted mid-write finishes inside it. A handler that relied on being killed at the signal now runs to completion or to the grace deadline.
 
+### Websocket: a zero `IdleTimeout` is refused at construction
+
+**What changed.** [`websocket.NewStreamHandler`](../../integrations/websocket/v3/handler.go) panics when `Options.IdleTimeout` is not positive, rather than treating the zero value as "no keepalive". Nothing else in the stack can reap a peer that goes away without a fin: `coderwebsocket.Accept` hijacks the connection, so `http.Server`'s read and write timeouts stop applying to it; the read loop then blocks in `Read` with no deadline of its own; and a write into a half-open socket keeps succeeding for as long as the send buffer has room, so a broadcast is no liveness signal either. The keepalive ping is the only remaining evidence, which makes its interval a required decision rather than a tunable with an off position. Left at zero, connections opened and abandoned each cost a descriptor, a hub subscription and three goroutines for the life of the process.
+
+**Symptom.** An application whose websocket options never named an `IdleTimeout` no longer starts. The construction panics with `websocket options require a positive IdleTimeout: ...`, and the exception context carries the `idleTimeout` it was given. Through [`websocket.NewModule`](../../integrations/websocket/v3/module.go) the handler is built while routes are registered, so the failure surfaces at boot rather than on the first upgrade request — deliberately, the way the framework reports every other unusable configuration.
+
+**Remedy.** Name the interval at which a silent peer should be pinged. `30s` suits a browser client, which answers the ping inside its protocol stack where the page's JavaScript never sees it, so a receive-only client stays connected:
+
+```go
+websocket.NewModule(websocket.ModuleConfig{
+	Hub:  hub,
+	Path: "/ws",
+	Options: websocket.Options{
+		TopicResolver: topicResolver,
+		WriteTimeout:  10 * time.Second,
+		IdleTimeout:   30 * time.Second,
+	},
+})
+```
+
+The module supplies no default of its own on purpose: the only thing that reaps a vanished peer should be chosen by the application rather than inherited silently.
+
 ### Other integration modules
 
 * **`bunorm` deterministic encryption.** `melody:encrypt:database --mode=encrypt --deterministic` ([`encrypt_database_command.go`](../../integrations/bunorm/v3/encrypt/encrypt_database_command.go)) now rewrites a column that was already bulk-encrypted with random nonces into its deterministic form, keeping the key each value already carries ([`migrate.go`](../../integrations/bunorm/v3/encrypt/migrate.go)). Every such value previously authenticated under a live key and was passed through untouched, so the command reported success while converting nothing and every [`CiphertextCandidates`](../../integrations/bunorm/v3/encrypt/cipher.go) equality lookup on that column returned zero rows. *Symptom:* a deterministic run over an already-encrypted column now writes rows where it used to write none. *Remedy:* none — it remains idempotent and never rotates keys, so `--mode=reencrypt --target-key=...` is still the only way to change a key.
 * **`bunorm` audit change-sets.** [`audit.ChangeSet`](../../integrations/bunorm/v3/audit/change.go) always serialises an empty change-set as `[]` rather than the json literal `null`. *Symptom:* a trail consumer that special-cased `null` in the `changes` column sees `[]` instead. *Remedy:* drop the special case; `jsonb_array_length(changes::jsonb)` now reads `0` where it errored or read `1`.
 * **`websocket` keepalive.** A received pong refreshes the connection's liveness mark, and a keepalive ping that could not be written because a data frame was in flight is no longer read as a dead peer ([`handler.go`](../../integrations/websocket/v3/handler.go)). *Symptom:* a configuration with `IdleTimeout` below `WriteTimeout` no longer turns transient write contention into a disconnect — a frame in flight excuses a timed-out ping until one interval past the configured write timeout. *Remedy:* none; a receive-only client bridged onto a broadcast hub stops being disconnected for never sending a data frame.
 * **`outbox` relay lease.** The distributed lease is released on a context detached from the run and bounded by five seconds, and a release failure is logged rather than discarded ([`relay.go`](../../integrations/outbox/v3/relay.go)). *Symptom:* a graceful restart no longer stalls outbox delivery for a whole `LockTtl`. *Remedy:* none.
+
+## v3.0.0
+
+v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version. The entry below is the one rewrite that does not compile afterwards: v1 and v2 keep the identifiers, v3 has never carried them.
+
+### Compile-level: `validation` does not carry the twelve deprecated constants
+
+**What changed.** [`validation/const.go`](../validation/const.go) declares `ServiceValidator`, `ErrorInvalidRuleSyntax`, `ErrorUnknownRule` and `ErrorNestingDepthExceeded` and nothing else. The twelve deprecated aliases that v1 and v2 still declare are absent. Each one was defined as the constant that replaces it, so every replacement carries the identical string and the rewrite is a rename:
+
+| Absent in v3           | Replacement                                                                              | Value                |
+|------------------------|------------------------------------------------------------------------------------------|----------------------|
+| `ErrorNotAlpha`        | [`ConstraintAlphaErrorNotAlpha`](../validation/constraint_alpha.go)                      | `notAlpha`           |
+| `ErrorNotAlphanumeric` | [`ConstraintAlphanumericErrorNotAlphanumeric`](../validation/constraint_alphanumeric.go) | `notAlphanumeric`    |
+| `ErrorInvalidEmail`    | [`ConstraintEmailErrorInvalidEmail`](../validation/constraint_email.go)                  | `invalidEmail`       |
+| `ConstraintMax`        | [`ConstraintMaxLength`](../validation/constraint_max_length.go)                          | `max`                |
+| `ErrorMaxLength`       | [`ConstraintMaxLengthErrorTooLong`](../validation/constraint_max_length.go)              | `tooLong`            |
+| `ConstraintMin`        | [`ConstraintMinLength`](../validation/constraint_min_length.go)                          | `min`                |
+| `ErrorMinLength`       | [`ConstraintMinLengthErrorInsufficientLength`](../validation/constraint_min_length.go)   | `insufficientLength` |
+| `ErrorNotBlank`        | [`ConstraintNotBlankErrorIsBlank`](../validation/constraint_not_blank.go)                | `isBlank`            |
+| `ErrorEmpty`           | [`ConstraintNotEmptyErrorEmpty`](../validation/constraint_not_empty.go)                  | `empty`              |
+| `ErrorNotNumeric`      | [`ConstraintNumericErrorNotNumeric`](../validation/constraint_numeric.go)                | `notNumeric`         |
+| `ErrorRegexMismatch`   | [`ConstraintRegexErrorMismatch`](../validation/constraint_regex.go)                      | `regexMismatch`      |
+| `ErrorInvalidPattern`  | [`ConstraintRegexErrorInvalidPattern`](../validation/constraint_regex.go)                | `invalidPattern`     |
+
+`ConstraintMax` and `ConstraintMin` are rule names — the token a `validate` tag spells — and the other ten are error codes a client reads off a validation failure.
+
+**Symptom.** Code that named any of them stops compiling with `undefined: validation.ErrorNotAlpha` and the like. The failure is per identifier, so a package that used several reports several.
+
+**Remedy.** Rename each reference to the replacement column above:
+
+```go
+/* v1 / v2 */
+if validation.ErrorNotBlank == validationError.Code() {
+
+/* v3 */
+if validation.ConstraintNotBlankErrorIsBlank == validationError.Code() {
+```
+
+Nothing outside the Go source changes: the strings are identical, so a `validate` tag, an api client matching on the error code, and a translation catalogue keyed on it all keep working untouched.

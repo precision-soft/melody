@@ -5,14 +5,20 @@ import (
     "errors"
     "fmt"
     nethttp "net/http"
+    "net/http/httptest"
     "testing"
+    "time"
 
     melodyconfig "github.com/precision-soft/melody/config"
     melodyconfigcontract "github.com/precision-soft/melody/config/contract"
     melodycontainer "github.com/precision-soft/melody/container"
     melodycontainercontract "github.com/precision-soft/melody/container/contract"
+    melodyhttp "github.com/precision-soft/melody/http"
     melodyruntime "github.com/precision-soft/melody/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
+    melodyserializer "github.com/precision-soft/melody/serializer"
+    melodyserializercontract "github.com/precision-soft/melody/serializer/contract"
+    melodyvalidation "github.com/precision-soft/melody/validation"
 )
 
 const causeSecret = "connection to 10.0.0.7 refused: password=hunter2"
@@ -60,8 +66,40 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
 
-/* @important the presenter must reach the same decision the framework exception listener reaches, and
-must reach "no debug material" whenever the environment cannot be read at all */
+func TestBuildApiResponseHonoursAnExplicitRefusal(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
+
+    registerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
+        containerInstance,
+        melodyserializer.ServiceSerializerManager,
+        func(resolver melodycontainercontract.Resolver) (*melodyserializer.SerializerManager, error) {
+            return melodyserializer.NewSerializerManager(
+                map[string]melodyserializercontract.Serializer{
+                    melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
+                },
+            )
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register serializer manager: %v", registerErr)
+    }
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
+    httpRequest.Header.Set("Accept", "*/*;q=0")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+
+    response := buildApiResponse(runtimeInstance, request, nethttp.StatusForbidden, apiResponse{Success: false})
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    if nethttp.StatusNotAcceptable != response.StatusCode() {
+        t.Fatalf("expected the explicit refusal to be answered 406 on the error path, got %d", response.StatusCode())
+    }
+}
 
 func TestDebugModeFollowsTheKernelEnvironment(t *testing.T) {
     if true == debugMode(runtimeForEnvironment(t, melodyconfig.EnvProduction)) {
@@ -118,6 +156,49 @@ func TestBuildErrorContextCarriesTheCauseWhenDebugIsEnabled(t *testing.T) {
 
     if causeSecret != errorEntry["message"] {
         t.Fatalf("expected the raw message under debug, got %v", errorEntry["message"])
+    }
+}
+
+func TestValidationErrorMessagesAnswerOneEntryPerViolation(t *testing.T) {
+    validationErrors := melodyvalidation.ValidationErrors{
+        melodyvalidation.NewValidationError("name", "must be at least 2 characters", "min", nil),
+        melodyvalidation.NewValidationError("price", "must be greater than 0", "greaterThan", nil),
+    }
+
+    messages := validationErrorMessages(validationErrors)
+
+    if 2 != len(messages) {
+        t.Fatalf("expected one message per violation, got %v", messages)
+    }
+
+    if "name: must be at least 2 characters" != messages[0] {
+        t.Fatalf("unexpected first message: %q", messages[0])
+    }
+
+    if "price: must be greater than 0" != messages[1] {
+        t.Fatalf("unexpected second message: %q", messages[1])
+    }
+}
+
+func TestValidationErrorMessagesSkipANilViolation(t *testing.T) {
+    validationErrors := melodyvalidation.ValidationErrors{
+        nil,
+        melodyvalidation.NewValidationError("price", "must be greater than 0", "greaterThan", nil),
+    }
+
+    messages := validationErrorMessages(validationErrors)
+
+    if 1 != len(messages) {
+        t.Fatalf("expected the nil violation to be skipped, got %v", messages)
+    }
+}
+
+/* A plain error can reach the door when the validator refuses for a reason that is not a per-field collection; the answer is its message, not a panic and not silence. */
+func TestValidationErrorMessagesDegradeANonCollectionError(t *testing.T) {
+    messages := validationErrorMessages(errors.New("the payload could not be validated"))
+
+    if 1 != len(messages) || "the payload could not be validated" != messages[0] {
+        t.Fatalf("unexpected messages: %v", messages)
     }
 }
 

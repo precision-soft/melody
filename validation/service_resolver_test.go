@@ -4,6 +4,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/container"
+    containercontract "github.com/precision-soft/melody/container/contract"
 )
 
 func TestValidatorFromContainer_ReturnsNilWhenMissing(t *testing.T) {
@@ -25,4 +26,28 @@ func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
     }()
 
     _ = ValidatorMustFromContainer(serviceContainer)
+}
+
+func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    registeredValidator := NewValidator()
+
+    registerErr := serviceContainer.Register(
+        ServiceValidator,
+        func(resolver containercontract.Resolver) (*Validator, error) {
+            return registeredValidator, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registeredValidator != ValidatorFromContainer(serviceContainer) {
+        t.Fatalf("expected the registered validator to be handed back")
+    }
+
+    if registeredValidator != ValidatorMustFromContainer(serviceContainer) {
+        t.Fatalf("expected the must resolver to hand back the same instance")
+    }
 }

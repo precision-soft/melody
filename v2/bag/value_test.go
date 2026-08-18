@@ -1,6 +1,7 @@
 package bag
 
 import (
+    "net/url"
     "testing"
 )
 
@@ -174,7 +175,6 @@ func TestBagFloat64_ConversionsAndErrors(t *testing.T) {
     }
 }
 
-/* @info a key set to nil is present but carries no value: String used to report it as set while Int, Bool, Float64 and Duration reported it as unset, so Has and the typed accessors contradicted each other on the same state */
 func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("key", nil)
@@ -203,5 +203,55 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
 
     if value, exists := String(parameterBag, "key"); false == exists || "value" != value {
         t.Fatalf("expected a set value to be reported, got %q exists=%v", value, exists)
+    }
+}
+
+func TestString_PanicsOnAStringSlice(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("repeated", []string{"1", "2"})
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the string slice to be refused with a panic")
+        }
+    }()
+
+    _, _ = String(parameterBag, "repeated")
+}
+
+func TestString_DeliversTheSingleOccurrence(t *testing.T) {
+    parameterBag := NewParameterBagFromValues(url.Values{"term": {"melody"}})
+
+    value, exists := String(parameterBag, "term")
+    if false == exists || "melody" != value {
+        t.Fatalf("expected the single occurrence back, got exists=%v value=%q", exists, value)
+    }
+
+    if "melody" != StringOrDefault(parameterBag, "term", "fallback") {
+        t.Fatalf("expected StringOrDefault to deliver the value, not the fallback")
+    }
+
+    if false == HasNonEmptyString(parameterBag, "term") {
+        t.Fatalf("expected HasNonEmptyString to see the provided value")
+    }
+}
+
+func TestBagTypedReaders_AnAbsentNameIsUnsetRatherThanTheZeroValue(t *testing.T) {
+    parameterBag := NewParameterBag()
+
+    boolValue, boolExists, boolErr := Bool(parameterBag, "missing")
+    if true == boolExists || nil != boolErr || false != boolValue {
+        t.Fatalf("expected Bool to report an absent name unset, got value=%v exists=%v err=%v", boolValue, boolExists, boolErr)
+    }
+
+    floatValue, floatExists, floatErr := Float64(parameterBag, "missing")
+    if true == floatExists || nil != floatErr || 0 != floatValue {
+        t.Fatalf("expected Float64 to report an absent name unset, got value=%v exists=%v err=%v", floatValue, floatExists, floatErr)
+    }
+
+    intValue, intExists, intErr := Int(parameterBag, "missing")
+    if true == intExists || nil != intErr || 0 != intValue {
+        t.Fatalf("expected Int to report an absent name unset, got value=%v exists=%v err=%v", intValue, intExists, intErr)
     }
 }

@@ -46,9 +46,9 @@ import (
 	"your/module/database"
 	"your/module/database/migrations"
 
-	bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v2"
 	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
 	clicontract "github.com/precision-soft/melody/v2/cli/contract"
+	bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v2"
 	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
 )
 
@@ -73,6 +73,15 @@ func (instance *YourModule) RegisterCliCommands(kernelInstance kernelcontract.Ke
 var _ applicationcontract.CliModule = (*YourModule)(nil)
 ```
 
+Or bundle it as a self-registering application module, so a single `RegisterModule` call contributes the commands instead of hand-writing `RegisterCliCommands`:
+
+```go
+app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
+    Migrations: migrations.Migrations,
+    Options:    bunormmigrate.Options{CommandPrefix: "db"},
+}))
+```
+
 ## Multiple database contexts
 
 A binary with several databases declares one context per database and registers the module once; each context gets its own command family pinned to its manager in the shared registry:
@@ -86,9 +95,9 @@ app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
 }))
 ```
 
-This generates `db:platform:init|migrate|rollback|status|unlock|create` and the same family under `db:payment:*`. By convention a context's pinned manager name equals the context name (override with `Options.ManagerName`) and its prefix derives from the base prefix (`db:<name>`, override with `Options.CommandPrefix`); every context resolves against the one shared `*bunorm.ManagerRegistry`, so no `container.WithoutTypeRegistration()` juggling is needed. The pin only replaces the registry-default fallback — an explicit `--manager` flag still wins. `Contexts` composes with the legacy single-set `Migrations` field, which keeps its unprefixed commands. For hand-wired setups, `RegisterContextCommands(contexts, baseOptions)` returns the same commands without the module wrapper.
+This generates `db:platform:init|migrate|rollback|status|unlock|create` and the same family under `db:payment:*`. By convention a context's pinned manager name equals the context name (override with `Options.ManagerName`) and its prefix derives from the base prefix (`db:<name>`, override with `Options.CommandPrefix`); every context resolves against the one shared `*bunorm.ManagerRegistry`. The pin only replaces the registry-default fallback — an explicit `--manager` flag still wins. `Contexts` composes with the legacy single-set `Migrations` field, which keeps its unprefixed commands. For hand-wired setups, `RegisterContextCommands(contexts, baseOptions)` returns the same commands without the module wrapper.
 
-If you deliberately keep separate registries per context, set each context's `ManagerRegistryServiceId`; note that registering a second `*bunorm.ManagerRegistry` service needs `container.WithTypeRegistration(false)` (append; the first provider keeps winning `GetByType`) or `container.WithoutTypeRegistration()` because the strict default refuses a duplicate service type.
+If you deliberately keep separate registries per context, set each context's `ManagerRegistryServiceId`.
 
 ## Options
 
@@ -96,16 +105,18 @@ If you deliberately keep separate registries per context, set each context's `Ma
 
 * `CommandPrefix` (default: `db`) controls the command namespace (`db:init`, `db:migrate`, etc.).
 * `ManagerFlagName` (default: `manager`) controls the flag used to select a manager (`--manager` by default).
-* `ManagerRegistryServiceId` (default: `service.database.manager.registry`) is the container service id for the `*bunorm.ManagerRegistry`.
+* `ManagerRegistryServiceId` (default: `service.database.manager.registry`) is the container service id for the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: the commands resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
 * `ManagerName` (default: empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
 
-Empty values are replaced with the defaults in [`RegisterCommands`](./register.go).
+Empty values are replaced with the defaults in [`RegisterCommands`](./register.go), and [`DefaultOptions`](./option.go) answers with that same set as a value — the way to read what a field falls back to, or to start from it and change one field.
 
 ## Commands
 
-All commands accept the standard Melody output flags, but only `--verbose` and `--no-color` affect the output; `--format=json` is not implemented (the commands always print their plain-text output).
+All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output and renders one machine-readable json envelope on a single line — a failure included — instead of the plain-text output; `--format=json-pretty` renders the same document indented for reading by hand, and `--verbose` and `--no-color` affect the plain-text output alone.
 
-The manager can be selected with `--<managerFlagName>`. If not provided, the registry default manager is used.
+The json document therefore carries every block the command produces at any verbosity: `--verbose` never shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`, `data.migrations.rolledBack`, `data.database`, `data.files`, `data.messages` — and are not the headings the text blocks print. `data.database.database` is json `null` when the connection reports no current database, where the text block renders `<null>`. One consequence is worth knowing: a json run performs the database-identity query a text run only performs under `--verbose`.
+
+The manager can be selected with `--<managerFlagName>`. Without the flag the `ManagerName` pin from the registration options is used, and only an empty pin falls back to the registry default — which is the point of pinning one manager per command set, so a multi-context binary cannot migrate the wrong database by omitting the flag.
 
 With the default prefix (`db`), the commands are:
 

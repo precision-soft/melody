@@ -2,11 +2,12 @@ package security
 
 import (
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/internal"
     securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
 func NewToken(user securitycontract.Token) *Token {
-    if nil == user {
+    if true == internal.IsNilInterface(user) {
         exception.Panic(
             exception.NewError("can not create a security token from nil", nil, nil),
         )

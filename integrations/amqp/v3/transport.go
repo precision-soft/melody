@@ -435,21 +435,36 @@ func (instance *Transport) publish(
     routingKey string,
     publishing amqp091.Publishing,
 ) error {
+    _, publishErr := instance.publishRecoverable(ctx, exchange, routingKey, publishing)
+
+    return publishErr
+}
+
+/* publishRecoverable is publish, additionally reporting whether a failure it returns is one a further attempt could still recover from. A caller that keeps trying (a requeue whose retry counters only exist on this publishing) needs that answer: retrying a channel fault is how the counters get through, while retrying a broker verdict only produces the same verdict on a fresh channel. */
+func (instance *Transport) publishRecoverable(
+    ctx context.Context,
+    exchange string,
+    routingKey string,
+    publishing amqp091.Publishing,
+) (bool, error) {
     usedChannel, retryable, publishErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
     if nil == publishErr {
-        return nil
+        return false, nil
     }
 
     /* only a channel-level failure is worth a second attempt on a fresh channel; a broker-semantic rejection (an unroutable return or a nack) is a permanent condition that a retry would only silently re-drop */
     if false == retryable || false == instance.publishRetryable() {
-        return publishErr
+        return false, publishErr
     }
 
     instance.resetPublishChannel(usedChannel)
 
-    _, _, retryErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+    _, retryRetryable, retryErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+    if nil == retryErr {
+        return false, nil
+    }
 
-    return retryErr
+    return true == retryRetryable && true == instance.publishRetryable(), retryErr
 }
 
 /* @important the channel runs in publisher-confirm mode and the publish is serialized with its confirmation wait: a message is reported sent only after the broker acked it and no basic.return arrived, so republish-then-ack cannot drop a message the broker silently discarded (reject-publish policy, deleted queue). */
@@ -796,15 +811,12 @@ func (instance *Transport) republish(
 
     publishing, buildErr := instance.buildPublishing(envelopeInstance, expiration)
     if nil != buildErr {
-        instance.logError(runtimeInstance, "amqp requeue re-publish build failed, falling back to broker requeue", buildErr)
-
-        return instance.nackChannel(channel, stamp.Tag, true)
+        /* a serialization failure is deterministic: the same envelope builds the same way on the next attempt, so retrying it only delays the same verdict */
+        return instance.rejectUncountedRequeue(runtimeInstance, channel, stamp, "amqp requeue re-publish build failed", buildErr)
     }
 
-    if publishErr := instance.publish(runtimeInstance.Context(), exchange, routingKey, publishing); nil != publishErr {
-        instance.logError(runtimeInstance, "amqp requeue re-publish failed, falling back to broker requeue", publishErr)
-
-        return instance.nackChannel(channel, stamp.Tag, true)
+    if publishErr := instance.publishRequeue(runtimeInstance, exchange, routingKey, publishing); nil != publishErr {
+        return instance.rejectUncountedRequeue(runtimeInstance, channel, stamp, "amqp requeue re-publish failed", publishErr)
     }
 
     if stamp.Generation != instance.currentGeneration() {
@@ -812,6 +824,94 @@ func (instance *Transport) republish(
     }
 
     return instance.ackChannel(channel, stamp.Tag)
+}
+
+/* republishAttemptCount bounds how many times a requeue is re-published carrying the counters it has just advanced.
+
+Only the re-publish carries them: RedeliveryStamp and DeadLetterAttemptStamp are advanced on the Go envelope and reach the broker as x-redelivery-count and x-dead-letter-attempt-count on the new publishing, while the delivery already on the channel still holds the counts the message arrived with. Anything that abandons the re-publish therefore abandons the accounting too, which is why a transient publish failure is worth attempting again rather than giving up on the first one — a channel or connection that flaps is the ordinary cause, and the next attempt carries the true counts through.
+
+Three is where the two costs cross. Each attempt is itself a publish, which already retries once on a freshly opened channel, so three attempts are up to six publishes across up to three channels, spaced by the reconnect backoff — room enough to ride out a channel loss and a reconnect. Beyond that the failure is no longer transient (a queue full under a reject-publish policy, a route that no longer exists), and every further attempt holds a worker on one message while the broker's answer stays the same. */
+const republishAttemptCount = 3
+
+/* publishRequeue publishes a requeue, retrying a bounded number of times while the failure is one a further attempt could recover from. It stops early on everything else: a broker verdict on the message, a transport that is closing, a runtime context that is done, or a connection no dialer can bring back. */
+func (instance *Transport) publishRequeue(
+    runtimeInstance runtimecontract.Runtime,
+    exchange string,
+    routingKey string,
+    publishing amqp091.Publishing,
+) error {
+    backoff := clampedInitialBackoff(instance.reconnect)
+
+    var lastErr error
+
+    for attempt := 0; attempt < republishAttemptCount; attempt++ {
+        if 0 < attempt {
+            if false == instance.waitForRetry(runtimeInstance, backoff) {
+                return lastErr
+            }
+
+            backoff = nextReconnectBackoff(instance.reconnect, backoff)
+        }
+
+        recoverable, publishErr := instance.publishRecoverable(runtimeInstance.Context(), exchange, routingKey, publishing)
+        if nil == publishErr {
+            return nil
+        }
+
+        lastErr = publishErr
+
+        if false == recoverable {
+            return lastErr
+        }
+
+        if attempt+1 < republishAttemptCount {
+            instance.logError(runtimeInstance, "amqp requeue re-publish failed, retrying with the advanced retry counters", publishErr)
+        }
+    }
+
+    return lastErr
+}
+
+/* rejectUncountedRequeue ends a requeue whose advanced counters could never reach the broker.
+
+Handing the ORIGINAL delivery back with basic.nack and requeue set returns it bearing the counts it arrived with, because the increments only ever existed on the envelope the failed publish was carrying. The consumer then re-reads the same x-redelivery-count and x-dead-letter-attempt-count on the next delivery, MaxRetries and MaxDeadLetterAttempts are measured against the same numbers forever, and — with no DelayStamp surviving either — the message spins at full speed and never dead-letters. The delivery is rejected instead, so a queue that carries a dead-letter exchange routes the message there for an operator to see; a queue configured without one drops it, the same verdict a message that fails to decode already receives.
+
+A transport that is shutting down is the one failure that is not the message's fault, so nothing is rejected there: the delivery is left unacked and the broker redelivers it whole when the channel closes, resuming from the counts persisted in its headers instead of losing the message to a deploy. A delivery whose generation has already moved on is gone for the same reason and needs no verdict either. */
+func (instance *Transport) rejectUncountedRequeue(
+    runtimeInstance runtimecontract.Runtime,
+    channel *amqp091.Channel,
+    stamp DeliveryStamp,
+    message string,
+    cause error,
+) error {
+    if true == instance.isClosing() || nil != runtimeInstance.Context().Err() {
+        instance.logError(runtimeInstance, message+", leaving the delivery unacked for redelivery", cause)
+
+        return cause
+    }
+
+    /* where a dead-letter queue exists, refusing without requeue routes the delivery to it: the message is kept, an operator can see it, and the counters it lost are recoverable from there. Where one does NOT exist, the same refusal DESTROYS the message — the broker has nowhere to route it and discards it — so the transport is handed back to the caller having silently turned at-least-once into at-most-once, and it happens under exactly the conditions that produce these failures in the first place: a max-length policy with overflow=reject-publish, an unroutable return, a queue that filled up. A message is worth more than an accurate redelivery count, so it goes back on the queue.
+
+       What is given up by requeuing is the accounting, and that is real: the counters advanced for this attempt travel only on the re-publish that just failed, so the delivery returns carrying the counts it arrived with and a failure that persists will be seen again at the same count. Configure a dead-letter queue to bound that; without one there is nothing to bound it WITH, and dropping is not a bound, it is a loss. */
+    requeue := requeueOnRejectedRepublish(instance.deadLetter)
+
+    rejectMessage := message + ", dead-lettering rather than returning it uncounted"
+    if true == requeue {
+        rejectMessage = message + ", returning it to the queue with the counts it arrived with (no dead-letter queue configured, so refusing it outright would destroy it)"
+    }
+
+    instance.logError(runtimeInstance, rejectMessage, cause)
+
+    if stamp.Generation != instance.currentGeneration() {
+        return cause
+    }
+
+    return instance.nackChannel(channel, stamp.Tag, requeue)
+}
+
+/* requeueOnRejectedRepublish decides what a refused re-publish does with the delivery still on the channel. It is a named predicate rather than an inline negation because it is the transport's at-least-once guarantee in one line, and a broker is needed to observe it any other way: without a dead-letter exchange bound to the queue, refusing without requeue does not park the message anywhere, it discards it. */
+func requeueOnRejectedRepublish(deadLetter bool) bool {
+    return false == deadLetter
 }
 
 func (instance *Transport) consumeChannelForAck() (*amqp091.Channel, uint64) {

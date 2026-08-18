@@ -125,8 +125,9 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
 
     groupedPattern := JoinPaths(instance.pathPrefix, pattern)
 
-    if "" != instance.namePrefix && "" != options.Name() {
-        options.SetName(instance.namePrefix + options.Name())
+    groupedName := options.Name()
+    if "" != instance.namePrefix && "" != groupedName {
+        groupedName = instance.namePrefix + groupedName
     }
 
     requirements := options.Requirements()
@@ -147,8 +148,6 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
         requirements[key] = value
     }
 
-    options.SetRequirements(requirements)
-
     defaults := options.Defaults()
     if nil == defaults {
         defaults = map[string]string{}
@@ -167,9 +166,20 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
         defaults[key] = value
     }
 
-    options.SetDefaults(defaults)
+    /* the group registers options of its own instead of writing the name prefix and the merged group values back into the caller's: one options value reused across two grouped registrations would otherwise accumulate the prefix, so the second route would register under a name nothing can generate, and the first group's requirements would leak into a later registration through a different group */
+    groupedOptions := NewRouteOptions(
+        groupedName,
+        options.Methods(),
+        options.Host(),
+        options.Schemes(),
+        requirements,
+        defaults,
+        options.Locales(),
+        options.Priority(),
+        options.Attributes(),
+    )
 
-    instance.router.HandleWithOptions(groupedPattern, handler, options)
+    instance.router.HandleWithOptions(groupedPattern, handler, groupedOptions)
 }
 
 var _ httpcontract.RouteGroup = (*RouteGroup)(nil)

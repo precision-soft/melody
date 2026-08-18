@@ -1,156 +1,156 @@
 {
-  "routes": [
-    {
-      "name": "example.categories.api.read.all",
-      "pattern": "/categories/api/read",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.currencies.api.read.all",
-      "pattern": "/currencies/api/read",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.api.create",
-      "pattern": "/products/api/create",
-      "methods": [
-        "POST"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.api.delete",
-      "pattern": "/products/api/delete/:id",
-      "methods": [
-        "DELETE"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.api.read",
-      "pattern": "/products/api/read/:id",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.api.read.all",
-      "pattern": "/products/api/read",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.api.update",
-      "pattern": "/products/api/update/:id",
-      "methods": [
-        "PUT"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.create.page",
-      "pattern": "/products/create",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.list.page",
-      "pattern": "/products",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.products.update.page",
-      "pattern": "/products/update/:id",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.routes",
-      "pattern": "/routes",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.api.create",
-      "pattern": "/users/api/create",
-      "methods": [
-        "POST"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.api.delete",
-      "pattern": "/users/api/delete/:id",
-      "methods": [
-        "DELETE"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.api.read",
-      "pattern": "/users/api/read/:id",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.api.read.all",
-      "pattern": "/users/api/read",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.api.update",
-      "pattern": "/users/api/update/:id",
-      "methods": [
-        "PUT"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.create.page",
-      "pattern": "/users/create",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.list.page",
-      "pattern": "/users",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    },
-    {
-      "name": "example.users.update.page",
-      "pattern": "/users/update/:id",
-      "methods": [
-        "GET"
-      ],
-      "zone": "frontend"
-    }
-  ]
+    "routes": [
+        {
+            "name": "example.categories.api.read.all",
+            "pattern": "/categories/api/read",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.currencies.api.read.all",
+            "pattern": "/currencies/api/read",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.api.create",
+            "pattern": "/products/api/create",
+            "methods": [
+                "POST"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.api.delete",
+            "pattern": "/products/api/delete/:id",
+            "methods": [
+                "DELETE"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.api.read",
+            "pattern": "/products/api/read/:id",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.api.read.all",
+            "pattern": "/products/api/read",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.api.update",
+            "pattern": "/products/api/update/:id",
+            "methods": [
+                "PUT"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.create.page",
+            "pattern": "/products/create",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.list.page",
+            "pattern": "/products",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.products.update.page",
+            "pattern": "/products/update/:id",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.routes",
+            "pattern": "/routes",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.api.create",
+            "pattern": "/users/api/create",
+            "methods": [
+                "POST"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.api.delete",
+            "pattern": "/users/api/delete/:id",
+            "methods": [
+                "DELETE"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.api.read",
+            "pattern": "/users/api/read/:id",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.api.read.all",
+            "pattern": "/users/api/read",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.api.update",
+            "pattern": "/users/api/update/:id",
+            "methods": [
+                "PUT"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.create.page",
+            "pattern": "/users/create",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.list.page",
+            "pattern": "/users",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        },
+        {
+            "name": "example.users.update.page",
+            "pattern": "/users/update/:id",
+            "methods": [
+                "GET"
+            ],
+            "zone": "frontend"
+        }
+    ]
 }

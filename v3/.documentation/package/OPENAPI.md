@@ -87,9 +87,9 @@ A component key is derived from the Go type name, sanitized to the key grammar (
 
 **Instantiated generics** need more than that. Go reports type arguments as part of the type name — `Page[github.com/acme/app/api.User]` — and neither the brackets nor the import paths survive as a component key: the key grammar admits only letters, digits, `.`, `-` and `_`, and a raw `/` splits the `$ref` JSON pointer into tokens that resolve to nothing. So import paths are dropped and the remaining punctuation folded to a single underscore:
 
-| Go type name                            | Component key   | `$ref`                              |
-|-----------------------------------------|-----------------|-------------------------------------|
-| `Page[github.com/acme/app/api.User]`    | `Page_api.User` | `#/components/schemas/Page_api.User` |
+| Go type name                         | Component key   | `$ref`                               |
+|--------------------------------------|-----------------|--------------------------------------|
+| `Page[github.com/acme/app/api.User]` | `Page_api.User` | `#/components/schemas/Page_api.User` |
 
 Dropping the import path keeps the qualified type name that carries the meaning, and the key stays derived only from the type, so it is stable across runs. Two instantiations that differ only in the folded punctuation fold to the same key; the numeric suffix above then separates them (`Page_api.User2`).
 

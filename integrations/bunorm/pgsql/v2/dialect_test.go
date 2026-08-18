@@ -6,8 +6,6 @@ import (
     "github.com/uptrace/bun/dialect/pgdialect"
 )
 
-/* @info the dialect wrapper must pin the default schema so bun schema introspection targets public */
-
 func TestDialectWithDefaultSchemaReturnsPublic(t *testing.T) {
     dialect := dialectWithDefaultSchema{
         Dialect: pgdialect.New(),

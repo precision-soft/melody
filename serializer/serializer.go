@@ -4,6 +4,7 @@ import (
     "encoding/json"
 
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
     serializercontract "github.com/precision-soft/melody/serializer/contract"
 )
 
@@ -32,7 +33,7 @@ func (instance *JsonSerializer) Serialize(value any) ([]byte, error) {
 }
 
 func (instance *JsonSerializer) Deserialize(payload []byte, target any) error {
-    if nil == target {
+    if nil == target || true == internal.IsNilInterface(target) {
         return exception.NewError("deserialize target is nil", nil, nil)
     }
 

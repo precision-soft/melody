@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/config"
     configcontract "github.com/precision-soft/melody/config/contract"
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/internal"
 )
 
 func newEnvironmentSource(
@@ -16,7 +17,8 @@ func newEnvironmentSource(
 ) configcontract.EnvironmentSource {
     _ = projectDirectory
 
-    if nil == embeddedEnvFiles {
+    /* the guard reads through the interface: a typed-nil fs.FS passes the plain comparison and dies later as an anonymous nil dereference inside fs.Stat, instead of this refusal that names the argument */
+    if true == internal.IsNilInterface(embeddedEnvFiles) {
         exception.Panic(
             exception.NewError(
                 "embedded environment files are not provided",

@@ -7,12 +7,15 @@ import (
     "sync"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    "github.com/precision-soft/melody/v3/cache"
+    "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/session"
 )
 
 func (instance *Application) RegisterHttpRoute(
@@ -120,6 +123,10 @@ func (instance *Application) runHttp(
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
 
+    instance.warnOnUnboundedDefaultCacheBackend(logger)
+
+    instance.warnOnUnboundedDefaultSessionStorage(logger)
+
     /* net/http runs these the moment Shutdown is called, on their own goroutines, so a streaming handler is released while the server drains the rest; wrapping each one recovers a panicking hook through the framework logger (a bare goroutine would otherwise crash the drain) and counts it into shutdownHooksDone so runHttp can join the hooks before returning */
     var shutdownHooksDone sync.WaitGroup
     for _, hook := range instance.httpShutdownHooks {
@@ -175,6 +182,18 @@ func (instance *Application) runHttp(
     }
 }
 
+/* warnOnUnboundedDefaultCacheBackend reports, once at boot, that the cache melody wired by default carries no item ceiling. Whether an entry ever leaves the map is then decided entirely by the caller: a key cached with a positive ttl is reclaimed by the sweep, and one cached without stays for as long as the process lives, with nothing to evict it under memory pressure. The constructor's second argument sets how often that sweep runs, not how long an entry lives. The warning is raised from the http path alone on purpose: a command runs and exits, taking its map with it, so there is genuinely nothing to warn a cli invocation about, and a warning it cannot act on would only teach it to ignore the ones it can. */
+func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingcontract.Logger) {
+    if false == instance.unboundedDefaultCacheBackend {
+        return
+    }
+
+    logger.Warning(
+        "the default in-memory cache backend carries no item ceiling, so a key cached without a ttl is kept until this process exits and nothing evicts it under memory pressure; register `"+cache.ServiceCacheBackend+"` with cache.NewInMemoryBackend(maxItems, cleanupInterval, clock) for a bounded one, or with a shared backend",
+        nil,
+    )
+}
+
 /* wrapHttpShutdownHook adapts a shutdown hook for net/http's RegisterOnShutdown, which starts each hook on its own goroutine and never joins it. The wrapper counts the hook into hooksDone so runHttp can wait for it, and recovers a panicking hook through the framework logger so it is contained like every other extension point instead of hard-crashing the drain on a bare goroutine. */
 func wrapHttpShutdownHook(
     hook func(),
@@ -185,9 +204,46 @@ func wrapHttpShutdownHook(
 
     return func() {
         defer hooksDone.Done()
-        defer logging.LogOnRecover(logger, false)
+        defer recoverHttpShutdownHook(logger)
 
         hook()
+    }
+}
+
+/* recoverHttpShutdownHook contains a panicking shutdown hook by logging it and returning. It keeps its own shape rather than reusing logging.LogOnRecover because it must also strip the exit code an *exception.ExitError carries: a shutdown hook runs on its own goroutine the instant Shutdown begins, while the server is still draining, so nothing it panics with may be allowed to travel on and end the process there — that would cut the in-flight requests the drain exists to finish, skip the remaining hooks and skip Application.Close(). A hook asking for an exit code is therefore recorded as a plain error: the process is already on its way down, and the code a hook cannot deliver is not worth the requests it would cut. */
+func recoverHttpShutdownHook(logger loggingcontract.Logger) {
+    recoveredValue := recover()
+    if nil == recoveredValue {
+        return
+    }
+
+    logging.LogError(logger, httpShutdownHookError(recoveredValue))
+}
+
+/* the *exception.ExitError case is listed first because it also satisfies error, and it is unwrapped to the error it carries so the exit code is dropped while the diagnostic is kept */
+func httpShutdownHookError(recoveredValue any) *exception.Error {
+    switch value := recoveredValue.(type) {
+    case *exception.ExitError:
+        if nil == value.ErrorValue() {
+            return exception.NewError("http shutdown hook asked to exit", nil, nil)
+        }
+
+        return value.ErrorValue()
+
+    case *exception.Error:
+        return value
+
+    case error:
+        return exception.NewError(value.Error(), nil, value)
+
+    default:
+        return exception.NewError(
+            "panic in http shutdown hook",
+            map[string]any{
+                "value": value,
+            },
+            nil,
+        )
     }
 }
 
@@ -208,4 +264,24 @@ func waitForHttpShutdownHooks(
     case <-done:
     case <-ctx.Done():
     }
+}
+
+/* warnOnUnboundedDefaultSessionStorage reports, once at boot, the one combination in which sessions grow without anything ever reclaiming them: the storage melody wired itself, which lives in this process and which nothing outside it can expire, together with a lifetime of zero, which asks it to keep every entry forever.
+
+Either half alone is a deliberate and reasonable choice. A shared storage with no expiry is the operator's to prune, and the in-memory one with a lifetime set reclaims on its own. Together they are neither, and the growth does not come from anything the application wrote: melody mints a session for every request that arrives without a session cookie, so a single write on a public path — a csrf token, a flash message, a locale — turns every such request into a permanent entry, and an unauthenticated caller decides how many arrive.
+
+It is raised from the http path alone, the way the cache warning is: a command builds its map, runs and takes it away with it. */
+func (instance *Application) warnOnUnboundedDefaultSessionStorage(logger loggingcontract.Logger) {
+    if false == instance.defaultInMemorySessionStorage {
+        return
+    }
+
+    if 0 != instance.configuration.Http().SessionTtl() {
+        return
+    }
+
+    logger.Warning(
+        "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie can leave an entry that is kept until this process exits; set `"+config.HttpSessionTtlKey+"` to the lifetime this deployment wants, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
+        nil,
+    )
 }

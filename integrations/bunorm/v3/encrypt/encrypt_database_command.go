@@ -130,11 +130,29 @@ func (instance *EncryptDatabaseCommand) Run(
     }
 
     mode := commandContext.String("mode")
+    targetKey := commandContext.String("target-key")
     ctx := runtimeInstance.Context()
 
     migrator, migratorErr := instance.resolveMigrator()
     if nil != migratorErr {
         return migratorErr
+    }
+
+    if migrateModeReencrypt == mode && "" == targetKey {
+        return exception.NewError("mode reencrypt requires --target-key", nil, nil)
+    }
+
+    /* both writing modes can turn a stored value into a longer one, so the columns are sized up front rather than one truncated row at a time: a server left in a non-strict sql_mode accepts an overflowing UPDATE, keeps a ciphertext that will never authenticate and reports the row as migrated. The two grow for different reasons — encrypting expands a plaintext, rotating swaps a key id for a longer one on every row that is already sealed — so each mode is checked against what it will write. Decrypting only ever shortens a value, so it needs no room. */
+    if migrateModeEncrypt == mode {
+        if capacityErr := migrator.EnsureColumnCapacity(ctx, spec); nil != capacityErr {
+            return capacityErr
+        }
+    }
+
+    if migrateModeReencrypt == mode {
+        if capacityErr := migrator.EnsureColumnCapacityForReencrypt(ctx, spec, targetKey); nil != capacityErr {
+            return capacityErr
+        }
     }
 
     var processed int
@@ -144,10 +162,6 @@ func (instance *EncryptDatabaseCommand) Run(
     case migrateModeEncrypt:
         processed, runErr = migrator.MigrateEncrypt(ctx, spec)
     case migrateModeReencrypt:
-        targetKey := commandContext.String("target-key")
-        if "" == targetKey {
-            return exception.NewError("mode reencrypt requires --target-key", nil, nil)
-        }
         processed, runErr = migrator.MigrateReencrypt(ctx, spec, targetKey)
     case migrateModeDecrypt:
         processed, runErr = migrator.MigrateDecrypt(ctx, spec)

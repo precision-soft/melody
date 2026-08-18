@@ -1,6 +1,7 @@
 package rueidis
 
 import (
+    "errors"
     "os"
     "strings"
     "testing"
@@ -10,6 +11,7 @@ import (
     configcontract "github.com/precision-soft/melody/config/contract"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 const (
@@ -242,18 +244,23 @@ func TestProvider_Ping_NilClientReturnsError(t *testing.T) {
     }
 }
 
-func TestProvider_Open_ZeroConnectTimeoutPingsWithoutDeadline(t *testing.T) {
+/* the name of this test used to say the ping ran WITHOUT a deadline at a zero connect timeout, which is the opposite of what the code does: resolveConnectTimeout reads a non-positive value as the default rather than as "unbounded", so the ping is bounded either way. The claim it can make against a live store is that a config naming only the command timeout still opens and pings — the bound itself is proven, without a store, by TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound below. */
+func TestProvider_Open_AZeroConnectTimeoutPingsUnderTheDefaultBound(t *testing.T) {
     address := os.Getenv("REDIS_ADDRESS")
     if "" == address {
         t.Skip("REDIS_ADDRESS not set; skipping redis provider integration test")
     }
 
-    provider := newTestProvider().WithTimeoutConfig(
-        &TimeoutConfig{
-            ConnectTimeout: 0,
-            CommandTimeout: 3 * time.Second,
-        },
-    )
+    timeoutConfig := &TimeoutConfig{
+        ConnectTimeout: 0,
+        CommandTimeout: 3 * time.Second,
+    }
+
+    if DefaultTimeoutConfig().ConnectTimeout != resolveConnectTimeout(timeoutConfig) {
+        t.Fatalf("a zero connect timeout must take the default bound, got %s", resolveConnectTimeout(timeoutConfig))
+    }
+
+    provider := newTestProvider().WithTimeoutConfig(timeoutConfig)
 
     client, openErr := provider.Open(newProviderTestResolver(t, address, "", ""))
     if nil != openErr {
@@ -269,4 +276,173 @@ func TestProvider_Open_ZeroConnectTimeoutPingsWithoutDeadline(t *testing.T) {
     if nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
+}
+
+/* the boot ping is bounded even where the connect timeout is left at zero: a TimeoutConfig naming only the command timeout would otherwise put the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. Ping one screen below reads its own zero the same way. */
+func TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound(t *testing.T) {
+    defaultConnectTimeout := DefaultTimeoutConfig().ConnectTimeout
+
+    if defaultConnectTimeout != resolveConnectTimeout(nil) {
+        t.Fatalf("a missing config must take the default, got %s", resolveConnectTimeout(nil))
+    }
+
+    if defaultConnectTimeout != resolveConnectTimeout(&TimeoutConfig{CommandTimeout: 5 * time.Second}) {
+        t.Fatal("a config naming only the command timeout must still bound the ping")
+    }
+
+    if defaultConnectTimeout != resolveConnectTimeout(&TimeoutConfig{ConnectTimeout: -time.Second}) {
+        t.Fatal("a negative connect timeout must take the default rather than build an already-lapsed context")
+    }
+
+    if 7*time.Second != resolveConnectTimeout(&TimeoutConfig{ConnectTimeout: 7 * time.Second}) {
+        t.Fatal("a configured connect timeout must govern")
+    }
+}
+
+/* the credentials read through MustString, the bunorm convention: a wrong-typed password panics at boot naming the parameter, where String() folded it to "" and connected with no credential at all. */
+func TestProviderOpen_RefusesAWrongTypedCredentialLoudly(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            environment, environmentErr := config.NewEnvironment(
+                &testEnvironmentSource{
+                    values: map[string]string{
+                        config.EnvKey: config.EnvDevelopment,
+                    },
+                },
+            )
+            if nil != environmentErr {
+                return nil, environmentErr
+            }
+
+            configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+            if nil != configurationErr {
+                return nil, configurationErr
+            }
+
+            configuration.RegisterRuntime(testAddressParameterName, "127.0.0.1:1")
+            configuration.RegisterRuntime(testUserParameterName, "")
+            configuration.RegisterRuntime(testPasswordParameterName, 12345)
+
+            return configuration, nil
+        },
+    )
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected the int-typed password to panic loudly")
+        }
+    }()
+
+    _, openErr := newTestProvider().Open(serviceContainer)
+    t.Fatalf("expected a panic, got error %v", openErr)
+}
+
+func TestProviderOpen_TheRefusalNamesTheParameterAndTheDeadlines(t *testing.T) {
+    resolver := newProviderTestResolver(t, "", "melody", "secret")
+
+    provider := NewProvider(testAddressParameterName, testUserParameterName, testPasswordParameterName)
+
+    _, openErr := provider.Open(resolver)
+    if nil == openErr {
+        t.Fatal("expected an empty address to be refused")
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(openErr, &melodyErr) {
+        t.Fatalf("expected a melody error, got %T", openErr)
+    }
+
+    errorContext := melodyErr.Context()
+
+    if testAddressParameterName != errorContext["addressParameter"] {
+        t.Fatalf("expected the parameter the operator has to set, got %v", errorContext["addressParameter"])
+    }
+
+    if _, exists := errorContext["connectTimeout"]; false == exists {
+        t.Fatalf("expected the deadline that governs the attempt, got %v", errorContext)
+    }
+
+    if "secret" == errorContext["password"] {
+        t.Fatalf("expected the credential to stay out of the record, got %v", errorContext)
+    }
+}
+
+/* the refusal reports the deadline that GOVERNED the dial, not the one that was configured. The custom dialer is installed only for a positive value, so a zero or negative DialTimeout — the footgun of a partial ClientConfig literal — ran under the library's own five seconds while the record said "0s", and an operator reads that as no dial bound at all and goes looking for a deadline that never existed. Measured against an unroutable address: the dial failed after five seconds under it. */
+func TestProvider_TheReportedDialTimeoutIsTheOneThatGovernedTheDial(t *testing.T) {
+    for _, testCase := range []struct {
+        name        string
+        dialTimeout time.Duration
+        expected    string
+    }{
+        {name: "a configured timeout is reported as itself", dialTimeout: 2 * time.Second, expected: "2s"},
+        {name: "zero is the library default, and says so", dialTimeout: 0, expected: "5s (library default)"},
+        {name: "a negative value is the library default too", dialTimeout: -1 * time.Second, expected: "5s (library default)"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            clientConfig := DefaultClientConfig()
+            clientConfig.DialTimeout = testCase.dialTimeout
+
+            if testCase.expected != resolveDialTimeoutDescription(clientConfig) {
+                t.Fatalf("dialTimeout = %q, want %q", resolveDialTimeoutDescription(clientConfig), testCase.expected)
+            }
+        })
+    }
+}
+
+/* the value travels into the diagnostic context every refusal of this provider carries, beside the connect timeout it mirrors */
+func TestProvider_TheConnectionContextCarriesTheGoverningDialTimeout(t *testing.T) {
+    clientConfig := DefaultClientConfig()
+    clientConfig.DialTimeout = 0
+
+    connectionContext := newTestProvider().connectionContext(
+        NewConnectionConfig("127.0.0.1:6379", "", ""),
+        clientConfig,
+        DefaultTimeoutConfig(),
+    )
+
+    if "5s (library default)" != connectionContext["dialTimeout"] {
+        t.Fatalf("dialTimeout = %v, want the governing value", connectionContext["dialTimeout"])
+    }
+}
+
+func TestProvider_SecretParameterNames_NamesThePasswordParameterAlone(t *testing.T) {
+    names := newTestProvider().SecretParameterNames()
+
+    if 1 != len(names) {
+        t.Fatalf("secret parameter names: expected exactly one, got %v", names)
+    }
+
+    if testPasswordParameterName != names[0] {
+        t.Fatalf("secret parameter names: expected %q, got %q", testPasswordParameterName, names[0])
+    }
+}
+
+func TestMarkSecretParameters_ArmsTheRedactionWithoutADial(t *testing.T) {
+    resolver := newProviderTestResolver(t, "127.0.0.1:6379", "melody", "melody-password")
+
+    MarkSecretParameters(resolver, newTestProvider())
+
+    configuration := config.ConfigMustFromResolver(resolver)
+
+    if false == configuration.MustGet(testPasswordParameterName).IsSecret() {
+        t.Fatalf("the password parameter must be secret after MarkSecretParameters, before any dial")
+    }
+
+    if true == configuration.MustGet(testUserParameterName).IsSecret() {
+        t.Fatalf("the user parameter must stay unmarked: the provider names only the credential")
+    }
+}
+
+func TestMarkSecretParameters_ToleratesAResolverWithoutConfiguration(t *testing.T) {
+    MarkSecretParameters(container.NewContainer(), newTestProvider())
+}
+
+func TestMarkSecretParameters_SkipsANilProviderAndAnEmptyParameterName(t *testing.T) {
+    resolver := newProviderTestResolver(t, "127.0.0.1:6379", "melody", "melody-password")
+
+    MarkSecretParameters(resolver, nil, NewProvider(testAddressParameterName, testUserParameterName, ""))
 }

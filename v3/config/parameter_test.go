@@ -3,6 +3,7 @@ package config
 import (
     "fmt"
     "strings"
+    "sync"
     "testing"
     "time"
 )
@@ -137,4 +138,54 @@ func TestParameter_ConversionErrorsOmitTheRawValue(t *testing.T) {
             t.Fatalf("error message leaked the value: %v", err)
         }
     }
+}
+
+/* @info Resolve rewrites every parameter's value, while a service handed the *Parameter reads it through the accessors without ever touching the configuration. The write was covered by the configuration lock and the read by nothing, which is two locks around one field — the race detector reported the write at the resolve loop against the read in Value(). */
+func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{
+            values: map[string]string{
+                "APP_TAG": "tag",
+            },
+        },
+        "/srv/app",
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
+    }
+
+    configuration.RegisterRuntime("app.tag", "%env(APP_TAG)%")
+
+    parameter := configuration.Get("app.tag")
+    if nil == parameter {
+        t.Fatalf("expected the registered parameter to exist")
+    }
+
+    var waitGroup sync.WaitGroup
+
+    waitGroup.Add(1)
+    go func() {
+        defer waitGroup.Done()
+
+        for iteration := 0; iteration < 200; iteration = iteration + 1 {
+            resolveErr := configuration.Resolve()
+            if nil != resolveErr {
+                t.Errorf("unexpected resolve error: %v", resolveErr)
+
+                return
+            }
+        }
+    }()
+
+    waitGroup.Add(1)
+    go func() {
+        defer waitGroup.Done()
+
+        for iteration := 0; iteration < 200; iteration = iteration + 1 {
+            _ = parameter.Value()
+            _ = parameter.String()
+        }
+    }()
+
+    waitGroup.Wait()
 }

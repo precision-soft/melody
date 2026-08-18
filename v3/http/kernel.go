@@ -96,13 +96,23 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         scope := serviceContainer.NewScope()
 
-        /* @important close the scope before anything that can fail, so a panic during request-logger setup cannot leak it; the logger is captured by reference and nil-guarded for the pre-setup failure path */
+        /* @important close the scope before anything that can fail, so a panic during request-logger setup cannot leak it; the logger is captured by reference and nil-guarded for the pre-setup failure path.
+
+           The report falls back to the emergency logger rather than being dropped: the request logger is read after the scope it was installed into has closed, which is safe only because it is an override and Close leaves overrides alone. A close failure is the one thing that must never go unreported, so the path that has no request logger to name still says what happened. */
         var requestLogger loggingcontract.Logger
         defer func() {
             scopeCloseErr := scope.Close()
-            if nil != scopeCloseErr && nil != requestLogger {
-                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+            if nil == scopeCloseErr {
+                return
             }
+
+            if nil != requestLogger {
+                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+
+                return
+            }
+
+            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
         }()
 
         requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(serviceContainer, scope)
@@ -669,41 +679,31 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             response = kernelExceptionEvent.Response()
         }
 
-        if nil != response {
-            finalResponse = response
-            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
-            _, eventKernelResponseErr := eventDispatcher.DispatchName(
-                runtimeInstance,
-                kernelcontract.EventKernelResponse,
-                kernelResponseEvent,
-            )
-            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
-
-            /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
-            if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
-                closeDiscardedResponseBody(finalResponse, requestLogger)
-            }
-
-            finalResponse = kernelResponseEvent.Response()
-            writeResponse(
-                runtimeInstance,
-                melodyRequest,
-                writer,
-                finalResponse,
-                sessionManager,
-                sessionInstance,
-                instance.options.ForwardedHeadersPolicy,
-                instance.options.SessionCookiePolicy,
-            )
-
-            return
+        /* a handler that returns no response is answered with an empty 204, and it is given one here rather than deep inside writeResponse, so that kernel.response is dispatched for it like for every other outcome. A listener is the only thing that decorates a response — cross-origin headers, cache directives, the access log's status code — and a response that never reaches one comes out visibly different from the identical response written explicitly: the browser drops a nil-returning cross-origin DELETE for want of the headers its explicit-204 twin carries, and the log records status 0. */
+        if nil == response {
+            response = EmptyResponse(nethttp.StatusNoContent)
         }
 
+        finalResponse = response
+        kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
+        _, eventKernelResponseErr := eventDispatcher.DispatchName(
+            runtimeInstance,
+            kernelcontract.EventKernelResponse,
+            kernelResponseEvent,
+        )
+        instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
+
+        /* @important close the swapped-out response body so a file-backed body (FileResponse/ServeReader) is not leaked */
+        if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
+            closeDiscardedResponseBody(finalResponse, requestLogger)
+        }
+
+        finalResponse = kernelResponseEvent.Response()
         writeResponse(
             runtimeInstance,
             melodyRequest,
             writer,
-            nil,
+            finalResponse,
             sessionManager,
             sessionInstance,
             instance.options.ForwardedHeadersPolicy,

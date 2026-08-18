@@ -6,10 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v3.1.1] - 2026-07-25 - Migration Lock Release on an Interrupted Run
+### Changed
+
+- the migration commands run on the dedicated migration connection when the provider offers one (`bunorm.MigrationProvider`), falling back to the ordinary pool otherwise; the resolved database label says `(dedicated migration connection)` so the run reports which connection carried it. A long migration — an ALTER TABLE adding cascade foreign keys on a large table — used to be cut by the request pool's 30s driver deadlines with `invalid connection` mid-sequence, where MySQL DDL leaves partially applied steps behind
 
 ### Fixed
 
+- a migration read from a `.sql` file whose statement the database refuses now fails the command instead of being reported as applied. The module required `bun v1.2.16`, where the deferred `conn.Close()` / `tx.Rollback()` overwrote the exec failure with its own nil return, so `Migrate` answered nil for a statement that never ran: `db:migrate` printed `[success]`, exited 0, wrote nothing to the journal, and marked the migration applied — which made the failure unrepeatable and `db:status` report it as done. The requirement moves to `bun v1.2.17`, the oldest release that returns the exec failure, and a regression pin drives a refused `.up.sql` through the migrator built here and requires both halves: the refusal reaches the caller, and no row is written for it. Go migrations were never affected
 - the migration lock is released on a context detached from the command's own, so interrupting a running migration no longer leaves the lock row behind and refusing every later migration until someone runs the unlock command by hand. The cancelled context made the delete fail before it reached the database, and the failure was discarded; it is now reported
 
 ## [v3.1.0] - 2026-07-11 - Multi-Context Migrations and Per-Context Manager Pinning
@@ -62,9 +65,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code duplicated into `integrations/bunorm/migrate/v3/`; v2 and v3 implementations maintained in parallel
 - `go.mod` — dependencies: `github.com/precision-soft/melody/integrations/bunorm/v3 v3.0.0`, `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.1.1...HEAD
-
-[v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.1.0...integrations/bunorm/migrate/v3.1.1
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.1.0...HEAD
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v3.0.3...integrations/bunorm/migrate/v3.1.0
 

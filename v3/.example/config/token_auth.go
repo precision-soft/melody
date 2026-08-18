@@ -1,31 +1,24 @@
 package config
 
 import (
-    "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/security"
     melodysecurity "github.com/precision-soft/melody/v3/security"
-    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-const (
-    demoJwtSecret   = "melody-example-demo-secret-change-me"
-    demoOpaqueToken = "melody-example-opaque-token"
-)
+const exampleJwtSecret = "melody-example-signing-secret-change-me"
 
 func (instance *Module) buildTokenAuth() {
-    instance.jwtSecret = []byte(demoJwtSecret)
-    instance.tokenValidator = melodysecurity.NewJwtTokenValidator(
+    instance.jwtSecret = []byte(exampleJwtSecret)
+    instance.tokenValidator = melodysecurity.NewJwtTokenValidatorWithRevocationEpoch(
         melodysecurity.JwtConfig{
-            Secret:     instance.jwtSecret,
-            ScopeClaim: "scope",
+            Secret:      instance.jwtSecret,
+            ScopeClaim:  "scope",
+            DeviceClaim: security.DeviceClaim,
         },
+        security.ResolvedTokenStore{},
     )
 
-    opaqueStore := melodysecurity.NewInMemoryTokenStore()
-    opaqueStore.Put(demoOpaqueToken, melodysecuritycontract.Claims{
-        UserIdentifier: "api-user",
-        Roles:          []string{entity.RoleUser},
-    })
+    instance.opaqueTokenStore = melodysecurity.NewInMemoryTokenStore()
 
-    instance.opaqueTokenStore = opaqueStore
-    instance.opaqueTokenValidator = melodysecurity.NewOpaqueTokenValidator(opaqueStore)
+    instance.opaqueTokenValidator = melodysecurity.NewOpaqueTokenValidator(security.ResolvedTokenStore{})
 }

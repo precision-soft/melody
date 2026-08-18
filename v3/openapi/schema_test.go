@@ -3,6 +3,8 @@ package openapi
 import (
     "encoding/json"
     neturl "net/url"
+    "os"
+    "os/exec"
     "reflect"
     "regexp"
     "sort"
@@ -451,7 +453,7 @@ func TestBuildSchema_NegativeMinClampedNegativeMaxUnsatisfiable(t *testing.T) {
 /* @info a negative max admits no non-null value, but MaxLength.Validate passes a nil pointer (dereferenceValue returns absent), so the validator still accepts null on a NULLABLE field. The mirror must therefore contradict only the value space and preserve the nullable advertisement — matching the integer/number/boolean branch — rather than clearing Nullable and advertising a null the validator accepts as invalid. A non-nullable field stays fully unsatisfiable. */
 func TestApplyValidation_NegativeMaxOnNullableStringKeepsNullValid(t *testing.T) {
     nullable := &Schema{Type: "string", Nullable: true}
-    applyValidation(nullable, "max(value=-1)")
+    applyValidation(nullable, "max(value=-1)", nil)
 
     if false == nullable.Nullable {
         t.Fatalf("expected a nullable string with a negative max to keep null valid (the validator accepts null), but Nullable was cleared")
@@ -461,7 +463,7 @@ func TestApplyValidation_NegativeMaxOnNullableStringKeepsNullValid(t *testing.T)
     }
 
     nonNullable := &Schema{Type: "string"}
-    applyValidation(nonNullable, "max(value=-1)")
+    applyValidation(nonNullable, "max(value=-1)", nil)
 
     if true == nonNullable.Nullable {
         t.Fatalf("expected a non-nullable string with a negative max to stay non-nullable")
@@ -735,6 +737,61 @@ func TestBuildSchema_EmptyNameTagEmbeddedStructPromoted(t *testing.T) {
     }
 }
 
+type SchemaDiamondLeaf struct {
+    CreatedBy string `validate:"notBlank"`
+}
+
+type SchemaDiamondMiddle struct {
+    SchemaDiamondLeaf
+}
+
+type SchemaDiamondFirstBranch struct {
+    SchemaDiamondMiddle
+}
+
+type SchemaDiamondSecondBranch struct {
+    SchemaDiamondMiddle
+}
+
+type SchemaDiamondPayload struct {
+    SchemaDiamondFirstBranch
+    SchemaDiamondSecondBranch
+    Title string `json:"title" validate:"notBlank"`
+}
+
+func TestBuildSchema_AStackedDiamondKeepsThePopulatedProperty(t *testing.T) {
+    decoded := SchemaDiamondPayload{}
+
+    if unmarshalErr := json.Unmarshal([]byte(`{"CreatedBy":"filled"}`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unexpected error: %v", unmarshalErr)
+    }
+
+    if "filled" != decoded.SchemaDiamondFirstBranch.SchemaDiamondMiddle.SchemaDiamondLeaf.CreatedBy {
+        t.Fatalf(
+            "expected encoding/json to populate the name promoted past the diamond, got %q",
+            decoded.SchemaDiamondFirstBranch.SchemaDiamondMiddle.SchemaDiamondLeaf.CreatedBy,
+        )
+    }
+
+    components := map[string]*Schema{}
+
+    buildSchema(
+        reflect.TypeOf(SchemaDiamondPayload{}),
+        components,
+        map[reflect.Type]string{},
+        map[reflect.Type]bool{},
+    )
+
+    published, built := components["SchemaDiamondPayload"]
+    if false == built {
+        t.Fatalf("expected the payload to be registered as a component, got %+v", components)
+    }
+
+    if _, present := published.Properties["CreatedBy"]; false == present {
+        t.Fatalf("expected the diamond-promoted property to be published, got %+v", published.Properties)
+    }
+}
+
 /* @info nullable ref validation */
 
 type emailRefTarget struct {
@@ -867,13 +924,13 @@ func TestApplyValidation_GreaterLessThanBoundMatchesValidatorIntegerTruncation(t
 
 func TestApplyValidation_BareStringConstraintsMirrorValidatorDefaults(t *testing.T) {
     minSchema := &Schema{Type: "string"}
-    applyValidation(minSchema, "min")
+    applyValidation(minSchema, "min", nil)
     if nil == minSchema.MinLength || 1 != *minSchema.MinLength {
         t.Fatalf("expected bare min to advertise minLength 1, got %v", minSchema.MinLength)
     }
 
     maxSchema := &Schema{Type: "string"}
-    applyValidation(maxSchema, "max")
+    applyValidation(maxSchema, "max", nil)
     if nil == maxSchema.MaxLength || 100 != *maxSchema.MaxLength {
         t.Fatalf("expected bare max to advertise maxLength 100, got %v", maxSchema.MaxLength)
     }
@@ -881,7 +938,7 @@ func TestApplyValidation_BareStringConstraintsMirrorValidatorDefaults(t *testing
 
 func TestApplyValidation_BareNumericConstraintsMirrorValidatorDefaults(t *testing.T) {
     greaterThanSchema := &Schema{Type: "integer"}
-    applyValidation(greaterThanSchema, "greaterThan")
+    applyValidation(greaterThanSchema, "greaterThan", nil)
     if nil == greaterThanSchema.Minimum || 0 != *greaterThanSchema.Minimum {
         t.Fatalf("expected bare greaterThan to advertise minimum 0, got %v", greaterThanSchema.Minimum)
     }
@@ -890,7 +947,7 @@ func TestApplyValidation_BareNumericConstraintsMirrorValidatorDefaults(t *testin
     }
 
     lessThanSchema := &Schema{Type: "number"}
-    applyValidation(lessThanSchema, "lessThan")
+    applyValidation(lessThanSchema, "lessThan", nil)
     if nil == lessThanSchema.Maximum || 0 != *lessThanSchema.Maximum {
         t.Fatalf("expected bare lessThan to advertise maximum 0, got %v", lessThanSchema.Maximum)
     }
@@ -901,13 +958,13 @@ func TestApplyValidation_BareNumericConstraintsMirrorValidatorDefaults(t *testin
 
 func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
     minSchema := &Schema{Type: "string"}
-    applyValidation(minSchema, "min(value=3)")
+    applyValidation(minSchema, "min(value=3)", nil)
     if nil == minSchema.MinLength || 3 != *minSchema.MinLength {
         t.Fatalf("expected min(value=3) to advertise minLength 3, got %v", minSchema.MinLength)
     }
 
     greaterThanSchema := &Schema{Type: "integer"}
-    applyValidation(greaterThanSchema, "greaterThan(value=5)")
+    applyValidation(greaterThanSchema, "greaterThan(value=5)", nil)
     if nil == greaterThanSchema.Minimum || 5 != *greaterThanSchema.Minimum {
         t.Fatalf("expected greaterThan(value=5) to advertise minimum 5, got %v", greaterThanSchema.Minimum)
     }
@@ -916,19 +973,19 @@ func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
 /* @info L2: a value-less min defaults to minLength 1 but must be raise-only — it may not lower a higher floor an earlier rule already set. The validator enforces every rule (effective floor stays 5), so advertising minLength 1 would offer values the validator rejects. Mirrors the value-less max branch, which was already tighten-only. */
 func TestApplyValidation_ValuelessMinIsRaiseOnly(t *testing.T) {
     afterHigh := &Schema{Type: "string"}
-    applyValidation(afterHigh, "min(value=5),min")
+    applyValidation(afterHigh, "min(value=5),min", nil)
     if nil == afterHigh.MinLength || 5 != *afterHigh.MinLength {
         t.Fatalf("expected a value-less min not to lower an existing minLength 5, got %v", afterHigh.MinLength)
     }
 
     beforeHigh := &Schema{Type: "string"}
-    applyValidation(beforeHigh, "min,min(value=5)")
+    applyValidation(beforeHigh, "min,min(value=5)", nil)
     if nil == beforeHigh.MinLength || 5 != *beforeHigh.MinLength {
         t.Fatalf("expected a real min(value=5) to win over a value-less min regardless of order, got %v", beforeHigh.MinLength)
     }
 
     bare := &Schema{Type: "string"}
-    applyValidation(bare, "min")
+    applyValidation(bare, "min", nil)
     if nil == bare.MinLength || 1 != *bare.MinLength {
         t.Fatalf("expected a bare min alone to still advertise minLength 1, got %v", bare.MinLength)
     }
@@ -964,7 +1021,7 @@ func TestParseLeadingIntMatchesValidator(t *testing.T) {
 func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
     for _, tag := range []string{"notEmpty(foo)", "min(x)", "min(5)", "email(x)"} {
         schema := &Schema{Type: "string"}
-        applyValidation(schema, tag)
+        applyValidation(schema, tag, nil)
 
         if nil == schema.MinLength || 1 != *schema.MinLength || nil == schema.MaxLength || 0 != *schema.MaxLength {
             t.Fatalf("expected %q to advertise an unsatisfiable string (minLength 1, maxLength 0), got minLength=%v maxLength=%v", tag, schema.MinLength, schema.MaxLength)
@@ -976,7 +1033,7 @@ func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
 
     /* @important a well-formed parenthesized tag must NOT be swept up by the syntax guard: min(value=3) still advertises its real bound */
     valid := &Schema{Type: "string"}
-    applyValidation(valid, "min(value=3)")
+    applyValidation(valid, "min(value=3)", nil)
     if nil == valid.MinLength || 3 != *valid.MinLength || nil != valid.MaxLength {
         t.Fatalf("expected min(value=3) to stay satisfiable with minLength 3, got minLength=%v maxLength=%v", valid.MinLength, valid.MaxLength)
     }
@@ -1117,9 +1174,48 @@ type notEmptyOnStructRequest struct {
     } `json:"inline" validate:"notEmpty"`
 }
 
+/* isImpossibleObject reports whether a member EXCLUDES every value, rather than whether it merely carries a particular pair of keywords.
+
+The distinction is the whole assertion. `minProperties: 1` beside `maxProperties: 0` reads as impossible, and is — for an object. JSON Schema draft-04 §5.4.1 and §5.4.2, the dialect this document declares, apply both to object instances only and ignore them for every other type, so the same pair sitting beside a $ref that resolves to a named collection excludes nothing at all and `["a"]` satisfies the conjunction the mirror published as unsatisfiable. Asserting on the keywords let that through; asserting on the exclusion does not, whatever form the exclusion takes. */
 func isImpossibleObject(schema *Schema) bool {
-    return nil != schema && nil != schema.MinProperties && 1 == *schema.MinProperties &&
-        nil != schema.MaxProperties && 0 == *schema.MaxProperties
+    if nil == schema {
+        return false
+    }
+
+    /* `not: {}` — the empty schema admits everything, so its negation admits nothing, for every instance type */
+    if nil != schema.Not && true == isEmptySchema(schema.Not) {
+        return true
+    }
+
+    /* the object-level contradiction still counts where the member itself says it is an object, because there the keywords do bind */
+    if "object" == schema.Type &&
+        nil != schema.MinProperties && 1 == *schema.MinProperties &&
+        nil != schema.MaxProperties && 0 == *schema.MaxProperties {
+        return true
+    }
+
+    /* the collection-level contradiction, likewise, where the member says it is one */
+    if "array" == schema.Type &&
+        nil != schema.MinItems && 1 == *schema.MinItems &&
+        nil != schema.MaxItems && 0 == *schema.MaxItems {
+        return true
+    }
+
+    return false
+}
+
+/* isEmptySchema reports whether a schema constrains nothing, which is what makes its negation exclude everything. */
+func isEmptySchema(schema *Schema) bool {
+    if nil == schema {
+        return false
+    }
+
+    return "" == schema.Ref && "" == schema.Type && 0 == len(schema.Properties) && 0 == len(schema.AllOf) &&
+        nil == schema.Items && nil == schema.Not && nil == schema.Enum &&
+        nil == schema.MinProperties && nil == schema.MaxProperties &&
+        nil == schema.MinItems && nil == schema.MaxItems &&
+        nil == schema.MinLength && nil == schema.MaxLength &&
+        nil == schema.Minimum && nil == schema.Maximum && "" == schema.Pattern
 }
 
 func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
@@ -1572,7 +1668,7 @@ func TestBuildSchema_UncompilableRegexNotLoosenedByValuelessMax(t *testing.T) {
 /* @info The generator's bracket-balance helper is documented as an exact mirror of the validator's, so a tag the validator accepts must never be swept up by the syntax guard. RE2 reads a ']' that closes no character class as a literal, and the validator handles this; a generator still rejecting it advertises an unsatisfiable field for values the api happily accepts. */
 func TestApplyValidation_LiteralClosingBracketMatchesTheValidator(t *testing.T) {
     schema := &Schema{Type: "string"}
-    applyValidation(schema, "regex(pattern=^a]b$)")
+    applyValidation(schema, "regex(pattern=^a]b$)", nil)
 
     if nil != schema.MinLength && nil != schema.MaxLength && 1 == *schema.MinLength && 0 == *schema.MaxLength {
         t.Fatalf("the generator declared unsatisfiable a field the validator accepts")
@@ -1585,7 +1681,7 @@ func TestApplyValidation_LiteralClosingBracketMatchesTheValidator(t *testing.T) 
 /* @info The runtime validator registers regex only under the name "regex" — there is no "pattern" constraint, and an unknown rule fails the field closed for every value. Advertising `pattern=...` as a satisfiable regex-constrained string published a contract the api rejects outright. */
 func TestApplyValidation_PatternIsNotARegexAlias(t *testing.T) {
     schema := &Schema{Type: "string"}
-    applyValidation(schema, "pattern=^[0-9]+$")
+    applyValidation(schema, "pattern=^[0-9]+$", nil)
 
     if "^[0-9]+$" == schema.Pattern {
         t.Fatalf("the generator invented a regex constraint the validator does not have")
@@ -1682,7 +1778,7 @@ func TestBuildSchema_PointerMinFieldStaysOptional(t *testing.T) {
 /* @info a POSIX named class ([:alpha:]) nested in a bracket expression has its own closing ']' that the character-class scanner must not read as the end of the whole class; otherwise regex=[[:alpha:],] is split at the in-class comma into an uncompilable pattern plus a stray ']' rule. The validator rejects such a tag for every value including "", so the mirror must keep the class intact and advertise the compilable pattern rather than a maxLength-0 (empty-string-satisfiable) field. This keeps the local scanner in lockstep with validation/validation_rule.go. */
 func TestApplyValidation_PosixClassKeepsTheClassIntact(t *testing.T) {
     schema := &Schema{Type: "string"}
-    applyValidation(schema, `regex=[[:alpha:],]`)
+    applyValidation(schema, `regex=[[:alpha:],]`, nil)
 
     if "[[:alpha:],]" != schema.Pattern {
         t.Fatalf("expected the POSIX-class regex to reach the schema pattern intact, got pattern=%q maxLength=%v allOf=%v", schema.Pattern, schema.MaxLength, schema.AllOf)
@@ -2234,7 +2330,6 @@ func TestSchemaFromType_NilTypeYieldsEmptySchema(t *testing.T) {
     }
 }
 
-
 type marshalerEmbedPrice struct {
     Amount   int64  `json:"amount"`
     Currency string `json:"currency"`
@@ -2685,7 +2780,6 @@ func TestBuildSchema_JsonNamedTimeEmbedStillPromotesItsCodec(t *testing.T) {
     }
 }
 
-
 var componentKeyGrammar = regexp.MustCompile(`^[a-zA-Z0-9.\-_]+$`)
 
 type genericPage[T any] struct {
@@ -2753,5 +2847,447 @@ func TestSchemaComponentName_DistinctGenericsThatSanitizeAlikeStayDisambiguated(
 
     if first.Ref+"2" != second.Ref {
         t.Fatalf("expected the colliding instantiation to be disambiguated as %q, got %q", first.Ref+"2", second.Ref)
+    }
+}
+
+type cyclicMetadata map[string]cyclicMetadata
+
+type cyclicNodes []cyclicNodes
+
+type cyclicNext *cyclicNext
+
+type cyclicLeft []cyclicRight
+
+type cyclicRight []cyclicLeft
+
+type cyclicInterfaceElement interface {
+    Children() cyclicInterfaceList
+}
+
+type cyclicInterfaceList []cyclicInterfaceElement
+
+type cyclicStructNode struct {
+    Value    string              `json:"value"`
+    Children []*cyclicStructNode `json:"children"`
+}
+
+type cyclicShapeHost struct {
+    Metadata cyclicMetadata      `json:"metadata"`
+    Nodes    cyclicNodes         `json:"nodes"`
+    Next     cyclicNext          `json:"next"`
+    Left     cyclicLeft          `json:"left"`
+    Dynamic  cyclicInterfaceList `json:"dynamic"`
+    Node     *cyclicStructNode   `json:"node"`
+}
+
+const cyclicShapeChildMarker = "MELODY_OPENAPI_CYCLIC_SHAPE_CHILD"
+
+/* A type cycle that never passes through a struct meets neither of the guards a struct cycle meets, and the recursion that follows it ends in a Go stack overflow — a fatal error, not a panic: recover cannot reach it and neither can the http recovery middleware, so the process dies. SpecHandler regenerates the document on every request, which makes the spec route a kill switch the first client trips. The reproduction therefore cannot live in this process: the child re-executes this test binary with the marker set, builds every shape and asserts what it got, and the parent asserts the child came back alive. The child carries its own timeout so the pointer-cycle shape, which live-locks rather than crashing, is reported instead of hanging the run. */
+func TestBuildSchema_TypeCyclesTerminateWithoutKillingTheProcess(t *testing.T) {
+    if "" != os.Getenv(cyclicShapeChildMarker) {
+        assertCyclicShapesAreDescribed(t)
+
+        return
+    }
+
+    command := exec.Command(
+        os.Args[0],
+        "-test.run=^TestBuildSchema_TypeCyclesTerminateWithoutKillingTheProcess$",
+        "-test.v",
+        "-test.timeout=60s",
+    )
+    command.Env = append(os.Environ(), cyclicShapeChildMarker+"=1")
+
+    output, runErr := command.CombinedOutput()
+    if nil != runErr {
+        t.Fatalf("schema generation for a cyclic type did not survive: %v\n%s", runErr, output)
+    }
+}
+
+func assertCyclicShapesAreDescribed(t *testing.T) {
+    t.Helper()
+
+    assertNamedMapCycleIsDescribed(t)
+    assertNamedSliceCycleIsDescribed(t)
+    assertNamedPointerCycleIsDescribed(t)
+    assertMutualCollectionCycleIsDescribed(t)
+    assertInterfaceCycleIsDescribed(t)
+    assertStructCycleIsDescribed(t)
+    assertEveryCyclicShapeMarshalsAsOneDocument(t)
+}
+
+func assertNamedMapCycleIsDescribed(t *testing.T) {
+    t.Helper()
+
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(cyclicMetadata{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    assertResolvableComponentReference(t, schema, components)
+
+    component := components[componentKeyOfReference(schema.Ref)]
+    if "object" != component.Type || nil == component.AdditionalProperties {
+        t.Fatalf("expected the named map component to describe an object with additional properties, got %+v", component)
+    }
+
+    if schema.Ref != component.AdditionalProperties.Ref {
+        t.Fatalf("expected the map value to point back at %q, got %+v", schema.Ref, component.AdditionalProperties)
+    }
+}
+
+func assertNamedSliceCycleIsDescribed(t *testing.T) {
+    t.Helper()
+
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(cyclicNodes{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    assertResolvableComponentReference(t, schema, components)
+
+    component := components[componentKeyOfReference(schema.Ref)]
+    if "array" != component.Type || nil == component.Items {
+        t.Fatalf("expected the named slice component to describe an array with items, got %+v", component)
+    }
+
+    if schema.Ref != component.Items.Ref {
+        t.Fatalf("expected the slice element to point back at %q, got %+v", schema.Ref, component.Items)
+    }
+}
+
+func assertNamedPointerCycleIsDescribed(t *testing.T) {
+    t.Helper()
+
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(cyclicNext(nil)), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if false == strings.Contains(schema.Description, "nesting depth") {
+        t.Fatalf("expected a pointer type that dereferences to itself to be described as bounded, got %+v", schema)
+    }
+
+    if "" != schema.Type || "" != schema.Ref {
+        t.Fatalf("expected the bounded position to carry no type and no reference, got %+v", schema)
+    }
+
+    if false == schema.Nullable {
+        t.Fatalf("expected a pointer type to stay nullable, got %+v", schema)
+    }
+}
+
+func assertMutualCollectionCycleIsDescribed(t *testing.T) {
+    t.Helper()
+
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(cyclicLeft{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    assertResolvableComponentReference(t, schema, components)
+
+    left := components[componentKeyOfReference(schema.Ref)]
+    if "array" != left.Type || nil == left.Items || "" == left.Items.Ref {
+        t.Fatalf("expected the first component to reference the second, got %+v", left)
+    }
+
+    assertResolvableComponentReference(t, left.Items, components)
+
+    right := components[componentKeyOfReference(left.Items.Ref)]
+    if "array" != right.Type || nil == right.Items || schema.Ref != right.Items.Ref {
+        t.Fatalf("expected the second component to reference %q, got %+v", schema.Ref, right)
+    }
+}
+
+func assertInterfaceCycleIsDescribed(t *testing.T) {
+    t.Helper()
+
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(cyclicInterfaceList{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    if "array" != schema.Type || nil == schema.Items {
+        t.Fatalf("expected a list of interfaces to stay an inline array, got %+v", schema)
+    }
+
+    if "" != schema.Items.Type || "" != schema.Items.Ref {
+        t.Fatalf("expected the interface element to stay undescribed, got %+v", schema.Items)
+    }
+
+    if 0 != len(components) {
+        t.Fatalf("expected a cycle broken by an interface to need no component, got %v", componentKeyList(components))
+    }
+}
+
+func assertStructCycleIsDescribed(t *testing.T) {
+    t.Helper()
+
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(cyclicStructNode{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    assertResolvableComponentReference(t, schema, components)
+
+    component := components[componentKeyOfReference(schema.Ref)]
+    children := component.Properties["children"]
+    if nil == children || "array" != children.Type || nil == children.Items {
+        t.Fatalf("expected the recursive struct field to stay an inline array, got %+v", children)
+    }
+
+    if 1 != len(children.Items.AllOf) || schema.Ref != children.Items.AllOf[0].Ref {
+        t.Fatalf("expected the child element to point back at %q, got %+v", schema.Ref, children.Items)
+    }
+}
+
+func assertEveryCyclicShapeMarshalsAsOneDocument(t *testing.T) {
+    t.Helper()
+
+    components := map[string]*Schema{}
+
+    schema := buildSchema(reflect.TypeOf(cyclicShapeHost{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    assertResolvableComponentReference(t, schema, components)
+
+    document := &Document{
+        OpenApi:    "3.0.3",
+        Info:       Info{Title: "cyclic", Version: "1"},
+        Paths:      map[string]PathItem{},
+        Components: &Components{Schemas: components},
+    }
+
+    if _, marshalErr := json.Marshal(document); nil != marshalErr {
+        t.Fatalf("expected a document carrying every cyclic shape to marshal, got: %v", marshalErr)
+    }
+}
+
+func componentKeyOfReference(reference string) string {
+    return strings.TrimPrefix(reference, "#/components/schemas/")
+}
+
+/* The bound is the guarantee that holds for a shape neither the component mechanism nor the element walk anticipated: reaching it must leave a well-formed, permissive position carrying a diagnostic, never a fatal stack overflow inside a request handler. Two hundred nested slices is deeper than the bound and shallower than the stack, so the walk must stop on its own well before the innermost element. */
+func TestBuildSchema_DepthBoundDescribesThePositionItStopsAt(t *testing.T) {
+    deepType := reflect.TypeOf("")
+    for level := 0; level < 200; level++ {
+        deepType = reflect.SliceOf(deepType)
+    }
+
+    schema := buildSchema(deepType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    levels := 0
+    current := schema
+    for nil != current.Items {
+        current = current.Items
+        levels++
+    }
+
+    if 200 <= levels {
+        t.Fatalf("expected the walk to stop before the innermost element, followed %d levels", levels)
+    }
+
+    if false == strings.Contains(current.Description, "nesting depth") {
+        t.Fatalf("expected the stopping position to carry a diagnostic, got %+v", current)
+    }
+
+    if "" != current.Type {
+        t.Fatalf("expected the stopping position to accept any value, got %+v", current)
+    }
+}
+
+type cyclicTaggedHost struct {
+    Metadata cyclicMetadata    `json:"metadata" validate:"notEmpty"`
+    Nodes    cyclicNodes       `json:"nodes" validate:"notEmpty"`
+    Optional *cyclicNodes      `json:"optional" validate:"notEmpty"`
+    Ranked   cyclicNodes       `json:"ranked" validate:"greaterThan"`
+    Labelled cyclicNodes       `json:"labelled" validate:"notBlank"`
+    Counted  cyclicNodes       `json:"counted" validate:"notEmpty(mode=hard)"`
+    Node     *cyclicStructNode `json:"node" validate:"notEmpty"`
+}
+
+/* A named collection that reaches itself is described by a component and answered with a reference, because nothing else ends its recursion. The validator knows none of that: it is handed the decoded value and measures the length of a map or a slice like any other, so notEmpty on such a field rejects a null and a zero length and accepts everything else. Reading the reference as a struct would advertise a field no value satisfies while the server accepts entries, which is the divergence between the document and the enforcement this mirror exists to prevent. */
+func TestBuildSchema_NotEmptyFollowsAReferenceToAPromotedCollection(t *testing.T) {
+    components := map[string]*Schema{}
+
+    buildSchema(reflect.TypeOf(cyclicTaggedHost{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["cyclicTaggedHost"]
+    if nil == schema {
+        t.Fatalf("expected the host schema to be registered in components, got %v", componentKeyList(components))
+    }
+
+    metadata := schema.Properties["metadata"]
+    assertReferenceCarriesFloor(t, metadata, "#/components/schemas/cyclicMetadata", "minProperties", components)
+
+    nodes := schema.Properties["nodes"]
+    assertReferenceCarriesFloor(t, nodes, "#/components/schemas/cyclicNodes", "minItems", components)
+
+    /* a pointer to a promoted collection already carries its reference inside the nullable wrapper; notEmpty rejects the nil pointer, so the null goes and the floor joins the reference */
+    optional := schema.Properties["optional"]
+    if nil == optional || true == optional.Nullable {
+        t.Fatalf("expected notEmpty to withdraw the null a pointer field advertises, got %+v", optional)
+    }
+    assertReferenceCarriesFloor(t, optional, "#/components/schemas/cyclicNodes", "minItems", components)
+
+    /* the floor is the whole advertisement: nothing may contradict it, or the field is back to accepting nothing */
+    for _, fieldName := range []string{"metadata", "nodes", "optional"} {
+        property := schema.Properties[fieldName]
+        for _, member := range property.AllOf {
+            if true == isImpossibleObject(member) {
+                t.Fatalf("expected %q to stay satisfiable behind its reference, got %+v", fieldName, property)
+            }
+        }
+    }
+
+    for _, fieldName := range []string{"metadata", "nodes", "optional"} {
+        if false == containsString(schema.Required, fieldName) {
+            t.Fatalf("expected notEmpty to keep %q required, got %v", fieldName, schema.Required)
+        }
+    }
+}
+
+/* Following the reference must not soften anything else the validator still rejects: greaterThan rejects every non-numeric value, a parameter a non-parameterizable constraint cannot consume fails the rule closed before any value is examined, and notEmpty on a struct is still the outright rejection it always was. */
+func TestBuildSchema_AReferenceStaysUnsatisfiableWhereTheValidatorRejectsIt(t *testing.T) {
+    components := map[string]*Schema{}
+
+    buildSchema(reflect.TypeOf(cyclicTaggedHost{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["cyclicTaggedHost"]
+    if nil == schema {
+        t.Fatalf("expected the host schema to be registered in components, got %v", componentKeyList(components))
+    }
+
+    for _, fieldName := range []string{"ranked", "counted", "node"} {
+        property := schema.Properties[fieldName]
+        if nil == property {
+            t.Fatalf("expected the %q property to exist", fieldName)
+        }
+
+        if true == property.Nullable || 0 == len(property.AllOf) || false == isImpossibleObject(property.AllOf[len(property.AllOf)-1]) {
+            t.Fatalf("expected %q to stay unsatisfiable behind its reference, got %+v", fieldName, property)
+        }
+    }
+
+    /* notBlank rejects only the null, and a non-pointer collection advertises none, so the reference is left exactly as it was built */
+    labelled := schema.Properties["labelled"]
+    if nil == labelled || "#/components/schemas/cyclicNodes" != labelled.Ref || 0 != len(labelled.AllOf) {
+        t.Fatalf("expected notBlank on a non-pointer collection to leave the bare reference, got %+v", labelled)
+    }
+}
+
+/* Resolving a reference is itself a walk over the shape the reference was introduced to survive, so it has to terminate on a components map that points back at itself. Neither a map assembled this way nor a key that names nothing may be followed forever, and neither may answer anything but the stricter struct reading. */
+func TestReferencedCollectionKind_ResolutionTerminatesOnACyclicComponentsMap(t *testing.T) {
+    components := map[string]*Schema{
+        "selfPointing":  {Ref: "#/components/schemas/selfPointing"},
+        "leftPointing":  {Ref: "#/components/schemas/rightPointing"},
+        "rightPointing": {Ref: "#/components/schemas/leftPointing"},
+        "missing":       {Ref: "#/components/schemas/absent"},
+        "throughToList": {Ref: "#/components/schemas/list"},
+        "list":          {Type: "array", Items: &Schema{Type: "string"}},
+        "dictionary":    {Type: "object", AdditionalProperties: &Schema{Type: "string"}},
+        "placeholder":   {Type: "object"},
+        "record":        {Type: "object", Properties: map[string]*Schema{"name": {Type: "string"}}},
+    }
+
+    cases := []struct {
+        reference string
+        expected  string
+    }{
+        {"#/components/schemas/selfPointing", ""},
+        {"#/components/schemas/leftPointing", ""},
+        {"#/components/schemas/missing", ""},
+        {"#/components/schemas/absent", ""},
+        {"#/components/schemas/throughToList", "array"},
+        {"#/components/schemas/list", "array"},
+        {"#/components/schemas/dictionary", "object"},
+        {"#/components/schemas/placeholder", ""},
+        {"#/components/schemas/record", ""},
+    }
+
+    for _, testCase := range cases {
+        if resolved := referencedCollectionKind(&Schema{Ref: testCase.reference}, components); testCase.expected != resolved {
+            t.Fatalf("expected %q to resolve to %q, got %q", testCase.reference, testCase.expected, resolved)
+        }
+
+        wrapped := &Schema{AllOf: []*Schema{{Ref: testCase.reference}}, Nullable: true}
+        if resolved := referencedCollectionKind(wrapped, components); testCase.expected != resolved {
+            t.Fatalf("expected the nullable wrapper of %q to resolve to %q, got %q", testCase.reference, testCase.expected, resolved)
+        }
+    }
+
+    /* a field carrying no reference at all has nothing to resolve */
+    if resolved := referencedCollectionKind(&Schema{Type: "array"}, components); "" != resolved {
+        t.Fatalf("expected a schema without a reference to resolve to nothing, got %q", resolved)
+    }
+}
+
+type cyclicFixedRing [2]*cyclicFixedRing
+
+type cyclicEmptyRing [0]*cyclicEmptyRing
+
+type cyclicFixedArrayHost struct {
+    Ring  cyclicFixedRing `json:"ring" validate:"notEmpty"`
+    Empty cyclicEmptyRing `json:"empty" validate:"notEmpty"`
+}
+
+/* A fixed-length array reaches itself through a pointer element, so it is promoted like any other self-referential collection — but the validator measures a length its type fixes. encoding/json zero-fills a shorter payload, so notEmpty can never fail for a length of two and can never pass for a length of zero, and the floor the reference would otherwise carry has to be dropped in the first case and contradicted in the second, exactly as it is for an inline fixed array. */
+func TestBuildSchema_NotEmptyOnAPromotedFixedArrayKeepsTheFixedLengthReading(t *testing.T) {
+    components := map[string]*Schema{}
+
+    buildSchema(reflect.TypeOf(cyclicFixedArrayHost{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["cyclicFixedArrayHost"]
+    if nil == schema {
+        t.Fatalf("expected the host schema to be registered in components, got %v", componentKeyList(components))
+    }
+
+    ring := schema.Properties["ring"]
+    if nil == ring || "" == ring.Ref || 0 != len(ring.AllOf) || nil != ring.MinItems {
+        t.Fatalf("expected notEmpty on a promoted fixed-length array to advertise no floor, got %+v", ring)
+    }
+
+    if true == containsString(schema.Required, "ring") {
+        t.Fatalf("expected a non-pointer fixed-length array not to be required under notEmpty, got %v", schema.Required)
+    }
+
+    empty := schema.Properties["empty"]
+    if nil == empty || 0 == len(empty.AllOf) || false == isImpossibleObject(empty.AllOf[len(empty.AllOf)-1]) {
+        t.Fatalf("expected notEmpty on a promoted zero-length array to advertise an unsatisfiable field, got %+v", empty)
+    }
+}
+
+func assertReferenceCarriesFloor(t *testing.T, property *Schema, reference string, facet string, components map[string]*Schema) {
+    t.Helper()
+
+    if nil == property {
+        t.Fatalf("expected a property carrying %q", reference)
+    }
+
+    /* a facet beside a $ref binds nothing, the reference replacing the object it sits in, so the floor has to travel inside an allOf */
+    if "" != property.Ref {
+        t.Fatalf("expected the reference to move into an allOf so the floor binds with it, got %+v", property)
+    }
+
+    if 2 != len(property.AllOf) || reference != property.AllOf[0].Ref {
+        t.Fatalf("expected an allOf of [%s, floor], got %+v", reference, property)
+    }
+
+    assertResolvableComponentReference(t, property.AllOf[0], components)
+
+    floor := property.AllOf[1]
+    if "minItems" == facet {
+        if nil == floor.MinItems || 1 != *floor.MinItems {
+            t.Fatalf("expected the referenced array to carry minItems 1, got %+v", floor)
+        }
+        if nil != floor.MinProperties {
+            t.Fatalf("expected an array floor to carry no minProperties, got %+v", floor)
+        }
+
+        return
+    }
+
+    if nil == floor.MinProperties || 1 != *floor.MinProperties {
+        t.Fatalf("expected the referenced map to carry minProperties 1, got %+v", floor)
+    }
+    if nil != floor.MinItems {
+        t.Fatalf("expected a map floor to carry no minItems, got %+v", floor)
+    }
+    if nil != floor.MaxProperties {
+        t.Fatalf("expected the map floor to stay satisfiable, got %+v", floor)
     }
 }

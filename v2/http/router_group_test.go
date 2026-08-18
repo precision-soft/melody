@@ -2,6 +2,7 @@ package http
 
 import (
     nethttp "net/http"
+    "net/http/httptest"
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
@@ -26,15 +27,10 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     )
 }
 
-func TestRouteGroup_PanicsWhenOptionsIsNil(t *testing.T) {
+/* nil options read as the default options, the router's own answer for the same input: the group was the one registration surface that refused what its sibling accepts. The route carries the group's prefix and answers every method, exactly what the defaults mean. */
+func TestRouteGroup_NilOptionsReadAsTheDefaultOptions(t *testing.T) {
     router := NewRouter()
     group := router.Group("/api")
-
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
 
     group.HandleWithOptions(
         "/x",
@@ -43,6 +39,18 @@ func TestRouteGroup_PanicsWhenOptionsIsNil(t *testing.T) {
         },
         nil,
     )
+
+    if _, matched := router.Match(nethttp.MethodGet, "/api/x", "", ""); false == matched {
+        t.Fatal("expected the grouped route to answer under the group prefix")
+    }
+
+    if _, matched := router.Match(nethttp.MethodPost, "/api/x", "", ""); false == matched {
+        t.Fatal("expected the default options to answer every method")
+    }
+
+    if _, matched := router.Match(nethttp.MethodGet, "/x", "", ""); true == matched {
+        t.Fatal("expected the route to exist only under the group prefix")
+    }
 }
 
 func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
@@ -192,4 +200,157 @@ func TestRouteGroup_RejectsAnOptionalSegmentInThePrefix(t *testing.T) {
         },
         "optional route parameter must be the last pattern segment unless it has a default",
     )
+}
+func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    group := router.Group("/api")
+    group.WithNamePrefix("api.")
+    group.WithRequirements(map[string]string{"id": "[0-9]+"})
+
+    options := NewRouteOptions(
+        "users.show",
+        []string{nethttp.MethodGet},
+        "",
+        nil,
+        nil,
+        nil,
+        nil,
+        0,
+        nil,
+    )
+
+    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return TextResponse(200, "users"), nil
+    }
+
+    group.HandleWithOptions("/users/:id", handler, options)
+
+    if "users.show" != options.Name() {
+        t.Fatalf("expected the caller's options to keep its own name, got %q", options.Name())
+    }
+
+    if _, carried := options.Requirements()["id"]; true == carried {
+        t.Fatalf("expected the group requirement to stay out of the caller's options, got %v", options.Requirements())
+    }
+
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    generatedPath, generateErr := urlGenerator.GeneratePath("api.users.show", map[string]string{"id": "7"})
+    if nil != generateErr {
+        t.Fatalf("unexpected generate error: %v", generateErr)
+    }
+
+    if "/api/users/7" != generatedPath {
+        t.Fatalf("expected the group prefix to be applied once, got %q", generatedPath)
+    }
+
+    assertPanicWithExceptionMessage(
+        t,
+        func() {
+            group.HandleWithOptions("/users/:id/edit", handler, options)
+        },
+        "route name already exists",
+    )
+}
+
+func TestRouteGroup_HandleCarriesTheGroupPrefix(t *testing.T) {
+    router := NewRouter()
+
+    group := router.Group("/api")
+    group.Handle(nethttp.MethodGet, "/articles", routeRegistryTestHandler())
+
+    if 1 != len(router.RouteDefinitions()) {
+        t.Fatalf("expected one route to be registered")
+    }
+
+    if "/api/articles" != router.RouteDefinitions()[0].Pattern() {
+        t.Fatalf("expected the group prefix to be carried, got: %q", router.RouteDefinitions()[0].Pattern())
+    }
+}
+
+func TestRouteGroup_HandleNamedCarriesBothPrefixes(t *testing.T) {
+    router := NewRouter()
+
+    group := router.Group("/api")
+    group.WithNamePrefix("api.")
+    group.HandleNamed("article.show", nethttp.MethodGet, "/articles/:id", routeRegistryTestHandler())
+
+    definition, found := router.RouteDefinition("api.article.show")
+    if false == found {
+        t.Fatalf("expected the group name prefix to be carried onto the route name")
+    }
+
+    if "/api/articles/:id" != definition.Pattern() {
+        t.Fatalf("expected the group path prefix to be carried, got: %q", definition.Pattern())
+    }
+}
+
+func TestRouteGroup_HandleControllerCarriesTheGroupPrefix(t *testing.T) {
+    router := NewRouter()
+
+    group := router.Group("/api")
+    group.HandleController(
+        nethttp.MethodGet,
+        "/articles",
+        func(request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "from the grouped controller"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/api/articles", nil))
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the grouped controller to answer under the prefix, got: %d", recorder.Code)
+    }
+
+    if "from the grouped controller" != recorder.Body.String() {
+        t.Fatalf("unexpected body: %q", recorder.Body.String())
+    }
+
+    ungroupedRecorder := httptest.NewRecorder()
+    handler.ServeHTTP(ungroupedRecorder, httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
+
+    if nethttp.StatusOK == ungroupedRecorder.Code {
+        t.Fatalf("expected the controller not to be reachable outside the group prefix")
+    }
+}
+
+func TestRouteGroup_HandleNamedControllerCarriesBothPrefixes(t *testing.T) {
+    router := NewRouter()
+
+    group := router.Group("/api")
+    group.WithNamePrefix("api.")
+    group.HandleNamedController(
+        "article.show",
+        nethttp.MethodGet,
+        "/articles/:id",
+        func(request httpcontract.Request) (httpcontract.Response, error) {
+            identifier, _ := request.Param("id")
+
+            return TextResponse(nethttp.StatusOK, identifier), nil
+        },
+    )
+
+    definition, found := router.RouteDefinition("api.article.show")
+    if false == found {
+        t.Fatalf("expected the group name prefix to be carried onto the route name")
+    }
+
+    if "/api/articles/:id" != definition.Pattern() {
+        t.Fatalf("expected the group path prefix to be carried, got: %q", definition.Pattern())
+    }
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/api/articles/42", nil))
+
+    if "42" != recorder.Body.String() {
+        t.Fatalf("expected the route parameter to reach the grouped controller, got: %q", recorder.Body.String())
+    }
 }

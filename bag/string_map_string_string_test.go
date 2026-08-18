@@ -47,3 +47,18 @@ func TestStringMapStringString_CopiesAndErrors(t *testing.T) {
         t.Fatalf("expected error")
     }
 }
+
+func TestStringMapStringString_AnAbsentNameIsUnsetRatherThanAnEmptyMap(t *testing.T) {
+    parameterBag := NewParameterBag()
+
+    value, exists, mapErr := StringMapStringString(parameterBag, "missing")
+    if true == exists {
+        t.Fatalf("expected an absent name to be reported unset")
+    }
+    if nil != mapErr {
+        t.Fatalf("expected no error for an absent name, got %v", mapErr)
+    }
+    if nil != value {
+        t.Fatalf("expected no map for an absent name, got %v", value)
+    }
+}

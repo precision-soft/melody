@@ -44,7 +44,7 @@ func (instance *CategoryService) List() ([]*entity.Category, error) {
         CacheKeyCategoryList,
         0,
         func(ctx context.Context) (any, error) {
-            return instance.categoryRepository.All(), nil
+            return instance.categoryRepository.All(ctx)
         },
         nil,
     )
@@ -68,7 +68,11 @@ func (instance *CategoryService) FindById(id string) (*entity.Category, bool, er
         cacheKey,
         0,
         func(ctx context.Context) (any, error) {
-            category, found := instance.categoryRepository.FindById(id)
+            category, found, findErr := instance.categoryRepository.FindById(ctx, id)
+            if nil != findErr {
+                return nil, findErr
+            }
+
             if false == found {
                 return nil, nil
             }
@@ -100,7 +104,7 @@ func (instance *CategoryService) Create(
 ) (*entity.Category, error) {
     category := entity.NewCategory(categoryId, name)
 
-    createErr := instance.categoryRepository.Create(category)
+    createErr := instance.categoryRepository.Create(runtimeInstance.Context(), category)
     if nil != createErr {
         return nil, createErr
     }
@@ -123,14 +127,20 @@ func (instance *CategoryService) Update(
     categoryId string,
     name string,
 ) (*entity.Category, bool, error) {
-    category, found := instance.categoryRepository.FindById(categoryId)
+    ctx := runtimeInstance.Context()
+
+    category, found, findErr := instance.categoryRepository.FindById(ctx, categoryId)
+    if nil != findErr {
+        return nil, false, findErr
+    }
+
     if false == found {
         return nil, false, nil
     }
 
     category.Name = name
 
-    updated, updateErr := instance.categoryRepository.Update(category)
+    updated, updateErr := instance.categoryRepository.Update(ctx, category)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -155,7 +165,7 @@ func (instance *CategoryService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     categoryId string,
 ) (bool, error) {
-    deleted, deleteErr := instance.categoryRepository.DeleteById(categoryId)
+    deleted, deleteErr := instance.categoryRepository.DeleteById(runtimeInstance.Context(), categoryId)
     if nil != deleteErr {
         return false, deleteErr
     }

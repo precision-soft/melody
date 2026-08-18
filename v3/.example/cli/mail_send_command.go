@@ -11,7 +11,7 @@ import (
 )
 
 /* @info a 1x1 transparent PNG standing in for a brand logo; a real application embeds its own asset (for example with go:embed) and attaches it the same way */
-const demoLogoPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+const exampleLogoPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
 func NewMailSendCommand(mailer melodymailercontract.Mailer) *MailSendCommand {
     return &MailSendCommand{
@@ -28,7 +28,7 @@ func (instance *MailSendCommand) Name() string {
 }
 
 func (instance *MailSendCommand) Description() string {
-    return "send a demo branded email (HTML body with an inline logo) through the configured mailer"
+    return "send a branded email (HTML body with an inline logo) through the configured mailer"
 }
 
 func (instance *MailSendCommand) Flags() []melodyclicontract.Flag {
@@ -55,10 +55,10 @@ func (instance *MailSendCommand) Run(
 
     text := commandContext.String("text")
     if "" == text {
-        text = "This is a demo email sent through the Melody mailer."
+        text = "This message was sent through the Melody mailer."
     }
 
-    logo, decodeErr := base64.StdEncoding.DecodeString(demoLogoPngBase64)
+    logo, decodeErr := base64.StdEncoding.DecodeString(exampleLogoPngBase64)
     if nil != decodeErr {
         return decodeErr
     }

@@ -72,16 +72,16 @@ app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
 
 [`otlp.Config`](./otlp/tracer_provider.go):
 
-| Field            | Meaning                                                                                                           | Default                          |
-|------------------|-------------------------------------------------------------------------------------------------------------------|----------------------------------|
-| `Endpoint`       | `host:port`, no scheme. **Required** — an empty value returns `otlp tracer provider endpoint is required`          | —                                |
-| `Protocol`       | `otlp.ProtocolGrpc` (`"grpc"`, collector port 4317) or `otlp.ProtocolHttp` (`"http"`, http/protobuf, port 4318)    | `grpc`                           |
-| `ServiceName`    | the `service.name` resource attribute                                                                             | `melody`                         |
-| `ServiceVersion` | the `service.version` resource attribute                                                                          | empty                            |
-| `SampleRatio`    | in `(0,1)` keeps that fraction of traces (parent-based); `0` or `>= 1` samples everything                          | sample everything                |
-| `Headers`        | extra exporter headers (for example a vendor auth token)                                                          | none                             |
-| `Insecure`       | skip transport security — for a collector on the local network                                                     | `false`                          |
-| `BatchTimeout`   | batch span processor flush interval                                                                                | `5s`                             |
+| Field            | Meaning                                                                                                         | Default           |
+|------------------|-----------------------------------------------------------------------------------------------------------------|-------------------|
+| `Endpoint`       | `host:port`, no scheme. **Required** — an empty value returns `otlp tracer provider endpoint is required`       | —                 |
+| `Protocol`       | `otlp.ProtocolGrpc` (`"grpc"`, collector port 4317) or `otlp.ProtocolHttp` (`"http"`, http/protobuf, port 4318) | `grpc`            |
+| `ServiceName`    | the `service.name` resource attribute                                                                           | `melody`          |
+| `ServiceVersion` | the `service.version` resource attribute                                                                        | empty             |
+| `SampleRatio`    | in `(0,1)` keeps that fraction of traces (parent-based); `0` or `>= 1` samples everything                       | sample everything |
+| `Headers`        | extra exporter headers (for example a vendor auth token)                                                        | none              |
+| `Insecure`       | skip transport security — for a collector on the local network                                                  | `false`           |
+| `BatchTimeout`   | batch span processor flush interval                                                                             | `5s`              |
 
 `ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them.
 

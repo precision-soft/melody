@@ -393,3 +393,281 @@ func TestScope_TypesImplementingReturnsEmptyWhenClosed(t *testing.T) {
         t.Fatalf("expected a closed scope to enumerate nothing, got %d", len(matches))
     }
 }
+
+/* @info A service that reads nothing out of the scope has to stay a process singleton. Melody instantiates lazily, so the first resolution of nearly every service happens inside a request; scoping all of them would rebuild the whole graph — connection pools included — once per request. */
+func TestScope_ServiceThatReadsNothingFromTheScopeStaysASingleton(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    calls := 0
+
+    registerErr := serviceContainer.Register(
+        "app.shared",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            calls = calls + 1
+
+            return &scopeTestService{value: "shared"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    firstScope := serviceContainer.NewScope()
+    first, getErr := firstScope.Get("app.shared")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+    _ = firstScope.Close()
+
+    secondScope := serviceContainer.NewScope()
+    second, getErr := secondScope.Get("app.shared")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+    _ = secondScope.Close()
+
+    if 1 != calls {
+        t.Fatalf("expected the provider to run once for the whole process, ran %d times", calls)
+    }
+
+    if first != second {
+        t.Fatalf("expected both scopes to be handed the same singleton")
+    }
+
+    fromContainer, getErr := serviceContainer.Get("app.shared")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if first != fromContainer {
+        t.Fatalf("expected the container itself to hold the singleton the scopes built")
+    }
+}
+
+/* @info The container's graph must stay consistent with itself: after a scope-bound service was built, resolving the same name from the container may not answer with the instance that belongs to a closed request. */
+func TestScope_RootContainerDoesNotSeeTheScopeBoundInstance(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.consumer",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            tag, getErr := resolver.Get("app.tag")
+            if nil != getErr {
+                return &scopeTestService{value: "no-tag"}, nil
+            }
+
+            return &scopeTestService{value: tag.(*scopeTestService).value}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    overrideErr := scopeInstance.OverrideInstance("app.tag", &scopeTestService{value: "request-1"})
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    _, getErr := scopeInstance.Get("app.consumer")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    _ = scopeInstance.Close()
+
+    fromContainer, getErr := serviceContainer.Get("app.consumer")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if "no-tag" != fromContainer.(*scopeTestService).value {
+        t.Fatalf("expected the container to build its own instance, got the request-bound %q", fromContainer.(*scopeTestService).value)
+    }
+}
+
+type closeCountingScopeService struct {
+    value      string
+    closeCalls *int32
+    closeErr   error
+}
+
+func (instance *closeCountingScopeService) Close() error {
+    atomic.AddInt32(instance.closeCalls, 1)
+
+    return instance.closeErr
+}
+
+/* @info An override was installed from outside and outlives the scope, and a singleton belongs to the root container which closes it at the end of the process; closing either here would tear down, once per request, something the next request still needs. */
+func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var singletonCloseCalls int32
+    var overrideCloseCalls int32
+
+    registerErr := serviceContainer.Register(
+        "app.singleton",
+        func(resolver containercontract.Resolver) (*closeCountingScopeService, error) {
+            return &closeCountingScopeService{
+                value:      "singleton",
+                closeCalls: &singletonCloseCalls,
+            }, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    overrideErr := scopeInstance.OverrideInstance(
+        "app.override",
+        &closeCountingScopeService{
+            value:      "override",
+            closeCalls: &overrideCloseCalls,
+        },
+    )
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    _, getErr := scopeInstance.Get("app.singleton")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    _, getErr = scopeInstance.Get("app.override")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := scopeInstance.Close()
+    if nil != closeErr {
+        t.Fatalf("unexpected scope close error: %v", closeErr)
+    }
+
+    if 0 != atomic.LoadInt32(&singletonCloseCalls) {
+        t.Fatalf("expected the root container's singleton to survive the scope, got %d close calls", atomic.LoadInt32(&singletonCloseCalls))
+    }
+
+    if 0 != atomic.LoadInt32(&overrideCloseCalls) {
+        t.Fatalf("expected an installed override to survive the scope, got %d close calls", atomic.LoadInt32(&overrideCloseCalls))
+    }
+}
+
+/* scopeLifetimeProbe counts how many times it was built and closed, which is the whole question a request scope poses about a container service. */
+type scopeLifetimeProbe struct {
+    closed *atomic.Int64
+}
+
+func (instance *scopeLifetimeProbe) Close() error {
+    instance.closed.Add(1)
+
+    return nil
+}
+
+/* @info The container is request-agnostic: a service it owns is one instance for the whole process. Resolving that service THROUGH a request scope must not change what it is — the scope layers over the container for the code running inside a request, it does not reach underneath into the container's own wiring.
+
+This is the shape that broke: a provider that asks for the logger. The kernel installs a request logger into every scope under the same name the container registers, so a provider doing nothing request-specific at all was assembled from a scope entry, kept per request, and closed when the request ended. Live in the repository: the bunorm providers read the logger while opening, so the *bun.DB pool was closed at the end of the request that first resolved it. The provider must see the container's own logger, be built once, and never be closed by a request ending. */
+func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *testing.T) {
+    var buildCount atomic.Int64
+    var closeCount atomic.Int64
+
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "infrastructure.logger",
+        func(resolver containercontract.Resolver) (string, error) {
+            return "container-logger", nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    seenLogger := ""
+    registerErr = serviceContainer.Register(
+        "app.pool",
+        func(resolver containercontract.Resolver) (*scopeLifetimeProbe, error) {
+            buildCount.Add(1)
+
+            logger, getErr := resolver.Get("infrastructure.logger")
+            if nil != getErr {
+                return nil, getErr
+            }
+            seenLogger, _ = logger.(string)
+
+            return &scopeLifetimeProbe{closed: &closeCount}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    for requestIndex := 0; requestIndex < 3; requestIndex = requestIndex + 1 {
+        requestScope := serviceContainer.NewScope()
+
+        if overrideErr := requestScope.OverrideProtectedInstance("infrastructure.logger", "request-logger"); nil != overrideErr {
+            t.Fatalf("request %d: unexpected override error: %v", requestIndex, overrideErr)
+        }
+
+        if _, getErr := requestScope.Get("app.pool"); nil != getErr {
+            t.Fatalf("request %d: unexpected get error: %v", requestIndex, getErr)
+        }
+
+        if closeErr := requestScope.Close(); nil != closeErr {
+            t.Fatalf("request %d: unexpected close error: %v", requestIndex, closeErr)
+        }
+    }
+
+    if 1 != buildCount.Load() {
+        t.Fatalf("a container singleton was built %d times for 3 requests", buildCount.Load())
+    }
+
+    if 0 != closeCount.Load() {
+        t.Fatalf("a container singleton was closed %d times by requests ending; nothing outside the process may end its life", closeCount.Load())
+    }
+
+    if "container-logger" != seenLogger {
+        t.Fatalf("the provider read %q: a process-lifetime service must be assembled from the container's own values, not from one request's substitutes", seenLogger)
+    }
+}
+
+/* @info the other half of the same rule, and the reason it is safe: a container provider that genuinely needs something only a request carries is told the service does not exist, at the point the mistake is made, instead of quietly becoming a per-request object that a request ending destroys. */
+func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (string, error) {
+            requestContext, getErr := resolver.Get("request.context")
+            if nil != getErr {
+                return "", getErr
+            }
+
+            return requestContext.(string), nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    requestScope := serviceContainer.NewScope()
+    defer requestScope.Close()
+
+    if overrideErr := requestScope.OverrideProtectedInstance("request.context", "the-request"); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    /* the scope carries it, so asking the scope directly answers */
+    if value, getErr := requestScope.Get("request.context"); nil != getErr || "the-request" != value {
+        t.Fatalf("expected the scope to answer for its own entry, got %v / %v", value, getErr)
+    }
+
+    /* the container provider may not, and must be told so */
+    _, getErr := requestScope.Get("app.reporter")
+    if nil == getErr {
+        t.Fatal("a container provider reached a scope-only entry: it would hold one request for the life of the process")
+    }
+}

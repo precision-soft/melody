@@ -11,11 +11,13 @@ import (
 )
 
 const (
-    bootCollisionKindService       = "service"
-    bootCollisionKindServiceType   = "serviceType"
-    bootCollisionKindParameter     = "parameter"
-    bootCollisionKindConfiguration = "configuration"
-    bootCollisionKindCliCommand    = "cliCommand"
+    bootCollisionKindService           = "service"
+    bootCollisionKindServiceType       = "serviceType"
+    bootCollisionKindScopedService     = "scopedService"
+    bootCollisionKindScopedServiceType = "scopedServiceType"
+    bootCollisionKindParameter         = "parameter"
+    bootCollisionKindConfiguration     = "configuration"
+    bootCollisionKindCliCommand        = "cliCommand"
 )
 
 /* bootCollision is one duplicate registration recorded during the boot window instead of panicking immediately, so a consolidation that produced several collisions surfaces them all in one report rather than one panic per boot attempt. The origin carries the registration call site, because by the time the report panics the stack no longer shows where the duplicate came from; a collision detected inside a boot phase — a duplicate cli command found while wiring the runner — carries the boot call site instead, the nearest frame that is not the framework's own. */

@@ -27,9 +27,9 @@ func (instance *nilMapStorage) Close() error {
 }
 
 func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = NewManager(nil, time.Minute)
-    })
+    }, "session storage is nil")
 }
 
 func TestManager_NewSession_HasId(t *testing.T) {

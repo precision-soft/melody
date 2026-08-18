@@ -129,3 +129,11 @@ func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
         t.Fatalf("expected %q, got %q", FormatTable, parsed.Format)
     }
 }
+
+func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
+    normalized := NormalizeOption(Option{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
+
+    if 0 != normalized.VerbosityLevel {
+        t.Fatalf("expected the negative verbosity level clamped to 0, got %d", normalized.VerbosityLevel)
+    }
+}

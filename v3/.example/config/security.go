@@ -12,7 +12,9 @@ import (
 
 func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) {
     accessControl := melodysecurity.NewAccessControl(
+        /* the index file is the same resource the root serves, so it carries the same policy: MELODY_STATIC_INDEX_FILE makes "/" and "/index.html" two spellings of one page, and anchoring the public rule at "^/$" left the explicit spelling to the ROLE_USER catch-all below */
         melodysecurity.NewAccessControlRegexRule("^/$", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/index\\.html$", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/login", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/logout", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/routes", melodysecuritycontract.AttributePublicAccess),
@@ -25,15 +27,9 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/metrics", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/openapi.json", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/ws", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/websocket/demo", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/platform/demo", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/messagebus/demo", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/cache/demo", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/encrypt/demo", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/redis/token/demo", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/ratelimit/demo", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/database/demo", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/database/audit/demo", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/platform/check", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/messagebus/dispatch", melodysecuritycontract.AttributePublicAccess),
+        melodysecurity.NewAccessControlRegexRule("^/encrypt/roundtrip", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/twofactor", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/outbox", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/storage", melodysecuritycontract.AttributePublicAccess),
@@ -42,8 +38,11 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.CurrenciesPrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.UsersPrefix, entity.RoleAdmin),
+        melodysecurity.NewAccessControlRule(route.AccessTokenRevokeUserPattern, entity.RoleAdmin),
+        melodysecurity.NewAccessControlRule(route.AccessTokenPrefix, entity.RoleEditor),
+        melodysecurity.NewAccessControlRule(route.DevicePrefix, entity.RoleUser),
         melodysecurity.NewAccessControlRule(route.SecurePrefix, entity.RoleUser),
-        melodysecurity.NewAccessControlRule(route.InternalPrefix, demoInternalRole),
+        melodysecurity.NewAccessControlRule(route.InternalPrefix, internalCallerRole),
 
         melodysecurity.NewAccessControlRegexRule("^/", entity.RoleUser),
     )
@@ -100,6 +99,16 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             Users:         instance.impersonatedUsers,
             RoleHierarchy: roleHierarchy,
         }),
+        melodysecurityconfig.NewFirewallOverrideConfiguration().
+            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
+            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
+    )
+
+    builder.AddStatelessFirewall(
+        "deviceToken",
+        melodysecurity.NewPathPrefixMatcher(route.DevicePrefix),
+        []melodysecuritycontract.Rule{},
+        melodysecurity.NewBearerTokenSource(instance.opaqueTokenValidator),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),

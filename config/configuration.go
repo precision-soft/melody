@@ -5,6 +5,7 @@ import (
     "sort"
     "strings"
     "sync"
+    "sync/atomic"
 
     configcontract "github.com/precision-soft/melody/config/contract"
     "github.com/precision-soft/melody/exception"
@@ -88,6 +89,17 @@ type Configuration struct {
 
     /* set once the boot-time Resolve has run, so a parameter registered afterwards is resolved on registration instead of keeping its raw template */
     resolved bool
+
+    /* written and read under the configuration write lock so the refusal in Resolve is airtight — a MarkServing racing a Resolve either waits for the rewrite to finish (still pre-serving) or lands first and the rewrite is refused; the atomic wrapper keeps any future lock-free reader honest rather than carrying the synchronization itself */
+    serving atomic.Bool
+}
+
+/* MarkServing records that the wiring phase is over and the application has started running. From that point Resolve is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works — it resolves itself on registration — which is what keeps a late module functioning. */
+func (instance *Configuration) MarkServing() {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.serving.Store(true)
 }
 
 func (instance *Configuration) Cli() configcontract.CliConfiguration {
@@ -103,7 +115,7 @@ func (instance *Configuration) Http() configcontract.HttpConfiguration {
 }
 
 func (instance *Configuration) Parameters() ParameterMap {
-    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
+    /* read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -123,7 +135,7 @@ func (instance *Configuration) projectDirectoryParameterValue() string {
 }
 
 func (instance *Configuration) Get(name string) configcontract.Parameter {
-    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded read here races the writer and trips Go's fatal "concurrent map read and map write" */
+    /* read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded read here races the writer and trips Go's fatal "concurrent map read and map write" */
     instance.mutex.RLock()
     parameter := instance.getInternalParameter(name)
     instance.mutex.RUnlock()
@@ -162,9 +174,22 @@ func (instance *Configuration) RegisterRuntimeSecret(name string, value any) {
 }
 
 func (instance *Configuration) registerRuntimeParameter(name string, value any, isSecret bool) {
-    if "" == name {
+    if "" == strings.TrimSpace(name) {
         exception.Panic(
             exception.NewError("cannot register parameters with empty names", nil, nil),
+        )
+    }
+
+    /* a name judged raw would let "  pool.size " register a parameter no lookup ever names: Get is an exact map lookup, so the padded spelling is unreachable through every accessor that types the name as written */
+    if name != strings.TrimSpace(name) {
+        exception.Panic(
+            exception.NewError(
+                "cannot register parameters with surrounding whitespace in the name",
+                exceptioncontract.Context{
+                    "parameterName": name,
+                },
+                nil,
+            ),
         )
     }
 
@@ -183,7 +208,7 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* @important use the lock-free lookup here, not Get: Get now takes the read lock and sync.RWMutex is non-reentrant, so self-calling it while holding the write lock would deadlock */
+    /* use the lock-free lookup here, not Get: Get now takes the read lock and sync.RWMutex is non-reentrant, so self-calling it while holding the write lock would deadlock */
     existingParameter := instance.getInternalParameter(name)
     if nil != existingParameter {
         exception.Panic(
@@ -198,11 +223,13 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     }
 
     parameter := NewParameter("", value, value, false)
+    parameter.name = name
     parameter.isSecret.Store(isSecret)
 
+    /* the parameter is published before its own template is resolved, and removed again if that resolution fails. The resolution's secret propagation marks the READER it finds in this map by name, so a parameter resolved before it was published was absent at the only moment the propagation looks: a dsn assembled after boot from a credential the configuration had marked inherited nothing and printed in full beside the redacted key it was built from. Nothing observes the intermediate state — the publish, the resolution and the rollback all run under the write lock every reader takes, so the map a reader sees either holds a fully resolved parameter or has never held this name at all. */
     instance.parameters[name] = parameter
 
-    /* the boot resolution has already run, so this parameter would otherwise keep its raw template — a %env(...)% reaching the consuming service verbatim. Resolve it now against the parameters boot left in place; a pre-resolve registration is left raw for the boot pass to resolve in one batch. */
+    /* the boot resolution has already run, so this parameter would otherwise keep its raw template — a %env(...)% reaching the consuming service verbatim. A pre-resolve registration is left raw for the boot pass to resolve in one batch. */
     if true == instance.resolved {
         stringValue, isString := value.(string)
         if true == isString {
@@ -213,6 +240,9 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
                 make(map[string]bool),
             )
             if nil != resolveErr {
+                /* the rollback runs before the panic, not after it: Panic panics, so anything below it is never reached, and a half-made parameter would otherwise serve its raw template to every reader that outlived the recovered panic, with the name burnt for the corrected retry */
+                delete(instance.parameters, name)
+
                 exception.Panic(
                     exception.NewError(
                         "could not resolve a runtime parameter registered after boot",
@@ -224,7 +254,7 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
                 )
             }
 
-            parameter.value = resolvedValue
+            parameter.storeValue(resolvedValue)
         }
     }
 }
@@ -243,11 +273,56 @@ func (instance *Configuration) MarkSecret(name string) bool {
 
     parameter.isSecret.Store(true)
 
+    /* the marking travels to every parameter whose template reads this one, exactly as it does when the marking precedes the resolution: without this, a MarkSecret arriving after the boot resolve redacted the key but left the dsn assembled from it printing in full, and the late marking reported success while covering half of what the early one covers. The scan reads the raw templates, so it reaches the same direct readers the resolution-time propagation reaches. */
+    instance.propagateSecretMarkLocked(name)
+
     return true
 }
 
+/* propagateSecretMarkLocked marks every parameter whose raw template reads the named one — through %env(NAME)%, through the default processor's fallback, or through a %NAME% reference — and follows the marking to a fixpoint: a reader of a freshly marked name is scanned in turn, so a derivation chain is covered whole however late the mark arrives. A match inside doubled-percent escaped text over-marks, which errs toward redacting more, never less. */
+func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
+    markedNames := []string{markedName}
+
+    for 0 < len(markedNames) {
+        currentName := markedNames[0]
+        markedNames = markedNames[1:]
+
+        for name, parameter := range instance.parameters {
+            if true == parameter.isSecret.Load() {
+                continue
+            }
+
+            templateValue, isString := parameter.environmentValue.(string)
+            if false == isString {
+                continue
+            }
+
+            if true == templateReadsName(templateValue, currentName) {
+                parameter.isSecret.Store(true)
+                markedNames = append(markedNames, name)
+            }
+        }
+    }
+}
+
+func templateReadsName(template string, name string) bool {
+    for _, submatches := range envPlaceholderPattern.FindAllStringSubmatch(template, -1) {
+        if name == submatches[3] || name == submatches[2] {
+            return true
+        }
+    }
+
+    for _, submatches := range parameterPlaceholderPattern.FindAllStringSubmatch(template, -1) {
+        if name == submatches[1] {
+            return true
+        }
+    }
+
+    return false
+}
+
 func (instance *Configuration) Names() []string {
-    /* @important read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
+    /* read under the read lock because RegisterRuntime mutates the shared parameters map at runtime; an unguarded range here races the writer and trips Go's fatal "concurrent map read and map write" */
     instance.mutex.RLock()
 
     names := make([]string, 0, len(instance.parameters))
@@ -274,6 +349,11 @@ func (instance *Configuration) applyDefaults(projectDirectory string) error {
     )
 
     return nil
+}
+
+/* EnvironmentKeyCount reports how many keys the .env artifacts contributed. Zero almost always means the files were not found rather than deliberately empty (the warning in applyEnvironmentOverrides names the same condition); the count is exposed so the application can refuse to serve http on nothing but development defaults instead of merely warning. */
+func (instance *Configuration) EnvironmentKeyCount() int {
+    return len(instance.environment.All())
 }
 
 func (instance *Configuration) applyEnvironmentOverrides() error {
@@ -306,9 +386,9 @@ func (instance *Configuration) applyEnvironmentOverrides() error {
     return nil
 }
 
-/* @important the constructor's own pass does not mark the configuration resolved: the composition root registers its parameters after it and before boot, and a parameter registered while the configuration counts as resolved is resolved eagerly against whatever exists at that moment — which makes registration order significant and reports a forward reference as a failure "after boot" that boot has not yet reached. The boot pass resolves them all in one order-independent batch. */
+/* the constructor's own pass does not mark the configuration resolved: the composition root registers its parameters after it and before boot, and a parameter registered while the configuration counts as resolved is resolved eagerly against whatever exists at that moment — which makes registration order significant and reports a forward reference as a failure "after boot" that boot has not yet reached. The pass is tolerant for the same reason: a .env value referencing a parameter the composition root registers next is deferred — unreadable until settled — rather than refused, and the boot pass resolves them all in one order-independent batch. */
 func (instance *Configuration) resolvePlaceholders() error {
-    resolveErr := instance.Resolve()
+    resolveErr := instance.resolveAll(true)
     if nil != resolveErr {
         return exception.NewError("could not resolve the config parameters", nil, resolveErr)
     }
@@ -392,6 +472,8 @@ func (instance *Configuration) buildHttpConfiguration() error {
         )
     }
 
+    staticExcludedPaths := splitHttpConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
+
     sessionTtl, sessionTtlErr := instance.MustGet(KernelHttpSessionTtl).Duration()
     if nil != sessionTtlErr {
         return exception.NewError(
@@ -403,6 +485,28 @@ func (instance *Configuration) buildHttpConfiguration() error {
         )
     }
 
+    sessionTombstoneRetention, sessionTombstoneRetentionErr := instance.MustGet(KernelHttpSessionTombstoneRetention).Duration()
+    if nil != sessionTombstoneRetentionErr {
+        return exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": HttpSessionTombstoneRetentionKey,
+            },
+            sessionTombstoneRetentionErr,
+        )
+    }
+
+    shutdownTimeout, shutdownTimeoutErr := instance.MustGet(KernelHttpShutdownTimeout).Duration()
+    if nil != shutdownTimeoutErr {
+        return exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": HttpShutdownTimeoutKey,
+            },
+            shutdownTimeoutErr,
+        )
+    }
+
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
         instance.MustGet(KernelDefaultLocale).MustString(),
@@ -411,7 +515,10 @@ func (instance *Configuration) buildHttpConfiguration() error {
         httpMaxRequestBodyBytes,
         staticEnableCache,
         staticCacheMaxAge,
+        staticExcludedPaths,
         sessionTtl,
+        sessionTombstoneRetention,
+        shutdownTimeout,
     )
     if nil != newHttpConfigurationErr {
         return exception.NewError("could not initialize the http configuration", nil, newHttpConfigurationErr)
@@ -460,7 +567,7 @@ func (instance *Configuration) isReserved(name string) bool {
     return strings.HasPrefix(name, "kernel.")
 }
 
-/* @important getInternalParameter is the lock-free map lookup primitive; it must NOT take the lock because it is called both at single-threaded construction (placeholder resolution) and while the write lock is already held (RegisterRuntime). Concurrent readers go through Get/Parameters/Names, which take the read lock around it. */
+/* getInternalParameter is the lock-free map lookup primitive; it must NOT take the lock because it is called both at single-threaded construction (placeholder resolution) and while the write lock is already held (RegisterRuntime). Concurrent readers go through Get/Parameters/Names, which take the read lock around it. */
 func (instance *Configuration) getInternalParameter(name string) *Parameter {
     parameter, exists := instance.parameters[name]
     if false == exists || nil == parameter {

@@ -134,3 +134,43 @@ func TestLogError_NilLogger_DoesNotPrintEmptyContext(t *testing.T) {
         t.Fatalf("did not expect context output for empty context")
     }
 }
+
+func TestEnrichContextWithCause_NestedCause_BuildsFullChain(t *testing.T) {
+    rootErr := errors.New("root")
+    middleErr := exception.NewError("middle", map[string]any{"middleKey": "middleValue"}, rootErr)
+    outerErr := exception.NewError("outer", nil, middleErr)
+
+    enrichedContext := enrichContextWithCause(outerErr)
+
+    causeChainValue, hasCauseChain := enrichedContext["causeChain"]
+    if false == hasCauseChain {
+        t.Fatalf("expected causeChain to be present")
+    }
+
+    causeChain, ok := causeChainValue.([]string)
+    if false == ok {
+        t.Fatalf("expected causeChain to be []string")
+    }
+
+    if 2 != len(causeChain) {
+        t.Fatalf("expected the cause chain to carry the middle and root causes, got %v", causeChain)
+    }
+
+    if "middle" != causeChain[0] || "root" != causeChain[1] {
+        t.Fatalf("expected the cause chain to name the middle and root causes in order, got %v", causeChain)
+    }
+
+    causeContextChainValue, hasCauseContextChain := enrichedContext["causeContextChain"]
+    if false == hasCauseContextChain {
+        t.Fatalf("expected causeContextChain to be present")
+    }
+
+    causeContextChain, ok := causeContextChainValue.([]map[string]any)
+    if false == ok {
+        t.Fatalf("expected causeContextChain to be []map[string]any")
+    }
+
+    if 0 == len(causeContextChain) {
+        t.Fatalf("expected causeContextChain to have entries")
+    }
+}

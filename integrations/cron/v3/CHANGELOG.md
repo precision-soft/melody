@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- a scheduled command can run under a deadline. `EntryConfig.Timeout` bounds one run; without it a run is unbounded, which is what every entry configured before this existed already had and what an entry whose duration is genuinely open-ended keeps. Reaching the deadline cancels the command's context — a signal, not a kill — and a command that watches it unwinds and reports its own error alongside the timeout. Only a command that ignores the cancellation for a whole `EntryConfig.GracefulTimeout` (five minutes by default, per entry) is abandoned: the overrun is reported at warning naming the entry and both windows, its container scope is closed under it so the resources it holds are given back, and it stops counting towards the shutdown wait. That last step is a kill and is documented as one — `scope.MustGet` panics on a closed scope, and a panic in a goroutine the command started itself is beyond any recover, which is why the window before it is measured in minutes
+
 ## [v3.7.0] - 2026-07-24 - Dialect-Aware Schedule Bounds and the Kubernetes Question Mark
 
 ### Fixed

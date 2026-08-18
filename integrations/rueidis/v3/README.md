@@ -43,11 +43,11 @@ provider := rueidis.NewProvider(
 
 [`RetryConfig`](./retry_config.go) fields, each resolved independently against [`DefaultRetryConfig`](./retry_config.go):
 
-| Field               | Default | Notes                                                                                                    |
-|---------------------|---------|----------------------------------------------------------------------------------------------------------|
-| `MaxAttempts`       | `3`     | Total attempts, not extra ones. `0` resolves to the default.                                             |
-| `InitialDelay`      | `500ms` | Delay before the second attempt. A non-positive value resolves to the default.                            |
-| `MaxDelay`          | `5s`    | Cap on the grown delay. A non-positive value resolves to the default.                                    |
+| Field               | Default | Notes                                                                                                                               |
+|---------------------|---------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `MaxAttempts`       | `3`     | Total attempts, not extra ones. `0` resolves to the default.                                                                        |
+| `InitialDelay`      | `500ms` | Delay before the second attempt. A non-positive value resolves to the default.                                                      |
+| `MaxDelay`          | `5s`    | Cap on the grown delay. A non-positive value resolves to the default.                                                               |
 | `BackoffMultiplier` | `2.0`   | Growth per attempt. Anything not at least `1` — including `NaN` — resolves to the default; exactly `1` is a valid constant backoff. |
 
 Because each field is defaulted on its own, a partially filled `RetryConfig` cannot collapse the backoff into a re-dial storm. Retries are reported through the framework logger: a warning per retry, an error when the attempts run out, and an info line when a later attempt succeeds.
@@ -77,7 +77,12 @@ Because each field is defaulted on its own, a partially filled `RetryConfig` can
 * `Put` / `PutWithTtl` — store claims for a token (TTL defaults to the token's own expiry).
 * `Lookup` — resolve claims for a token string.
 * `Delete` — revoke a single token.
-* `DeleteByUser(userIdentifier)` — revoke every token currently owned by a user; it re-reads each indexed member's owner so a recycled token string belonging to another user is never revoked. Returns the count removed.
+* `RevokeBefore(userIdentifier, deviceIdentifier, instant)` — publish a revocation boundary. Every token of that user, or of that one device, issued before the instant stops resolving, including tokens written after the call as long as they were stamped earlier. The boundary only ever moves forward, and the one applied at lookup is the later of the user's and the device's, so a user-wide revocation cannot be undone by a device-scoped one. **This is what ends a user's sessions.**
+* `RevocationEpoch(runtime, userIdentifier, deviceIdentifier)` — read the boundary a token would be compared against; the zero instant means nothing has been revoked.
+
+The instants on both sides of that comparison come from application clocks. `WithTokenStoreMaximumClockSkew` bounds the window a divergent one opens — it widens the boundary by the stated amount and refuses a stamp further ahead of the verifying node than the same amount — and defaults to zero, so nothing changes unless it is set.
+
+* `DeleteByUser(userIdentifier)` — reclaim the keys and index entries of a user's tokens; it re-reads each indexed member's owner so a recycled token string belonging to another user is never touched. Returns the count removed. This is **cleanup, not revocation**: the walk is an `SSCAN` cursor, which does not promise to return a member added while it is in progress, so a token issued during the call survives it. Use `RevokeBefore` to make tokens unusable and this to reclaim what it made unusable.
 * `PurgeExpired` — prune index members whose tokens have expired.
 
 ## Nonce guard

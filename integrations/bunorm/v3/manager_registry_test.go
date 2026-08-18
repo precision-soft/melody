@@ -516,3 +516,126 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
         t.Fatalf("Close never returned")
     }
 }
+
+type migrationCapableProvider struct {
+    ordinaryDatabase   *bun.DB
+    migrationDatabase  *bun.DB
+    migrationOpenCount int
+}
+
+func (instance *migrationCapableProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.ordinaryDatabase, nil
+}
+
+func (instance *migrationCapableProvider) OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.migrationOpenCount = instance.migrationOpenCount + 1
+
+    return instance.migrationDatabase, nil
+}
+
+var _ Provider = (*migrationCapableProvider)(nil)
+var _ MigrationProvider = (*migrationCapableProvider)(nil)
+
+/* @info the migration commands run on the dedicated connection when the provider offers one: the request pool carries driver deadlines sized for requests, and a DDL statement past them is cut mid-statement; the dedicated database is opened once and cached */
+func TestManagerRegistry_MigrationDatabasePrefersTheCapability(t *testing.T) {
+    ordinaryDatabase, _ := newCloseRaceDatabase()
+    migrationDatabase, _ := newCloseRaceDatabase()
+
+    provider := &migrationCapableProvider{
+        ordinaryDatabase:  ordinaryDatabase,
+        migrationDatabase: migrationDatabase,
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    database, dedicated, migrationDatabaseErr := registry.MigrationDatabase("")
+    if nil != migrationDatabaseErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseErr)
+    }
+    if false == dedicated {
+        t.Fatalf("expected the dedicated migration connection to be preferred")
+    }
+    if migrationDatabase != database {
+        t.Fatalf("expected the migration database, not the ordinary pool")
+    }
+
+    databaseAgain, _, migrationDatabaseAgainErr := registry.MigrationDatabase("main")
+    if nil != migrationDatabaseAgainErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseAgainErr)
+    }
+    if database != databaseAgain {
+        t.Fatalf("expected the cached migration database")
+    }
+    if 1 != provider.migrationOpenCount {
+        t.Fatalf("expected exactly one migration open, got %d", provider.migrationOpenCount)
+    }
+}
+
+/* @info a provider without the capability keeps the old behaviour: the ordinary pooled connection, reported as not dedicated */
+func TestManagerRegistry_MigrationDatabaseFallsBackWithoutTheCapability(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    _, dedicated, migrationDatabaseErr := registry.MigrationDatabase("main")
+    if nil != migrationDatabaseErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseErr)
+    }
+    if true == dedicated {
+        t.Fatalf("expected the fallback to the ordinary connection")
+    }
+
+    if _, managerErr := registry.Manager("main"); nil != managerErr {
+        t.Fatalf("expected the ordinary manager path to have been taken: %v", managerErr)
+    }
+
+    if 0 != len(registry.migrationDatabases) {
+        t.Fatalf("expected no dedicated database to be cached on the fallback path")
+    }
+}
+
+/* @info the dedicated migration database belongs to the registry: Close ends it beside the managers, so a lifted-deadline connection never outlives the shutdown */
+func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
+    migrationDatabase, migrationCloseSignal := newCloseRaceDatabase()
+
+    provider := &migrationCapableProvider{
+        ordinaryDatabase:  nil,
+        migrationDatabase: migrationDatabase,
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, _, migrationDatabaseErr := registry.MigrationDatabase("main"); nil != migrationDatabaseErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseErr)
+    }
+
+    if closeErr := registry.Close(); nil != closeErr {
+        t.Fatalf("close error: %v", closeErr)
+    }
+
+    select {
+    case <-migrationCloseSignal:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected Close to close the dedicated migration database")
+    }
+
+    if _, _, afterCloseErr := registry.MigrationDatabase("main"); nil == afterCloseErr {
+        t.Fatalf("expected the closed registry to refuse a migration database")
+    }
+}

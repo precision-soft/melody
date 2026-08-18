@@ -384,3 +384,115 @@ func TestGenerate_RejectsAPackageNameTheGeneratedFileCannotCarry(t *testing.T) {
         }
     }
 }
+
+const (
+    scopedFixtureImportPath = "github.com/precision-soft/melody/v3/wiring/internal/fixture/scoped"
+    scopedFixtureDirectory  = "wiring/internal/fixture/scoped"
+    scopedFixtureGoldenFile = "internal/fixture/wiringscoped/wiring_gen.go"
+)
+
+func generateScopedFixture(t *testing.T, functionName string, scopedFunctionName string) (string, *GenerateReport, error) {
+    t.Helper()
+
+    bindSet := NewBindSet()
+    bindSet.Package(scopedFixtureImportPath, scopedFixtureDirectory)
+
+    return Generate(&GenerateRequest{
+        ProjectDirectory:   fixtureProjectDir,
+        PackageName:        "wiringscoped",
+        FunctionName:       functionName,
+        ScopedFunctionName: scopedFunctionName,
+        BindSet:            bindSet,
+    })
+}
+
+/* @info the committed scoped fixture output is compiled by the ordinary build, so comparing against it is what proves the scoped emission is type-correct Go — that MustRegisterScoped really takes a ScopedRegistrar, and that the two functions can coexist in one file */
+func TestGenerate_MatchesTheCommittedScopedFixtureOutput(t *testing.T) {
+    source, report, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "")
+    if nil != generateErr {
+        t.Fatalf("expected the scoped fixture to generate, got %v", generateErr)
+    }
+
+    if 2 != report.ConstructorCount {
+        t.Fatalf("expected two container constructors, got %d", report.ConstructorCount)
+    }
+
+    if 2 != report.ScopedConstructorCount {
+        t.Fatalf("expected two scoped constructors, got %d", report.ScopedConstructorCount)
+    }
+
+    golden, readErr := os.ReadFile(scopedFixtureGoldenFile)
+    if nil != readErr {
+        t.Fatalf("could not read the scoped golden file: %v", readErr)
+    }
+
+    if string(golden) != source {
+        t.Fatalf("the generated scoped wiring drifted from the committed fixture; regenerate %s", scopedFixtureGoldenFile)
+    }
+}
+
+/* @info a scoped constructor emitted into the container function would be registered as a process singleton, which is the silent half of the lifetime mistake: it would be built once and never closed with the request it was written for. */
+func TestGenerate_EmitsScopedRegistrationsInTheirOwnFunction(t *testing.T) {
+    source, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "")
+    if nil != generateErr {
+        t.Fatalf("expected the scoped fixture to generate, got %v", generateErr)
+    }
+
+    containerFunctionIndex := strings.Index(source, "func RegisterScopedFixtureServices(registrar containercontract.Registrar) {")
+    scopedFunctionIndex := strings.Index(source, "func RegisterScopedFixtureServicesScoped(registrar containercontract.ScopedRegistrar) {")
+
+    if 0 > containerFunctionIndex || 0 > scopedFunctionIndex {
+        t.Fatalf("expected both registration functions to be emitted, got:\n%s", source)
+    }
+
+    trailIndex := strings.Index(source, "scoped.ServiceRequestTrail")
+    if trailIndex < scopedFunctionIndex {
+        t.Fatalf("expected the scoped constructor to be emitted inside the scoped function, got:\n%s", source)
+    }
+
+    writerIndex := strings.Index(source, "scoped.NewProcessWriter")
+    if writerIndex > scopedFunctionIndex {
+        t.Fatalf("expected the container constructor to stay in the container function, got:\n%s", source)
+    }
+
+    if false == strings.Contains(source, ".MustRegisterScoped(") {
+        t.Fatalf("expected a named scoped registration to use MustRegisterScoped, got:\n%s", source)
+    }
+
+    if false == strings.Contains(source, ".MustRegisterScopedType(") {
+        t.Fatalf("expected a type-only scoped registration to use MustRegisterScopedType, got:\n%s", source)
+    }
+}
+
+/* @info a project that declares nothing scoped must keep regenerating the file it already had, or every consumer of the generator sees a spurious diff and a function nobody calls. */
+func TestGenerate_OmitsTheScopedFunctionWhenNothingIsScoped(t *testing.T) {
+    source, _ := generateFixture(t, newFixtureBindSet())
+
+    if true == strings.Contains(source, "ScopedRegistrar") {
+        t.Fatalf("expected no scoped function for a fixture that declares nothing scoped, got:\n%s", source)
+    }
+}
+
+/* @info the two functions share one file, so one name for both would declare the same function twice and not compile; which lifetime survived would be whichever the renderer wrote last. */
+func TestGenerate_RefusesAScopedFunctionNameEqualToTheFunctionName(t *testing.T) {
+    _, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "RegisterScopedFixtureServices")
+    if nil == generateErr {
+        t.Fatalf("expected the duplicate function name to be refused")
+    }
+
+    if "the generated function names must differ, or the file declares the same function twice" != generateErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", generateErr.Error())
+    }
+}
+
+/* @info the scoped name lands verbatim in the generated source exactly as the container one does, so it needs the same refusal for a name the file cannot declare. */
+func TestGenerate_RefusesAScopedFunctionNameTheGeneratedFileCannotCarry(t *testing.T) {
+    _, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "func")
+    if nil == generateErr {
+        t.Fatalf("expected the unusable scoped function name to be refused")
+    }
+
+    if "the generated scoped function name cannot be declared and referenced in the generated file" != generateErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", generateErr.Error())
+    }
+}

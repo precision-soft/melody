@@ -107,6 +107,9 @@ func callHealthEndpoint() (string, error) {
     - `SetBaseUrl`, `SetHeader`, `SetTimeout`
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go)
     - [`NewHttpClientConfig(baseUrl string, timeout time.Duration, headers map[string]string) *HttpClientConfig`](../../httpclient/http_client_config.go)
+    - [`WithTransport(transport *TransportConfig) *HttpClientConfig`](../../httpclient/http_client_config.go) — the door a transport comes through
+- [`type TransportConfig`](../../httpclient/transport_config.go)
+    - [`DefaultTransportConfig() *TransportConfig`](../../httpclient/transport_config.go)
 - Request options:
     - [`NewRequestOptions()`](../../httpclient/request_option.go)
     - `WithHeader`, `WithHeaders`, `WithQuery`, `WithQueryParams`, `WithBody`, `WithJson`, `WithTimeout`, `WithBearerToken`, `WithBasicAuth`, `WithMaxResponseBodyBytes`

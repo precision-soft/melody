@@ -17,5 +17,11 @@ type HttpConfiguration interface {
 
     StaticCacheMaxAge() int
 
+    StaticExcludedPaths() []string
+
     SessionTtl() time.Duration
+
+    SessionTombstoneRetention() time.Duration
+
+    ShutdownTimeout() time.Duration
 }

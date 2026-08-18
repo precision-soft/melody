@@ -5,14 +5,28 @@ import (
 )
 
 func TestPanic_WithNilErrorPanics(t *testing.T) {
+    assertPanicsWithEmergency(t, "panic called with nil error", func() {
+        Panic(nil)
+    })
+}
+
+func TestExit_WithNilErrorPanics(t *testing.T) {
+    assertPanicsWithEmergency(t, "exit called with nil error", func() {
+        Exit(nil)
+    })
+}
+
+func TestExit_WithErrorPanicsWithSamePointer(t *testing.T) {
+    expected := NewExitError(3, NewError("exit", nil, nil))
+
     defer func() {
         recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected panic")
+        if expected != recoveredValue {
+            t.Fatalf("expected panic value to be the same *ExitError instance")
         }
     }()
 
-    Panic(nil)
+    Exit(expected)
 }
 
 func TestPanic_WithErrorPanicsWithSamePointer(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/http"
     "github.com/precision-soft/melody/v3/internal/testhelper"
@@ -155,5 +156,30 @@ func TestRegisterCoreCliCommandIfAbsent_SkipsWhenAppAlreadyRegisteredSameName(t 
 
     if appCommand != instance.cliCommands[0] {
         t.Fatalf("expected the application's own command instance to be kept")
+    }
+}
+
+/* @info The unbounded default cache is a hazard only in a process that stays up: a command builds its map, runs and takes it away with it. A cli invocation must therefore see no cache warning at all, or every command a scheduler runs prints advice its lifetime makes meaningless. This drives the real runCli against the same wiring the http test warns from. */
+func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
+    logger := &warningRecordingLogger{}
+
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeCli, logger)
+
+    if false == applicationInstance.unboundedDefaultCacheBackend {
+        t.Fatalf("expected the cli application to carry the same unbounded default backend the http path warns about")
+    }
+
+    originalArguments := os.Args
+    os.Args = []string{"melody"}
+    defer func() { os.Args = originalArguments }()
+
+    runErr := applicationInstance.runCli()
+    if nil != runErr {
+        t.Fatalf("unexpected run cli error: %v", runErr)
+    }
+
+    warnings := logger.warningsContaining(unboundedCacheWarningFragment)
+    if 0 != len(warnings) {
+        t.Fatalf("expected no cache warning on a cli run, got %v", warnings)
     }
 }

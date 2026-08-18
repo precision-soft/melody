@@ -72,15 +72,27 @@ func TestEvent_Constructors(t *testing.T) {
 }
 
 func TestEvent_Constructors_PanicOnEmptyName(t *testing.T) {
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         NewEvent("", nil, clock.NewSystemClock())
-    })
+    }, "event name may not be empty")
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         NewEventWithTimestamp("", nil, time.Now())
-    })
+    }, "event name may not be empty")
 
-    testhelper.AssertPanics(t, func() {
-        NewEventFromEvent(NewEventWithTimestamp("", nil, time.Now()))
-    })
+    /* @info the source event carries the empty name rather than being built with one: NewEventWithTimestamp("", ...) panics while the argument is being evaluated, so writing it inline never enters NewEventFromEvent at all and only repeats the assertion above. An event with no name cannot be built through the constructors, which is the point — it can still arrive as a foreign implementation of the contract, and this is the path that rejects it. */
+    testhelper.AssertPanicsWithError(t, func() {
+        NewEventFromEvent(&Event{})
+    }, "event name may not be empty")
+}
+
+/* @info a nil event reaches its own guard before anything is read off it, and a typed nil has to reach it too: the parameter is an interface, so a (*Event)(nil) is not equal to nil and would otherwise dereference inside Name(). */
+func TestEvent_Constructors_PanicOnNilEvent(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewEventFromEvent(nil)
+    }, "event value may not be nil")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        NewEventFromEvent((*Event)(nil))
+    }, "event value may not be nil")
 }

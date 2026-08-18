@@ -100,7 +100,7 @@ func TestMustFromRuntime_PanicsWhenMissingEverywhere(t *testing.T) {
 
     runtimeInstance := New(context.Background(), serviceContainer.NewScope(), container.NewContainer())
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = MustFromRuntime[string](runtimeInstance, "missing")
-    })
+    }, "service is not registered")
 }

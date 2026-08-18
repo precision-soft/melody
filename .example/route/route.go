@@ -13,6 +13,9 @@ const (
     RoutesName    = "example.routes"
     RoutesPattern = "/routes/"
 
+    CatalogReportName    = "example.catalog.report"
+    CatalogReportPattern = "/catalog/report/"
+
     ProductsPrefix = "/products"
 
     ProductsListPageName    = "example.products.list.page"

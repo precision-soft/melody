@@ -41,19 +41,32 @@ func NewService(config Config) *Service {
     allowHeaders := copyStrings(config.AllowHeaders)
     exposeHeaders := copyStrings(config.ExposeHeaders)
 
-    if 0 == len(allowOrigins) {
+    /* a nil list expresses no preference and receives the permissive default; an EMPTY list is an expressed preference — no origin is allowed — and rewriting it to the wildcard would turn "nobody" into "everybody" the moment a misconfigured environment variable arrives empty. An empty list therefore denies every origin. */
+    if nil == allowOrigins {
         allowOrigins = []string{"*"}
     }
 
-    if 0 == len(allowMethods) {
-        allowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+    /* methods and headers read nil and empty the way origins do — nil takes the default, an empty list stays the expressed preference — because one Config must not read the same spelling as "nobody" on one field and "everything" on its sibling. The defaults are the single lists DefaultService grants, Authorization included: two default header lists meant an SPA sending Authorization worked on the zero-configuration deployment and died at preflight the moment the operator narrowed only the origins. */
+    if nil == allowMethods {
+        allowMethods = defaultAllowMethodList()
     }
 
-    if 0 == len(allowHeaders) {
-        allowHeaders = []string{"Origin", "Content-Type", "Accept"}
+    if nil == allowHeaders {
+        allowHeaders = defaultAllowHeaderList()
     }
 
     if true == config.AllowCredentials && nil == config.AllowOriginFunc {
+        /* credentials with nothing to grant them to is a contradiction worth stopping at boot: a deny-all service that also promises credentials can only come from a list that failed to load */
+        if 0 == len(allowOrigins) {
+            exception.Panic(
+                exception.NewError(
+                    "cors misconfiguration: allowCredentials cannot be true when no origin is allowed",
+                    nil,
+                    nil,
+                ),
+            )
+        }
+
         for _, origin := range allowOrigins {
             if "*" == strings.TrimSpace(origin) {
                 exception.Panic(
@@ -82,11 +95,21 @@ func NewService(config Config) *Service {
     }
 }
 
+/* defaultAllowMethodList is the one default the service grants wherever no method preference was expressed: DefaultService and the nil-list fallback of NewService hand out the same list, so narrowing an unrelated field never changes which methods a deployment accepts. */
+func defaultAllowMethodList() []string {
+    return []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+}
+
+/* defaultAllowHeaderList is the one default header list, Authorization included, shared by DefaultService and the nil-list fallback of NewService. */
+func defaultAllowHeaderList() []string {
+    return []string{"Origin", "Content-Type", "Accept", "Authorization"}
+}
+
 func DefaultService() *Service {
     return NewService(Config{
         AllowOrigins:     []string{"*"},
-        AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-        AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+        AllowMethods:     defaultAllowMethodList(),
+        AllowHeaders:     defaultAllowHeaderList(),
         ExposeHeaders:    []string{},
         AllowCredentials: false,
         MaxAge:           86400,
@@ -258,6 +281,7 @@ func normalizeOrigin(origin string) string {
     return strings.TrimSuffix(value, "/")
 }
 
+/* extractOriginHost keeps the port the origin names: two origins on different ports of one host are different origins to the browser, so an allow entry without a port grants only the portless spelling — an entry that means to allow a port writes it ("app.example.com:8443"). Reading the host without the port would let any service on another port of an allowed host — a dev server, a legacy admin UI — inherit the grant, with the credentials the restrictive configurations pair with it. */
 func extractOriginHost(origin string) string {
     if "" == origin {
         return ""
@@ -268,7 +292,7 @@ func extractOriginHost(origin string) string {
         return ""
     }
 
-    host := parsedUrl.Hostname()
+    host := parsedUrl.Host
     if "" == host {
         return ""
     }
@@ -294,7 +318,9 @@ parseSchemeWildcard recognizes a scheme-qualified wildcard pattern of the form
 "<scheme>://*.suffix" (for example "https://*.example.com"). It returns the
 scheme, the subdomain suffix, and true when the pattern is such a wildcard.
 Scheme-less patterns (for example "*.example.com") are not scheme wildcards and
-keep their scheme-agnostic host matching.
+keep their scheme-agnostic host matching. The port is significant in every
+suffix: a wildcard without one matches only portless origins, and a wildcard
+meaning to allow a port names it ("https://*.example.com:8443").
 */
 func parseSchemeWildcard(pattern string) (string, string, bool) {
     index := strings.Index(pattern, "://")

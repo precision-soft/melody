@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/.example/entity"
     "github.com/precision-soft/melody/.example/presenter"
+    "github.com/precision-soft/melody/.example/repository"
     "github.com/precision-soft/melody/.example/security"
     "github.com/precision-soft/melody/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
@@ -48,14 +49,17 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         actorUserId, _ := Actor(runtimeInstance)
 
-        if true == hasRole(targetUser.Roles, entity.RoleAdmin) {
-            if actorUserId != targetUser.Id {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "cannot modify another admin"), nil
-            }
+        if true == protectsAnotherAdmin(actorUserId, targetUser) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "cannot modify another admin"), nil
         }
 
         normalizedUsername := strings.TrimSpace(dto.Username)
         if "" != normalizedUsername {
+            /* the same spelling door the create handler holds: the username becomes a cache key component */
+            if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must not contain spaces or newlines and must stay within 255 bytes"), nil
+            }
+
             if normalizedUsername != targetUser.Username {
                 otherUser, otherExists, otherFindErr := userService.FindByUsername(normalizedUsername)
                 if nil != otherFindErr {
@@ -76,7 +80,20 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         normalizedPassword := strings.TrimSpace(dto.Password)
         if "" != normalizedPassword {
-            targetUser.Password = security.Sha256Hex(normalizedPassword)
+            if security.PasswordMaximumBytes < len(normalizedPassword) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
+            }
+
+            passwordHash, hashErr := security.HashPassword(normalizedPassword)
+            if nil != hashErr {
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
+            }
+
+            targetUser.Password = passwordHash
+        }
+
+        if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
         }
 
         targetUser.Roles = normalizeRoles(dto.Roles)
@@ -122,6 +139,19 @@ type adminUserUpdateRequest struct {
     Username string   `json:"username"`
     Password string   `json:"password"`
     Roles    []string `json:"roles"`
+}
+
+/* protectsAnotherAdmin answers whether the change the actor is asking for would touch an administrator who is not the actor. An administrator may edit and delete their own account and everyone below them, and may not reach a peer: an account that can grant roles is the one account whose holder must not be able to lock a colleague out or take their place quietly. Both the update and the delete door ask the same question, so the two cannot drift apart on who is protected — only on the words they refuse with. */
+func protectsAnotherAdmin(actorUserId string, targetUser *entity.User) bool {
+    if nil == targetUser {
+        return false
+    }
+
+    if false == hasRole(targetUser.Roles, entity.RoleAdmin) {
+        return false
+    }
+
+    return actorUserId != targetUser.Id
 }
 
 func hasRole(roles []string, role string) bool {

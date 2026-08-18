@@ -4,12 +4,14 @@
 # the dev-container exec wrappers and the check pass/fail accounting. Source it; never execute it.
 #
 # How to add a new check (stack.sh style):
-#   1. section_start "MY CHECK" "${TAG_VALIDATE}" "e2e"
+#   1. check_section_start "MY CHECK" "${TAG_VALIDATE}" "e2e"
 #   2. run_in_dev_capture "$(e2e_example_directory 3)" "go run . my:command"   # name the major the check drives
 #      then read RUN_IN_DEV_OUTPUT_STRING / RUN_IN_DEV_STATUS_INTEGER (never call it inside "$(...)")
 #   3. assert with check_pass "..." / check_fail "..." — every check needs a reachable fail branch;
 #      a check that cannot fail is a bug
-#   4. section_end "MY CHECK" "success" "${TAG_VALIDATE}" "e2e" and keep finish_checks last in the script
+#   4. check_section_end "MY CHECK" "${TAG_VALIDATE}" "e2e" — it reports the status the section's own checks
+#      earned, so never call section_end with a hardcoded "success" from a check script
+#   5. keep finish_checks last in the script and raise its expected check count by the number of checks added
 
 if [[ "1" = "${MELODY_E2E_COMMON_SOURCED:-0}" ]]; then
     return 0
@@ -24,6 +26,19 @@ REPOSITORY_ROOT_DIRECTORY_STRING="$(cd -P "${E2E_DIRECTORY_STRING}/../.." && pwd
 . "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
 
 E2E_SERVICE_NAME_STRING="dev"
+E2E_MYSQL_SERVICE_NAME_STRING="mysql"
+
+# every major's database is provisioned whatever MELODY_E2E_MAJORS narrows the RUN to: the variable picks
+# which majors are exercised, not which ones are allowed to exist, and a database missing because a previous
+# run was narrowed would surface much later as an unrelated failure.
+#
+# An ARRAY rather than a space-separated string: the e2e scripts run under IFS=$'\n\t', so a string would
+# not split on the spaces and the whole list would arrive as one element — and mysql accepts a backtick-quoted
+# identifier containing spaces, so the run would report success having created one junk database and none of
+# the three real ones
+E2E_EXAMPLE_MAJOR_NUMBER_LIST=(1 2 3)
+
+E2E_MYSQL_PROVISION_ATTEMPT_LIMIT_INTEGER=15
 
 # paths as seen from inside the dev container
 E2E_HARNESS_DIRECTORY_STRING="/app/.dev/e2e"
@@ -50,10 +65,12 @@ e2e_example_directory() {
     esac
 }
 
-# stack.sh drives the v3 example throughout: every one of its checks either exercises a module that exists only in
-# v3 (wiring, openapi, outbox, encrypt) or reaches its property through a command, a parameter or an app:info line
-# that only the v3 example application declares. It names v3 explicitly here so the choice is visible; the
-# coverage that DOES generalize across the majors lives in the run.sh harness, one section per major.
+# stack.sh drives the v3 example through this default: those checks either exercise a module that exists only in
+# v3 (wiring, openapi, outbox, encrypt) or reach their property through a command, a parameter or an app:info line
+# that only the v3 example application declares. It names v3 explicitly here so the choice is visible. The
+# sections whose banner begins with V1 address the v1 example through e2e_example_directory 1 instead of this
+# variable, for wiring only the v1 example carries; the coverage that DOES generalize across the majors lives in
+# the run.sh harness, one section per major.
 EXAMPLE_DIRECTORY_STRING="$(e2e_example_directory 3)"
 EXAMPLE_ENV_LOCAL_PATH_STRING="${EXAMPLE_DIRECTORY_STRING}/.env.local"
 
@@ -72,8 +89,27 @@ SMTP_ADDRESS="${SMTP_ADDRESS-mailpit:1025}"
 MAILPIT_API_URL="${MAILPIT_API_URL-http://mailpit:8025}"
 EXAMPLE_BASE_URL="${EXAMPLE_BASE_URL-http://127.0.0.1:8080}"
 EXAMPLE_LOAD_BALANCER_URL="${EXAMPLE_LOAD_BALANCER_URL-http://load-balancer:80}"
+# the harness's OWN connection to the database the example writes through: the mysql and two-factor sections
+# re-read a column out of band instead of trusting the value the application reported, and delete the row they
+# created. Clearing it keeps both sections running with their out-of-band halves announced as skipped.
+# The credentials are the example's own (v3/.example/.env) and the address is the compose service name on the
+# compose network, as seen from inside the dev container.
+# The database it names is v3's, because the sections that read through it drive the v3 example. The per-major
+# sections do not inherit it: each major keeps its schema in a database of its own, and the Go harness swaps
+# the database of this dsn for the major it is driving (exampleMysqlDsn in .dev/e2e/example.go).
+MYSQL_DSN="${MYSQL_DSN-melody:melody@tcp(mysql:3306)/melody_example_v3}"
+# the dev prometheus that scrapes the example's /metrics (.dev/docker/prometheus/prometheus.yml). The port is the
+# IN-NETWORK 9090, not the 9091 the host mapping publishes: every e2e variable addresses the compose services from
+# inside the dev container. Clearing it skips the scrape half of the metrics section.
+PROMETHEUS_URL="${PROMETHEUS_URL-http://prometheus:9090}"
 
 CHECK_FAILURE_COUNT_INTEGER=0
+CHECK_EXECUTED_COUNT_INTEGER=0
+
+# the failure count the section currently open began with; check_section_end compares against it to report the
+# status that section's own checks earned. One variable is enough because the check sections are flat — a check
+# script opens one section, asserts, closes it and opens the next.
+CHECK_SECTION_FAILURE_BASELINE_INTEGER=0
 
 RUN_IN_DEV_OUTPUT_STRING=""
 RUN_IN_DEV_STATUS_INTEGER=0
@@ -87,6 +123,61 @@ e2e_require_dev_service() {
     fi
 
     ensure_service_running "${E2E_SERVICE_NAME_STRING}"
+
+    e2e_ensure_example_databases
+}
+
+# each .example application holds its schema in a database of its own, all three in the one mysql container:
+# the bunorm/migrate command family builds its migrator on bun's default bookkeeping tables and bun matches
+# an applied migration by NAME, so three majors sharing one database would share one bun_migrations and the
+# first set to land would answer for the others.
+#
+# .dev/docker/mysql/init.sql creates them, but only on a FRESH volume — every development volume provisioned
+# before that file existed would otherwise refuse the examples with "unknown database". These statements are
+# the door for those: idempotent, run as root because the melody user cannot create a database, and cheap
+# enough to pay on every harness invocation.
+#
+# Clearing MYSQL_DSN opts out, the same way it opts out of the out-of-band reads: a run told there is no
+# database to reach is not asked to provision one.
+e2e_ensure_example_databases() {
+    if [[ "" = "${MYSQL_DSN}" ]]; then
+        info "MYSQL_DSN is cleared, so the per-major example databases were not provisioned"
+
+        return 0
+    fi
+
+    # the mysql service sits behind the 'all' compose profile, so the profile-blind helpers do not see it:
+    # docker_compose_service_exists reads `config --services` and ensure_service_running reads `ps -q`, and
+    # both answer empty for a profiled service. The profile is named here rather than the service looked up.
+    if [[ "" = "$(docker_compose_no_log --profile all ps -q "${E2E_MYSQL_SERVICE_NAME_STRING}" 2>/dev/null || true)" ]]; then
+        info "service ${E2E_MYSQL_SERVICE_NAME_STRING} is not running [starting]"
+        docker_compose --profile all up -d "${E2E_MYSQL_SERVICE_NAME_STRING}"
+    fi
+
+    local STATEMENT_STRING=""
+    local MAJOR_STRING
+    for MAJOR_STRING in "${E2E_EXAMPLE_MAJOR_NUMBER_LIST[@]}"; do
+        STATEMENT_STRING="${STATEMENT_STRING}CREATE DATABASE IF NOT EXISTS \`melody_example_v${MAJOR_STRING}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; "
+    done
+    STATEMENT_STRING="${STATEMENT_STRING}GRANT ALL PRIVILEGES ON \`melody\\_example\\_%\`.* TO 'melody'@'%'; FLUSH PRIVILEGES;"
+
+    # the mysql client is asked for a machine answer and the whole thing is retried: the service can report
+    # healthy through mysqladmin while the server is still finishing its own initialisation, and a create
+    # that lands then fails on a connection refused rather than on anything about the statement
+    local ATTEMPT_INTEGER=0
+    while true; do
+        if docker_compose_no_log --profile all exec -T "${E2E_MYSQL_SERVICE_NAME_STRING}" \
+            mysql -uroot -proot --batch --skip-column-names -e "${STATEMENT_STRING}" </dev/null >/dev/null 2>&1; then
+            return 0
+        fi
+
+        ATTEMPT_INTEGER=$((ATTEMPT_INTEGER + 1))
+        if [[ "${ATTEMPT_INTEGER}" -ge "${E2E_MYSQL_PROVISION_ATTEMPT_LIMIT_INTEGER}" ]]; then
+            fail "could not create the per-major example databases on the ${E2E_MYSQL_SERVICE_NAME_STRING} service after ${ATTEMPT_INTEGER} attempts"
+        fi
+
+        sleep 2
+    done
 }
 
 # builds the in-container command line: go on the PATH, GOWORK=off, the backend env exported, then cd into
@@ -109,6 +200,8 @@ e2e_dev_command() {
         " MAILPIT_API_URL='${MAILPIT_API_URL}'" \
         " EXAMPLE_BASE_URL='${EXAMPLE_BASE_URL}'" \
         " EXAMPLE_LOAD_BALANCER_URL='${EXAMPLE_LOAD_BALANCER_URL}'" \
+        " MYSQL_DSN='${MYSQL_DSN}'" \
+        " PROMETHEUS_URL='${PROMETHEUS_URL}'" \
         " MELODY_E2E_MAJORS='${MELODY_E2E_MAJORS}'" \
         "; cd ${DIRECTORY_STRING} || exit 1; ${COMMAND_STRING}"
 }
@@ -145,20 +238,53 @@ run_in_dev_capture() {
 
 check_pass() {
     printf 'PASS  %s\n' "${1}"
+    CHECK_EXECUTED_COUNT_INTEGER="$((CHECK_EXECUTED_COUNT_INTEGER + 1))"
 }
 
 check_fail() {
     printf 'FAIL  %s\n' "${1}" >&2
     CHECK_FAILURE_COUNT_INTEGER="$((CHECK_FAILURE_COUNT_INTEGER + 1))"
+    CHECK_EXECUTED_COUNT_INTEGER="$((CHECK_EXECUTED_COUNT_INTEGER + 1))"
 }
 
-# prints the summary and exits non-zero when any check failed; the label names the check family ("stack")
+# opens a check section and snapshots the failure counter, so its end can report what the section actually did
+check_section_start() {
+    CHECK_SECTION_FAILURE_BASELINE_INTEGER="${CHECK_FAILURE_COUNT_INTEGER}"
+
+    section_start "$@"
+}
+
+# closes a check section with the status its own checks earned: "failure" when the failure counter moved while the
+# section ran, "success" otherwise. A check script must never pass the status itself — a hardcoded "success" is
+# how a section that ran a check_fail still printed a green banner
+check_section_end() {
+    local TITLE_STRING="${1:?}"
+    shift
+
+    local STATUS_STRING="success"
+    if [[ ${CHECK_FAILURE_COUNT_INTEGER} -gt ${CHECK_SECTION_FAILURE_BASELINE_INTEGER} ]]; then
+        STATUS_STRING="failure"
+    fi
+
+    section_end "${TITLE_STRING}" "${STATUS_STRING}" "$@"
+}
+
+# prints the summary and exits non-zero when any check failed; the label names the check family ("stack"). The
+# expected count is what makes a DELETED check block red: no individual assertion can notice its own absence, so
+# the run states up front how many checks a complete pass executes and finishes by comparing it with the number
+# that actually ran
 finish_checks() {
     local LABEL_STRING="${1:?}"
+    local EXPECTED_COUNT_INTEGER="${2:-}"
+
+    if [[ "" != "${EXPECTED_COUNT_INTEGER}" && ${EXPECTED_COUNT_INTEGER} -ne ${CHECK_EXECUTED_COUNT_INTEGER} ]]; then
+        check_fail "the run executed ${CHECK_EXECUTED_COUNT_INTEGER} ${LABEL_STRING} check(s), expected ${EXPECTED_COUNT_INTEGER} — a check block was skipped, removed or added (update the expected count in the same change)"
+    fi
 
     if [[ 0 -lt ${CHECK_FAILURE_COUNT_INTEGER} ]]; then
         fail "${CHECK_FAILURE_COUNT_INTEGER} ${LABEL_STRING} check(s) failed"
     fi
 
-    printf '\nALL %s CHECKS PASSED\n' "$(utility_to_upper "${LABEL_STRING}")"
+    printf '\nALL %s CHECKS PASSED (%s of %s)\n' \
+        "$(utility_to_upper "${LABEL_STRING}")" "${CHECK_EXECUTED_COUNT_INTEGER}" "${EXPECTED_COUNT_INTEGER:-${CHECK_EXECUTED_COUNT_INTEGER}}"
 }

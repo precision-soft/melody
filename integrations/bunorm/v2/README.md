@@ -209,3 +209,7 @@ The hook is configured via a provider option passed to the provider constructor:
 * PostgreSQL: [`pgsql.WithPostBuildHook`](../pgsql/v2/provider_option.go) using [`pgsql.PostBuildHook`](../pgsql/v2/post_build_hook.go)
 
 The hook is executed during provider open, after Melody defaults and typed configs are applied, and before establishing the SQL connection.
+
+## Enhancements
+
+Read/write splitting, encrypted columns and an audit trail ship in the **v3 binding alone** — no `split.go`, `encrypt/` or `audit/` exists outside `integrations/bunorm/v3`, so nothing here can be reached from this module. They are documented where they live: read/write splitting in [`v3/README.md`](../v3/README.md), field encryption in [`v3/encrypt/README.md`](../v3/encrypt/README.md), and the audit trail in [`v3/audit/README.md`](../v3/audit/README.md).

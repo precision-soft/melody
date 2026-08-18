@@ -1,0 +1,17 @@
+{
+    "name": "melody-v1-example-frontend",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Frontend bundle for the melody v1 example: bundles app.ts (which builds URLs from the route manifest the example injects as window.melodyRoutes) into public/assets/app.js.",
+    "scripts": {
+        "sync-icons": "node sync-icons.mjs",
+        "prebuild": "node sync-icons.mjs",
+        "build": "esbuild app.ts --bundle --format=iife --target=es2020 --outfile=../public/assets/app.js",
+        "build:watch": "esbuild app.ts --bundle --format=iife --target=es2020 --outfile=../public/assets/app.js --watch=forever",
+        "typecheck": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "esbuild": "^0.24.0",
+        "typescript": "^5.6.0"
+    }
+}

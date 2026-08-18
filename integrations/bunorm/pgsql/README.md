@@ -11,7 +11,7 @@ This module implements [`bunorm.Provider`](../provider.go) and produces a Bun da
 
 ## Provider
 
-[`pgsql.Provider`](./provider.go) reads configuration values from Melody config using the parameter names passed to [`NewProvider`](./provider.go).
+[`pgsql.Provider`](./provider.go) reads configuration values from Melody config using the parameter names passed to [`NewProvider`](./provider.go), which also takes a variadic of [`ProviderOption`](./provider_option.go) — the shipped ones are `WithPostBuildHook`, `WithInsecure` and `WithTlsConfig`, and a caller can write their own, since the type is exported.
 
 Common parameter names:
 
@@ -21,11 +21,12 @@ Common parameter names:
 - `DB_USER`
 - `DB_PASSWORD`
 
-Pool, timeout and retry defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go) and [`WithRetryConfig`](./provider.go) methods (or up front through [`NewProviderWithConfig`](./provider.go)) using [`PoolConfig`](./pool_config.go), [`TimeoutConfig`](./timeout_config.go) and [`RetryConfig`](./retry_config.go). [`TimeoutConfig`](./timeout_config.go) carries the **connect timeout only** — unlike the MySQL provider it has no read/write timeouts, because `pgdriver` exposes no separate read/write deadlines.
+Pool, timeout and retry defaults can be overridden via the chainable [`WithPoolConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go) and [`WithRetryConfig`](./provider.go) methods (or up front through [`NewProviderWithConfig`](./provider.go)) using [`PoolConfig`](./pool_config.go), [`TimeoutConfig`](./timeout_config.go) and [`RetryConfig`](./retry_config.go). [`TimeoutConfig`](./timeout_config.go) names every deadline the driver applies — [`NewTimeoutConfig`](./timeout_config.go) takes the connect, read and write timeouts — because without explicit read and write deadlines `pgdriver` applies its own defaults, 10 seconds per read and 5 per write, which cut long statements with nothing in this configuration to mention they exist. For statements that must outlive even the configured deadlines, [`OpenForMigration`](./provider.go) opens a dedicated connection with the read and write deadlines lifted, which is what the migration commands run on.
 
 ### Defaults
 
-Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
+All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the listed default, so passing zeros to [`NewPoolConfig`](./pool_config.go) yields the defaults rather than the zeros — on `database/sql` a zero maximum means *unlimited*, which is not a sizing anyone asks for by omission. An absent `PoolConfig` or `TimeoutConfig` is the whole default ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go)). What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two — except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff ([`NewRetryConfig`](./retry_config.go) builds one field by field, and [`DefaultRetryConfig`](./retry_config.go) builds the
+same shape for callers who want it whole):
 
 | Config          | Field                   | Default |
 |-----------------|-------------------------|---------|
@@ -34,6 +35,8 @@ Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config
 | `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    |
 | `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    |
 | `TimeoutConfig` | `ConnectTimeout`        | `5s`    |
+| `TimeoutConfig` | `ReadTimeout`           | `30s`   |
+| `TimeoutConfig` | `WriteTimeout`          | `30s`   |
 | `RetryConfig`   | `MaxAttempts`           | `3`     |
 | `RetryConfig`   | `InitialDelay`          | `500ms` |
 | `RetryConfig`   | `MaxDelay`              | `5s`    |
@@ -41,13 +44,19 @@ Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config
 
 Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt.
 
+## Opening under a context, and opening for migrations
+
+- [`Provider.OpenContext`](./provider.go) implements [`bunorm.ContextOpener`](../provider.go): an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The registry prefers it and hands the context it was constructed with.
+- [`Provider.OpenForMigration`](./provider.go) implements [`bunorm.MigrationProvider`](../provider.go) and opens the same database with the read and write deadlines lifted, the connect timeout still armed, over a pool of the two connections a sequential migration run needs and with no connection recycled mid-run.
+- [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
+
 ## TLS
 
-Starting with `integrations/bunorm/pgsql/v3.1.0` the provider is **secure-by-default**: `pgdriver` negotiates a TLS handshake on every Postgres connection. Earlier releases hardcoded `pgdriver.WithInsecure(true)`, which silently disabled TLS.
+Starting with `integrations/bunorm/pgsql v1.1.4` the provider is **secure-by-default**: `pgdriver` negotiates a verified TLS handshake on every Postgres connection. Earlier releases of this module called `pgdriver.WithInsecure(false)`, which — despite the name — negotiated TLS with `InsecureSkipVerify: true`, so the server certificate was never checked.
 
 Two provider options expose the TLS knobs:
 
-- [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to restore the legacy plain-TCP behaviour (for local development or non-TLS endpoints).
+- [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to disable TLS entirely and connect over plain TCP (for local development or non-TLS endpoints). It does not *restore* an earlier default: before the verifying handshake landed, this provider connected through `pgdriver`'s own insecure mode, which despite its name negotiates TLS with `InsecureSkipVerify: true` — encrypted but unauthenticated, never plain TCP. `true` here is a deliberate step further out than that.
 - [`pgsql.WithTlsConfig(*tls.Config)`](./provider_option.go) — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. When set, it takes precedence over `WithInsecure(...)`.
 
 Example — connect against a local Postgres that does not expose TLS:
@@ -103,7 +112,15 @@ func main() {
 		pgsql.WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, connector *pgdriver.Connector) error {
 			_ = ctx
 			_ = resolver
-			connector.Config().TLSConfig.InsecureSkipVerify = true
+
+			/* WithInsecure(true) leaves TLSConfig nil, so the hook must not assume one is there */
+			tlsConfig := connector.Config().TLSConfig
+			if nil == tlsConfig {
+				return nil
+			}
+
+			tlsConfig.InsecureSkipVerify = true
+
 			return nil
 		}),
 	)

@@ -106,8 +106,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
     }
 
     if 0 != entry.ExpiresAt && time.Now().UnixNano() >= entry.ExpiresAt {
-        delete(instance.sessionById, sessionId)
-
+        /* the flush is what drops this entry: purgeExpiredLocked runs inside it against the same clock and the same predicate, so naming the session again here would only duplicate the removal */
         flushErr := instance.flushLocked()
         if nil != flushErr {
             return nil, false, flushErr
@@ -225,7 +224,9 @@ func (instance *FileStorage) Close() error {
     return nil
 }
 
-/* purgeExpiredLocked drops every lapsed session before a snapshot is written. Without it an expired session is only ever removed when a Load happens to name it, so entries accumulate forever in the map and in the file — and because every Save rewrites the whole snapshot, the write cost grows with everything that ever expired. */
+/* purgeExpiredLocked drops every lapsed session before a snapshot is written. Without it an expired session is only ever removed when a Load happens to name it, so entries accumulate forever in the map and in the file — and because every Save rewrites the whole snapshot, the write cost grows with everything that ever expired.
+
+This is the one place a lapsed entry is removed: no caller deletes the session it just found expired, they all rely on the flush below reaching this. Anything that narrows the predicate here — leaving a class of lapsed entries in place — has to give those callers their explicit delete back. */
 func (instance *FileStorage) purgeExpiredLocked() {
     now := time.Now().UnixNano()
 
@@ -236,6 +237,7 @@ func (instance *FileStorage) purgeExpiredLocked() {
     }
 }
 
+/* flushLocked writes the snapshot, and purges first — unconditionally, on every path that reaches it. That is what lets Load answer an expired session without deleting it itself; a flush that stopped purging would leave the lapsed entry in the file. */
 func (instance *FileStorage) flushLocked() error {
     instance.purgeExpiredLocked()
 

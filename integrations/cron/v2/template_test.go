@@ -1,693 +1,8 @@
 package cron
 
 import (
-    "strings"
     "testing"
 )
-
-func TestRenderProducesHeaderAndEntries(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "first",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"first"},
-            Schedule: &Schedule{
-                Minute: "0",
-                Hour:   "*",
-            },
-            LogPath: "/var/log/app/first.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    if false == strings.Contains(content, "# GENERATED FILE") {
-        t.Fatalf("expected GENERATED FILE marker, got:\n%s", content)
-    }
-
-    if false == strings.Contains(content, "# DO NOT EDIT LOCALLY") {
-        t.Fatalf("expected do-not-edit warning, got:\n%s", content)
-    }
-
-    expectedLine := "0 * * * * www-data /usr/local/bin/app first >> '/var/log/app/first.log' 2>&1"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected line %q in:\n%s", expectedLine, content)
-    }
-}
-
-func TestRenderFillsScheduleWildcardsForEmptyFields(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "everything-wildcards",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"everything-wildcards"},
-            Schedule: &Schedule{
-                Minute: "*/5",
-            },
-            LogPath: "/var/log/app.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "*/5 * * * * www-data /usr/local/bin/app everything-wildcards >> '/var/log/app.log' 2>&1"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected wildcards line %q, got:\n%s", expectedLine, content)
-    }
-}
-
-func TestRenderOmitsLogRedirectionWhenLogPathEmpty(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "no-log",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"no-log"},
-            Schedule: &Schedule{
-                Minute: "*",
-            },
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    if true == strings.Contains(content, " >> ") {
-        t.Fatalf("expected no log redirection, got:\n%s", content)
-    }
-
-    if true == strings.Contains(content, "2>&1") {
-        t.Fatalf("expected no stderr redirection, got:\n%s", content)
-    }
-}
-
-func TestRenderReturnsErrorWhenEntryUserEmpty(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "missing-user",
-            Binary: "/bin/foo",
-            Args:   []string{"missing-user"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/tmp/x.log",
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when entry user is empty, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "missing-user") {
-        t.Fatalf("expected error to mention command name, got: %v", err)
-    }
-}
-
-func TestRenderReturnsErrorWhenEntryBinaryEmpty(t *testing.T) {
-    entries := []Entry{
-        {
-            Name: "missing-binary",
-            User: "www-data",
-            Args: []string{"missing-binary"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when entry binary is empty, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "missing-binary") {
-        t.Fatalf("expected error to mention command name, got: %v", err)
-    }
-}
-
-func TestRenderUsesCustomUserWhenProvided(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "custom",
-            User:   "ec2-user",
-            Binary: "/bin/foo",
-            Args:   []string{"custom"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/tmp/x.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    if false == strings.Contains(content, " ec2-user /bin/foo ") {
-        t.Fatalf("expected ec2-user user in line, got:\n%s", content)
-    }
-}
-
-func TestRenderEmitsHeartbeatWhenConfigured(t *testing.T) {
-    content, err := Render(nil, RenderOptions{
-        HeartbeatUser: "www-data",
-        HeartbeatPath: "/var/log/cron/heartbeat.crontab",
-    })
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    if false == strings.Contains(content, "* * * * * www-data /bin/touch /var/log/cron/heartbeat.crontab") {
-        t.Fatalf("expected heartbeat line, got:\n%s", content)
-    }
-}
-
-func TestRenderReturnsErrorWhenHeartbeatUserEmpty(t *testing.T) {
-    _, err := Render(nil, RenderOptions{
-        HeartbeatPath: "/var/log/cron/heartbeat.crontab",
-    })
-
-    if nil == err {
-        t.Fatalf("expected error when heartbeat path is set without a user, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "heartbeat user") {
-        t.Fatalf("expected error to mention heartbeat user, got: %v", err)
-    }
-}
-
-func TestRenderOmitsHeartbeatWhenPathEmpty(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "any",
-            User:   "www-data",
-            Binary: "/bin/foo",
-            Args:   []string{"any"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/tmp/x.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    if true == strings.Contains(content, "/bin/touch") {
-        t.Fatalf("expected no heartbeat line, got:\n%s", content)
-    }
-}
-
-func TestRenderHandlesMultipleArgsCorrectly(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "multi-arg",
-            User:   "www-data",
-            Binary: "/bin/echo",
-            Args:   []string{"foo", "bar", "baz"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/tmp/x.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "0 * * * * www-data /bin/echo foo bar baz >> '/tmp/x.log' 2>&1"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected line %q, got:\n%s", expectedLine, content)
-    }
-}
-
-func TestRenderEndsWithFooter(t *testing.T) {
-    content, err := Render(nil, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    if false == strings.HasSuffix(content, "#############################################################################\n") {
-        t.Fatalf("expected trailing footer block, got:\n%s", content)
-    }
-}
-
-func TestRenderUsesScheduleCommandWhenProvided(t *testing.T) {
-    entries := []Entry{
-        {
-            Name: "wrapped",
-            User: "www-data",
-            Schedule: &Schedule{
-                Minute: "0",
-                Hour:   "5",
-            },
-            Command: []string{"/usr/bin/flock", "-n", "/tmp/lock", "/opt/melody/app", "wrapped"},
-            LogPath: "/var/log/wrapped.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "0 5 * * * www-data /usr/bin/flock -n /tmp/lock /opt/melody/app wrapped >> '/var/log/wrapped.log' 2>&1"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected custom command line %q in:\n%s", expectedLine, content)
-    }
-}
-
-func TestRenderReturnsErrorWhenEntryHasNeitherCommandNorBinary(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:     "no-command",
-            User:     "www-data",
-            Schedule: &Schedule{Minute: "0"},
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when entry has neither Command nor Binary, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "no-command") {
-        t.Fatalf("expected error to mention command name, got: %v", err)
-    }
-}
-
-func TestRenderEmitsHeartbeatCommandWhenProvided(t *testing.T) {
-    content, err := Render(nil, RenderOptions{
-        HeartbeatUser:    "monitor",
-        HeartbeatCommand: []string{"/usr/bin/curl", "-fsS", "https://heartbeat.example.com/ping"},
-    })
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "* * * * * monitor /usr/bin/curl -fsS https://heartbeat.example.com/ping"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected custom heartbeat line %q in:\n%s", expectedLine, content)
-    }
-
-    if true == strings.Contains(content, "/bin/touch") {
-        t.Fatalf("expected /bin/touch fallback to be skipped when HeartbeatCommand is set; got:\n%s", content)
-    }
-}
-
-func TestRenderHeartbeatCommandTakesPrecedenceOverPath(t *testing.T) {
-    content, err := Render(nil, RenderOptions{
-        HeartbeatUser:    "monitor",
-        HeartbeatPath:    "/var/log/heartbeat",
-        HeartbeatCommand: []string{"/bin/echo", "alive"},
-    })
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    if true == strings.Contains(content, "/bin/touch") {
-        t.Fatalf("expected HeartbeatCommand to override HeartbeatPath; got:\n%s", content)
-    }
-
-    if false == strings.Contains(content, "* * * * * monitor /bin/echo alive") {
-        t.Fatalf("expected HeartbeatCommand line in:\n%s", content)
-    }
-}
-
-func TestRenderReturnsErrorWhenHeartbeatCommandHasNoUser(t *testing.T) {
-    _, err := Render(nil, RenderOptions{
-        HeartbeatCommand: []string{"/bin/echo", "alive"},
-    })
-
-    if nil == err {
-        t.Fatalf("expected error when HeartbeatCommand set without HeartbeatUser, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "heartbeat user") {
-        t.Fatalf("expected error to mention heartbeat user, got: %v", err)
-    }
-}
-
-func TestRenderShellQuotesArgsContainingSpaces(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "with-space-arg",
-            User:   "www-data",
-            Binary: "/usr/bin/echo",
-            Args:   []string{"hello world", "next"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/var/log/x.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "0 * * * * www-data /usr/bin/echo 'hello world' next >> '/var/log/x.log' 2>&1"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected per-token quoting around the spaced arg, got:\n%s", content)
-    }
-}
-
-func TestRenderShellQuotesScheduleCommandTokens(t *testing.T) {
-    entries := []Entry{
-        {
-            Name: "wrapped",
-            User: "www-data",
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            Command: []string{"/usr/bin/flock", "-n", "/tmp/lock with space", "/opt/melody/app", "wrapped"},
-            LogPath: "/var/log/wrapped.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "0 * * * * www-data /usr/bin/flock -n '/tmp/lock with space' /opt/melody/app wrapped >> '/var/log/wrapped.log' 2>&1"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected per-token quote on the spaced token, got:\n%s", content)
-    }
-}
-
-func TestRenderEscapesEmbeddedSingleQuoteInLogPath(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "with-quote",
-            User:   "www-data",
-            Binary: "/bin/echo",
-            Args:   []string{"hello"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/var/log/o'reilly.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedRedirect := ` >> '/var/log/o'\''reilly.log' 2>&1`
-    if false == strings.Contains(content, expectedRedirect) {
-        t.Fatalf("expected POSIX-escaped single quote in log path, got:\n%s", content)
-    }
-}
-
-func TestRenderQuotesHeartbeatPathWithSpaces(t *testing.T) {
-    content, err := Render(nil, RenderOptions{
-        HeartbeatUser: "www-data",
-        HeartbeatPath: "/var/log/has space/heartbeat",
-    })
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "* * * * * www-data /bin/touch '/var/log/has space/heartbeat'"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected quoted heartbeat path, got:\n%s", content)
-    }
-}
-
-func TestRenderShellQuotesHeartbeatCommandTokens(t *testing.T) {
-    content, err := Render(nil, RenderOptions{
-        HeartbeatUser:    "monitor",
-        HeartbeatCommand: []string{"/usr/bin/curl", "-fsS", "https://heartbeat.example.com/ping?token=$X"},
-    })
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := `* * * * * monitor /usr/bin/curl -fsS 'https://heartbeat.example.com/ping?token=$X'`
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected per-token quoting in heartbeat command, got:\n%s", content)
-    }
-}
-
-func TestRenderQuotesEmptyStringToken(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "empty-arg",
-            User:   "www-data",
-            Binary: "/bin/echo",
-            Args:   []string{"", "after"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/tmp/x.log",
-        },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "0 * * * * www-data /bin/echo '' after >> '/tmp/x.log' 2>&1"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected empty token rendered as '', got:\n%s", content)
-    }
-}
-
-func TestRenderRejectsEntryArgContainingPercent(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "stamper",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"--time=%H"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when entry arg contains %%, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "%") || false == strings.Contains(err.Error(), "stamper") {
-        t.Fatalf("expected error to mention %% and entry name, got: %v", err)
-    }
-}
-
-func TestRenderRejectsCustomCommandContainingPercent(t *testing.T) {
-    entries := []Entry{
-        {
-            Name: "stamper",
-            User: "www-data",
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            Command: []string{"/bin/date", "+%Y"},
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when custom Command contains %%, got nil")
-    }
-}
-
-func TestRenderRejectsLogPathContainingPercent(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "rotated",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"rotated"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/var/log/app/%Y.log",
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when LogPath contains %%, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "log path") {
-        t.Fatalf("expected error to mention log path, got: %v", err)
-    }
-}
-
-func TestRenderRejectsHeartbeatCommandContainingPercent(t *testing.T) {
-    options := RenderOptions{
-        HeartbeatUser:    "www-data",
-        HeartbeatCommand: []string{"/bin/echo", "100%"},
-    }
-
-    _, err := Render(nil, options)
-    if nil == err {
-        t.Fatalf("expected error when HeartbeatCommand contains %%, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "heartbeat command") {
-        t.Fatalf("expected error to mention heartbeat command, got: %v", err)
-    }
-}
-
-func TestRenderRejectsHeartbeatPathContainingPercent(t *testing.T) {
-    options := RenderOptions{
-        HeartbeatUser: "www-data",
-        HeartbeatPath: "/tmp/%H.beat",
-    }
-
-    _, err := Render(nil, options)
-    if nil == err {
-        t.Fatalf("expected error when HeartbeatPath contains %%, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "heartbeat path") {
-        t.Fatalf("expected error to mention heartbeat path, got: %v", err)
-    }
-}
-
-func TestRenderRejectsEntryArgContainingNewline(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "stamper",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"line1\nline2"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when entry arg contains newline, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "stamper") {
-        t.Fatalf("expected error to mention entry name, got: %v", err)
-    }
-}
-
-func TestRenderRejectsLogPathContainingNewline(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "rotated",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"rotated"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            LogPath: "/var/log/app\nrotated.log",
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when LogPath contains newline, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "log path") {
-        t.Fatalf("expected error to mention log path, got: %v", err)
-    }
-}
-
-func TestRenderRejectsHeartbeatCommandContainingNewline(t *testing.T) {
-    options := RenderOptions{
-        HeartbeatUser:    "www-data",
-        HeartbeatCommand: []string{"/bin/echo", "line1\nline2"},
-    }
-
-    _, err := Render(nil, options)
-    if nil == err {
-        t.Fatalf("expected error when HeartbeatCommand contains newline, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "heartbeat command") {
-        t.Fatalf("expected error to mention heartbeat command, got: %v", err)
-    }
-}
-
-func TestRenderRejectsHeartbeatPathContainingNewline(t *testing.T) {
-    options := RenderOptions{
-        HeartbeatUser: "www-data",
-        HeartbeatPath: "/tmp/beat\nfile",
-    }
-
-    _, err := Render(nil, options)
-    if nil == err {
-        t.Fatalf("expected error when HeartbeatPath contains newline, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "heartbeat path") {
-        t.Fatalf("expected error to mention heartbeat path, got: %v", err)
-    }
-}
-
-func TestRenderRejectsScheduleCommandWithOnlyEmptyTokens(t *testing.T) {
-    entries := []Entry{
-        {
-            Name: "stamper",
-            User: "www-data",
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            Command: []string{"", "", ""},
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when Command tokens are all empty, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "stamper") || false == strings.Contains(err.Error(), "every token is empty") {
-        t.Fatalf("expected error to mention entry name and empty tokens, got: %v", err)
-    }
-}
-
-func TestRenderRejectsScheduleCommandContainingCarriageReturn(t *testing.T) {
-    entries := []Entry{
-        {
-            Name: "stamper",
-            User: "www-data",
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-            Command: []string{"/bin/echo", "value\r"},
-        },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when Schedule.Command token contains carriage return, got nil")
-    }
-}
 
 func TestBuiltinTemplatesReturnsCrontabVariants(t *testing.T) {
     templates := BuiltinTemplates()
@@ -709,238 +24,105 @@ func TestBuiltinTemplatesReturnsCrontabVariants(t *testing.T) {
     }
 }
 
-func TestRenderRejectsWhitespaceInScheduleField(t *testing.T) {
+/* the package-level Render is the door onto the crontab template, so it answers what that template answers rather than a shape of its own. */
+func TestRender_RendersThroughTheCrontabTemplate(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "broken",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"broken"},
-            Schedule: &Schedule{
-                Minute: "0 30",
-                Hour:   "*",
-            },
-            LogPath: "/var/log/app/broken.log",
+            Name:     "backup:run",
+            User:     "apache",
+            Binary:   "/usr/local/bin/fakeapp",
+            Args:     []string{"backup:run"},
+            Schedule: &Schedule{Minute: "0", Hour: "2"},
         },
     }
 
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when Schedule.Minute contains whitespace, got nil")
+    rendered, renderErr := Render(entries, RenderOptions{})
+    if nil != renderErr {
+        t.Fatalf("Render: %v", renderErr)
     }
 
-    if false == strings.Contains(err.Error(), "whitespace in Schedule.Minute") {
-        t.Fatalf("expected error to mention whitespace in Schedule.Minute, got: %v", err)
+    direct, directErr := defaultCrontabTemplate.Render(entries, RenderOptions{})
+    if nil != directErr {
+        t.Fatalf("the crontab template: %v", directErr)
+    }
+
+    if direct != rendered {
+        t.Fatalf("Render must answer what the crontab template answers\n got: %s\nwant: %s", rendered, direct)
     }
 }
 
-func TestRenderAcceptsRangeAndStepNotation(t *testing.T) {
-    entries := []Entry{
+type userColumnAnsweringTemplate struct {
+    name             string
+    rendersUserColum bool
+}
+
+func (instance *userColumnAnsweringTemplate) Name() string {
+    return instance.name
+}
+
+func (instance *userColumnAnsweringTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    return "", nil
+}
+
+func (instance *userColumnAnsweringTemplate) RendersUserColumn() bool {
+    return instance.rendersUserColum
+}
+
+type silentTemplate struct {
+    name string
+}
+
+func (instance *silentTemplate) Name() string {
+    return instance.name
+}
+
+func (instance *silentTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    return "", nil
+}
+
+/* a template that answers for itself is believed whatever it is called, and one that does not is judged by the builtin name — the only thing the generator can read about a dialect it was handed. Deciding on the name alone made every registered dialect that renders no user column, the readme's own kubernetes example among them, demand a crontab user it would never render. */
+func TestTemplateRendersUserColumn_AsksTheTemplateBeforeTheName(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        template Template
+        expected bool
+    }{
         {
-            Name:   "valid",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"valid"},
-            Schedule: &Schedule{
-                Minute:     "*/15",
-                Hour:       "9-17",
-                DayOfMonth: "1,15",
-                Month:      "*",
-                DayOfWeek:  "mon-fri",
-            },
-            LogPath: "/var/log/app/valid.log",
+            name:     "a registered dialect answering no is believed under a name that means yes",
+            template: &userColumnAnsweringTemplate{name: TemplateNameCrontab, rendersUserColum: false},
+            expected: false,
         },
-    }
-
-    content, err := Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error for valid step/range/list syntax: %v", err)
-    }
-
-    if false == strings.Contains(content, "*/15 9-17 1,15 * mon-fri") {
-        t.Fatalf("expected rendered expression to preserve step/range/list syntax, got:\n%s", content)
-    }
-}
-
-func TestRenderRejectsEntryUserContainingWhitespace(t *testing.T) {
-    entries := []Entry{
         {
-            Name:   "bad-user",
-            User:   "www data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"bad-user"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
+            name:     "a registered dialect answering yes is believed under a name that means no",
+            template: &userColumnAnsweringTemplate{name: TemplateNameCrontabNoUser, rendersUserColum: true},
+            expected: true,
         },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when entry user contains whitespace, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "bad-user") {
-        t.Fatalf("expected error to mention entry name, got: %v", err)
-    }
-
-    if false == strings.Contains(err.Error(), "whitespace") {
-        t.Fatalf("expected error to mention whitespace, got: %v", err)
-    }
-}
-
-func TestRenderRejectsEntryUserContainingNewline(t *testing.T) {
-    entries := []Entry{
         {
-            Name:   "bad-user",
-            User:   "www\ndata",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"bad-user"},
-            Schedule: &Schedule{
-                Minute: "0",
-            },
+            name:     "a dialect that does not answer falls back to its name",
+            template: &silentTemplate{name: TemplateNameCrontabNoUser},
+            expected: false,
         },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when entry user contains newline, got nil")
-    }
-}
-
-func TestRenderRejectsHeartbeatUserContainingWhitespace(t *testing.T) {
-    _, err := Render(nil, RenderOptions{
-        HeartbeatUser: "www data",
-        HeartbeatPath: "/var/log/heartbeat",
-    })
-
-    if nil == err {
-        t.Fatalf("expected error when heartbeat user contains whitespace, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "heartbeat user") {
-        t.Fatalf("expected error to mention heartbeat user, got: %v", err)
-    }
-}
-
-func TestRenderRejectsHeartbeatUserContainingNewlineForCommand(t *testing.T) {
-    _, err := Render(nil, RenderOptions{
-        HeartbeatUser:    "www\ndata",
-        HeartbeatCommand: []string{"/bin/echo", "alive"},
-    })
-
-    if nil == err {
-        t.Fatalf("expected error when heartbeat user contains newline (command branch), got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "heartbeat user") {
-        t.Fatalf("expected error to mention heartbeat user, got: %v", err)
-    }
-}
-
-func TestRenderRejectsCarriageReturnInScheduleField(t *testing.T) {
-    entries := []Entry{
         {
-            Name:   "stamper",
-            User:   "www-data",
-            Binary: "/usr/bin/app",
-            Args:   []string{"stamper"},
-            Schedule: &Schedule{
-                Minute: "0\r",
-                Hour:   "3",
-            },
+            name:     "a dialect of the integrator's own, silent, is assumed to render one",
+            template: &silentTemplate{name: "kubernetes-cronjob"},
+            expected: true,
         },
-    }
-
-    _, err := Render(entries, RenderOptions{})
-    if nil == err {
-        t.Fatalf("expected error when Schedule.Minute contains carriage return, got nil")
-    }
-
-    if false == strings.Contains(err.Error(), "Minute") {
-        t.Fatalf("expected error to mention the offending field Minute, got: %v", err)
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            if testCase.expected != templateRendersUserColumn(testCase.template) {
+                t.Fatalf("renders a user column = %v, want %v", templateRendersUserColumn(testCase.template), testCase.expected)
+            }
+        })
     }
 }
 
-func TestCrontabNoUserTemplateOmitsTheUserColumn(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "busybox-job",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"tick"},
-            Schedule: &Schedule{
-                Minute: "0",
-                Hour:   "*",
-            },
-            LogPath: "/var/log/app/tick.log",
-        },
+/* the builtins keep answering what they always answered */
+func TestTemplateRendersUserColumn_AnswersForTheBuiltins(t *testing.T) {
+    if false == templateRendersUserColumn(defaultCrontabTemplate) {
+        t.Fatal("the crontab dialect renders a user column")
     }
 
-    content, err := defaultCrontabNoUserTemplate.Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("Render returned unexpected error: %v", err)
-    }
-
-    expectedLine := "0 * * * * /usr/local/bin/app tick >> '/var/log/app/tick.log' 2>&1"
-    if false == strings.Contains(content, expectedLine) {
-        t.Fatalf("expected line %q in:\n%s", expectedLine, content)
-    }
-
-    if true == strings.Contains(content, "www-data") {
-        t.Fatalf("expected the user column to be omitted, got:\n%s", content)
-    }
-
-    if false == strings.Contains(content, "user-less dialect") {
-        t.Fatalf("expected the user-less header, got:\n%s", content)
-    }
-}
-
-func TestCrontabNoUserTemplateAcceptsEntriesWithoutUser(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "no-user-job",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"tick"},
-            Schedule: &Schedule{
-                Minute: "*/5",
-            },
-        },
-    }
-
-    content, err := defaultCrontabNoUserTemplate.Render(entries, RenderOptions{})
-    if nil != err {
-        t.Fatalf("expected the user-less dialect to accept an empty user, got: %v", err)
-    }
-
-    if false == strings.Contains(content, "*/5 * * * * /usr/local/bin/app tick") {
-        t.Fatalf("unexpected content:\n%s", content)
-    }
-}
-
-func TestCrontabNoUserTemplateHeartbeatWithoutUser(t *testing.T) {
-    content, err := defaultCrontabNoUserTemplate.Render(nil, RenderOptions{HeartbeatPath: "/var/run/cron.heartbeat"})
-    if nil != err {
-        t.Fatalf("expected the user-less heartbeat to render without a user, got: %v", err)
-    }
-
-    if false == strings.Contains(content, "* * * * * /bin/touch /var/run/cron.heartbeat") {
-        t.Fatalf("unexpected heartbeat line:\n%s", content)
-    }
-}
-
-func TestCrontabTemplateStillRequiresTheUser(t *testing.T) {
-    entries := []Entry{
-        {
-            Name:   "cron-d-job",
-            Binary: "/usr/local/bin/app",
-            Schedule: &Schedule{
-                Minute: "0",
-            },
-        },
-    }
-
-    if _, err := Render(entries, RenderOptions{}); nil == err {
-        t.Fatalf("expected the /etc/cron.d dialect to keep requiring a user")
+    if true == templateRendersUserColumn(defaultCrontabNoUserTemplate) {
+        t.Fatal("the crontab-no-user dialect renders none")
     }
 }

@@ -5,10 +5,15 @@ import (
 
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 func NewApiKeyHeaderRule(matcher securitycontract.Matcher, headerName string, expectedValue string) *ApiKeyHeaderRule {
+    if true == internal.IsNilInterface(matcher) {
+        exception.Panic(exception.NewError("api key header rule matcher is nil", nil, nil))
+    }
+
     if "" == headerName {
         exception.Panic(exception.NewError("api key header rule header name is empty", nil, nil))
     }

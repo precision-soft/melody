@@ -658,7 +658,6 @@ func TestGenerate_ResponseWithoutBodyTypeIsDescribed(t *testing.T) {
     }
 }
 
-
 func TestGenerate_OptionalTailSegmentIsMirroredAsBothPaths(t *testing.T) {
     registry := NewRegistry().Describe(
         "page.show",

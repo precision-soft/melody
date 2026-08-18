@@ -24,7 +24,7 @@ type actorView struct {
 
 /* WhoamiHandler echoes the principal the internal-auth (HMAC) firewall authenticated: the calling service
 and its registry roles, plus the originating actor the caller propagated (F1), if any. It reads the token
-straight from the security context the firewall populated — a working demo that the HMAC envelope both
+straight from the security context the firewall populated — working proof that the HMAC envelope both
 authenticates the service and carries the upstream human actor across the service boundary. */
 func WhoamiHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {

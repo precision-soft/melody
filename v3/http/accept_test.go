@@ -65,7 +65,15 @@ func TestPrefersHtml_ReturnsFalseForWildcard(t *testing.T) {
 func TestPrefersHtml_CaseInsensitive(t *testing.T) {
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "Text/HTML")
     if false == PrefersHtml(request) {
-        t.Fatalf("expected true for case-insensitive text/html match")
+        t.Fatalf("expected true for a case-insensitive html type on its own")
+    }
+}
+
+/* @info the header above carries one type, so nothing about it exercises the comparison of two. Both entries are kept: folding them into one lost the single-type case entirely, and the two reach the parser differently — one takes the whole header as the type, the other has to split it first and fold the case of each part. */
+func TestPrefersHtml_CaseInsensitiveAheadOfAnotherType(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "Text/HTML,Application/JSON")
+    if false == PrefersHtml(request) {
+        t.Fatalf("expected true for case-insensitive html before json")
     }
 }
 
@@ -117,5 +125,12 @@ func TestPrefersHtml_HonoursQualityValues(t *testing.T) {
         if testCase.expected != actual {
             t.Fatalf("Accept %q: expected prefersHtml=%v, got %v", testCase.acceptHeader, testCase.expected, actual)
         }
+    }
+}
+
+func TestPrefersHtml_ReturnsFalseForNeither(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "application/xml,text/plain")
+    if true == PrefersHtml(request) {
+        t.Fatalf("expected false when neither text/html nor application/json is present")
     }
 }

@@ -48,3 +48,27 @@ func TestPathPrefixMatcher_NilRequestDoesNotMatch(t *testing.T) {
         t.Fatalf("expected matcher to not match a nil request")
     }
 }
+
+func TestPathPrefixMatcher_RequestWithoutAnHttpRequestDoesNotMatch(t *testing.T) {
+    matcher := NewPathPrefixMatcher("/admin")
+
+    if true == matcher.Matches(&requestWithoutHttpRequest{}) {
+        t.Fatalf("expected a request without an http request to match nothing")
+    }
+}
+
+func TestPathPrefixMatcher_EmptyPrefixMatchesEveryRequest(t *testing.T) {
+    matcher := NewPathPrefixMatcher("")
+
+    if false == matcher.Matches(newFirewallTestRequest("/anything")) {
+        t.Fatalf("expected the empty prefix to match")
+    }
+
+    if true == matcher.Matches(nil) {
+        t.Fatalf("expected the empty prefix to still refuse a nil request")
+    }
+
+    if true == matcher.Matches(&requestWithoutHttpRequest{}) {
+        t.Fatalf("expected the empty prefix to still refuse a request without an http request")
+    }
+}

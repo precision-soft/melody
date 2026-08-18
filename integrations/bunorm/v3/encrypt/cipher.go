@@ -100,23 +100,17 @@ func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, 
     return candidates, nil
 }
 
+/* Decrypt returns the plaintext of a value this cipher sealed, and passes a value that carries no marker straight through: a column is converted one write at a time, so the rows not yet sealed must keep reading, and that pass-through is what makes an incremental migration possible.
+
+A value that DOES carry the marker is not eligible for that pass-through. The marker is written by seal and by nothing else, so its presence is the framework's own claim that the value was encrypted here; a body behind it that no longer parses is damage. The way it happens in practice is a column too narrow for the ciphertext under a non-strict sql_mode, where MySQL truncates the value the UPDATE wrote and reports a warning instead of failing. Handing the caller that fragment as though the application had stored it is silent corruption — the row reads as a marker, a key id and half a base64 blob, and every later write and comparison builds on it. It is an error instead. */
 func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
-    if false == looksEncrypted(encoded) {
+    if false == hasEncryptionMarker(encoded) {
         return encoded, nil
     }
 
-    body := encoded[len(markerPrefix):]
-
-    separator := strings.IndexByte(body, ':')
-    if -1 == separator {
-        return "", exception.NewError("encrypted value is malformed", nil, nil)
-    }
-
-    keyId := body[:separator]
-
-    payload, decodeErr := base64.RawStdEncoding.DecodeString(body[separator+1:])
+    keyId, payload, decodeErr := decodeEncrypted(encoded)
     if nil != decodeErr {
-        return "", exception.NewError("encrypted value is not valid base64", nil, decodeErr)
+        return "", decodeErr
     }
 
     key, keyErr := instance.keys.Key(keyId)
@@ -144,9 +138,11 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     return string(plaintext), nil
 }
 
-/* @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a key currently in the key set. A retired key stays in the set (still decryptable) until re-encryption completes and is only then removed, so a value sealed under it is not destroyed by double encryption; a marker-shaped value bearing an unknown key id is treated as ordinary plaintext and sealed under the current key instead of being stored verbatim. */
+/* @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a key currently in the key set. A retired key stays in the set (still decryptable) until re-encryption completes and is only then removed, so a value sealed under it is not destroyed by double encryption; a marker-shaped value bearing an unknown key id, or one whose payload does not parse at all, is treated as ordinary plaintext and sealed under the current key instead of being stored verbatim.
+
+This is the write side, and it is deliberately the lenient one: what arrives here is application data, and an application is free to hold a string that merely looks like a marker. Sealing it is the safe answer. Reading is the strict side — a marker that comes back OUT of the database was put there by this cipher, so a payload that no longer parses is reported rather than passed off as plaintext. */
 func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
-    if false == looksEncrypted(value) {
+    if false == hasEncryptionMarker(value) {
         return false
     }
 
@@ -203,15 +199,18 @@ func gcmForKey(key []byte, keyId string) (cipher.AEAD, error) {
     return gcm, nil
 }
 
-func keyIdOf(encoded string) (string, bool) {
-    if false == looksEncrypted(encoded) {
-        return "", false
+/* keyIdOf reports the key id a stored value was sealed under. A value carrying no marker is ordinary plaintext and reports no key id, which is how a bulk migration tells a converted row from one still waiting. A value carrying the marker whose payload no longer parses is damage and is reported as an error, so a migration stops on it instead of classifying it as plaintext and sealing the wreckage a second time. */
+func keyIdOf(encoded string) (string, bool, error) {
+    if false == hasEncryptionMarker(encoded) {
+        return "", false, nil
     }
 
-    body := encoded[len(markerPrefix):]
-    separator := strings.IndexByte(body, ':')
+    keyId, _, decodeErr := decodeEncrypted(encoded)
+    if nil != decodeErr {
+        return "", false, decodeErr
+    }
 
-    return body[:separator], true
+    return keyId, true, nil
 }
 
 func deterministicNonce(key []byte, plaintext string, size int) []byte {
@@ -225,22 +224,36 @@ func deterministicNonce(key []byte, plaintext string, size int) []byte {
     return nonceMac.Sum(nil)[:size]
 }
 
-func looksEncrypted(value string) bool {
-    if false == strings.HasPrefix(value, markerPrefix) {
-        return false
-    }
+/* hasEncryptionMarker reports whether a value carries the framework's own encryption marker. The marker is emitted by seal and by nothing else, so it is a claim of provenance rather than a heuristic: a value that carries it came out of this cipher, and what follows it is required to be a well-formed sealed body. Provenance and well-formedness are deliberately separate questions — conflating them is what let a truncated ciphertext be mistaken for plaintext. */
+func hasEncryptionMarker(value string) bool {
+    return strings.HasPrefix(value, markerPrefix)
+}
 
+/* decodeEncrypted splits the body behind the marker into its key id and its raw payload, and refuses a body that is no longer one.
+
+The caller must have established the marker first: this reads the body positionally and says nothing about values that carry no marker, which are ordinary plaintext and belong to no key. Every failure here means the same thing — a value this cipher wrote came back changed — so each is reported rather than absorbed. The length floor is the nonce: a payload shorter than one cannot even be split into nonce and ciphertext, so a shortfall is structural damage and not an authentication failure to be blamed on a key. */
+func decodeEncrypted(value string) (string, []byte, error) {
     body := value[len(markerPrefix):]
 
     separator := strings.IndexByte(body, ':')
     if -1 == separator || 0 == separator {
-        return false
+        return "", nil, exception.NewError("encrypted value is malformed", nil, nil)
     }
+
+    keyId := body[:separator]
 
     payload, decodeErr := base64.RawStdEncoding.DecodeString(body[separator+1:])
     if nil != decodeErr {
-        return false
+        return "", nil, exception.NewError("encrypted value is not valid base64", map[string]any{"keyId": keyId}, decodeErr)
     }
 
-    return len(payload) >= minNonceSize
+    if len(payload) < minNonceSize {
+        return "", nil, exception.NewError(
+            "encrypted value is too short",
+            map[string]any{"keyId": keyId, "payloadBytes": len(payload)},
+            nil,
+        )
+    }
+
+    return keyId, payload, nil
 }

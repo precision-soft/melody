@@ -16,11 +16,31 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter("app.catalog_title", "%APP_CATALOG_TITLE%")
     registrar.RegisterParameter("app.cron.product_user", "%APP_CRON_PRODUCT_USER%")
 
-    /* @info the optional-and-secret shapes the configuration supports: the refresh interval falls back to the parameter below when APP_REFRESH_INTERVAL is unset, and the api token registered automatically from .env is marked as a credential so debug:parameters redacts it along with anything whose template reads it */
+    /* the optional-and-secret shapes the configuration supports: the refresh interval falls back to the parameter below when APP_REFRESH_INTERVAL is unset, and the api token registered automatically from .env is marked as a credential so debug:parameters redacts it along with anything whose template reads it — app.api_token included */
     registrar.RegisterParameter("app.default_refresh_interval", "5m")
     registrar.RegisterParameter("app.refresh_interval", "%env(default:app.default_refresh_interval:APP_REFRESH_INTERVAL)%")
 
+    /* the showcase wirings follow the integrations' switch: an empty value leaves the door unwired — no api firewall, no cors listeners, the in-memory session storage */
+    registrar.RegisterParameter(ParameterApiToken, "%env(default::APP_API_TOKEN)%")
+    registrar.RegisterParameter(ParameterCorsAllowOrigins, "%env(default::APP_CORS_ALLOW_ORIGINS)%")
+    registrar.RegisterParameter(ParameterSessionFile, "%env(default::APP_SESSION_FILE)%")
+
+    /* the live integrations read their endpoints from parameters, each with a registered fallback so a partially set environment cannot leave a name the providers resolve undefined. An empty value is the switch: the example then wires the integration not at all. */
+    registrar.RegisterParameter("app.database.default_port", "3306")
+    registrar.RegisterParameter(ParameterDatabaseHost, "%env(default::MYSQL_HOST)%")
+    registrar.RegisterParameter(ParameterDatabasePort, "%env(default:app.database.default_port:MYSQL_PORT)%")
+    registrar.RegisterParameter(ParameterDatabaseName, "%env(default::MYSQL_DATABASE)%")
+    registrar.RegisterParameter(ParameterDatabaseUser, "%env(default::MYSQL_USER)%")
+    registrar.RegisterParameter(ParameterDatabasePassword, "%env(default::MYSQL_PASSWORD)%")
+    registrar.RegisterParameter(ParameterDatabaseInsecure, "%env(default::MYSQL_INSECURE)%")
+
+    registrar.RegisterParameter(ParameterRedisAddress, "%env(default::REDIS_ADDRESS)%")
+    registrar.RegisterParameter(ParameterRedisUser, "%env(default::REDIS_USER)%")
+    registrar.RegisterParameter(ParameterRedisPassword, "%env(default::REDIS_PASSWORD)%")
+
     registrar.MarkParameterSecret("APP_API_TOKEN")
+    registrar.MarkParameterSecret("MYSQL_PASSWORD")
+    registrar.MarkParameterSecret("REDIS_PASSWORD")
 }
 
 var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)

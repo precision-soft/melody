@@ -109,7 +109,9 @@ func RunExclusive(
     return true, runErr
 }
 
-/* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the first refresh failure. A non-positive ttl means a session-style lock: Refresh is then a liveness probe at defaultSessionProbeInterval, and the nominal positive ttl the contract requires is the probe interval itself. */
+/* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the failure that cost the lease. A non-positive ttl means a session-style lock: Refresh is then a liveness probe at defaultSessionProbeInterval, and the nominal positive ttl the contract requires is the probe interval itself.
+
+What demotes the caller is the lease clock, not the outcome of any single call. A renewal that answers slowly still renewed: the store took the write, the lease now runs a full ttl from it, and treating the latency as a lost lease cancels work that was never in danger — which is what a per-call verdict does, and what it did here to a call that succeeded inside the lease it was renewing. So a failed or abandoned attempt is remembered rather than acted on, and the loop demotes only once the lease it last wrote is too close to lapsing for another attempt to land: at that point the failure is real whatever caused it, and there is still a full cadence left to stop the work before the lock can be anyone else's. */
 func refreshWhileHeld(
     runtimeInstance runtimecontract.Runtime,
     lock lockcontract.Lock,
@@ -117,9 +119,13 @@ func refreshWhileHeld(
     done <-chan struct{},
 ) error {
     refreshInterval, refreshTtl := resolveRefreshSchedule(ttl)
+    refreshTimeout := resolveRefreshTimeout(refreshInterval)
 
     ticker := time.NewTicker(refreshInterval)
     defer ticker.Stop()
+
+    /* the lock was acquired immediately before this goroutine started, so the lease it wrote runs from now */
+    leaseExpiry := time.Now().Add(refreshTtl)
 
     for {
         select {
@@ -128,20 +134,36 @@ func refreshWhileHeld(
         case <-runtimeInstance.Context().Done():
             return nil
         case <-ticker.C:
-            if refreshErr := lock.Refresh(runtimeInstance, refreshTtl); nil != refreshErr {
-                /* callback finished, or the caller cancelled — a SIGTERM cancels the very context the backend was called with, so the refresh in flight fails with the cancellation. Either way the failure is the shutdown itself, not a lost lease, and reporting it would turn a clean stop into an error. */
-                select {
-                case <-done:
-                    return nil
-                case <-runtimeInstance.Context().Done():
-                    return nil
-                default:
-                }
+            refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, refreshTimeout)
+            if nil == refreshErr {
+                leaseExpiry = time.Now().Add(refreshTtl)
 
+                continue
+            }
+
+            /* callback finished, or the caller cancelled — a SIGTERM cancels the very context the backend was called with, so the refresh in flight fails with the cancellation. Either way the failure is the shutdown itself, not a lost lease, and reporting it would turn a clean stop into an error. */
+            select {
+            case <-done:
+                return nil
+            case <-runtimeInstance.Context().Done():
+                return nil
+            default:
+            }
+
+            if true == leaseIsBeyondRecovery(time.Now(), leaseExpiry, refreshInterval) {
                 return refreshErr
             }
         }
     }
+}
+
+/* leaseIsBeyondRecovery reports whether the lease this goroutine last wrote is close enough to lapsing that a failed attempt has to be treated as the lost lock it probably is.
+
+The margin is half the cadence. A whole cadence would be wrong and was tried: with renewals issued at half the ttl the retry after a failure lands exactly at the lease boundary, so demanding a full cadence of slack demotes on the FIRST failure — which is the per-call verdict this replaces, wearing a different name. Half leaves the first failure survivable, which is the entire reason the cadence is half the ttl rather than the ttl itself, and still refuses to keep running once the lease is at its edge.
+
+What the margin cannot buy back is slack that the cadence never created. A lock whose renewals are lost twice in a row is demoted as its lease lapses, not before it, because the second attempt is the lapse; a deployment that needs a demotion strictly earlier than that needs renewals more often than twice a lease, which is the caller's cadence to choose. */
+func leaseIsBeyondRecovery(now time.Time, leaseExpiry time.Time, refreshInterval time.Duration) bool {
+    return false == now.Before(leaseExpiry.Add(-refreshInterval/2))
 }
 
 /* resolveRefreshSchedule derives the refresh cadence and the ttl each refresh writes. A positive ttl refreshes at half of it, so a renewal always lands a full half-ttl before the lease lapses. A non-positive ttl is session mode: probe at defaultSessionProbeInterval, but renew for a multiple of it — a session locker ignores the value, while a lease locker would otherwise get a lease that expires exactly when the next probe is due. The interval is floored so a sub-nanosecond-derived zero can never reach time.NewTicker, which panics on a non-positive duration. */
@@ -159,6 +181,39 @@ func resolveRefreshSchedule(ttl time.Duration) (time.Duration, time.Duration) {
     }
 
     return refreshInterval, refreshTtl
+}
+
+/* resolveRefreshTimeout bounds a single renewal call. Without a deadline of its own a renewal inherits only the term context, which nothing cancels while the work runs, so a store that accepts the call and never answers — a wedged connection, a backend that stopped replying — leaves the renewal parked forever, holding a goroutine and never producing an outcome at all.
+
+The budget is the whole cadence, and it is a deadline on the call rather than a verdict on the lease: an abandoned attempt costs this round and the next one is already due. Nothing shorter is warranted now that the lease clock decides demotion — a fraction of the cadence only turns a slow store into a lost lock — and nothing longer is either, since a second attempt would otherwise start beside a call still in flight against the same lock.
+
+The floor is applied to the cadence first and the budget is clamped to it afterwards. Both were floored independently before, which at a ttl of a few milliseconds produced a budget LARGER than the cadence it was meant to fit inside: at ttl=1ms the cadence floors to 1ms and the budget floored to 1ms too, so every attempt overlapped its successor. */
+func resolveRefreshTimeout(refreshInterval time.Duration) time.Duration {
+    timeout := refreshInterval
+    if minimumRefreshInterval > timeout {
+        timeout = minimumRefreshInterval
+    }
+
+    if refreshInterval < timeout {
+        timeout = refreshInterval
+    }
+
+    return timeout
+}
+
+/* refreshOnce renews the lease on a runtime whose context carries the renewal deadline, derived from the caller's so a shutdown still cancels the call in flight. The caller keeps testing its OWN context to tell a shutdown from a lost lease: the deadline lives only on the child, so an expired renewal reads as the lease failure it is. */
+func refreshOnce(
+    runtimeInstance runtimecontract.Runtime,
+    lock lockcontract.Lock,
+    ttl time.Duration,
+    timeout time.Duration,
+) error {
+    refreshContext, cancel := context.WithTimeout(runtimeInstance.Context(), timeout)
+    defer cancel()
+
+    refreshRuntime := runtime.New(refreshContext, runtimeInstance.Scope(), runtimeInstance.Container())
+
+    return lock.Refresh(refreshRuntime, ttl)
 }
 
 /* releaseDetached releases the lock on a runtime detached from the caller's context: by release time that context may already be cancelled, and a release that silently fails because of it would keep the lock held until the ttl lapses. */

@@ -133,3 +133,39 @@ func TestIsTransientErrorRecognizesConnectionAbort(t *testing.T) {
         t.Fatalf("expected the windows spelling of a connection abort to be transient")
     }
 }
+
+/* @info the migration connection lifts the read and write deadlines and keeps the connect timeout: the deadlines are sized for request traffic and cut a legitimate long DDL mid-statement, while a down database must still fail fast */
+func TestMigrationTimeoutConfig_LiftsDeadlinesKeepsConnect(t *testing.T) {
+    derived := migrationTimeoutConfig(&TimeoutConfig{
+        ConnectTimeout: 7 * time.Second,
+        ReadTimeout:    30 * time.Second,
+        WriteTimeout:   30 * time.Second,
+    })
+
+    if 7*time.Second != derived.ConnectTimeout {
+        t.Fatalf("expected the connect timeout kept, got %v", derived.ConnectTimeout)
+    }
+    if 0 != derived.ReadTimeout || 0 != derived.WriteTimeout {
+        t.Fatalf("expected the read and write deadlines lifted, got %v/%v", derived.ReadTimeout, derived.WriteTimeout)
+    }
+
+    derivedFromNil := migrationTimeoutConfig(nil)
+    if DefaultTimeoutConfig().ConnectTimeout != derivedFromNil.ConnectTimeout {
+        t.Fatalf("expected the default connect timeout for a nil base, got %v", derivedFromNil.ConnectTimeout)
+    }
+    if 0 != derivedFromNil.ReadTimeout || 0 != derivedFromNil.WriteTimeout {
+        t.Fatalf("expected the deadlines lifted for a nil base")
+    }
+}
+
+/* @info the migration pool never recycles a connection mid-run: a lifetime rotation under a running statement is the same mid-statement cut by another name */
+func TestMigrationPoolConfig_NeverRecyclesMidRun(t *testing.T) {
+    poolConfig := migrationPoolConfig()
+
+    if 0 != poolConfig.ConnectionMaxLifetime || 0 != poolConfig.ConnectionMaxIdleTime {
+        t.Fatalf("expected no connection recycling for migrations, got %v/%v", poolConfig.ConnectionMaxLifetime, poolConfig.ConnectionMaxIdleTime)
+    }
+    if 2 != poolConfig.MaxOpenConnections {
+        t.Fatalf("expected the two connections a sequential migration run needs, got %d", poolConfig.MaxOpenConnections)
+    }
+}

@@ -452,20 +452,17 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
     }
 }
 
+/* SimpleRateLimit keys on the direct peer address, so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use SimpleRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
 func SimpleRateLimit(requestsPerMinute int) httpcontract.Middleware {
-    limiter := NewFixedWindowLimiter(requestsPerMinute, time.Minute)
-
-    return RateLimitMiddleware(
-        NewRateLimitConfig(
-            limiter,
-            nil,
-            nil,
-        ),
-    )
+    return SimpleRateLimitWithResolver(requestsPerMinute, nil)
 }
 
-func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
-    limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
+/* SimpleRateLimitWithResolver is SimpleRateLimit with the client address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so a per-IP budget behind a reverse proxy is charged to the client rather than to the proxy. A nil resolver keeps the direct peer. */
+func SimpleRateLimitWithResolver(
+    requestsPerMinute int,
+    clientIpResolver ClientIpResolver,
+) httpcontract.Middleware {
+    limiter := NewFixedWindowLimiter(requestsPerMinute, time.Minute)
 
     config := NewRateLimitConfig(
         limiter,
@@ -473,16 +470,20 @@ func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
         nil,
     )
 
-    config.SetKeyExtractor(func(request httpcontract.Request) string {
-        return config.clientIp(request)
-    })
+    config.SetClientIpResolver(clientIpResolver)
 
     return RateLimitMiddleware(config)
 }
 
-func UserRateLimit(
+/* IpRateLimit keys on the direct peer address, so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use IpRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
+    return IpRateLimitWithResolver(requestsPerMinute, nil)
+}
+
+/* IpRateLimitWithResolver is IpRateLimit with the client address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so a per-IP budget behind a reverse proxy is charged to the client rather than to the proxy. A nil resolver keeps the direct peer. */
+func IpRateLimitWithResolver(
     requestsPerMinute int,
-    getUserId KeyExtractor,
+    clientIpResolver ClientIpResolver,
 ) httpcontract.Middleware {
     limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
 
@@ -491,6 +492,39 @@ func UserRateLimit(
         nil,
         nil,
     )
+
+    config.SetClientIpResolver(clientIpResolver)
+
+    config.SetKeyExtractor(func(request httpcontract.Request) string {
+        return config.clientIp(request)
+    })
+
+    return RateLimitMiddleware(config)
+}
+
+/* UserRateLimit falls back to the direct peer address for a request that carries no user id, so behind a reverse proxy every anonymous client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use UserRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+func UserRateLimit(
+    requestsPerMinute int,
+    getUserId KeyExtractor,
+) httpcontract.Middleware {
+    return UserRateLimitWithResolver(requestsPerMinute, getUserId, nil)
+}
+
+/* UserRateLimitWithResolver is UserRateLimit with the anonymous fallback address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so unauthenticated traffic behind a reverse proxy is charged per client rather than to the proxy. A nil resolver keeps the direct peer. */
+func UserRateLimitWithResolver(
+    requestsPerMinute int,
+    getUserId KeyExtractor,
+    clientIpResolver ClientIpResolver,
+) httpcontract.Middleware {
+    limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
+
+    config := NewRateLimitConfig(
+        limiter,
+        nil,
+        nil,
+    )
+
+    config.SetClientIpResolver(clientIpResolver)
 
     config.SetKeyExtractor(func(request httpcontract.Request) string {
         userId := getUserId(request)

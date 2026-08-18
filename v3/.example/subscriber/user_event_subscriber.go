@@ -4,6 +4,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/event"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodyevent "github.com/precision-soft/melody/v3/event"
@@ -62,7 +63,12 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
             return listDeleteErr
         }
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionCreated,
+            service.CatalogJournalSubjectUser,
+            payloadInstance.User().Id,
+        )
     }
 }
 
@@ -97,7 +103,12 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             return listDeleteErr
         }
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionUpdated,
+            service.CatalogJournalSubjectUser,
+            payloadInstance.User().Id,
+        )
     }
 }
 
@@ -132,7 +143,12 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
             return listDeleteErr
         }
 
-        return nil
+        return recordCatalogChange(
+            runtimeInstance,
+            repository.CatalogJournalActionDeleted,
+            service.CatalogJournalSubjectUser,
+            payloadInstance.UserId(),
+        )
     }
 }
 

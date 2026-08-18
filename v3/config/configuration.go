@@ -5,6 +5,7 @@ import (
     "sort"
     "strings"
     "sync"
+    "sync/atomic"
 
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -88,6 +89,14 @@ type Configuration struct {
 
     /* set once the boot-time Resolve has run, so a parameter registered afterwards is resolved on registration instead of keeping its raw template */
     resolved bool
+
+    /* @important atomic rather than covered by the mutex: Resolve reads it before it takes the write lock, and MarkServing is called from the goroutine that starts the application while requests may already be reading parameters */
+    serving atomic.Bool
+}
+
+/* MarkServing records that the wiring phase is over and the application has started running. From that point Resolve is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works — it resolves itself on registration — which is what keeps a late module functioning. */
+func (instance *Configuration) MarkServing() {
+    instance.serving.Store(true)
 }
 
 func (instance *Configuration) Cli() configcontract.CliConfiguration {
@@ -224,7 +233,7 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
                 )
             }
 
-            parameter.value = resolvedValue
+            parameter.storeValue(resolvedValue)
         }
     }
 }
@@ -392,6 +401,8 @@ func (instance *Configuration) buildHttpConfiguration() error {
         )
     }
 
+    staticExcludedPaths := splitHttpConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
+
     sessionTtl, sessionTtlErr := instance.MustGet(KernelHttpSessionTtl).Duration()
     if nil != sessionTtlErr {
         return exception.NewError(
@@ -411,6 +422,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         httpMaxRequestBodyBytes,
         staticEnableCache,
         staticCacheMaxAge,
+        staticExcludedPaths,
         sessionTtl,
     )
     if nil != newHttpConfigurationErr {

@@ -11,20 +11,18 @@ mkdir -p /go/pkg/mod
 mkdir -p /go/cache/go-build
 touch ${HOME}/.bash_history
 
-# sync shared assets (logo/favicon) into the example apps so they have a single
-# source of truth in .assets (the example copies are git-ignored and generated here)
-ASSETS_DIR="${WORKDIR}.assets"
-if [[ -d "${ASSETS_DIR}" ]]; then
-    for EXAMPLE in "${WORKDIR}.example" "${WORKDIR}v2/.example" "${WORKDIR}v3/.example"; do
-        [[ -d "${EXAMPLE}/public" ]] || continue
-        mkdir -p "${EXAMPLE}/public/assets"
-        cp -f "${ASSETS_DIR}/favicon.ico" "${EXAMPLE}/public/favicon.ico" 2>/dev/null || true
-        cp -f "${ASSETS_DIR}/logo.svg" "${EXAMPLE}/public/assets/favicon.svg" 2>/dev/null || true
-        cp -f "${ASSETS_DIR}/logo.png" "${EXAMPLE}/public/assets/logo.png" 2>/dev/null || true
-        cp -f "${ASSETS_DIR}/logo.png" "${EXAMPLE}/public/assets/apple-touch-icon.png" 2>/dev/null || true
-    done
-    echo "[melody-dev] assets synced into examples from ${ASSETS_DIR}"
-fi
+# put the shared icons (logo/favicon) into every example's public/ directory. They live in ONE place in
+# the tree — <root>/.assets — and are git-ignored under the examples, so a checkout carries no copy that
+# could go stale. The mapping from source name to served name is not restated here: each example's
+# assets/sync-icons.mjs owns it, and this loop runs that script. It runs for all three majors rather than
+# only the one this container serves, because the end-to-end harness builds all three out of the tree.
+for EXAMPLE in "${WORKDIR}.example" "${WORKDIR}v2/.example" "${WORKDIR}v3/.example"; do
+    [[ -f "${EXAMPLE}/assets/sync-icons.mjs" ]] || continue
+    command -v node >/dev/null 2>&1 || continue
+    ( cd "${EXAMPLE}/assets" && node sync-icons.mjs ) >/dev/null 2>&1 \
+        && echo "[melody-dev] icons synced into ${EXAMPLE#${WORKDIR}}" \
+        || echo "[melody-dev] icon sync FAILED for ${EXAMPLE#${WORKDIR}}; the pages will 404 on favicon and logo"
+done
 
 REFLEX_ENABLED="${MELODY_DEV_REFLEX_ENABLED:-1}"
 EXAMPLE_DIR="${MELODY_DEV_EXAMPLE_DIR:-${WORKDIR}v3/.example}"
@@ -38,8 +36,12 @@ fi
 cd "${EXAMPLE_DIR}"
 
 # build the example frontend bundle (TypeScript -> public/assets/app.js) so the
-# example is functional in the browser on startup and picks up local .ts edits;
-# the committed bundle stays as the fallback if the build cannot run.
+# example is functional in the browser on startup and picks up local .ts edits.
+# The bundle is NOT committed — it is generated from assets/app.ts and git-ignored — so a build that
+# cannot run leaves no app.js at all: the pages load and every interaction through
+# window.melodyExample.* is dead until `cd assets && npm ci && npm run build` succeeds.
+# Which example this builds is decided by MELODY_DEV_EXAMPLE_DIR, so each of the three supervised
+# services (dev-v1, dev-v2, dev) builds its own major's bundle.
 if [[ -f "assets/package.json" ]] && command -v npm >/dev/null 2>&1; then
     echo "[melody-dev] building example frontend bundle"
     (
@@ -47,7 +49,7 @@ if [[ -f "assets/package.json" ]] && command -v npm >/dev/null 2>&1; then
         [[ -d node_modules ]] || npm ci --no-audit --no-fund
         npm run build
     ) && echo "[melody-dev] frontend bundle built" \
-        || echo "[melody-dev] frontend bundle build failed; serving the committed bundle"
+        || echo "[melody-dev] frontend bundle build FAILED; public/assets/app.js is absent and the browser interface will not work"
 
     # hot-reload the frontend bundle by polling the .ts sources: this host's bind
     # mount does not propagate inotify events into the container (so esbuild --watch

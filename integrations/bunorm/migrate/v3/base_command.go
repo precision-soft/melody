@@ -81,21 +81,22 @@ func (instance *baseCommand) resolveDatabase(
         managerName = instance.options.ManagerName
     }
 
-    if "" == managerName {
-        defaultManager, defaultManagerErr := registry.DefaultManager()
-        if nil != defaultManagerErr {
-            return nil, "", defaultManagerErr
-        }
-
-        return defaultManager.Database(), "<default>", nil
+    /* the migration commands prefer the dedicated migration connection — the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement — and fall back to the ordinary pool when the provider offers no such capability */
+    database, dedicated, migrationDatabaseErr := registry.MigrationDatabase(managerName)
+    if nil != migrationDatabaseErr {
+        return nil, "", migrationDatabaseErr
     }
 
-    manager, managerErr := registry.Manager(managerName)
-    if nil != managerErr {
-        return nil, "", managerErr
+    label := managerName
+    if "" == label {
+        label = "<default>"
     }
 
-    return manager.Database(), managerName, nil
+    if true == dedicated {
+        label = label + " (dedicated migration connection)"
+    }
+
+    return database, label, nil
 }
 
 func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) {

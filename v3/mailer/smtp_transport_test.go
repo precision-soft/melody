@@ -619,7 +619,11 @@ func TestSmtpTransport_SendsLargePayloadToSlowButSteadyReader(t *testing.T) {
     }
 }
 
-/* @info re-arming the deadline per payload chunk must not turn it into a moving target that never fires: a peer that stops reading mid-body makes no progress, so the blocked chunk write still hits the per-step deadline and the session is cut within one timeout. */
+/* re-arming the deadline per payload chunk must not turn it into a moving target that never fires: a peer that stops reading mid-body makes no progress, so the blocked chunk write still hits the per-step deadline and the session is cut within one timeout.
+
+The payload has to be large enough that the client blocks while writing it rather than after: a body that fits inside the socket buffers is written whole, and the client then waits for the closing dot's acknowledgment, which is bounded by dataTerminationTimeout — two minutes — instead of by the per-step deadline this test exists to prove. Measured: at one megabyte the send is not cut at all.
+
+The cut is therefore measured from the instant the server stops reading, not from the start of the test, because rendering a payload of that size happens inside Send and its duration tracks machine load. */
 func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
     listener := listenWithSmallReceiveBuffer(t)
     defer listener.Close()
@@ -627,12 +631,16 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
     released := make(chan struct{})
     defer close(released)
 
-    go serveStallMidDataSmtp(listener, released)
+    stalled := make(chan struct{})
+
+    go serveStallMidDataSmtp(listener, released, stalled)
+
+    const sessionTimeout = 500 * time.Millisecond
 
     transport := NewSmtpTransport(SmtpConfig{
         Address: listener.Addr().String(),
         Host:    "127.0.0.1",
-        Timeout: 500 * time.Millisecond,
+        Timeout: sessionTimeout,
     })
 
     finished := make(chan error, 1)
@@ -646,6 +654,19 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
     }()
 
     select {
+    case <-stalled:
+    case sendErr := <-finished:
+        t.Fatalf("the send ended before the server stalled, so the stall was never exercised: %v", sendErr)
+    case <-time.After(60 * time.Second):
+        t.Fatal("the server never reached the stall point")
+    }
+
+    stalledAt := time.Now()
+
+    /* the client may still have buffered bytes to push when reading stops, so the bound is a small multiple of the session timeout rather than the timeout itself; what it refuses is the moving target — a deadline re-armed per chunk that never fires while the peer makes no progress. */
+    const cutBound = 8 * sessionTimeout
+
+    select {
     case sendErr := <-finished:
         if nil == sendErr {
             t.Fatal("expected a timeout error when the server stops reading mid-payload")
@@ -655,8 +676,12 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
         if false == errors.As(sendErr, &netErr) || false == netErr.Timeout() {
             t.Fatalf("expected an i/o timeout error, got %v", sendErr)
         }
-    case <-time.After(2 * time.Second):
-        t.Fatal("send was not cut within one session timeout on a server that stopped reading mid-payload")
+
+        if cutSince := time.Since(stalledAt); cutBound < cutSince {
+            t.Fatalf("expected the session to be cut within %v of the stall, took %v", cutBound, cutSince)
+        }
+    case <-time.After(60 * time.Second):
+        t.Fatal("send was not cut on a server that stopped reading mid-payload")
     }
 }
 
@@ -754,7 +779,7 @@ func serveSlowSteadyDataSmtp(listener net.Listener) {
 }
 
 /* serveStallMidDataSmtp greets and accepts the envelope, drains the first stretch of the DATA body and then stops reading entirely — until released is closed or a safety timeout elapses — modelling a peer that goes dead mid-transfer. */
-func serveStallMidDataSmtp(listener net.Listener, released <-chan struct{}) {
+func serveStallMidDataSmtp(listener net.Listener, released <-chan struct{}, stalled chan<- struct{}) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
         return
@@ -795,6 +820,9 @@ func serveStallMidDataSmtp(listener net.Listener, released <-chan struct{}) {
                 }
                 drained += count
             }
+
+            /* the instant reading stops is the only moment from which "cut within one session timeout" can be measured: everything before it — rendering a payload of several megabytes, the dial, the envelope — is work whose duration tracks machine load, and a wall-clock budget spanning it measures the load rather than the deadline. */
+            close(stalled)
 
             select {
             case <-released:

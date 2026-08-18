@@ -9,7 +9,8 @@ import (
 const defaultStreamRouteName = "melody.websocket"
 
 type ModuleConfig struct {
-    Hub       *melodyhttp.ServerSentEventHub
+    Hub *melodyhttp.ServerSentEventHub
+    /* Options is handed to NewStreamHandler untouched, so its IdleTimeout requirement is the module's too: a zero fails the route registration at boot. The module deliberately supplies no default of its own — the only thing that reaps a peer which vanished without a fin should be chosen by the application, not inherited silently. */
     Options   Options
     RouteName string
     Path      string

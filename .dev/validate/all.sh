@@ -12,15 +12,18 @@ fi
 . "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
 
 MODE_STRING="all"
+SKIP_LIVE_BOOLEAN="false"
 if [[ "" = "${1-}" ]]; then
     :
 elif [[ "-h" = "${1-}" ]]; then
-    println "usage: all.sh [-h] [--all | --staged | --live]"
+    println "usage: all.sh [-h] [--all | --staged | --live | --e2e] [--skip-live]"
     println ""
-    println "  -h         show this help and exit"
-    println "  --all      validate all modules and the live integration suites (default)"
-    println "  --staged   validate only modules with staged changes"
-    println "  --live     run only the live integration suites (mirrors the ci live job)"
+    println "  -h           show this help and exit"
+    println "  --all        validate all modules, the live integration suites and the live e2e run (default)"
+    println "  --staged     validate only modules with staged changes"
+    println "  --live       run only the live integration suites (mirrors the ci live job)"
+    println "  --e2e        run only the live e2e harness and stack checks (mirrors the ci e2e job)"
+    println "  --skip-live  leave the live suites and the e2e run out of --all, for a hand run with no backends"
     exit 0
 elif [[ "--staged" = "${1-}" ]]; then
     MODE_STRING="staged"
@@ -28,8 +31,17 @@ elif [[ "--all" = "${1-}" ]]; then
     MODE_STRING="all"
 elif [[ "--live" = "${1-}" ]]; then
     MODE_STRING="live"
+elif [[ "--e2e" = "${1-}" ]]; then
+    MODE_STRING="e2e"
+elif [[ "--skip-live" = "${1-}" ]]; then
+    MODE_STRING="all"
+    SKIP_LIVE_BOOLEAN="true"
 else
     fail "unknown flag: ${1}"
+fi
+
+if [[ "--skip-live" = "${2-}" ]]; then
+    SKIP_LIVE_BOOLEAN="true"
 fi
 
 SERVICE_NAME_STRING="dev"
@@ -98,37 +110,27 @@ LIVE_SERVICE_NAME_STRING_LIST=(
 
 LIVE_ENVIRONMENT_EXPORT_STRING="export AMQP_DSN='amqp://guest:guest@rabbitmq:5672/' REDIS_ADDRESS='redis:6379' MYSQL_DSN='melody:melody@tcp(mysql:3306)/melody_example' PGSQL_HOST='postgres' PGSQL_PORT='5432' PGSQL_DATABASE='melody_test' PGSQL_USER='melody' PGSQL_PASSWORD='melody' POSTGRES_DSN='postgres://melody:melody@postgres:5432/melody_test?sslmode=disable' MINIO_ENDPOINT='localstack:4566' MINIO_ACCESS_KEY='test' MINIO_SECRET_KEY='test'"
 
-LIVE_SUITE_SPECIFICATION_STRING_LIST=(
-    "integrations/amqp/v3 -race"
-    "integrations/rueidis/v3 -race"
-    "integrations/rueidis/v2"
-    "integrations/rueidis"
-    "integrations/bunorm/mysql/v3 -race"
-    "integrations/bunorm/mysql/v2"
-    "integrations/bunorm/mysql"
-    "integrations/bunorm/pgsql/v3 -race"
-    "integrations/bunorm/pgsql/v2"
-    "integrations/bunorm/pgsql"
-    "integrations/outbox/v3 -race"
-    "integrations/awss3/v3"
-)
 
+# every integration module is discovered rather than listed, so a module added later joins this lane without
+# anyone remembering to register it — the list that had to be maintained by hand is exactly the one that gets
+# forgotten. The suites are gated on their backend environment variables, so a module with no live test simply
+# runs its ordinary tests again, and the detector runs over all of them because a race in an integration is
+# caught by nothing else.
 run_live_go_suites() {
     docker_compose up -d --wait "${LIVE_SERVICE_NAME_STRING_LIST[@]}"
 
     local BATCH_COMMAND_LIST=()
 
-    local LIVE_SUITE_SPECIFICATION_STRING
-    for LIVE_SUITE_SPECIFICATION_STRING in "${LIVE_SUITE_SPECIFICATION_STRING_LIST[@]}"; do
-        local LIVE_MODULE_RELATIVE_PATH_STRING="${LIVE_SUITE_SPECIFICATION_STRING%% *}"
-
-        local LIVE_RACE_FLAG_STRING=""
-        if [[ "${LIVE_SUITE_SPECIFICATION_STRING}" != "${LIVE_MODULE_RELATIVE_PATH_STRING}" ]]; then
-            LIVE_RACE_FLAG_STRING="${LIVE_SUITE_SPECIFICATION_STRING#* } "
+    local LIVE_MODULE_DIRECTORY_STRING
+    while IFS= read -r LIVE_MODULE_DIRECTORY_STRING; do
+        if [[ "" = "${LIVE_MODULE_DIRECTORY_STRING}" ]]; then
+            continue
         fi
 
-        BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test ${LIVE_RACE_FLAG_STRING}-count=1 ./...")
-    done
+        local LIVE_MODULE_RELATIVE_PATH_STRING="${LIVE_MODULE_DIRECTORY_STRING#${REPOSITORY_ROOT_DIRECTORY_STRING}/}"
+
+        BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ./...")
+    done < <(get_integration_module_directory_list)
 
     run_section "melody live integration suites (mirrors the ci live job)" "${TAG_VALIDATE}" "go" -- \
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
@@ -141,14 +143,27 @@ run_live_go_suites() {
 # logger's shared writer, the message bus dispatch, the cron runner's parallel dispatch), and only the
 # detector sees them race — several of those tests assert nothing at all, so without this lane they can only
 # ever pass. validation carries the process-lifetime parse and constraint memos that concurrent requests share,
-# and openapi the schema memo, so both belong here too. No service containers needed.
+# and openapi the schema memo, so both belong here too. session, http and internal carry the state a request
+# actually touches — the storages every concurrent request reads and writes, the middleware chain, the deep copy
+# that guards one request's data from another's — and their suites hold tests written specifically to catch a
+# race, with a goroutine and a wait group, which without this lane could only ever pass. exception belongs here
+# for the same reason: a creation failure the container memoizes is handed to the owner and to every waiter at
+# once, so one error's context map is written in place while another goroutine iterates it, and the mutex that
+# orders them is only observable to the detector. bunorm's manager registry belongs here for the same class of
+# reason and needs no database to show it: it coalesces concurrent opens of one definition onto a single dial,
+# publishes the result to parked waiters through a channel, and races a Close against an open still in flight —
+# and its suite holds the tests written for exactly those windows, which without this lane could only ever pass.
+# No service containers needed; the three add some four seconds per major.
 RACE_SUITE_SPECIFICATION_STRING_LIST=(
-    ". ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/..."
-    "v2 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./validation/..."
-    "v3 ./container/... ./application/... ./config/... ./event/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/..."
+    ". ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
+    "v2 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
+    "v3 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."
+    "integrations/bunorm ./..."
+    "integrations/bunorm/v2 ./..."
+    "integrations/bunorm/v3 ./..."
 )
 
 run_race_go_suites() {
@@ -168,14 +183,123 @@ run_race_go_suites() {
 
 # the e2e harness module is deliberately outside go.work (it builds GOWORK=off against the local replaces),
 # so no other lane compiles it: a break in the harness — or a stale framework pin in its go.mod — would
-# otherwise surface only when someone runs run.sh or stack.sh by hand
+# otherwise surface only when someone runs run.sh or stack.sh by hand. Its own unit tests run here too:
+# they cover the parsing the harness does before it ever reaches a backend — the section catalogue, the
+# server-sent-event frame reader, the prometheus exposition reader, the token minters — and nothing else
+# executes them, so without this lane a harness assertion could stop working and every live run would
+# still report a pass.
 run_e2e_harness_checks() {
     if [[ ! -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/go.mod" ]]; then
-        return 0
+        fail "the e2e harness module is missing: .dev/e2e/go.mod does not exist, so the harness lane cannot run. It is not optional — reporting success here would mean the whole lane silently contributed nothing"
     fi
 
     run_section "melody e2e harness module (.dev/e2e, GOWORK=off)" "${TAG_VALIDATE}" "go" -- \
-        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go vet ./..."
+        run_batch_in_service_shell "${SERVICE_NAME_STRING}" \
+        "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go vet ./..." \
+        "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go test -count=1 ./..."
+}
+
+# the package documents against the code of every major. The three majors are near-copies whose documents
+# drifted independently, and nothing compared them: a symbol one major documents while another ships it
+# undocumented is invisible to every compiler and every test. Reads the tree only, so it needs no container
+# and costs seconds.
+run_documentation_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/documentation.sh" ]]; then
+        fail "the documentation check is missing or not executable: .dev/validate/documentation.sh. It is not optional — the ci job invokes it directly, so a skip here reports a pass locally against a lane that fails in ci; restore it or chmod +x it"
+    fi
+
+    run_section "melody package documentation against every major (mirrors the ci documentation job)" "${TAG_VALIDATE}" "docs" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/documentation.sh"
+}
+
+# one published major against the next, after the import path is rewritten. v1 and v2 are the same framework
+# twice over — the port was a copy with the module path rewritten, not a translation — and they are separate
+# modules, so no build, no vet run and no test binary ever sees them together: a fix that lands on one major
+# and is forgotten on the other compiles, tests and reads correctly on both sides, and nothing else in this
+# script can tell. Reads the tree only, so it needs no container and costs seconds.
+run_parity_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/parity.sh" ]]; then
+        fail "the parity check is missing or not executable: .dev/validate/parity.sh. It is not optional — the ci job invokes it directly, so a skip here reports a pass locally against a lane that fails in ci, and it is the only lane that compares one major against another at all; restore it or chmod +x it"
+    fi
+
+    run_section "melody v1 against v2 after the import path rewrite (mirrors the ci parity job)" "${TAG_VALIDATE}" "parity" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/parity.sh"
+}
+
+# what every document of a major cites, against what that major declares. The documentation check above asks
+# whether a symbol a major ships is documented; it structurally cannot ask the opposite, and the opposite is
+# where a document rots — an upgrade note that keeps naming a method the code no longer has reads as correct
+# to every check in this file. It also reaches the documents nothing else does: the per-integration README
+# and CHANGELOG are outside `<major>/.documentation`, so neither the documentation check nor the parity check
+# has ever looked at them.
+#
+# The --samples pass is deliberately not passed here. It type-checks the fenced go blocks that are whole
+# programs and therefore needs a Go toolchain, which on this project lives in the development container,
+# while this lane runs on the host like its two neighbours. Run it there when documents change:
+# `./dc exec dev bash -lc '.dev/validate/citation.sh --samples'`.
+run_citation_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/citation.sh" ]]; then
+        fail "the citation check is missing or not executable: .dev/validate/citation.sh. It is not optional — the ci job invokes it directly, so a skip here reports a pass locally against a lane that fails in ci, and it is the only lane that asks whether what the documents claim exists at all; restore it or chmod +x it"
+    fi
+
+    run_section "melody document citations against the code of every major (mirrors the ci citation job)" "${TAG_VALIDATE}" "citation" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/citation.sh"
+}
+
+# the shape of every changelog block: which sections it opens, in which order, and whether the two published
+# majors file the same entry under the same one. The three checks above read what a document CLAIMS; none of
+# them reads a heading, so a session that opened a second `### Fixed` at the head of a block instead of
+# writing into the one already there left half a cycle where no reader of that block would find it — which
+# is what ten of the fourteen `[Unreleased]` blocks of the published majors were measured doing. Reads the
+# tree only, so it needs no container and costs seconds.
+run_changelog_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/changelog.sh" ]]; then
+        fail "the changelog check is missing or not executable: .dev/validate/changelog.sh. It is not optional — the ci job invokes it directly, so a skip here reports a pass locally against a lane that fails in ci, and it is the only lane that reads a changelog heading at all; restore it or chmod +x it"
+    fi
+
+    run_section "melody changelog block shape across every major (mirrors the ci changelog job)" "${TAG_VALIDATE}" "changelog" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/changelog.sh"
+}
+
+# the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
+# actually drives a booted application over the wire, and that is the only place a whole class of defect shows
+# up at all — a middleware ordering that only matters once a real request traverses the chain, a route the
+# router registers but never answers, a session cookie that never reaches the wire. The scripts are host
+# scripts: each execs into the dev container itself, so this lane brings the stack up and hands off. mailpit
+# and prometheus join the live backends because the mail and metric sections scrape them directly, and the
+# load balancer because a stack check asserts what it routes.
+E2E_SERVICE_NAME_STRING_LIST=(
+    "rabbitmq"
+    "redis"
+    "mysql"
+    "postgres"
+    "localstack"
+    "mailpit"
+    "prometheus"
+    # the v1 and v2 example applications: THREE HOSTS asks the load balancer for each major's vhost, so
+    # all three supervised applications have to be up, not only the v3 one the dev service runs
+    "dev-v1"
+    "dev-v2"
+    "load-balancer"
+)
+
+run_e2e_live_checks() {
+    local E2E_SCRIPT_PATH_STRING
+    for E2E_SCRIPT_PATH_STRING in \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/run.sh" \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/stack.sh"; do
+        if [[ ! -x "${E2E_SCRIPT_PATH_STRING}" ]]; then
+            fail "the live e2e script is missing or not executable: ${E2E_SCRIPT_PATH_STRING#${REPOSITORY_ROOT_DIRECTORY_STRING}/}. It is not optional — this is the only lane that drives a booted application over the wire, so a skip here reports a pass for the class of defect nothing else can see; restore it or chmod +x it"
+        fi
+    done
+
+    docker_compose up -d --wait "${E2E_SERVICE_NAME_STRING_LIST[@]}"
+
+    run_section "melody e2e harness live run (.dev/e2e/run.sh)" "${TAG_VALIDATE}" "e2e" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/run.sh"
+
+    run_section "melody e2e stack checks (.dev/e2e/stack.sh)" "${TAG_VALIDATE}" "e2e" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/stack.sh"
 }
 
 get_versioned_module_directory_list() {
@@ -310,6 +434,13 @@ main() {
         return 0
     fi
 
+    if [[ "e2e" = "${MODE_STRING}" ]]; then
+        run_e2e_live_checks
+
+        success "validation completed"
+        return 0
+    fi
+
     if [[ "all" = "${MODE_STRING}" ]]; then
         run_go_checks "${ROOT_DIRECTORY_STRING}" "melody framework (root module)"
 
@@ -329,9 +460,22 @@ main() {
 
         run_e2e_harness_checks
 
+        run_documentation_checks
+
+        run_parity_checks
+
+        run_citation_checks
+
+        run_changelog_checks
+
         run_race_go_suites
 
-        run_live_go_suites
+        if [[ "true" = "${SKIP_LIVE_BOOLEAN}" ]]; then
+            info "skip live integration suites and live e2e run (--skip-live)"
+        else
+            run_live_go_suites
+            run_e2e_live_checks
+        fi
 
         success "validation completed"
         return 0
@@ -372,6 +516,30 @@ main() {
     else
         info "skip .dev/e2e harness (no staged changes)"
     fi
+
+    # ungated on purpose, unlike every lane above it. The check reads the whole tree rather than the staged
+    # subset, and the drift it reports is precisely between two things that are rarely staged together: a
+    # staged source file that adds an exported symbol makes an unstaged document wrong, so gating it on the
+    # staged paths would skip it in the one commit that introduced the gap. It needs no container and costs
+    # seconds, which is what makes running it every time affordable.
+    run_documentation_checks
+
+    # ungated for the same reason as the documentation check above it, in a sharper form: the drift it
+    # reports lives between two majors that are never staged together. A fix staged on v1 is precisely what
+    # makes the unstaged v2 wrong, so gating on the staged paths would skip the check in the one commit that
+    # introduced the divergence. It reads the tree, needs no container and costs seconds.
+    run_parity_checks
+
+    # ungated for the same reason, in its own form: a citation goes stale when the CODE moves, and the
+    # commit that moves it stages a .go file while the document that names it stays untouched. Gating on
+    # the staged paths would skip the check in exactly the commit that broke the claim.
+    run_citation_checks
+
+    # ungated for the same reason, in the form closest to home: a changelog entry is written by the very
+    # commit that stages the code it describes, and it is written into a file gating on staged paths would
+    # then judge against the section it was just dropped into. The whole point is to catch the entry the
+    # moment it is filed, not a cycle later.
+    run_changelog_checks
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"
     success "validation completed"

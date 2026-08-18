@@ -6,12 +6,13 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 func NewAuthenticatorManager(authenticators ...securitycontract.Authenticator) *AuthenticatorManager {
     for index, authenticator := range authenticators {
-        if nil == authenticator {
+        if true == internal.IsNilInterface(authenticator) {
             exception.Panic(
                 exception.NewError(
                     fmt.Sprintf(
@@ -26,7 +27,7 @@ func NewAuthenticatorManager(authenticators ...securitycontract.Authenticator) *
     }
 
     return &AuthenticatorManager{
-        authenticators: authenticators,
+        authenticators: append([]securitycontract.Authenticator{}, authenticators...),
     }
 }
 
@@ -45,7 +46,8 @@ func (instance *AuthenticatorManager) Authenticate(request httpcontract.Request)
             return nil, true, err
         }
 
-        if nil == token {
+        /* the authenticator is the application's, and a nil pointer of its own token type is how "no user" is written by hand; boxed in the contract it is not equal to nil, so the plain comparison took it for a live token and the anonymous token this line exists to hand back was never built. AuthenticatedToken.IsAuthenticated answers true without touching its receiver, so such a token reads as authenticated all the way to the first Roles() call, which panics. */
+        if true == internal.IsNilInterface(token) {
             return NewAnonymousToken(), true, nil
         }
 

@@ -2,8 +2,9 @@ package serializer
 
 import (
     "sort"
-    "strconv"
     "strings"
+
+    "github.com/precision-soft/melody/internal"
 )
 
 const (
@@ -28,8 +29,9 @@ type acceptedMime struct {
     qualityValue float64
 }
 
+/* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
 func parseAcceptHeader(acceptHeader string) []acceptedMime {
-    parts := strings.Split(acceptHeader, ",")
+    parts := internal.SplitOutsideQuotes(acceptHeader, ',')
     result := make([]acceptedMime, 0, len(parts))
 
     for _, part := range parts {
@@ -40,6 +42,7 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
 
         mimePart := part
         qualityValue := 1.0
+        qualityInvalid := false
 
         parameterSeparatorIndex := strings.Index(part, ";")
         if -1 != parameterSeparatorIndex {
@@ -47,7 +50,7 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
             parametersPart := strings.TrimSpace(part[parameterSeparatorIndex+1:])
 
             if "" != parametersPart {
-                parameters := strings.Split(parametersPart, ";")
+                parameters := internal.SplitOutsideQuotes(parametersPart, ';')
                 for _, parameter := range parameters {
                     parameter = strings.TrimSpace(parameter)
                     if "" == parameter {
@@ -63,20 +66,21 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
                     value := strings.TrimSpace(keyValue[1])
 
                     if "q" == key {
-                        parsedValue, err := strconv.ParseFloat(value, 64)
-                        if nil == err {
-                            if 0 > parsedValue {
-                                parsedValue = 0
-                            }
-                            if 1 < parsedValue {
-                                parsedValue = 1
-                            }
+                        parsedValue, valid := internal.ParseQualityValue(value)
+                        if false == valid {
+                            qualityInvalid = true
 
-                            qualityValue = parsedValue
+                            continue
                         }
+
+                        qualityValue = parsedValue
                     }
                 }
             }
+        }
+
+        if true == qualityInvalid {
+            continue
         }
 
         mimePart = normalizeMime(mimePart)
@@ -121,7 +125,7 @@ func matchWildcardSubtype(wildcardMime string, candidateMime string) bool {
     return true == strings.HasPrefix(candidateMime, prefix)
 }
 
-/* @important a q of 0 is a refusal, not an absence: it is kept in the parsed list so a candidate it covers can be excluded rather than falling through to the default */
+/* a q of 0 is a refusal, not an absence: it is kept in the parsed list so a candidate it covers can be excluded rather than falling through to the default */
 func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int {
     acceptedMimeValue = normalizeMime(acceptedMimeValue)
     candidateMime = normalizeMime(candidateMime)

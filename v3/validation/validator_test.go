@@ -749,6 +749,55 @@ func TestValidateStruct_TaggedPromotedFieldBeatsTheUntaggedTwin(t *testing.T) {
     }
 }
 
+type StackedDiamondLeaf struct {
+    CreatedBy string `validate:"notBlank"`
+}
+
+type StackedDiamondMiddle struct {
+    StackedDiamondLeaf
+}
+
+type StackedDiamondFirstBranch struct {
+    StackedDiamondMiddle
+}
+
+type StackedDiamondSecondBranch struct {
+    StackedDiamondMiddle
+}
+
+type StackedDiamondPayload struct {
+    StackedDiamondFirstBranch
+    StackedDiamondSecondBranch
+    Title string `json:"title" validate:"notBlank"`
+}
+
+func TestValidateStruct_AStackedDiamondKeepsThePopulatedNameValidated(t *testing.T) {
+    decoded := StackedDiamondPayload{}
+
+    if unmarshalErr := json.Unmarshal([]byte(`{"CreatedBy":"filled"}`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unexpected error: %v", unmarshalErr)
+    }
+
+    if "filled" != decoded.StackedDiamondFirstBranch.StackedDiamondMiddle.StackedDiamondLeaf.CreatedBy {
+        t.Fatalf(
+            "expected encoding/json to populate the name promoted past the diamond, got %q",
+            decoded.StackedDiamondFirstBranch.StackedDiamondMiddle.StackedDiamondLeaf.CreatedBy,
+        )
+    }
+
+    validator := NewValidator()
+
+    validationErrors := requireValidationErrors(t, validator.Validate(&StackedDiamondPayload{Title: "set"}))
+
+    for _, candidate := range validationErrors {
+        if "CreatedBy" == candidate.Field() {
+            return
+        }
+    }
+
+    t.Fatalf("expected the diamond-promoted CreatedBy to be validated, got %v", validationErrors)
+}
+
 /* @info encoding/json populates the exported fields promoted through an unexported embed, so their tags run — the walk must include what a payload reaches */
 func TestValidateStruct_ValidatesFieldsPromotedThroughAnUnexportedEmbed(t *testing.T) {
     validator := NewValidator()

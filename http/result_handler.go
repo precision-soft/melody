@@ -6,6 +6,7 @@ import (
 
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/serializer"
 )
@@ -40,9 +41,14 @@ func NormalizeResultToResponse(
         return nil, nil
     }
 
-    responseInstance, ok := value.(*Response)
+    /* the assertion is against the contract, the same question the controller registration door
+       asks: a caller's own Response implementation is served with its status and headers rather than
+       being handed to the serializer, which rendered it as a value — all unexported fields, so an
+       empty body under a 200 that replaced the status the caller chose. The typed nil is read through
+       the interface, where a bare comparison would take it for a live response. */
+    responseInstance, ok := value.(httpcontract.Response)
     if true == ok {
-        if nil == responseInstance {
+        if true == internal.IsNilInterface(responseInstance) {
             return nil, nil
         }
 
@@ -63,14 +69,12 @@ func NormalizeResultToResponse(
         serializerManager := serializer.SerializerManagerFromRuntime(runtimeInstance)
 
         if nil != serializerManager {
-            acceptHeader := ""
-            if nil != request.HttpRequest() && nil != request.HttpRequest().Header {
-                acceptHeader = request.HttpRequest().Header.Get("Accept")
-            }
+            /* every Accept line is joined before parsing: Get answers only the first line of a repeated field, and the accept header is list-typed, so a refusal the client sent on a second line would otherwise vanish */
+            acceptHeader := joinedAcceptHeader(request)
 
             serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
 
-            /* @important a header that refuses every available media type is answered as not acceptable rather than served the very type it rejected; a header that simply matches nothing still falls through to the default representation */
+            /* a header that refuses every available media type is answered as not acceptable rather than served the very type it rejected; a header that simply matches nothing still falls through to the default representation */
             if true == errors.Is(err, serializer.ErrNotAcceptable) {
                 return EmptyResponse(nethttp.StatusNotAcceptable), nil
             }

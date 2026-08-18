@@ -286,13 +286,17 @@ func TestKeyIdOf_ReportsKeyForEncryptedValue(t *testing.T) {
         t.Fatalf("encrypt: %v", encryptErr)
     }
 
-    keyId, encryptedFlag := keyIdOf(encrypted)
+    keyId, encryptedFlag, keyIdErr := keyIdOf(encrypted)
+    if nil != keyIdErr {
+        t.Fatalf("key id of an encrypted value: %v", keyIdErr)
+    }
+
     if false == encryptedFlag || "v1" != keyId {
         t.Fatalf("expected key id v1, got %q (encrypted=%v)", keyId, encryptedFlag)
     }
 
-    if _, plaintextFlag := keyIdOf("plain text"); true == plaintextFlag {
-        t.Fatalf("expected plaintext to report not-encrypted")
+    if _, plaintextFlag, plaintextErr := keyIdOf("plain text"); true == plaintextFlag || nil != plaintextErr {
+        t.Fatalf("expected plaintext to report not-encrypted with no error, got %v", plaintextErr)
     }
 }
 
@@ -308,8 +312,130 @@ func TestReencryptSkipAvoidsNonceRewrite(t *testing.T) {
         t.Fatalf("expected a fresh nonce to change the ciphertext, proving the skip is needed")
     }
 
-    keyId, _ := keyIdOf(underTarget)
+    keyId, _, _ := keyIdOf(underTarget)
     if "v2" != keyId {
         t.Fatalf("expected the value to already be under the target key, got %q", keyId)
+    }
+}
+
+/* truncateSealed cuts a sealed value the way a column too narrow for it does under a non-strict sql_mode: the marker and the key id survive, the base64 payload keeps only its first characters. The retained payload length is chosen so the remainder no longer decodes to a whole sealed body — which is exactly the shape that used to be mistaken for plaintext. */
+func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) string {
+    t.Helper()
+
+    if false == strings.HasPrefix(sealed, markerPrefix) {
+        t.Fatalf("expected a sealed value carrying the marker, got %q", sealed)
+    }
+
+    body := sealed[len(markerPrefix):]
+
+    separator := strings.IndexByte(body, ':')
+    if -1 == separator {
+        t.Fatalf("expected a key id separator in %q", sealed)
+    }
+
+    payload := body[separator+1:]
+    if len(payload) <= retainedPayloadCharacters {
+        t.Fatalf("expected the sealed payload to be longer than %d characters", retainedPayloadCharacters)
+    }
+
+    return sealed[:len(markerPrefix)+separator+1] + payload[:retainedPayloadCharacters]
+}
+
+/* a value that carries the framework's marker was written by this cipher, so a payload that no longer decodes is damage — a column truncated under sql_mode='' — and must be reported. Returning it verbatim with a nil error is how a truncated ciphertext used to read back as garbage that the application then stored on. */
+func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := NewCipher(provider)
+
+    sealed, encryptErr := cipher.Encrypt("alice@example.com")
+    if nil != encryptErr {
+        t.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    /* 8 base64 characters decode cleanly to 6 bytes, which is short of the nonce; 5 do not decode at all */
+    for _, retained := range []int{8, 5, 0} {
+        truncated := truncateSealed(t, sealed, retained)
+
+        plaintext, decryptErr := cipher.Decrypt(truncated)
+        if nil == decryptErr {
+            t.Fatalf("expected an error for a payload truncated to %d characters, got %q", retained, plaintext)
+        }
+
+        if "" != plaintext {
+            t.Fatalf("expected no plaintext for a payload truncated to %d characters, got %q", retained, plaintext)
+        }
+    }
+}
+
+/* the marker with no key id separator behind it cannot name a key, so it is damage too. */
+func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := NewCipher(provider)
+
+    for _, damaged := range []string{markerPrefix, markerPrefix + "v1", markerPrefix + ":" + base64.RawStdEncoding.EncodeToString(make([]byte, 32))} {
+        if _, decryptErr := cipher.Decrypt(damaged); nil == decryptErr {
+            t.Fatalf("expected an error for %q", damaged)
+        }
+    }
+}
+
+/* the pass-through for values carrying NO marker is what makes an incremental migration work: the rows not yet sealed keep reading while the column is converted one write at a time. */
+func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := NewCipher(provider)
+
+    for _, plaintext := range []string{"", "alice@example.com", "<ENC>", "<ENC>\x00gcm2\x00v1:zzz", "not encrypted at all"} {
+        decrypted, decryptErr := cipher.Decrypt(plaintext)
+        if nil != decryptErr {
+            t.Fatalf("expected %q to pass through, got %v", plaintext, decryptErr)
+        }
+
+        if plaintext != decrypted {
+            t.Fatalf("expected %q to pass through unchanged, got %q", plaintext, decrypted)
+        }
+    }
+}
+
+/* keyIdOf classifies rows for the bulk migrator, so it must not report a truncated ciphertext as plaintext: doing so seals the wreckage a second time and reports the row as migrated. */
+func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := NewCipher(provider)
+
+    sealed, _ := cipher.Encrypt("alice@example.com")
+    truncated := truncateSealed(t, sealed, 8)
+
+    keyId, encrypted, keyIdErr := keyIdOf(truncated)
+    if nil == keyIdErr {
+        t.Fatalf("expected an error for a truncated ciphertext, got %q (encrypted=%v)", keyId, encrypted)
+    }
+
+    if true == encrypted {
+        t.Fatal("expected a truncated ciphertext not to be reported as a usable sealed value")
+    }
+}
+
+/* an application still holding a marker-shaped string must not have it stored verbatim: the write side seals it, so it can never poison a later read. */
+func TestCipher_EncryptSealsAMarkerShapedPlaintextThatDoesNotDecode(t *testing.T) {
+    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    cipher := NewCipher(provider)
+
+    sealed, _ := cipher.Encrypt("alice@example.com")
+    truncated := truncateSealed(t, sealed, 8)
+
+    resealed, encryptErr := cipher.Encrypt(truncated)
+    if nil != encryptErr {
+        t.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    if truncated == resealed {
+        t.Fatal("expected a marker-shaped value that does not decode to be sealed rather than stored verbatim")
+    }
+
+    roundTripped, decryptErr := cipher.Decrypt(resealed)
+    if nil != decryptErr {
+        t.Fatalf("decrypt: %v", decryptErr)
+    }
+
+    if truncated != roundTripped {
+        t.Fatalf("expected the sealed value to round-trip, got %q", roundTripped)
     }
 }

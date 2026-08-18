@@ -20,25 +20,41 @@ type creationState struct {
 
 type createWithGuardLookupFunc func() (any, bool)
 type createWithGuardCreateFunc func(resolver containercontract.Resolver) (any, error, *providerDebugInfo)
-type createWithGuardStoreFunc func(value any)
+
+/* instanceStore is where a finished service is kept. A container provider builds a process-lifetime singleton and writes the container's own maps; a scoped provider builds one instance for the scope that drove the resolution and writes that scope alone, which is what keeps the root container blind to it. Naming the target rather than hiding it inside the creation closure is what lets one creation guard serve both lifetimes without knowing which it is running. */
+type instanceStore struct {
+    keep func(value any) error
+}
+
+/* guardedCreation is one creation the guard has to run: where the value is looked up, how it is built, where it is kept, and which creation-state map tells a concurrent resolution that it is already under way. */
+type guardedCreation struct {
+    requestedKey       string
+    creatingKey        string
+    getCreatingState   func() (*creationState, bool)
+    setCreatingState   func(state *creationState)
+    clearCreatingState func()
+    lookup             createWithGuardLookupFunc
+    create             createWithGuardCreateFunc
+    store              instanceStore
+    /* suspendsScope is true for a provider the CONTAINER owns and false for one a SCOPE owns. A container service is one instance for the whole process, so it may read only what the container holds, and the suspension is what refuses one request's substitutes to it. A scoped service is the request, so it reads both levels, and suspending it would hide from it the very entries it exists to consume. */
+    suspendsScope bool
+}
 
 func (instance *container) serviceWithCreationGuardLocked(
-    requestedKey string,
-    creatingKey string,
-    getCreatingState func() (*creationState, bool),
-    setCreatingState func(state *creationState),
-    clearCreatingState func(),
-    lookup createWithGuardLookupFunc,
-    create createWithGuardCreateFunc,
-    store createWithGuardStoreFunc,
+    creation guardedCreation,
     resolver *resolverContext,
 ) (any, error) {
+    requestedKey := creation.requestedKey
+    creatingKey := creation.creatingKey
+    lookup := creation.lookup
+    create := creation.create
+
     value, exists := lookup()
     if true == exists {
         return value, nil
     }
 
-    currentState, isBeingCreated := getCreatingState()
+    currentState, isBeingCreated := creation.getCreatingState()
     if true == isBeingCreated {
         if nil == currentState || nil == currentState.waitChannel {
             return nil, exception.NewError(
@@ -82,17 +98,17 @@ func (instance *container) serviceWithCreationGuardLocked(
         }
 
         value, exists = lookup()
-        if false == exists {
-            return nil, exception.NewError(
-                "service was not available after creation finished",
-                map[string]any{
-                    "name": creatingKey,
-                },
-                nil,
-            )
+        if true == exists {
+            return value, nil
         }
 
-        return value, nil
+        return nil, exception.NewError(
+            "service was not available after creation finished",
+            map[string]any{
+                "name": creatingKey,
+            },
+            nil,
+        )
     }
 
     if true == instance.isClosed {
@@ -105,11 +121,17 @@ func (instance *container) serviceWithCreationGuardLocked(
         lastCreationErr: nil,
     }
 
-    setCreatingState(newState)
+    creation.setCreatingState(newState)
 
     instance.mutex.Unlock()
 
     createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
+        /* @important the restore is registered before the recovery below so it runs after it: a provider that panics unwinds through that recovery, and an inline restore would never be reached. The resolution that continues above this frame is still the caller's, and leaving it suspended would hide the scope from every scoped service further up the stack. */
+        outerScopeSuspended := resolver.scopeSuspended
+        defer func() {
+            resolver.scopeSuspended = outerScopeSuspended
+        }()
+
         defer func() {
             recoveredValue := recover()
             if nil == recoveredValue {
@@ -142,8 +164,19 @@ func (instance *container) serviceWithCreationGuardLocked(
             )
         }()
 
+        /* a provider the CONTAINER owns resolves what it needs from the container alone: a process-lifetime singleton assembled out of one request's values would hold that request for the life of the process, and closing it with the request would take it away from every other one. A provider a SCOPE owns is the opposite case and reads both levels, so it is left unsuspended. */
+        if true == creation.suspendsScope {
+            resolver.scopeSuspended = true
+        }
+
         createdValue, err, debugInfo = create(resolver)
+
         if true == internal.IsNilInterface(createdValue) {
+            /* a nil value handed back together with an error is the provider saying why it could not build the service — "service is not registered" is the everyday one — and that reason is the failure worth naming. Overwriting it here would put a symptom at the top and bury the cause one level down, so the generic report is kept for the genuinely silent (nil, nil) return, where nothing else says anything at all. */
+            if nil != err {
+                return nil, err, debugInfo
+            }
+
             return nil, exception.NewError(
                 "service provider returned nil",
                 exceptioncontract.Context{
@@ -174,7 +207,7 @@ func (instance *container) serviceWithCreationGuardLocked(
                         return createFunction.Name()
                     }(),
                 },
-                err,
+                nil,
             ), nil
         }
 
@@ -229,11 +262,11 @@ func (instance *container) serviceWithCreationGuardLocked(
     }
 
     if nil == err {
-        store(createdValue)
+        err = creation.store.keep(createdValue)
     }
 
     newState.lastCreationErr = err
-    clearCreatingState()
+    creation.clearCreatingState()
     close(newState.waitChannel)
 
     if nil != err {

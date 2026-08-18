@@ -77,6 +77,8 @@ func (instance *Storage) Put(
         minio.PutObjectOptions{ContentType: options.ContentType},
     )
     if nil != putErr {
+        instance.abortOrphanedMultipartUpload(runtimeInstance.Context(), normalizedKey, size)
+
         /* the body cut the upload off itself: report the size mismatch the caller can act on, not the transport failure it surfaced as */
         if nil != streaming && true == streaming.rejected.Load() {
             return declaredSizeMismatchError(key, size)
@@ -86,6 +88,31 @@ func (instance *Storage) Put(
     }
 
     return nil
+}
+
+/* multipartAbortTimeout bounds the detached abort. The abort is a single DELETE preceded by one list, so a bucket that is answering at all finishes it in milliseconds; the window only has to be long enough to survive one slow round trip, and short enough that an unresponsive bucket cannot hold the caller's goroutine after the request it belonged to is already gone. */
+const multipartAbortTimeout = 10 * time.Second
+
+/* abortOrphanedMultipartUpload removes the multipart upload a failed Put leaves behind when the request context is what killed it.
+
+minio aborts a failed multipart upload itself, but it builds that abort on the very context the upload ran under. Once the client disconnects that context is already cancelled, so the abort request is refused before it reaches the network and the initiated upload survives on the bucket, holding every part already sent and billing for them until a lifecycle rule expires it — which most buckets do not carry. The abort therefore runs on a context detached from the request, so a dead request cannot suppress it, and under its own short deadline, so a bucket that never answers cannot hang the caller instead.
+
+Only a body that took the multipart path can leave anything behind: a declared size at or below minio's part size goes up as a single request, which leaves nothing at the key when it fails, while an unknown length always goes multipart. A live request context needs nothing either — minio's own abort went out on it.
+
+The abort is addressed by key rather than by upload id, which minio's PutObject never hands back, so a second upload of the SAME key still in flight is aborted along with this one. Same-key puts already race to last-writer-wins here, and the loser then fails loudly instead of leaving an invisible orphan behind. A failed abort is not reported: the caller is already receiving the put failure, and the orphan it could not remove is the state the caller would have been left in anyway. */
+func (instance *Storage) abortOrphanedMultipartUpload(ctx context.Context, normalizedKey string, size int64) {
+    if nil == ctx.Err() {
+        return
+    }
+
+    if 0 <= size && putSpoolLimit >= size {
+        return
+    }
+
+    abortContext, cancelAbort := context.WithTimeout(context.WithoutCancel(ctx), multipartAbortTimeout)
+    defer cancelAbort()
+
+    _ = instance.client.RemoveIncompleteUpload(abortContext, instance.bucket, normalizedKey)
 }
 
 /* putSpoolLimit bounds what a Put may ever hold in memory, and is minio's default part size.
@@ -152,7 +179,7 @@ func newSizeCheckedReader(ctx context.Context, key string, source io.Reader, siz
 
 /* sizeCheckedReader yields exactly the declared number of bytes and stops one byte short of it the moment the body turns out to hold more.
 
-Stopping short is what keeps the put all-or-nothing without buffering: the upload is then a byte short of the content length it announced, so a single-shot request is refused by the bucket and a multipart upload is aborted by minio, and neither leaves anything at the key. Every read is bounded and honours the context, so neither a stalled body nor a client that walked away can pin an upload. */
+Stopping short is what keeps the put all-or-nothing without buffering: the upload is then a byte short of the content length it announced, so a single-shot request is refused by the bucket and a multipart upload is left incomplete, and neither leaves anything at the key. Nothing visible, that is — an incomplete multipart upload still holds its parts on the bucket until it is aborted, and minio only manages that while the request context is alive, which is why Put sweeps the key itself when the context is what failed. Every read is bounded and honours the context, so neither a stalled body nor a client that walked away can pin an upload. */
 type sizeCheckedReader struct {
     key        string
     size       int64

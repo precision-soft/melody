@@ -4,13 +4,16 @@ import (
     "errors"
     "fmt"
     nethttp "net/http"
+    "sync"
 
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
 )
 
 type HttpException struct {
-    statusCode    int
-    message       string
+    statusCode int
+    message    string
+    /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines. The immutable fields need no lock. */
+    stateMutex    sync.RWMutex
     context       exceptioncontract.Context
     causeErr      error
     alreadyLogged bool
@@ -33,14 +36,28 @@ func (instance *HttpException) Message() string {
 }
 
 func (instance *HttpException) Context() exceptioncontract.Context {
+    instance.stateMutex.RLock()
+    defer instance.stateMutex.RUnlock()
+
     return copyStringMap(instance.context)
 }
 
 func (instance *HttpException) SetContext(context exceptioncontract.Context) {
+    instance.stateMutex.Lock()
+    defer instance.stateMutex.Unlock()
+
     instance.context = copyStringMap(context)
 }
 
 func (instance *HttpException) SetContextValue(key string, value any) {
+    instance.stateMutex.Lock()
+    defer instance.stateMutex.Unlock()
+
+    /* the zero value is constructible outside the constructors and carries a nil map */
+    if nil == instance.context {
+        instance.context = make(exceptioncontract.Context)
+    }
+
     instance.context[key] = value
 }
 
@@ -53,32 +70,35 @@ func (instance *HttpException) StatusCode() int {
 }
 
 func (instance *HttpException) AlreadyLogged() bool {
+    instance.stateMutex.RLock()
+    defer instance.stateMutex.RUnlock()
+
     return true == instance.alreadyLogged
 }
 
 func (instance *HttpException) MarkAsLogged() {
+    instance.stateMutex.Lock()
+    defer instance.stateMutex.Unlock()
+
     instance.alreadyLogged = true
 }
 
 var _ exceptioncontract.ContextProvider = (*HttpException)(nil)
 var _ exceptioncontract.AlreadyLogged = (*HttpException)(nil)
 
+/* IsHttpException answers whether AsHttpException would find a usable exception, so a caller that trusts it and then dereferences cannot meet a disagreement. */
 func IsHttpException(err error) bool {
-    if nil == err {
-        return false
-    }
-
-    var httpExceptionInstance *HttpException
-    return errors.As(err, &httpExceptionInstance)
+    return nil != AsHttpException(err)
 }
 
 func AsHttpException(err error) *HttpException {
-    if nil == err {
+    /* the typed nil is refused with the plain one: errors.As walks the chain through Unwrap, and every Unwrap in this package reads a field off its receiver */
+    if nil == err || true == isNilInterfaceValue(err) {
         return nil
     }
 
     var httpExceptionInstance *HttpException
-    if true == errors.As(err, &httpExceptionInstance) {
+    if true == errors.As(err, &httpExceptionInstance) && nil != httpExceptionInstance {
         return httpExceptionInstance
     }
 
@@ -88,7 +108,8 @@ func AsHttpException(err error) *HttpException {
 func ValidationFailed(validationErrors any) *HttpException {
     httpException := NewHttpException(nethttp.StatusUnprocessableEntity, "validation failed")
 
-    httpException.SetContextValue("validationErrors", validationErrors)
+    /* the errors key is the one the kernel exception listener serves to the client */
+    httpException.SetContextValue("errors", validationErrors)
 
     return httpException
 }

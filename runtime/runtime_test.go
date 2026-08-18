@@ -5,6 +5,7 @@ import (
     "errors"
     "reflect"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -53,6 +54,13 @@ func (instance containerStub) Register(serviceName string, provider any, options
 }
 
 func (instance containerStub) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
+}
+
+func (instance containerStub) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    return errors.New("not implemented")
+}
+
+func (instance containerStub) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
 }
 
 func (instance containerStub) Get(serviceName string) (any, error) {
@@ -165,6 +173,13 @@ func (instance scopeStub) OverrideProtectedInstance(serviceName string, value an
 func (instance scopeStub) MustOverrideProtectedInstance(serviceName string, value any) {
 }
 
+func (instance scopeStub) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    return errors.New("not implemented")
+}
+
+func (instance scopeStub) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+}
+
 func (instance scopeStub) Close() error {
     return errors.New("not implemented")
 }
@@ -206,7 +221,60 @@ func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
         t.Fatalf("expected closed-scope error")
     }
 
-    testhelper.AssertPanics(t, func() {
+    testhelper.AssertPanicsWithError(t, func() {
         _ = runtimeInstance.Scope().MustGet("x")
-    })
+    }, "failed to get service from scope")
+}
+
+/* nilableScope embeds the interface so a nil pointer of this type is a typed nil that still satisfies containercontract.Scope */
+type nilableScope struct {
+    containercontract.Scope
+}
+
+/* nilableContainer embeds the interface so a nil pointer of this type is a typed nil that still satisfies containercontract.Container */
+type nilableContainer struct {
+    containercontract.Container
+}
+
+/* typedNilContext is a Context implementation carried as a typed nil, the shape a caller produces by passing an unassigned variable of a concrete context type: it is not equal to nil once it sits in the interface, so a plain comparison lets it through and the first Done() on the request path dereferences it */
+type typedNilContext struct{}
+
+func (instance *typedNilContext) Deadline() (time.Time, bool) {
+    return time.Time{}, false
+}
+
+func (instance *typedNilContext) Done() <-chan struct{} {
+    return nil
+}
+
+func (instance *typedNilContext) Err() error {
+    return nil
+}
+
+func (instance *typedNilContext) Value(key any) any {
+    return nil
+}
+
+func TestNew_RefusesANilAndATypedNilContext(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New(nil, serviceContainer.NewScope(), serviceContainer)
+    }, "context may not be nil on runtime")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New((*typedNilContext)(nil), serviceContainer.NewScope(), serviceContainer)
+    }, "context may not be nil on runtime")
+}
+
+func TestNew_RefusesTypedNilScopeAndContainer(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New(context.Background(), (*nilableScope)(nil), serviceContainer)
+    }, "scope may not be nil on runtime")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        New(context.Background(), serviceContainer.NewScope(), (*nilableContainer)(nil))
+    }, "container may not be nil on runtime")
 }

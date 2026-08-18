@@ -4,6 +4,7 @@ import (
     "errors"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
     "testing"
     "time"
 
@@ -41,6 +42,29 @@ func newHttpTestContainer() containercontract.Container {
 }
 
 func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) containercontract.Container {
+    return newHttpTestContainerWithSessionStorageAndEnvironmentValues(storage, nil)
+}
+
+func newHttpTestContainerWithSessionManager(
+    sessionManager sessioncontract.Manager,
+) containercontract.Container {
+    return newHttpTestContainerWithSessionManagerAndEnvironmentValues(sessionManager, nil)
+}
+
+func newHttpTestContainerWithSessionStorageAndEnvironmentValues(
+    storage sessioncontract.Storage,
+    environmentValues map[string]string,
+) containercontract.Container {
+    return newHttpTestContainerWithSessionManagerAndEnvironmentValues(
+        session.NewManager(storage, 30*time.Minute),
+        environmentValues,
+    )
+}
+
+func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
+    sessionManager sessioncontract.Manager,
+    environmentValues map[string]string,
+) containercontract.Container {
     serviceContainer := container.NewContainer()
 
     serviceContainer.MustRegister(
@@ -53,11 +77,16 @@ func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) con
     serviceContainer.MustRegister(
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            values := map[string]string{
+                config.EnvKey: config.EnvDevelopment,
+            }
+            for key, value := range environmentValues {
+                values[key] = value
+            }
+
             environment, err := config.NewEnvironment(
                 &testEnvironmentSource{
-                    values: map[string]string{
-                        config.EnvKey: config.EnvDevelopment,
-                    },
+                    values: values,
                 },
             )
             if nil != err {
@@ -71,7 +100,7 @@ func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) con
     serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return session.NewManager(storage, 30*time.Minute), nil
+            return sessionManager, nil
         },
     )
 
@@ -227,7 +256,6 @@ func TestRouter_ParamExtraction(t *testing.T) {
     }
 }
 
-/* @info A requirement is a whitelist for one path segment. Anchors bind looser than alternation, so concatenating "^" and "$" onto "en|de|fr" yields (^en)|(de)|(fr$) — which accepts "aden", "frfr" and any string ending in "fr". The requirement must be wrapped in a non-capturing group so the anchors apply to the whole alternation. */
 func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
     router := NewRouter()
 
@@ -272,7 +300,6 @@ func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
     }
 }
 
-/* @info The catch-all branch assigned the joined remainder to the wildcard without consulting the route's requirements, while the single-segment and named-parameter branches enforced theirs — a whitelist that silently failed open on ":path...". */
 func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
     router := NewRouter()
 
@@ -309,7 +336,6 @@ func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
     }
 }
 
-/* @info a request path that differs from the route only by whitespace must not reach the handler: a proxy or firewall rule matching the exact path never sees a match, so an alias here is an authorization bypass in front of the application */
 func TestRouter_Match_WhitespacePaddedRequestPathDoesNotAliasTheRoute(t *testing.T) {
     router := NewRouter()
 
@@ -332,7 +358,6 @@ func TestRouter_Match_WhitespacePaddedRequestPathDoesNotAliasTheRoute(t *testing
     }
 }
 
-/* @info an empty segment must not satisfy a named parameter: the handler cannot tell an empty bound value from a supplied one, so an empty identifier reaches whatever the handler does with it */
 func TestRouter_Match_EmptySegmentDoesNotSatisfyNamedParameter(t *testing.T) {
     router := NewRouter()
 
@@ -558,4 +583,254 @@ func TestRouter_AddRoute_RejectsANonTrailingOptionalWhoseDefaultIsEmpty(t *testi
         },
         "optional route parameter must be the last pattern segment unless it has a default",
     )
+}
+func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    router.HandleWithOptions(
+        "/:page?",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "home"), nil
+        },
+        NewRouteOptions(
+            "home",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    generatedPath, generateErr := urlGenerator.GeneratePath("home", nil)
+    if nil != generateErr {
+        t.Fatalf("unexpected generate error: %v", generateErr)
+    }
+
+    if "/" != generatedPath {
+        t.Fatalf("expected the omitted optional to generate the root path, got %q", generatedPath)
+    }
+
+    matchResult, matched := router.Match(nethttp.MethodGet, generatedPath, "", "")
+    if false == matched {
+        t.Fatalf("expected the generated path %q to match the route it came from", generatedPath)
+    }
+
+    if _, bound := matchResult.Params["page"]; true == bound {
+        t.Fatalf("expected the omitted optional to stay unbound, got %v", matchResult.Params)
+    }
+}
+
+func TestRouter_Match_NeverAdvertisesAnEmptyAllowedMethod(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(
+        "",
+        "/empty-method",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "never"), nil
+        },
+    )
+
+    matchResult, matched := router.Match(nethttp.MethodGet, "/empty-method", "", "")
+    if true == matched {
+        t.Fatalf("expected a route declared with an empty method to stay unreachable")
+    }
+
+    advertised, carried := matchResult.RouteAttributes[RouteAttributeMethods]
+    if false == carried {
+        return
+    }
+
+    methodList, ok := advertised.([]string)
+    if false == ok {
+        t.Fatalf("expected the advertised methods to be a string list, got %T", advertised)
+    }
+
+    for _, methodName := range methodList {
+        if "" == methodName {
+            t.Fatalf("expected no empty method token among the advertised methods, got %q", methodList)
+        }
+    }
+}
+
+func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
+    newGetOnlyKernel := func() *Kernel {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/hello",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return TextResponse(200, "ok"), nil
+            },
+        )
+
+        return NewKernel(router)
+    }
+
+    allowFor := func(kernel *Kernel) string {
+        handler := kernel.ServeHttp(newHttpTestContainer())
+        request := httptest.NewRequest(nethttp.MethodPost, "/hello", nil)
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, request)
+
+        if 405 != recorder.Code {
+            t.Fatalf("expected 405, got %d", recorder.Code)
+        }
+
+        return recorder.Header().Get("Allow")
+    }
+
+    /* default policy advertises the synthetic OPTIONS and HEAD it actually honors */
+    defaultAllow := allowFor(newGetOnlyKernel())
+    if false == strings.Contains(defaultAllow, nethttp.MethodOptions) || false == strings.Contains(defaultAllow, nethttp.MethodHead) {
+        t.Fatalf("default policy Allow must advertise OPTIONS and HEAD, got %q", defaultAllow)
+    }
+
+    /* with both policy flags off, OPTIONS and HEAD in fact return 405, so Allow must not promise them */
+    restricted := newGetOnlyKernel()
+    restricted.options.MethodPolicy.AutomaticOptions = false
+    restricted.options.MethodPolicy.HeadFallbackToGet = false
+    restrictedAllow := allowFor(restricted)
+
+    if true == strings.Contains(restrictedAllow, nethttp.MethodOptions) {
+        t.Fatalf("Allow must not advertise OPTIONS when AutomaticOptions is off, got %q", restrictedAllow)
+    }
+    if true == strings.Contains(restrictedAllow, nethttp.MethodHead) {
+        t.Fatalf("Allow must not advertise HEAD when HeadFallbackToGet is off, got %q", restrictedAllow)
+    }
+    if false == strings.Contains(restrictedAllow, nethttp.MethodGet) {
+        t.Fatalf("Allow must still advertise the real GET method, got %q", restrictedAllow)
+    }
+}
+
+func TestRouter_HandleControllerRegistersTheControllerUnderItsMethod(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleController(
+        nethttp.MethodGet,
+        "/articles",
+        func(request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "from the controller"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the controller to answer, got: %d", recorder.Code)
+    }
+
+    if "from the controller" != recorder.Body.String() {
+        t.Fatalf("unexpected body: %q", recorder.Body.String())
+    }
+
+    otherMethodRecorder := httptest.NewRecorder()
+    handler.ServeHTTP(otherMethodRecorder, httptest.NewRequest(nethttp.MethodPost, "/articles", nil))
+
+    if nethttp.StatusOK == otherMethodRecorder.Code {
+        t.Fatalf("expected the controller to be bound to its method alone")
+    }
+}
+
+func TestRouter_HandleNamedControllerRegistersTheNameTheGeneratorResolves(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleNamedController(
+        "article.show",
+        nethttp.MethodGet,
+        "/articles/:id",
+        func(request httpcontract.Request) (httpcontract.Response, error) {
+            identifier, _ := request.Param("id")
+
+            return TextResponse(nethttp.StatusOK, identifier), nil
+        },
+    )
+
+    definition, found := router.RouteDefinition("article.show")
+    if false == found {
+        t.Fatalf("expected the named controller route to be registered under its name")
+    }
+
+    if "/articles/:id" != definition.Pattern() {
+        t.Fatalf("unexpected pattern: %q", definition.Pattern())
+    }
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil))
+
+    if "42" != recorder.Body.String() {
+        t.Fatalf("expected the route parameter to reach the controller, got: %q", recorder.Body.String())
+    }
+}
+
+func TestRouter_HandleControllerRefusesSomethingThatIsNotAFunction(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a non-function controller to be refused at registration")
+        }
+    }()
+
+    NewRouter().HandleController(nethttp.MethodGet, "/articles", "not a function")
+}
+
+func TestRouter_RouteRegistryIsTheOneItRegistersInto(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    router.HandleNamed("article.show", nethttp.MethodGet, "/articles", routeRegistryTestHandler())
+
+    if routeRegistry != router.RouteRegistry() {
+        t.Fatalf("expected the router to report the registry it was built with")
+    }
+
+    if 1 != len(router.RouteRegistry().RouteDefinitions()) {
+        t.Fatalf("expected the registration to be visible through the reported registry")
+    }
+}
+
+func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/aliased",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    firstResult, matched := router.Match(nethttp.MethodGet, "/aliased", "", "http")
+    if false == matched || nil == firstResult {
+        t.Fatalf("expected a match")
+    }
+
+    firstMethods, ok := firstResult.RouteAttributes[RouteAttributeMethods].([]string)
+    if false == ok || 0 == len(firstMethods) {
+        t.Fatalf("expected the methods attribute")
+    }
+
+    firstMethods[0] = "HACKED"
+    firstResult.RouteAttributes["injected"] = "yes"
+
+    secondResult, _ := router.Match(nethttp.MethodGet, "/aliased", "", "http")
+
+    secondMethods, ok := secondResult.RouteAttributes[RouteAttributeMethods].([]string)
+    if false == ok || nethttp.MethodGet != secondMethods[0] {
+        t.Fatalf("expected the registry slice to be untouched by the caller's mutation, got %v", secondMethods)
+    }
+
+    if _, exists := secondResult.RouteAttributes["injected"]; true == exists {
+        t.Fatalf("expected the registry map to be untouched by the caller's mutation")
+    }
 }

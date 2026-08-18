@@ -44,7 +44,7 @@ func (instance *CurrencyService) List() ([]*entity.Currency, error) {
         CacheKeyCurrencyList,
         0,
         func(ctx context.Context) (any, error) {
-            return instance.currencyRepository.All(), nil
+            return instance.currencyRepository.All(ctx)
         },
         nil,
     )
@@ -68,7 +68,11 @@ func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, er
         cacheKey,
         0,
         func(ctx context.Context) (any, error) {
-            currency, found := instance.currencyRepository.FindById(id)
+            currency, found, findErr := instance.currencyRepository.FindById(ctx, id)
+            if nil != findErr {
+                return nil, findErr
+            }
+
             if false == found {
                 return nil, nil
             }
@@ -101,7 +105,7 @@ func (instance *CurrencyService) Create(
 ) (*entity.Currency, error) {
     currency := entity.NewCurrency(currencyId, code, name)
 
-    createErr := instance.currencyRepository.Create(currency)
+    createErr := instance.currencyRepository.Create(runtimeInstance.Context(), currency)
     if nil != createErr {
         return nil, createErr
     }
@@ -125,7 +129,13 @@ func (instance *CurrencyService) Update(
     code string,
     name string,
 ) (*entity.Currency, bool, error) {
-    currency, found := instance.currencyRepository.FindById(currencyId)
+    ctx := runtimeInstance.Context()
+
+    currency, found, findErr := instance.currencyRepository.FindById(ctx, currencyId)
+    if nil != findErr {
+        return nil, false, findErr
+    }
+
     if false == found {
         return nil, false, nil
     }
@@ -133,7 +143,7 @@ func (instance *CurrencyService) Update(
     currency.Code = code
     currency.Name = name
 
-    updated, updateErr := instance.currencyRepository.Update(currency)
+    updated, updateErr := instance.currencyRepository.Update(ctx, currency)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -158,7 +168,7 @@ func (instance *CurrencyService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
 ) (bool, error) {
-    deleted, deleteErr := instance.currencyRepository.DeleteById(currencyId)
+    deleted, deleteErr := instance.currencyRepository.DeleteById(runtimeInstance.Context(), currencyId)
     if nil != deleteErr {
         return false, deleteErr
     }

@@ -26,6 +26,7 @@ func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
     })
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
@@ -565,6 +566,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
         OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
             close(callbackEntered)
 
@@ -645,6 +647,7 @@ func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
         OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
             close(callbackEntered)
             <-releaseCallback
@@ -831,5 +834,46 @@ func TestConnectionLiveness_InFlightWriteExcusesOnlyThePingItQueuedBehindItself(
 
     if true == liveness.cannotAnswer(false, window, callbackGrace, graceForWrite) {
         t.Fatalf("a write that completed before the ping was issued must not excuse the ping's timeout")
+    }
+}
+
+/* a zero IdleTimeout leaves the connection with no reaper at all: Accept hijacks it out of http.Server's timeouts, the read loop blocks with no deadline and a write into a half-open socket still succeeds, so a peer that vanishes without a fin holds its descriptor, its hub subscription and its goroutines for the life of the process. Construction must refuse it, and say why. */
+func TestNewStreamHandler_RefusesAZeroIdleTimeout(t *testing.T) {
+    for _, idleTimeout := range []time.Duration{0, -time.Second} {
+        assertStreamHandlerRefusesIdleTimeout(t, idleTimeout)
+    }
+}
+
+func assertStreamHandlerRefusesIdleTimeout(t *testing.T, idleTimeout time.Duration) {
+    t.Helper()
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected a panic for an IdleTimeout of %v", idleTimeout)
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic value to be an error, got %T", recovered)
+        }
+
+        message := recoveredErr.Error()
+        if false == strings.Contains(message, "IdleTimeout") {
+            t.Fatalf("expected the diagnostic to name the option, got %q", message)
+        }
+
+        if false == strings.Contains(message, "ping") {
+            t.Fatalf("expected the diagnostic to explain that the keepalive ping is the only reaper, got %q", message)
+        }
+    }()
+
+    NewStreamHandler(melodyhttp.NewServerSentEventHub(), Options{IdleTimeout: idleTimeout})
+}
+
+/* a positive IdleTimeout is accepted and yields a usable handler. */
+func TestNewStreamHandler_AcceptsAPositiveIdleTimeout(t *testing.T) {
+    if nil == NewStreamHandler(melodyhttp.NewServerSentEventHub(), Options{IdleTimeout: time.Second}) {
+        t.Fatal("expected a handler for a positive IdleTimeout")
     }
 }

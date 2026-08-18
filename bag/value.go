@@ -4,6 +4,8 @@ import (
     "strings"
 
     bagcontract "github.com/precision-soft/melody/bag/contract"
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
 )
 
@@ -13,7 +15,7 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return "", false
     }
 
-    /* @important a present-but-nil value reports as unset, matching what the typed accessors report for the same state; otherwise Has and String would agree while String and Int contradicted each other */
+    /* a present-but-nil value reports as unset, matching what the typed accessors report for the same state; otherwise Has and String would agree while String and Int contradicted each other */
     if nil == value {
         return "", false
     }
@@ -21,6 +23,19 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
     stringValue, isString := value.(string)
     if true == isString {
         return stringValue, true
+    }
+
+    /* a string slice read as one string is refused loudly, never guessed at: the request bags keep the single and the repeated key apart by type, so what lands here is a genuine array. The empty string would lose the value and one element would hide the rest; the slice is read with StringSlice or StringAt. */
+    if _, isSlice := value.([]string); true == isSlice {
+        exception.Panic(
+            exception.NewError(
+                "parameter holds a string slice and cannot be read as one string; read it with StringSlice or StringAt",
+                exceptioncontract.Context{
+                    "parameterName": name,
+                },
+                nil,
+            ),
+        )
     }
 
     return "", true

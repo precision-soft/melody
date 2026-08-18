@@ -15,6 +15,7 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v2/serializer"
+    melodyvalidation "github.com/precision-soft/melody/v2/validation"
 )
 
 type apiResponse struct {
@@ -62,6 +63,42 @@ func ApiError(
             Context: buildErrorContext(request, statusCode, nil, debugMode(runtimeInstance)),
         },
     )
+}
+
+/* ApiValidationError renders a refused payload with one errors entry per violated field, so an api client can attach each message to the input that earned it instead of splitting a joined string. */
+func ApiValidationError(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    validationErr error,
+) melodyhttpcontract.Response {
+    return ApiError(runtimeInstance, request, nethttp.StatusBadRequest, validationErrorMessages(validationErr)...)
+}
+
+/* validationErrorMessages answers one message per violation. Each message carries only the field and its sentence — a violation's context, which may name the declaration rather than the input, never reaches the client on this path. Anything that is not a validation collection degrades to its plain message, and an empty collection degrades through normalizeErrors downstream. */
+func validationErrorMessages(validationErr error) []string {
+    var validationErrors melodyvalidation.ValidationErrors
+    if false == errors.As(validationErr, &validationErrors) {
+        return []string{errorMessage(validationErr)}
+    }
+
+    fieldErrors := make([]string, 0, len(validationErrors))
+    for _, validationError := range validationErrors {
+        if nil == validationError {
+            continue
+        }
+
+        fieldErrors = append(fieldErrors, validationError.Error())
+    }
+
+    return fieldErrors
+}
+
+func errorMessage(errorValue error) string {
+    if nil == errorValue {
+        return ""
+    }
+
+    return errorValue.Error()
 }
 
 func ApiErrorWithErr(
@@ -140,12 +177,19 @@ func buildApiResponse(
 
     acceptHeader := ""
     if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().Header {
-        acceptHeader = request.HttpRequest().Header.Get("Accept")
+        /* every Accept line is joined before parsing: Get answers only the first line of a repeated field, and the accept header is list-typed, so a refusal the client sent on a second line would otherwise vanish */
+        acceptHeader = strings.Join(request.HttpRequest().Header.Values("Accept"), ", ")
     }
 
     serializerManager := melodyserializer.SerializerManagerFromRuntime(runtimeInstance)
     if nil != serializerManager {
         serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
+
+        /* a header that refuses every available media type is answered as not acceptable on the error path exactly as the result handler answers it on the success path: falling through would render the failure in the very representation the client rejected; the incident itself is already in the application log by the time a presenter runs */
+        if true == errors.Is(err, melodyserializer.ErrNotAcceptable) {
+            return melodyhttp.EmptyResponse(nethttp.StatusNotAcceptable)
+        }
+
         if nil == err && nil != serializerInstance {
             return serializeWith(statusCode, payload, serializerInstance)
         }
@@ -192,7 +236,7 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
     return response
 }
 
-/* @important the debug decision is the kernel environment, exactly as the framework exception listener
+/* the debug decision is the kernel environment, exactly as the framework exception listener
 reads it; when it cannot be determined the presenter stays closed and emits no cause material */
 func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
     if nil == runtimeInstance {

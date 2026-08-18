@@ -6,11 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [v1.1.6] - 2026-07-25 - Connection-Abort Retry Markers
+## [v1.2.0] - 2026-08-18 - Verified TLS by Default, Context-Threaded Retries and Word-Bounded Transient Markers
+
+### Added
+
+- opening a connection routes bun's own diagnostic channel into the application's journal, once per process, through `bunorm.RouteDiagnostics`: bun's reports of a declaration mistake — an unknown struct tag option, a query carrying arguments and no placeholders — arrive as warning records instead of unstructured lines on standard error. See the `bunorm` changelog for the door itself, and this package's readme for the one line that deliberately stays on standard error: the dialect writes `can't discover MySQL version` through the standard library's default logger, not bun's, so routing it would mean taking `log.SetOutput` for the whole process
+
+- `WithInsecure` and `WithTlsConfig`, the two provider options its pgsql sibling already carried: `WithInsecure(true)` leaves the connection plaintext, the deliberate opt-out from the verified default; `WithTlsConfig` hands the connector an explicit configuration — a pinned server certificate, a client certificate — taking precedence over both the default and `WithInsecure`
+- `Provider.OpenForMigrationContext` — the provider implements `bunorm.MigrationContextOpener`: the migration open runs under the caller's context, so an already-cancelled migration is refused before the attempt and a cancellation arriving mid-attempt is honoured at the next cancellable step instead of sleeping out the retry budget. `OpenForMigration` is the same call under `context.Background()`, so no existing call site changes
+
+- `Provider.OpenContext` — the provider implements `bunorm.ContextOpener`: the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget, and the cancellation is reported with the last attempt's own failure as context
+- `Provider.OpenForMigration` — the provider implements `bunorm.MigrationProvider` and opens the same database with the driver deadlines lifted: `ReadTimeout` and `WriteTimeout` are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed, the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name
+
+### Changed
+
+- the provider negotiates a verified TLS handshake by default, the security posture its pgsql sibling already carried. The provider set no TLS on the connector, so it connected in plaintext and offered no option to turn TLS on — the only path was mutating `*mysql.Config` inside a `PostBuildHook`. It now builds a verifying `tls.Config` (the system roots, the configured host as the name to verify against, `MinVersion` TLS 1.2) by default, refusing the driver's `AllowFallbackToPlaintext` and `skip-verify` spellings that would downgrade silently or negotiate TLS without checking the certificate. **Behavioural change**: a mysql that speaks no TLS now fails the dial where it previously connected in plaintext; a caller reached over a trusted network or against such a server arms `WithInsecure(true)` explicitly, the same opt-out spelled the same way as pgsql
+- the `bun` requirement moves to `v1.2.17`, with the dialect and driver packages in lockstep: the dialects verify at init that their version equals bun's and panic otherwise. v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over a schema that never changed; the whole family moves together so no binary can assemble a mismatched pair
+
+- `Provider.Open` marks the configured password parameter secret through the configuration's own `MarkSecret` — the component told authoritatively which parameter holds the credential arms the framework's redaction for it, so the introspection output masks the password and every template derived from it without the application repeating the knowledge
+- the terminal failure record of the retry loop is the log of that failure: it is written in full through the exception context and the returned error carries the already-logged mark, so the exit handler no longer writes the same outage a second time. An alert counting error records saw one outage twice on the SQL providers and once on redis
 
 ### Fixed
 
+- the transient classifier matches its markers as words rather than as bare substrings. The short spellings fired inside ordinary identifiers — `eof` sits inside a table named `geofences`, `timeout` inside a `session_timeout` column — so a permanent failure was retried for the whole budget and then reported as "failed after max retry attempts" rather than as non-transient, costing the delay and telling the operator the wrong thing about what is really a schema error. A boundary is any character that is not a letter, a digit or an underscore, so the spellings carrying spaces and slashes match exactly as before, and the `io.EOF` and `net.Error` checks above the scan are untouched. **Behavioural change**: a failure whose message merely contains a marker inside a word now fails fast instead of exhausting the retry budget — see the framework's `UPGRADE.md`
+- a retry cancelled during its backoff hands on the failure it was retrying as structured context rather than as a flattened string. The cause stays the cancellation, because the classification upstream reads it, but the outage arrived as `openErr.Error()` in a single field — the exact flattening the comment eleven lines above condemns for the retry warning, which lifts the failure's own context and its cause chain. The record now carries the host and port dialled, the pool sizing and the deadlines that governed the attempt, so one failure has one record shape whether or not the caller happened to cancel
+- the diagnostic of a failed connection names the endpoint the dial actually reached. The connection context is built from the configuration parameters before the post-build hook runs, and the hook may rewrite the address — it is handed the very field for it — so a ping failure named the configured host and port while the attempt had gone somewhere else. The dialled address is carried beside the configured connection rather than folded into it, so a record where the two differ says so
+- the negotiated TLS posture is proven where the driver receives it, not only in the helper that computes it. The helper had its own test, but nothing observed that its answer reached the connector, so a deleted assignment would have left every default connection in plaintext with the suite green. The post-build hook is handed the configuration the connector is built from, and three tests read the posture through it: the verifying default with the configured host as the name to verify against, the one plaintext path behind `WithInsecure`, and an explicit `WithTlsConfig` reaching the driver exactly as it was given
+
+- documentation: the readme states that a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the default, the same field-by-field fill it presented as `RetryConfig`'s exception — what makes `RetryConfig` different is absence alone. The diagnostics section stops saying an application has one journal either way: the routing is taken once per process, so a first open handed no logger wins it with a no-op and drops the diagnostics of every provider opened afterwards
+
+- the zero-connect-timeout test message stops claiming a deadline-free dial: a non-positive `ConnectTimeout` is resolved to the default connect deadline before it reaches the driver — the documented normalization — and the failure message now says so instead of describing a no-deadline semantics the provider refuses to have
+
+- the readme's retry fill-in rule states the multiplier's real floor: it claimed every listed value fills in when the supplied field is zero or non-positive, while for `BackoffMultiplier` the code replaces any supplied value below `1`, `NaN` included, with the default `2.0`, and keeps exactly `1` as a valid constant backoff — so a configured `0.5` was documented as honoured and was not
+- bun's diagnostics are routed into the journal on the retry-less open path too: the `bunorm.RouteDiagnostics` call sat only in the retry loop, so the default provider — one built without a `RetryConfig` — opened its connection and left bun's declaration mistakes as unstructured lines on standard error, exactly the state the routing was added to end. The call now lives in the one open funnel every door shares — `Open`, `OpenContext`, the retry loop and the migration door alike
+
+- `provider.go` — the retry warning carries the diagnostic shape the terminal records carry: the host and port dialed, the pool sizing, the deadlines that governed the attempt and the cause chain, lifted through `exception.LogContext` the way the three records above it already are. The first two records an operator sees when a database is down had the failure flattened to `openErr.Error()` — a message and nothing to act on — and only the third, terminal one named the database
+
+- `provider.go` — the caller's own cancellation is a clean stop, recorded at warning under its own name and not retried. The transient classifier reads error types and message markers, none of which a cancellation carries, so a SIGTERM that cancelled the open mid-deploy fell through to the terminal branch and paged whoever was on call with "database connection failed with non-transient error" against a perfectly healthy database — the fifth site of a class the framework's fourth pass classified at four others, and the one that this module's own early refusal created. A cancellation that lands while an attempt waits out its backoff is recorded and marked the same way, so it does not travel up as a bare resolution failure for some later writer to file at error. Only `context.Canceled`: the ping budget derives from the connect timeout, so a deadline here can be the database itself
+
+- `provider.go` — the connection-failure record carries the pool sizing and the deadlines that governed the attempt, the pgsql sibling's diagnostic shape; it named only the address that refused, so the same outage read differently depending on which provider reported it
+- `provider.go` — every non-positive field of `PoolConfig` and `TimeoutConfig` falls back to the constructor default, the way the retry configuration already did. A zero reaches the provider far more often from an environment key nobody set than from a caller who means "no limit": on `database/sql` a zero maximum is an UNLIMITED pool and a zero lifetime means connections that are never recycled, while on this driver a zero read or write deadline means no deadline at all — so the zero-value configuration disarmed exactly the protections the nil configuration installs, and a negative one put the deadline in the past, failing every dial instantly with an i/o timeout no network event caused. **Behavioural**: a configuration that relied on zero meaning "unlimited" now receives the documented defaults; the migration connection keeps its deliberately lifted deadlines and disabled recycling
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), aligning with the pgsql provider
+
+- README — the retry paragraph states what the code does with a zero `ConnectTimeout`: every non-positive value falls back to the 10s default before the connector is built, so the dial, ping and hook always run under a deadline — the claim that zero "leaves both unbounded" described a state `resolvedTimeoutConfig` cannot produce
 
 ## [v1.1.5] - 2026-07-24 - Server Shutdown Transient Marker
 
@@ -46,9 +84,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v1.1.0] - 2026-02-17 - Add PostBuildHook and ProviderOption Infrastructure
 
-### Fixed
+### Added
 
-- `provider.go` — connection error handling improved to support hook-based TLS customization
+- `post_build_hook.go` — `mysql.PostBuildHook` function type: `func(ctx context.Context, resolver containercontract.Resolver, driverConfig *driver.Config) error`; runs after defaults and typed configs, before SQL connector creation (enables `TLSConfig` mutation and other driver-level customization)
+- `provider_option.go` — `mysql.ProviderOption` builder type; `mysql.WithPostBuildHook(hook)` option constructor
+- `retry_config.go` — `RetryConfig` extracted into dedicated file
 
 ### Changed
 
@@ -56,22 +96,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `provider.go` — removed exported `DefaultRetryConfig()` — retry config still configurable through `ProviderOption`
 - `README.md` — expanded with advanced connector customization examples
 
-### Added
+### Fixed
 
-- `post_build_hook.go` — `mysql.PostBuildHook` function type: `func(ctx context.Context, resolver containercontract.Resolver, driverConfig *driver.Config) error`; runs after defaults and typed configs, before SQL connector creation (enables `TLSConfig` mutation and other driver-level customization)
-- `provider_option.go` — `mysql.ProviderOption` builder type; `mysql.WithPostBuildHook(hook)` option constructor
-- `retry_config.go` — `RetryConfig` extracted into dedicated file
+- `provider.go` — connection error handling improved to support hook-based TLS customization
 
 ## [v1.0.1] - 2026-02-07 - Add Retry Mechanism with Exponential Backoff
-
-### Changed
-
-- `provider.go` — `Provider.Open()` delegates to `openWithRetry()` when retry config is present
 
 ### Added
 
 - `provider.go` — `Provider.openWithRetry()` implementing exponential backoff; `computeBackoffDelay()`; `isTransientError()` detecting connection-refused / I/O-timeout patterns
 - Retry configuration: `RetryConfig` with `MaxAttempts`, `InitialDelay`, `MaxDelay`, `BackoffMultiplier`; `DefaultRetryConfig()` — 3 attempts, 500ms initial delay, 5s max delay, 2.0× backoff multiplier
+
+### Changed
+
+- `provider.go` — `Provider.Open()` delegates to `openWithRetry()` when retry config is present
 
 ## [v1.0.0] - 2026-02-05 - Initial Release — MySQL Provider for bunorm
 
@@ -84,9 +122,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Builder methods: `Provider.WithPoolConfig()`, `WithTimeoutConfig()`
 - `mysql_error.go` — MySQL-specific error detection utilities
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.6...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.2.0...HEAD
 
-[v1.1.6]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.5...integrations/bunorm/mysql/v1.1.6
+[v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.5...integrations/bunorm/mysql/v1.2.0
 
 [v1.1.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.4...integrations/bunorm/mysql/v1.1.5
 

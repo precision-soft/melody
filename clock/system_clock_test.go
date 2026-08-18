@@ -3,6 +3,8 @@ package clock
 import (
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/internal/testhelper"
 )
 
 func TestSystemClock_Now(t *testing.T) {
@@ -41,14 +43,23 @@ func TestSystemTickerStopDoesNotPanic(t *testing.T) {
     ticker.Stop()
 }
 
+/* the panic is pinned by MESSAGE: recovered value-blind the guard is SHADOWED, because time.NewTicker panics on the same input three frames deeper */
 func TestSystemClock_NewTicker_PanicsOnInvalidInterval(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
+    clockInstance := NewSystemClock()
 
-    clock := NewSystemClock()
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = clockInstance.NewTicker(0)
+        },
+        "invalid ticker interval",
+    )
 
-    _ = clock.NewTicker(0)
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = clockInstance.NewTicker(-1 * time.Millisecond)
+        },
+        "invalid ticker interval",
+    )
 }

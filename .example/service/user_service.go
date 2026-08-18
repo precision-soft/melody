@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/.example/entity"
     "github.com/precision-soft/melody/.example/event"
     "github.com/precision-soft/melody/.example/repository"
+    "github.com/precision-soft/melody/.example/security"
     melodycache "github.com/precision-soft/melody/cache"
     melodycachecontract "github.com/precision-soft/melody/cache/contract"
     "github.com/precision-soft/melody/container"
@@ -44,7 +45,7 @@ func (instance *UserService) List() ([]*entity.User, error) {
         CacheKeyUserList,
         0,
         func(ctx context.Context) (any, error) {
-            return instance.userRepository.All()
+            return instance.userRepository.All(ctx)
         },
         nil,
     )
@@ -61,6 +62,10 @@ func (instance *UserService) List() ([]*entity.User, error) {
 }
 
 func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyUserById(id)
 
     cached, rememberErr := melodycache.Remember(
@@ -68,7 +73,11 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
         cacheKey,
         0,
         func(ctx context.Context) (any, error) {
-            user, found := instance.userRepository.FindById(id)
+            user, found, findErr := instance.userRepository.FindById(ctx, id)
+            if nil != findErr {
+                return nil, findErr
+            }
+
             if false == found {
                 return nil, nil
             }
@@ -94,8 +103,9 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 }
 
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
-    normalizedUsername := strings.ToLower(strings.TrimSpace(username))
-    if "" == normalizedUsername {
+    /* CacheSafeIdentifier also refuses the empty spelling, so the blank-username answer travels through the same door */
+    normalizedUsername := repository.NormalizedUsername(username)
+    if false == CacheSafeIdentifier(normalizedUsername) {
         return nil, false, nil
     }
 
@@ -106,7 +116,11 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
         cacheKey,
         0,
         func(ctx context.Context) (any, error) {
-            user, found := instance.userRepository.FindByUsername(normalizedUsername)
+            user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
+            if nil != findErr {
+                return nil, findErr
+            }
+
             if false == found {
                 return nil, nil
             }
@@ -135,12 +149,12 @@ func (instance *UserService) Create(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
     username string,
-    passwordSha256Hex string,
+    passwordHash string,
     roles []string,
 ) (*entity.User, error) {
-    user := entity.NewUser(userId, username, passwordSha256Hex, roles)
+    user := entity.NewUser(userId, username, passwordHash, roles)
 
-    createErr := instance.userRepository.Create(user)
+    createErr := instance.userRepository.Create(runtimeInstance.Context(), user)
     if nil != createErr {
         return nil, createErr
     }
@@ -162,19 +176,27 @@ func (instance *UserService) Update(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
     username string,
-    passwordSha256Hex string,
+    passwordHash string,
     roles []string,
 ) (*entity.User, bool, error) {
-    user, found := instance.userRepository.FindById(userId)
+    ctx := runtimeInstance.Context()
+
+    user, found, findErr := instance.userRepository.FindById(ctx, userId)
+    if nil != findErr {
+        return nil, false, findErr
+    }
+
     if false == found {
         return nil, false, nil
     }
 
+    previousUsername := user.Username
+
     user.Username = username
-    user.Password = passwordSha256Hex
+    user.Password = passwordHash
     user.Roles = roles
 
-    updated, updateErr := instance.userRepository.Update(user)
+    updated, updateErr := instance.userRepository.Update(ctx, user)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -182,7 +204,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(user)
+    updatedEvent := event.NewUserUpdatedEvent(user, previousUsername)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
@@ -199,12 +221,18 @@ func (instance *UserService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
 ) (bool, error) {
-    user, found := instance.userRepository.FindById(userId)
+    ctx := runtimeInstance.Context()
+
+    user, found, findErr := instance.userRepository.FindById(ctx, userId)
+    if nil != findErr {
+        return false, findErr
+    }
+
     if false == found {
         return false, nil
     }
 
-    deleted, deleteErr := instance.userRepository.DeleteById(userId)
+    deleted, deleteErr := instance.userRepository.DeleteById(ctx, userId)
     if nil != deleteErr {
         return false, deleteErr
     }
@@ -225,16 +253,16 @@ func (instance *UserService) DeleteById(
     return true, nil
 }
 
-func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
+func (instance *UserService) AuthenticateByUsernameAndPassword(
     username string,
-    passwordSha256Hex string,
+    password string,
 ) (*entity.User, bool, error) {
     normalizedUsername := strings.TrimSpace(username)
     if "" == normalizedUsername {
         return nil, false, nil
     }
 
-    if "" == strings.TrimSpace(passwordSha256Hex) {
+    if "" == password {
         return nil, false, nil
     }
 
@@ -243,10 +271,13 @@ func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
         return nil, false, findErr
     }
     if false == found {
+        /* spend a bcrypt comparison on an absent username too: the found path below runs one, and returning here without it would answer an unknown username faster than a wrong password, an existence oracle an attacker times to enumerate usernames */
+        security.DummyPasswordMatch(password)
+
         return nil, false, nil
     }
 
-    if passwordSha256Hex != user.Password {
+    if false == security.PasswordMatches(user.Password, password) {
         return nil, false, nil
     }
 

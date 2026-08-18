@@ -8,6 +8,8 @@ import (
     "fmt"
     "time"
 
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
+
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -27,7 +29,7 @@ func (instance *AuthTokenCommand) Name() string {
 }
 
 func (instance *AuthTokenCommand) Description() string {
-    return "mints a demo HS256 JWT for the token-protected secure api"
+    return "mints an HS256 JWT for the token-protected secure api"
 }
 
 func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
@@ -39,6 +41,10 @@ func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
         &melodyclicontract.StringSliceFlag{
             Name:  "role",
             Usage: "role embedded in the token (repeat for multiple)",
+        },
+        &melodyclicontract.StringFlag{
+            Name:  "device",
+            Usage: "device the token is issued to; a revocation can then end this device without ending the others",
         },
         &melodyclicontract.IntFlag{
             Name:  "ttl",
@@ -53,7 +59,7 @@ func (instance *AuthTokenCommand) Run(
 ) error {
     user := commandContext.String("user")
     if "" == user {
-        user = "demo-user"
+        user = "example-user"
     }
 
     roles := commandContext.StringSlice("role")
@@ -72,6 +78,10 @@ func (instance *AuthTokenCommand) Run(
         "roles": roles,
         "iat":   now.Unix(),
         "exp":   now.Add(time.Duration(ttl) * time.Second).Unix(),
+    }
+
+    if device := commandContext.String("device"); "" != device {
+        claims[examplesecurity.DeviceClaim] = device
     }
 
     fmt.Println(signHs256(instance.secret, claims))

@@ -52,7 +52,7 @@ func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
 func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
     _, report := generateWiring(t)
 
-    if 10 != report.ConstructorCount {
+    if 12 != report.ConstructorCount {
         t.Fatalf("expected every scanned constructor to be wired, got %d", report.ConstructorCount)
     }
 

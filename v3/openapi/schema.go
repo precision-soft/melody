@@ -13,6 +13,18 @@ import (
 var timeType = reflect.TypeOf(time.Time{})
 var jsonMarshalerInterfaceType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 
+/* maximumSchemaDepth is the last-resort bound on how far the generator descends into a type. A well-formed type graph never reaches it: every named struct and every self-referential named collection is expanded once into components and answered with a $ref from then on, so only distinct types stack up, and no payload nests sixty-four of them. The bound exists for the shape nobody anticipated, because this recursion runs inside a request handler — SpecHandler regenerates the document on every call — and a Go stack overflow is a fatal error, not a panic: neither recover nor the http recovery middleware can catch it, so the first client to fetch the spec route would take the process down and keep doing so. Reaching the bound must therefore degrade to an undescribed position in an otherwise complete document. */
+const maximumSchemaDepth = 64
+
+/* schemaDepthLimitDescription is the diagnostic the generator leaves where the bound stopped it. The schema at that position carries no type and no facet, so it accepts any value: the document stays well-formed and permissive rather than silently constraining a payload nobody described, and the description says why. It travels in the document itself because Generate is a pure function reachable from a request handler, with no logger to report to and no caller to return an error to. */
+var schemaDepthLimitDescription = "schema generation stopped at the maximum nesting depth of " +
+    strconv.Itoa(maximumSchemaDepth) +
+    " levels; this position is left undescribed"
+
+func depthLimitSchema() *Schema {
+    return &Schema{Description: schemaDepthLimitDescription}
+}
+
 /* @important the unsigned floor is applied here as well as on fields and collection elements: a request or response type handed in bare goes straight to buildSchema, so without this a top-level unsigned scalar advertises the negative range its decoder refuses */
 func schemaFromType(targetType reflect.Type, components map[string]*Schema, names map[reflect.Type]string) *Schema {
     schema := buildSchema(targetType, components, names, make(map[reflect.Type]bool))
@@ -23,14 +35,35 @@ func schemaFromType(targetType reflect.Type, components map[string]*Schema, name
 }
 
 func buildSchema(targetType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool) *Schema {
+    return buildSchemaAtDepth(targetType, components, names, visited, 0)
+}
+
+func buildSchemaAtDepth(
+    targetType reflect.Type,
+    components map[string]*Schema,
+    names map[reflect.Type]string,
+    visited map[reflect.Type]bool,
+    depth int,
+) *Schema {
     if nil == targetType {
         return &Schema{}
     }
 
+    if maximumSchemaDepth <= depth {
+        return depthLimitSchema()
+    }
+
     nullable := false
+    pointerHops := 0
     for reflect.Ptr == targetType.Kind() {
         nullable = true
         targetType = targetType.Elem()
+
+        /* a named pointer type can dereference to itself — `type Next *Next`, or a pair declared through each other — and this loop would then never reach a non-pointer kind. Counting the hops against the same bound turns that into a described position instead of a live-locked request handler; a declaration with more stars than the bound has no faithful schema anyway, and none exists. */
+        pointerHops++
+        if maximumSchemaDepth <= pointerHops {
+            return withNullable(depthLimitSchema(), true)
+        }
     }
 
     if targetType == timeType {
@@ -52,38 +85,110 @@ func buildSchema(targetType reflect.Type, components map[string]*Schema, names m
             return withNullable(&Schema{Type: "string", Format: "byte"}, nullable)
         }
 
-        return withNullable(&Schema{Type: "array", Items: elementSchema(targetType.Elem(), components, names, visited)}, nullable)
+        return withNullable(collectionSchemaReference(targetType, components, names, visited, depth), nullable)
     case reflect.Map:
-        return withNullable(&Schema{Type: "object", AdditionalProperties: elementSchema(targetType.Elem(), components, names, visited)}, nullable)
+        return withNullable(collectionSchemaReference(targetType, components, names, visited, depth), nullable)
     case reflect.Struct:
         if true == promotesEmbeddedTimeCodec(targetType) {
             return withNullable(&Schema{Type: "string", Format: "date-time"}, nullable)
         }
 
-        return structSchemaReference(targetType, components, names, visited, nullable)
+        return structSchemaReference(targetType, components, names, visited, nullable, depth)
     default:
         return withNullable(&Schema{}, nullable)
     }
 }
 
 /* @important a collection element carries no validate tag of its own — a tag on the field constrains the collection, not each entry — so the unsigned floor is stamped here rather than left to addFieldProperty, which only ever sees the field. Without it the items schema of a []uint advertises the whole negative range the decoder rejects. The absence of a tag is also what makes the floor safe here: there is no validator-placed exclusive bound for it to weaken. */
-func elementSchema(elementType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool) *Schema {
-    schema := buildSchema(elementType, components, names, visited)
+func elementSchema(
+    elementType reflect.Type,
+    components map[string]*Schema,
+    names map[reflect.Type]string,
+    visited map[reflect.Type]bool,
+    depth int,
+) *Schema {
+    schema := buildSchemaAtDepth(elementType, components, names, visited, depth)
 
     applyUnsignedLowerBound(schema, elementType)
 
     return schema
 }
 
-func structSchemaReference(structType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool, nullable bool) *Schema {
+/* collectionSchemaReference describes a slice, array or map, sending it through the same components + $ref mechanism a struct uses in the one case where nothing else would end the walk: a NAMED collection whose element links lead back to itself. `type Metadata map[string]Metadata` and `type Nodes []Nodes` carry no struct in the loop, and it is the components placeholder in structSchemaReference that ends a struct cycle, so such a type would otherwise be expanded until the stack is gone. Given a component of its own it is built once and answered with a $ref from then on, which both ends the walk and states what the type is instead of merely surviving it. Every other collection keeps its inline form: an unnamed one has no component key to point at, and one whose loop passes through a struct already terminates there. A field of a promoted type keeps the validation its tag asks for: applyValidation resolves the reference back to this component and reads the collection it describes, so a notEmpty is mirrored as the same length floor it would carry inline rather than as the unsatisfiable field a reference read as a struct would produce. */
+func collectionSchemaReference(
+    targetType reflect.Type,
+    components map[string]*Schema,
+    names map[reflect.Type]string,
+    visited map[reflect.Type]bool,
+    depth int,
+) *Schema {
+    if false == collectionReachesItself(targetType) {
+        return collectionSchemaBody(targetType, components, names, visited, depth)
+    }
+
+    name := schemaComponentName(targetType, names)
+    if _, built := components[name]; false == built {
+        /* claim the key before descending, exactly as a struct component does: an element that arrives back here finds it taken and answers with the $ref, which is what ends the cycle. The claimed value is never read — the arrival only tests for the key — and the body below replaces it. */
+        components[name] = &Schema{Type: "object"}
+        components[name] = collectionSchemaBody(targetType, components, names, visited, depth)
+    }
+
+    return &Schema{Ref: "#/components/schemas/" + name}
+}
+
+func collectionSchemaBody(
+    targetType reflect.Type,
+    components map[string]*Schema,
+    names map[reflect.Type]string,
+    visited map[reflect.Type]bool,
+    depth int,
+) *Schema {
+    if reflect.Map == targetType.Kind() {
+        return &Schema{Type: "object", AdditionalProperties: elementSchema(targetType.Elem(), components, names, visited, depth+1)}
+    }
+
+    return &Schema{Type: "array", Items: elementSchema(targetType.Elem(), components, names, visited, depth+1)}
+}
+
+/* collectionReachesItself walks the element links leading out of a named collection and reports whether they come back to it. A pointer, slice, array and map each have exactly one element type, so this is a single chain rather than a search. It stops at every other kind: a struct in the chain means the struct component already ends the recursion, and an interface, a scalar or time.Time ends it outright. Only a declared type can appear inside its own declaration, so an unnamed collection is never self-referential and is answered before the walk starts. The walk is bounded because a chain can also fall into a cycle that never returns to where it began (`type A []B` over `type B []C; type C []B`), a shape the depth bound then describes rather than this walk chasing forever. */
+func collectionReachesItself(targetType reflect.Type) bool {
+    if "" == targetType.Name() {
+        return false
+    }
+
+    current := targetType
+    for hop := 0; hop < maximumSchemaDepth; hop++ {
+        switch current.Kind() {
+        case reflect.Ptr, reflect.Slice, reflect.Array, reflect.Map:
+            current = current.Elem()
+        default:
+            return false
+        }
+
+        if current == targetType {
+            return true
+        }
+    }
+
+    return false
+}
+
+func structSchemaReference(
+    structType reflect.Type,
+    components map[string]*Schema,
+    names map[reflect.Type]string,
+    visited map[reflect.Type]bool,
+    nullable bool,
+    depth int,
+) *Schema {
     if "" == structType.Name() {
-        return withNullable(buildStructSchema(structType, components, names, visited), nullable)
+        return withNullable(buildStructSchema(structType, components, names, visited, depth), nullable)
     }
 
     name := schemaComponentName(structType, names)
     if _, built := components[name]; false == built {
         components[name] = &Schema{Type: "object"}
-        components[name] = buildStructSchema(structType, components, names, visited)
+        components[name] = buildStructSchema(structType, components, names, visited, depth)
     }
 
     return withNullable(&Schema{Ref: "#/components/schemas/" + name}, nullable)
@@ -133,7 +238,13 @@ func componentNameInUse(candidate string, names map[reflect.Type]string) bool {
     return false
 }
 
-func buildStructSchema(structType reflect.Type, components map[string]*Schema, names map[reflect.Type]string, visited map[reflect.Type]bool) *Schema {
+func buildStructSchema(
+    structType reflect.Type,
+    components map[string]*Schema,
+    names map[reflect.Type]string,
+    visited map[reflect.Type]bool,
+    depth int,
+) *Schema {
     if true == visited[structType] {
         return &Schema{Type: "object"}
     }
@@ -148,7 +259,7 @@ func buildStructSchema(structType reflect.Type, components map[string]*Schema, n
 
     var required []string
     rejectsAll := false
-    collectStructFields(structType, components, names, visited, schema.Properties, &required, &rejectsAll)
+    collectStructFields(structType, components, names, visited, schema.Properties, &required, &rejectsAll, depth)
 
     if 0 == len(schema.Properties) {
         schema.Properties = nil
@@ -172,7 +283,8 @@ func embedTagRejectsAll(field reflect.StructField) bool {
     return true == tagHasInvalidSyntax(validateTag) ||
         true == tagHasUnconsumedParameterizedParams(validateTag) ||
         true == tagHasParamsOnNonParameterizable(validateTag) ||
-        true == tagRejectsStruct(validateTag) ||
+        /* a promoted embed is a struct by definition (isPromotedEmbed), never a collection component, so the tag is read against the struct the validator hands the constraint */
+        true == tagRejectsReferencedValue(validateTag, "") ||
         true == tagRejectsAllViaNumericBound(validateTag) ||
         true == valueEmbedMaxBoundRejectsAll(field, validateTag)
 }
@@ -224,6 +336,7 @@ func collectStructFields(
     properties map[string]*Schema,
     required *[]string,
     rejectsAll *bool,
+    depth int,
 ) {
     resolved := make(map[string]bool)
 
@@ -245,7 +358,7 @@ func collectStructFields(
                 *rejectsAll = true
             }
 
-            embeddedType := dereferencedStructType(field.Type)
+            embeddedType := dereferencedType(field.Type)
             if true == embeddedSeen[embeddedType] {
                 continue
             }
@@ -281,7 +394,7 @@ func collectStructFields(
             continue
         }
 
-        addFieldProperty(winner, jsonName, components, names, visited, properties, required)
+        addFieldProperty(winner, jsonName, components, names, visited, properties, required, depth)
     }
 
     for 0 < len(embedQueue) {
@@ -309,15 +422,15 @@ func collectStructFields(
                         *rejectsAll = true
                     }
 
-                    childType := dereferencedStructType(field.Type)
+                    childType := dereferencedType(field.Type)
                     if true == embeddedSeen[childType] {
                         continue
                     }
                     if 0 == nextCount[childType] {
                         nextLevel = append(nextLevel, childType)
                     }
-                    /* two copies decide every dominance tie, so the count is capped there instead of doubling through stacked diamonds */
-                    nextCount[childType] += multiplicity
+                    /* two copies decide every dominance tie, so the count is capped there. The count is how many times this level reaches the type, one increment per embed occurrence, exactly as encoding/json's typeFields counts it — adding the parent's own multiplicity instead would cascade an ancestor diamond onto every type below it and drop a property a payload does populate. */
+                    nextCount[childType] += 1
                     if 2 < nextCount[childType] {
                         nextCount[childType] = 2
                     }
@@ -354,7 +467,7 @@ func collectStructFields(
                 continue
             }
 
-            addFieldProperty(winner, jsonName, components, names, visited, properties, required)
+            addFieldProperty(winner, jsonName, components, names, visited, properties, required, depth)
         }
 
         embedQueue = nextLevel
@@ -370,14 +483,18 @@ func addFieldProperty(
     visited map[reflect.Type]bool,
     properties map[string]*Schema,
     required *[]string,
+    depth int,
 ) {
-    propertySchema := buildSchema(field.Type, components, names, visited)
-    applyValidation(propertySchema, field.Tag.Get("validate"))
+    propertySchema := buildSchemaAtDepth(field.Type, components, names, visited, depth+1)
+    applyValidation(propertySchema, field.Tag.Get("validate"), components)
 
     /* a fixed-length array carries the length its type fixes, so notEmpty's minItems floor is vacuous for it — the validator measures a length that can never fall below it; drop the floor the notEmpty branch stamped so the spec accepts what the server accepts. A schema another rule already contradicted keeps its floor: the maxItems 0 beside it is the other half of that contradiction, and dropping the floor alone would leave the empty array advertised as valid while the validator rejects every payload. */
     if true == fixedArrayNotEmptyIsVacuous(field) && nil == propertySchema.MaxItems {
         propertySchema.MinItems = nil
     }
+
+    /* the correction above reads the floor where every other field carries it, beside the schema, so a floor bound for a referenced component is stamped there too and only moved onto the reference once it has had its say — a fixed array whose pointer element made it a component would otherwise keep a floor that correction means to drop. The move comes before the contradiction below so the contradiction stays the last word of the advertisement. */
+    liftValidationFacetsOntoReference(propertySchema)
 
     /* @important the zero-length counterpart of the case above: the validator measures a length fixed at zero, so notEmpty rejects every payload and the minItems floor alone would advertise a non-empty array the server always refuses */
     if true == fixedArrayNotEmptyIsUnsatisfiable(field) {
@@ -407,9 +524,7 @@ func applyUnsignedLowerBound(schema *Schema, fieldType reflect.Type) {
         return
     }
 
-    for reflect.Ptr == fieldType.Kind() {
-        fieldType = fieldType.Elem()
-    }
+    fieldType = dereferencedType(fieldType)
 
     switch fieldType.Kind() {
     case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -675,8 +790,13 @@ func dominantEmbeddedField(group []embeddedCandidate) (reflect.StructField, bool
     return reflect.StructField{}, false
 }
 
-func dereferencedStructType(targetType reflect.Type) reflect.Type {
-    for reflect.Ptr == targetType.Kind() {
+/* dereferencedType strips the pointers off a type for the predicates that ask what a field ultimately holds. The strip is bounded because a named pointer type can dereference to itself — `type Next *Next`, or a pair declared through each other — and an unbounded one would spin forever inside a request handler. A chain that outlasts the bound is returned still pointing at something, which every caller reads as "not the kind I was asking about": no schema is derived from the answer, only a kind test that then declines. */
+func dereferencedType(targetType reflect.Type) reflect.Type {
+    for hop := 0; hop < maximumSchemaDepth; hop++ {
+        if reflect.Ptr != targetType.Kind() {
+            return targetType
+        }
+
         targetType = targetType.Elem()
     }
 
@@ -708,10 +828,7 @@ func isPromotedEmbed(field reflect.StructField) bool {
         return false
     }
 
-    embedded := field.Type
-    for reflect.Ptr == embedded.Kind() {
-        embedded = embedded.Elem()
-    }
+    embedded := dereferencedType(field.Type)
 
     return reflect.Struct == embedded.Kind()
 }
@@ -762,7 +879,7 @@ func promotedMarshalerOrigin(targetType reflect.Type, path map[reflect.Type]bool
 
         embedded := field.Type
         if reflect.Ptr == embedded.Kind() {
-            embedded = dereferencedStructType(embedded)
+            embedded = dereferencedType(embedded)
 
             /* the promoted codec has a pointer receiver, so which type declares it cannot be followed through the embed. Outcome-neutral under the origin rule as it stands — a type that does not implement the interface can neither be time.Time nor promote its codec at a single shallowest depth, so falling through would reach the same object schema — and kept as the guard for a rule that stops being true. TestPromotedMarshalerOrigin_APointerEmbedWithAPointerReceiverCodecIsUnresolved pins it at the only level it is observable, this function's own return. */
             if false == embedded.Implements(jsonMarshalerInterfaceType) {
@@ -862,10 +979,7 @@ func isRequired(field reflect.StructField, schema *Schema) bool {
 
 /* fixedArrayNotEmptyIsUnsatisfiable reports whether a field is a zero-length fixed array carrying notEmpty, for which the validator's length check can never pass, so no payload the spec advertises is ever accepted. */
 func fixedArrayNotEmptyIsUnsatisfiable(field reflect.StructField) bool {
-    fieldType := field.Type
-    for reflect.Ptr == fieldType.Kind() {
-        fieldType = fieldType.Elem()
-    }
+    fieldType := dereferencedType(field.Type)
 
     if reflect.Array != fieldType.Kind() || 0 != fieldType.Len() {
         return false
@@ -912,7 +1026,7 @@ func parseLeadingInt(valueString string) (int, bool) {
     return result, true
 }
 
-func applyValidation(schema *Schema, validateTag string) {
+func applyValidation(schema *Schema, validateTag string, components map[string]*Schema) {
     if true == tagHasInvalidSyntax(validateTag) {
         /* @important the validator's parseValidationTag rejects a malformed tag with a value-independent "invalid validation tag syntax" error before any value is examined (createConstraintWithParams never runs), so the field accepts no value of any kind — null included. The mirror's splitRule is lenient (it silently drops a malformed parameter pair and returns an empty-param rule), so without this guard applyValidation would advertise a satisfiable schema for a field the validator rejects outright — e.g. a stray paren token such as min(5)/notEmpty(foo)/email(x). Detect the syntax error up front and advertise the field unsatisfiable, mirroring the malformed-numeric-bound and uncompilable-regex reject-all cases. */
         markFieldUnsatisfiable(schema)
@@ -926,13 +1040,26 @@ func applyValidation(schema *Schema, validateTag string) {
     }
 
     if "" != schema.Ref || nil != schema.AllOf {
-        /* @important a $ref (or nullable allOf-wrapped $ref) denotes a struct, which the validator rejects outright for notEmpty and greaterThan/lessThan, and it fails closed on params a non-parameterizable constraint cannot consume — so advertise the field unsatisfiable rather than as a satisfiable object. No length/numeric facet otherwise attaches to a $ref. */
-        if true == tagRejectsStruct(validateTag) || true == tagHasParamsOnNonParameterizable(validateTag) || true == tagRejectsAllViaNumericBound(validateTag) {
+        /* @important a $ref (or nullable allOf-wrapped $ref) denotes a component, and which component decides what the tag means: a struct is rejected outright by notEmpty and greaterThan/lessThan, while a named collection promoted into components for want of any other way to end its own recursion is a slice or a map to the validator, which measures its length like any other. Reading every reference as a struct would advertise a field the validator accepts as one no value satisfies, so the reference is resolved and the tag read against the shape it stands for. Both readings still fail closed on params a non-parameterizable constraint cannot consume. No length/numeric facet other than the notEmpty floor attaches to a reference. */
+        referencedKind := referencedCollectionKind(schema, components)
+
+        if true == tagRejectsReferencedValue(validateTag, referencedKind) || true == tagHasParamsOnNonParameterizable(validateTag) || true == tagRejectsAllViaNumericBound(validateTag) {
             markFieldUnsatisfiable(schema)
-        } else if true == tagForbidsNullStruct(validateTag) {
-            /* @important notBlank on a pointer-to-struct field (rendered as a nullable allOf-wrapped $ref): the validator rejects a nil pointer (dereferenceValue returns ok=false) but stringifies a non-nil struct via %v and accepts it, so the field is satisfiable with a non-null value — clear only the nullable advertisement so the spec does not offer a null the validator rejects, rather than marking the whole field unsatisfiable. */
+
+            return
+        }
+
+        if true == tagForbidsNullReferencedValue(validateTag) {
+            /* @important notBlank on a pointer-to-struct field (rendered as a nullable allOf-wrapped $ref): the validator rejects a nil pointer (dereferenceValue returns ok=false) but stringifies a non-nil struct via %v and accepts it, so the field is satisfiable with a non-null value — clear only the nullable advertisement so the spec does not offer a null the validator rejects, rather than marking the whole field unsatisfiable. A referenced collection reads the same way: %v renders an empty slice or map non-blank, so only the null goes. */
             schema.Nullable = false
         }
+
+        if "" != referencedKind && true == tagRequiresNonEmptyValue(validateTag) {
+            /* the referenced component is a named collection, so notEmpty means to the validator exactly what it means for an inline one: a null is rejected and so is a zero length. Stamp the same floor the inline branch below stamps — minItems for an array, minProperties for a map — beside the schema, from where addFieldProperty moves it onto the reference after the fixed-array corrections have read it. */
+            schema.Nullable = false
+            applyReferencedCollectionFloor(schema, referencedKind)
+        }
+
         return
     }
 
@@ -1216,6 +1343,101 @@ func applyValidation(schema *Schema, validateTag string) {
     }
 }
 
+/* referencedCollectionKind resolves the component a field's reference names and reports "array" when it describes a named slice or array, "object" when it describes a named map, and "" for a struct, an unresolvable reference or anything else — which is the struct reading the caller had before any reference was resolved, and the stricter of the two, so an unanswerable question keeps the safer answer.
+
+The resolution has to terminate on the very shapes the reference exists to describe, and is bounded three ways over so it does whatever the components map holds: it follows a chain only while a component is itself nothing but a reference, refuses a component key it has already followed, and gives up at the same nesting bound the generator descends under. A named map or slice pointing at itself, a mutual pair pointing at each other, a chain through an interface and a struct cycle all resolve in a single hop, because a component built by collectionSchemaBody or buildStructSchema always carries its own type; the chain-following exists for a components map assembled some other way, and the key set for one assembled cyclically. A component still holding the placeholder its builder claimed the key with reads as an object without additional properties, which is the struct answer, so a field reached while its own component is mid-build keeps the stricter treatment. */
+func referencedCollectionKind(schema *Schema, components map[string]*Schema) string {
+    reference := schema.Ref
+    if "" == reference {
+        /* a nullable field carries its reference as the single member of an allOf wrapper (withNullable), the reference itself having no room for the nullable flag beside it */
+        for _, member := range schema.AllOf {
+            if "" != member.Ref {
+                reference = member.Ref
+
+                break
+            }
+        }
+    }
+
+    followed := map[string]bool{}
+    for hop := 0; hop < maximumSchemaDepth; hop++ {
+        if "" == reference {
+            return ""
+        }
+
+        key := strings.TrimPrefix(reference, "#/components/schemas/")
+        if true == followed[key] {
+            return ""
+        }
+        followed[key] = true
+
+        resolved, exists := components[key]
+        if false == exists || nil == resolved {
+            return ""
+        }
+
+        if "" != resolved.Ref {
+            reference = resolved.Ref
+
+            continue
+        }
+
+        if "array" == resolved.Type {
+            return "array"
+        }
+
+        /* a map renders as an object carrying additionalProperties; a struct renders as an object carrying a fixed property set, and the placeholder a builder claims a key with carries neither */
+        if "object" == resolved.Type && nil != resolved.AdditionalProperties {
+            return "object"
+        }
+
+        return ""
+    }
+
+    return ""
+}
+
+/* applyReferencedCollectionFloor stamps the notEmpty floor for a referenced collection, raise-only and per shape exactly as the inline branches do: minItems 1 for an array, minProperties 1 for a map. */
+func applyReferencedCollectionFloor(schema *Schema, referencedKind string) {
+    floor := 1
+
+    if "array" == referencedKind {
+        if nil == schema.MinItems {
+            schema.MinItems = &floor
+        }
+
+        return
+    }
+
+    if nil == schema.MinProperties {
+        schema.MinProperties = &floor
+    }
+}
+
+/* liftValidationFacetsOntoReference moves a floor stamped beside a $ref into an allOf beside the reference, because a facet next to a $ref binds nothing: the specification replaces the object holding a $ref with the one it names, so the floor would be read by no client. Inside an allOf the two are conjoined and the field advertises both the shape and the bound. A field whose reference already sits in an allOf — the nullable form — takes the floor as one more member, keeping the whole advertisement in one place rather than half in a sibling. Nothing else stamps a length facet beside a reference, so a schema carrying neither floor, or carrying one without any reference to lift it onto, is left exactly as it is. */
+func liftValidationFacetsOntoReference(schema *Schema) {
+    if nil == schema.MinItems && nil == schema.MinProperties {
+        return
+    }
+
+    if "" == schema.Ref && nil == schema.AllOf {
+        return
+    }
+
+    facets := &Schema{MinItems: schema.MinItems, MinProperties: schema.MinProperties}
+    schema.MinItems = nil
+    schema.MinProperties = nil
+
+    if "" != schema.Ref {
+        schema.AllOf = []*Schema{{Ref: schema.Ref}, facets}
+        schema.Ref = ""
+
+        return
+    }
+
+    schema.AllOf = append(schema.AllOf, facets)
+}
+
 /* @important markFieldUnsatisfiable advertises a schema no value — null included — can satisfy, mirroring a validator that rejects the field outright for a malformed numeric/length tag, a negative max (both fail the field closed), or a constraint applied to a kind the validator rejects (notEmpty on a struct, greaterThan/lessThan on a non-numeric). It clears Nullable (the validator rejects null too, so an unsatisfiable field must not advertise null as valid) and then contradicts the value space via applyEmptyValueSpace. */
 func markFieldUnsatisfiable(schema *Schema) {
     schema.Nullable = false
@@ -1255,17 +1477,17 @@ func applyEmptyValueSpace(schema *Schema) {
         schema.MinProperties = &minProperties
         schema.MaxProperties = &maxProperties
     case "":
-        /* @important a $ref (or a nullable allOf-wrapped $ref) carries no Type; it denotes a struct component, so contradict it at the object level under allOf — the documented $ref is preserved as a member, but the impossible minProperties/maxProperties sibling means no value satisfies the conjunction */
-        minProperties := 1
-        maxProperties := 0
-        contradiction := &Schema{MinProperties: &minProperties, MaxProperties: &maxProperties}
+        /* @important a $ref (or a nullable allOf-wrapped $ref) carries no Type, so nothing here knows what it denotes — and it need not be a struct. A named collection is promoted to a component too, and once it is, an object-level contradiction stops contradicting anything: JSON Schema draft-04 §5.4.1 and §5.4.2 — the dialect this document declares, OpenApi 3.0.3 — apply minProperties and maxProperties to object instances ONLY and ignore them for every other type. `["a"]` therefore satisfies the whole allOf while the validator rejects it, and the specification advertises payloads the server refuses, which is the inverse of what a mirror is for. The inline path for the same verdict emits minItems/maxItems and DOES bind, so the two paths contradicted each other as well.
+
+           `not: {}` is the type-agnostic form: the empty schema admits every value, so its negation admits none, whatever the referenced component turns out to be. */
+        contradiction := &Schema{Not: &Schema{}}
         if "" != schema.Ref {
             schema.AllOf = []*Schema{{Ref: schema.Ref}, contradiction}
             schema.Ref = ""
         } else if nil != schema.AllOf {
             schema.AllOf = append(schema.AllOf, contradiction)
         } else {
-            /* @important an interface field carries neither a type nor a $ref, so the object-level contradiction would not bind — the empty schema admits every value; not against the empty schema is the one advertisement no value satisfies */
+            /* an interface field carries neither a type nor a $ref, so there is nothing to conjoin with: the refusal is written directly */
             schema.Not = &Schema{}
         }
     }
@@ -1372,12 +1594,28 @@ func tagHasUnconsumedParameterizedParams(validateTag string) bool {
     return false
 }
 
-/* @important reports whether a validate tag carries a constraint the runtime validator rejects outright for a struct value: notEmpty falls into constraint_not_empty.go's default branch, and greaterThan/lessThan into their "value must be numeric" default branch. A $ref/allOf schema (always a struct component) carrying any of these is therefore unsatisfiable server-side. notBlank is excluded because it stringifies any value with %v and only rejects a blank or nil one, so it does not reject a struct outright. */
-func tagRejectsStruct(validateTag string) bool {
+/* @important reports whether a validate tag carries a constraint the runtime validator rejects outright for the value a $ref/allOf schema stands for, so the field is unsatisfiable server-side. greaterThan/lessThan reject every non-numeric value through their "value must be numeric" default branch, whatever the component turns out to be. notEmpty depends on the component: it measures the length of a string, array, slice or map and falls into constraint_not_empty.go's default branch for everything else, so it rejects a struct outright but accepts a named collection that carries entries — the referencedKind the caller resolved is what tells the two apart, and an empty one means the struct reading. notBlank is excluded throughout because it stringifies any value with %v and only rejects a blank or nil one. */
+func tagRejectsReferencedValue(validateTag string, referencedKind string) bool {
     for _, rule := range splitRules(validateTag) {
         name, _ := splitRule(rule)
         switch name {
-        case "notEmpty", "greaterThan", "lessThan":
+        case "greaterThan", "lessThan":
+            return true
+        case "notEmpty":
+            if "" == referencedKind {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+/* reports whether a validate tag carries a bare notEmpty, the constraint that floors the length of the collection a $ref stands for. A notEmpty carrying parameters never reaches this question: the validator fails such a rule closed and tagHasParamsOnNonParameterizable has already answered for it. */
+func tagRequiresNonEmptyValue(validateTag string) bool {
+    for _, rule := range splitRules(validateTag) {
+        name, _ := splitRule(rule)
+        if "notEmpty" == name {
             return true
         }
     }
@@ -1406,8 +1644,8 @@ func tagRejectsAllViaNumericBound(validateTag string) bool {
     return false
 }
 
-/* @important reports whether a validate tag forbids a null value while still accepting a non-null struct — only notBlank qualifies: it rejects a nil pointer (dereferenceValue returns ok=false) yet stringifies a non-nil struct with %v and accepts it, so a pointer-to-struct field carrying notBlank is satisfiable but must not advertise null. notEmpty/greaterThan/lessThan also reject null but additionally reject the struct outright, so they are handled by tagRejectsStruct/markFieldUnsatisfiable rather than here. */
-func tagForbidsNullStruct(validateTag string) bool {
+/* @important reports whether a validate tag forbids a null value while still accepting the non-null value a $ref stands for — only notBlank qualifies: it rejects a nil pointer (dereferenceValue returns ok=false) yet stringifies a non-nil value with %v and accepts it, a struct and an empty slice or map alike, so a pointer field carrying notBlank is satisfiable but must not advertise null. greaterThan/lessThan also reject null but additionally reject the value outright, and notEmpty does so for a struct, so they are handled by tagRejectsReferencedValue/markFieldUnsatisfiable rather than here; notEmpty on a referenced collection clears the null alongside the floor it stamps. */
+func tagForbidsNullReferencedValue(validateTag string) bool {
     for _, rule := range splitRules(validateTag) {
         name, _ := splitRule(rule)
         if "notBlank" == name {

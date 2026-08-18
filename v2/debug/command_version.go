@@ -6,9 +6,9 @@ import (
     clicontract "github.com/precision-soft/melody/v2/cli/contract"
     "github.com/precision-soft/melody/v2/cli/output"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
-    melodyversion "github.com/precision-soft/melody/v2/version"
 )
 
+/* VersionCommand answers with three rows: the application's version, melody's, and the Go runtime's. The application row reads the process-wide declaration made through output.SetApplicationVersion — the composition root's main is where an application hands its version over, from whatever source it keeps it in — and an explicit ApplicationVersion set on the command wins over it. */
 type VersionCommand struct {
     ApplicationVersion string
 }
@@ -43,7 +43,6 @@ func (instance *VersionCommand) Run(
         time.Duration(0),
         output.Version{
             Application: instance.ApplicationVersion,
-            Melody:      melodyversion.BuildVersion(),
         },
     )
 
@@ -59,20 +58,21 @@ func (instance *VersionCommand) Run(
             []string{"component", "version"},
         )
 
-        if "" != instance.ApplicationVersion {
-            block.AddRow("application", instance.ApplicationVersion)
+        /* the rows read the meta, where NewMeta already applied the fallback chain: the command's explicit value, then the process-wide declaration, then nothing */
+        if "" != envelope.Meta.Version.Application {
+            block.AddRow("application", envelope.Meta.Version.Application)
         } else {
             block.AddRow("application", "<unknown>")
         }
 
-        block.AddRow("melody", melodyversion.BuildVersion())
+        block.AddRow("melody", envelope.Meta.Version.Melody)
         block.AddRow("go", envelope.Meta.Version.Go)
 
         envelope.Table = builder.Build()
     } else {
         envelope.Data = map[string]string{
-            "application": instance.ApplicationVersion,
-            "melody":      melodyversion.BuildVersion(),
+            "application": envelope.Meta.Version.Application,
+            "melody":      envelope.Meta.Version.Melody,
             "go":          envelope.Meta.Version.Go,
         }
     }

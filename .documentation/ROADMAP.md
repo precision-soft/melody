@@ -2,20 +2,13 @@
 
 This document lists high-level, forward-looking plans for the Melody repository.
 
-## Near-term
+Every item this document used to carry has shipped — static file serving, the firewall system and the router's named routes, url generation, grouping and constraints. What they do now is described where a current capability belongs, in [`./package/`](./package/), not here.
 
-- Static file serving enhancements
-    - Add explicit support for filesystem and embedded modes as a first-class feature set, aligned with the existing build tags (`melody_static_embedded`). See [`../http/`](../http/) and [`./package/HTTP.md`](./package/HTTP.md).
+## Direction
 
-- Firewall system
-    - Introduce a configurable firewall layer that can be composed with HTTP middleware and security integration points. See [`../security/`](../security/) and [`./package/SECURITY.md`](./package/SECURITY.md).
-
-## Mid-term
-
-- Router extensions
-    - Named routes, url generation, route grouping, and constraints. See [`../http/router.go`](../http/router.go) and [`./package/HTTP.md`](./package/HTTP.md).
+- This major line is being driven to complete stability and then frozen; new capabilities land in the newest major line. Remaining work here is hardening: aligning behaviour with what the documentation promises, closing defects, and keeping the example application a faithful showcase.
 
 ## Longer-term
 
 - Close remaining gaps
-    - Incrementally add framework capabilities that are aligned with Melody’s core principles (determinism, explicit wiring, clear boundaries), without expanding internal-only APIs into userland unintentionally. See [`../application/`](../application/) and [`../kernel/`](../kernel/).
+    - Finish levelling this major line with the newest one where a capability it already has is missing or behaves differently, then freeze. New framework capabilities are designed on the newest major line and reach this one only as part of that levelling, never as this line's own additions.

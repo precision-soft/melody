@@ -48,6 +48,43 @@ func (instance *Provider) Open(params bunorm.ConnectionParams, logger loggingcon
     return instance.openWithRetry(params, logger)
 }
 
+/* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. */
+func (instance *Provider) OpenForMigration(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+    migrationProvider := &Provider{
+        poolConfig:    migrationPoolConfig(),
+        timeoutConfig: migrationTimeoutConfig(instance.timeoutConfig),
+        retryConfig:   instance.retryConfig,
+        postBuildHook: instance.postBuildHook,
+    }
+
+    return migrationProvider.Open(params, logger)
+}
+
+/* migrationTimeoutConfig lifts the read and write deadlines and keeps the connect timeout of the configuration it derives from. */
+func migrationTimeoutConfig(baseConfig *TimeoutConfig) *TimeoutConfig {
+    connectTimeout := DefaultTimeoutConfig().ConnectTimeout
+    if nil != baseConfig {
+        connectTimeout = baseConfig.ConnectTimeout
+    }
+
+    return &TimeoutConfig{
+        ConnectTimeout: connectTimeout,
+        ReadTimeout:    0,
+        WriteTimeout:   0,
+    }
+}
+
+func migrationPoolConfig() *PoolConfig {
+    return &PoolConfig{
+        MaxOpenConnections:    2,
+        MaxIdleConnections:    1,
+        ConnectionMaxLifetime: 0,
+        ConnectionMaxIdleTime: 0,
+    }
+}
+
+var _ bunorm.MigrationProvider = (*Provider)(nil)
+
 func (instance *Provider) openWithRetry(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
     logger = logging.EnsureLogger(logger)
 

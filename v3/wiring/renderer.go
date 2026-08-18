@@ -220,12 +220,20 @@ func renderProvider(
     builder.WriteString(indent)
     builder.WriteString(containerAlias)
 
+    /* the lifetime is spelled in the verb, exactly as a hand-written registration spells it: a scoped constructor registers through MustRegisterScoped and is built once per scope, and the two registrar interfaces share no method, so the emitted call only compiles against the registrar its own function is handed */
+    registerByType := ".MustRegisterType(\n"
+    registerByName := ".MustRegister(\n"
+    if true == constructor.IsScoped {
+        registerByType = ".MustRegisterScopedType(\n"
+        registerByName = ".MustRegisterScoped(\n"
+    }
+
     /* a constructor whose package declares a service name is registered under it as well as under its type, so the name-based lookups the package already exposes keep resolving; the name is referenced as the constant rather than copied, leaving its definition in one place */
     if "" == constructor.ServiceNameIdentifier {
-        builder.WriteString(".MustRegisterType(\n")
+        builder.WriteString(registerByType)
         builder.WriteString(indent + indent + "registrar,\n")
     } else {
-        builder.WriteString(".MustRegister(\n")
+        builder.WriteString(registerByName)
         builder.WriteString(indent + indent + "registrar,\n")
         builder.WriteString(indent + indent + importAliases.alias(constructor.ImportPath) + "." + constructor.ServiceNameIdentifier + ",\n")
     }
@@ -462,8 +470,10 @@ func scalarNeedsConversion(typeReference *TypeReference) bool {
 func renderFile(
     packageName string,
     functionName string,
+    scopedFunctionName string,
     importAliases *importAliasTable,
     providerBlocks []string,
+    scopedProviderBlocks []string,
 ) string {
     /* the signature references the contract package whatever the scan found, so it is asked for before the import block is written */
     containerContractAlias := importAliases.alias(containerContractImportPath)
@@ -486,11 +496,20 @@ func renderFile(
 
     if 0 == len(providerBlocks) {
         builder.WriteString("}\n")
+    } else {
+        builder.WriteString(strings.Join(providerBlocks, "\n"))
+        builder.WriteString("}\n")
+    }
 
+    /* the scoped function is emitted only when something is scoped: the two registrars arrive at two different module hooks and neither satisfies the other, so one combined function could not be called from either, and a project that declares nothing scoped must keep regenerating the file it had */
+    if 0 == len(scopedProviderBlocks) {
         return builder.String()
     }
 
-    builder.WriteString(strings.Join(providerBlocks, "\n"))
+    builder.WriteString("\n")
+    builder.WriteString("/* " + scopedFunctionName + " registers every scope-owned service discovered under the scanned packages. What it registers is built once per scope and closed when that scope closes. */\n")
+    builder.WriteString("func " + scopedFunctionName + "(registrar " + containerContractAlias + ".ScopedRegistrar) {\n")
+    builder.WriteString(strings.Join(scopedProviderBlocks, "\n"))
     builder.WriteString("}\n")
 
     return builder.String()

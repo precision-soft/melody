@@ -2,40 +2,12 @@ package security
 
 import (
     "errors"
-    nethttp "net/http"
-    "net/http/httptest"
     "testing"
-    "time"
 
-    "github.com/precision-soft/melody/v2/bag"
-    bagcontract "github.com/precision-soft/melody/v2/bag/contract"
-    "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+    "github.com/precision-soft/melody/v2/internal/testhelper"
     securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
-
-type firewallTestRequestContext struct {
-    requestIdValue string
-    startedAtValue time.Time
-}
-
-func (instance *firewallTestRequestContext) RequestId() string    { return instance.requestIdValue }
-func (instance *firewallTestRequestContext) StartedAt() time.Time { return instance.startedAtValue }
-
-func newFirewallTestRequest(path string) httpcontract.Request {
-    request := httptest.NewRequest(nethttp.MethodGet, "http://example.com"+path, nil)
-
-    return http.NewRequest(
-        request,
-        nil,
-        nil,
-        &firewallTestRequestContext{
-            requestIdValue: "test",
-            startedAtValue: time.Now(),
-        },
-    )
-}
 
 type firewallTestRule struct {
     appliesCallback func(request httpcontract.Request) bool
@@ -129,5 +101,36 @@ func TestFirewall_Check_ReturnsFirstError(t *testing.T) {
     }
 }
 
-var _ bagcontract.ParameterBag = bag.NewParameterBag()
-var _ runtimecontract.Runtime = nil
+func TestNewFirewall_TypedNilRulePanics(t *testing.T) {
+    var typedNilRule *ApiKeyHeaderRule
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewFirewall(typedNilRule)
+        },
+        "security firewall rule is nil",
+    )
+}
+
+func TestNewFirewall_CopiesTheCallersRules(t *testing.T) {
+    refusingRule := NewApiKeyHeaderRule(&alwaysMatchingRuleMatcher{}, "X-Api-Key", "expected-secret")
+
+    callerRules := []securitycontract.Rule{refusingRule}
+
+    firewall := NewFirewall(callerRules...)
+
+    callerRules[0] = &firewallTestRule{
+        appliesCallback: func(request httpcontract.Request) bool { return false },
+        checkCallback: func(request httpcontract.Request) error {
+            t.Fatalf("the swapped rule must never be reached")
+
+            return nil
+        },
+    }
+
+    err := firewall.Check(newFirewallTestRequest("/"))
+    if nil == err {
+        t.Fatalf("expected the firewall to keep the rule it was built with")
+    }
+}

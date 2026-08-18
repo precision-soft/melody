@@ -60,8 +60,9 @@ func (instance *MiddlewareBuildReport) Inactive() []*InactiveMiddleware {
     return copyInactiveMiddlewareSlice(instance.inactive)
 }
 
+/* SetInactive copies like every sibling accessor of this report: retaining the caller's slice was the one asymmetry, and a caller reusing its slice rewrote the stored report behind the getter's copy. */
 func (instance *MiddlewareBuildReport) SetInactive(inactive []*InactiveMiddleware) {
-    instance.inactive = inactive
+    instance.inactive = copyInactiveMiddlewareSlice(inactive)
 }
 
 func (instance *MiddlewareBuildReport) MissingReference() []string {

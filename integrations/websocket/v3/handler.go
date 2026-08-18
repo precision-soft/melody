@@ -28,11 +28,30 @@ type Options struct {
 
     ReadLimit int64
 
-    /* @info when greater than zero, the handler sends a websocket ping every IdleTimeout and closes the connection if the peer does not pong within that window, so an idle or half-open client cannot hold a goroutine and connection indefinitely (the hijacked connection is not covered by http.Server read timeouts). Zero (the default) disables keepalive and preserves the previous behavior; an actively-subscribed client that only receives stays connected because it answers the pings. */
+    /* @info the interval at which the handler pings a silent peer and the window it allows for the pong; a peer that misses it has its connection closed, so an idle or half-open client cannot hold a descriptor, a hub subscription and three goroutines indefinitely. It is REQUIRED and must be positive — NewStreamHandler refuses a zero. An actively-subscribed client that only receives stays connected regardless, because RFC 6455 obliges it to answer the ping and every browser answers it inside the protocol stack, where the page's JavaScript never sees it. 30s suits a browser client. */
     IdleTimeout time.Duration
 }
 
+/* NewStreamHandler bridges a websocket connection onto a server-sent-event hub topic.
+
+A zero IdleTimeout is refused rather than defaulted, because nothing else in the stack can reap a peer that goes away without a fin. coderwebsocket.Accept hijacks the connection, so http.Server's read and write timeouts stop applying to it; the read loop then blocks in Read with no deadline of its own; and a write into a half-open socket keeps succeeding for as long as the send buffer has room, so a broadcast is no liveness signal either. The keepalive ping is the only remaining evidence, which makes its interval a required decision rather than a tunable with a sensible off position — left at zero, an attacker opens connections and abandons them and each one costs a descriptor, a hub subscription and three goroutines for the life of the process.
+
+Refusing it is a wiring error and panics at construction, the way the framework reports every other unusable configuration: it surfaces at boot rather than as an unbounded leak in production. */
 func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
+    if 0 >= options.IdleTimeout {
+        exception.Panic(
+            exception.NewError(
+                "websocket options require a positive IdleTimeout: the keepalive ping is the only thing that can reap a peer that vanishes without a fin, because accept hijacks the connection out of http.Server's timeouts, the read loop blocks with no deadline and a write into a half-open socket still succeeds; set it to the interval at which a silent peer should be pinged, 30s for a browser client",
+                map[string]any{"idleTimeout": options.IdleTimeout.String()},
+                nil,
+            ),
+        )
+    }
+
+    return newStreamHandler(hub, options)
+}
+
+func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         connection, acceptErr := coderwebsocket.Accept(writer, request.HttpRequest(), &coderwebsocket.AcceptOptions{
             OriginPatterns: options.OriginPatterns,
@@ -70,9 +89,8 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
             readLoop(connectionContext, cancel, connection, runtimeInstance, options, liveness)
         }()
 
-        if 0 < options.IdleTimeout {
-            go pingLoop(connectionContext, cancel, connection, options.IdleTimeout, pingWriteGrace(options), liveness)
-        }
+        /* unconditional: a positive IdleTimeout is established at construction, so every connection is reaped by the ping loop or by nothing at all */
+        go pingLoop(connectionContext, cancel, connection, options.IdleTimeout, pingWriteGrace(options), liveness)
 
         for {
             select {
