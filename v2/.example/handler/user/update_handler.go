@@ -80,7 +80,16 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         normalizedPassword := strings.TrimSpace(dto.Password)
         if "" != normalizedPassword {
-            targetUser.Password = security.Sha256Hex(normalizedPassword)
+            if security.PasswordMaximumBytes < len(normalizedPassword) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
+            }
+
+            passwordHash, hashErr := security.HashPassword(normalizedPassword)
+            if nil != hashErr {
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
+            }
+
+            targetUser.Password = passwordHash
         }
 
         if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {

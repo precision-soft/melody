@@ -16,6 +16,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v2/http"
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodyruntime "github.com/precision-soft/melody/v2/runtime"
+    melodyvalidation "github.com/precision-soft/melody/v2/validation"
     melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v2/serializer"
     melodyserializercontract "github.com/precision-soft/melody/v2/serializer/contract"
@@ -192,6 +193,49 @@ func TestBuildErrorContextCarriesTheCauseWhenDebugIsEnabled(t *testing.T) {
 
     if causeSecret != errorEntry["message"] {
         t.Fatalf("expected the raw message under debug, got %v", errorEntry["message"])
+    }
+}
+
+func TestValidationErrorMessagesAnswerOneEntryPerViolation(t *testing.T) {
+    validationErrors := melodyvalidation.ValidationErrors{
+        melodyvalidation.NewValidationError("name", "must be at least 2 characters", "min", nil),
+        melodyvalidation.NewValidationError("price", "must be greater than 0", "greaterThan", nil),
+    }
+
+    messages := validationErrorMessages(validationErrors)
+
+    if 2 != len(messages) {
+        t.Fatalf("expected one message per violation, got %v", messages)
+    }
+
+    if "name: must be at least 2 characters" != messages[0] {
+        t.Fatalf("unexpected first message: %q", messages[0])
+    }
+
+    if "price: must be greater than 0" != messages[1] {
+        t.Fatalf("unexpected second message: %q", messages[1])
+    }
+}
+
+func TestValidationErrorMessagesSkipANilViolation(t *testing.T) {
+    validationErrors := melodyvalidation.ValidationErrors{
+        nil,
+        melodyvalidation.NewValidationError("price", "must be greater than 0", "greaterThan", nil),
+    }
+
+    messages := validationErrorMessages(validationErrors)
+
+    if 1 != len(messages) {
+        t.Fatalf("expected the nil violation to be skipped, got %v", messages)
+    }
+}
+
+/* A plain error can reach the door when the validator refuses for a reason that is not a per-field collection; the answer is its message, not a panic and not silence. */
+func TestValidationErrorMessagesDegradeANonCollectionError(t *testing.T) {
+    messages := validationErrorMessages(errors.New("the payload could not be validated"))
+
+    if 1 != len(messages) || "the payload could not be validated" != messages[0] {
+        t.Fatalf("unexpected messages: %v", messages)
     }
 }
 

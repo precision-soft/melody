@@ -1,6 +1,8 @@
 package config
 
 import (
+    "path/filepath"
+
     "github.com/precision-soft/melody/v2/.example/cache"
     "github.com/precision-soft/melody/v2/.example/repository"
     "github.com/precision-soft/melody/v2/.example/service"
@@ -11,12 +13,19 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     melodyevent "github.com/precision-soft/melody/v2/event"
     melodykernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
+    melodysession "github.com/precision-soft/melody/v2/session"
+    melodysessioncontract "github.com/precision-soft/melody/v2/session/contract"
 )
 
 func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.ServiceRegistrar) {
+    /* the api token is captured here because RegisterSecurity receives only the builder: this hook runs first and holds the kernel, so the firewall declaration reads the value from the module */
+    instance.apiToken = parameterValue(kernelInstance, ParameterApiToken)
+
     /* the live integrations are built before anything is registered, because what they yield decides which services and routes exist at all */
     instance.buildRedis(kernelInstance)
     instance.buildDatabase(kernelInstance)
+
+    instance.registerSessionStorage(kernelInstance, registrar)
 
     instance.registerRedisServices(registrar)
     instance.registerDatabaseServices(registrar)
@@ -109,6 +118,37 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
 }
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
+
+/* registerSessionStorage swaps the framework's in-memory default for the file-backed storage when the environment names a file, so a signed-in session survives a process restart. The registration wins because module services land before the framework's own has-guarded fallback; an empty value keeps the default, like every other switch of the example. */
+func (instance *Module) registerSessionStorage(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.ServiceRegistrar) {
+    sessionFilePath := resolvedSessionFilePath(
+        parameterValue(kernelInstance, ParameterSessionFile),
+        kernelInstance.Config().Kernel().ProjectDir(),
+    )
+    if "" == sessionFilePath {
+        return
+    }
+
+    registrar.RegisterService(
+        melodysession.ServiceSessionStorage,
+        func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
+            return melodysession.NewFileStorageFromPath(sessionFilePath)
+        },
+    )
+}
+
+/* resolvedSessionFilePath keeps the empty value empty — the switch that says "in-memory" — and anchors a relative path to the project directory rather than the working directory, so a console run and the http process read the same snapshot. */
+func resolvedSessionFilePath(sessionFilePath string, projectDirectory string) string {
+    if "" == sessionFilePath {
+        return ""
+    }
+
+    if false == filepath.IsAbs(sessionFilePath) {
+        return filepath.Join(projectDirectory, sessionFilePath)
+    }
+
+    return sessionFilePath
+}
 
 /* registerCatalogJournalService wires the journal against whatever the environment gave the example. Without a database there is nowhere to keep a record of the changes, and the service is registered all the same with nothing behind it: the writes still succeed, and the report shows a journal of zero rather than the application refusing to change anything. */
 func (instance *Module) registerCatalogJournalService(registrar melodyapplicationcontract.ServiceRegistrar) {

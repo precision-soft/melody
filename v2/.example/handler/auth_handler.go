@@ -56,13 +56,11 @@ func LoginHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid credentials input"), nil
         }
 
-        passwordHash := security.Sha256Hex(password)
-
         userService := service.MustGetUserService(runtimeInstance.Container())
 
-        user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPasswordHash(
+        user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(
             username,
-            passwordHash,
+            password,
         )
         if nil != authenticationErr {
             /* the cause stays out of the errors list on purpose: it names internals — a cache refusal, a store address — and this is an unauthenticated door; ApiErrorWithErr keeps it in the debug-gated context instead */

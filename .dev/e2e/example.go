@@ -45,7 +45,7 @@ type exampleMajor struct {
     EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running
     the demos here as well would spend a budget another section is counting. */
     integrationDemos bool
-    /* showcaseProbes and sessionRestartProbe gate the wirings only the v1 example carries — cors, gzip,
+    /* showcaseProbes and sessionRestartProbe gate the wirings the two published examples carry — cors, gzip,
     the api-key firewall, per-field validation errors, the trusted-proxy client address, the file-backed
     session storage and the static cache validators. The three examples deliberately do not mirror each
     other, so these are per-major capabilities like integrationDemos, not shared surface. */
@@ -63,7 +63,7 @@ type exampleMajor struct {
 
 var exampleMajorCatalog = []exampleMajor{
     {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
-    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, loginThrottleProbe: true},
+    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, loginThrottleProbe: true},
     {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false},
 }
 

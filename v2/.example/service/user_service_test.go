@@ -8,6 +8,7 @@ import (
     "time"
 
     examplecache "github.com/precision-soft/melody/v2/.example/cache"
+    "github.com/precision-soft/melody/v2/.example/entity"
     "github.com/precision-soft/melody/v2/.example/event"
     "github.com/precision-soft/melody/v2/.example/repository"
     "github.com/precision-soft/melody/v2/.example/security"
@@ -116,10 +117,10 @@ func (instance *keyGrammarCache) Close() error {
 
 var _ melodycachecontract.Cache = (*keyGrammarCache)(nil)
 
-func TestAuthenticateByUsernameAndPasswordHashAcceptsTheSeededCredentials(t *testing.T) {
+func TestAuthenticateByUsernameAndPasswordAcceptsTheSeededCredentials(t *testing.T) {
     userService := newUserServiceUnderTest(t)
 
-    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPasswordHash("editor", security.Sha256Hex("editor"))
+    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword("editor", "editor")
     if nil != authenticationErr {
         t.Fatalf("authenticate the seeded editor: %v", authenticationErr)
     }
@@ -134,11 +135,11 @@ func TestAuthenticateByUsernameAndPasswordHashAcceptsTheSeededCredentials(t *tes
 }
 
 /* the door folds the username through the one definition the cache keys and the invalidation listeners read, so the spelling that authenticates is the spelling the entry is written under */
-func TestAuthenticateByUsernameAndPasswordHashFoldsTheUsername(t *testing.T) {
+func TestAuthenticateByUsernameAndPasswordFoldsTheUsername(t *testing.T) {
     userService := newUserServiceUnderTest(t)
 
     for _, spelling := range []string{"  editor  ", "EDITOR", "Editor"} {
-        _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPasswordHash(spelling, security.Sha256Hex("editor"))
+        _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(spelling, "editor")
         if nil != authenticationErr {
             t.Fatalf("authenticate %q: %v", spelling, authenticationErr)
         }
@@ -150,19 +151,19 @@ func TestAuthenticateByUsernameAndPasswordHashFoldsTheUsername(t *testing.T) {
 }
 
 /* Every refusal below is the same quiet (nil, false, nil), so each guard is driven on its own: a caller cannot tell WHICH guard refused, and the point of each case is that its input never reaches the comparison. */
-func TestAuthenticateByUsernameAndPasswordHashRefusesQuietly(t *testing.T) {
+func TestAuthenticateByUsernameAndPasswordRefusesQuietly(t *testing.T) {
     for name, credentials := range map[string][2]string{
-        "an empty username":       {"", security.Sha256Hex("editor")},
-        "a blank username":        {"   ", security.Sha256Hex("editor")},
-        "an empty password hash":  {"editor", ""},
-        "a wrong password":        {"editor", security.Sha256Hex("editor-but-wrong")},
-        "an unknown username":     {"nobody", security.Sha256Hex("editor")},
-        "another user's password": {"editor", security.Sha256Hex("admin")},
+        "an empty username":       {"", "editor"},
+        "a blank username":        {"   ", "editor"},
+        "an empty password":       {"editor", ""},
+        "a wrong password":        {"editor", "editor-but-wrong"},
+        "an unknown username":     {"nobody", "editor"},
+        "another user's password": {"editor", "admin"},
     } {
         t.Run(name, func(t *testing.T) {
             userService := newUserServiceUnderTest(t)
 
-            user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPasswordHash(credentials[0], credentials[1])
+            user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(credentials[0], credentials[1])
             if nil != authenticationErr {
                 t.Fatalf("the refusal carried an error: %v", authenticationErr)
             }
@@ -171,6 +172,27 @@ func TestAuthenticateByUsernameAndPasswordHashRefusesQuietly(t *testing.T) {
                 t.Fatalf("the credentials were accepted")
             }
         })
+    }
+}
+
+func TestAuthenticateByUsernameAndPasswordRefusesAUserWithoutRoles(t *testing.T) {
+    userService := newUserServiceUnderTest(t)
+
+    createErr := userService.userRepository.Create(
+        context.Background(),
+        entity.NewUser("user-9", "bare", security.MustHashPassword("bare"), nil),
+    )
+    if nil != createErr {
+        t.Fatalf("create the roleless user: %v", createErr)
+    }
+
+    _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword("bare", "bare")
+    if nil == authenticationErr {
+        t.Fatalf("a user without roles authenticated quietly")
+    }
+
+    if true == authenticated {
+        t.Fatalf("a user without roles was authenticated")
     }
 }
 
@@ -203,7 +225,7 @@ func TestFindByIdAnswersAbsentForACacheUnsafeIdentifier(t *testing.T) {
 func TestAuthenticateRefusesACacheUnsafeUsernameQuietly(t *testing.T) {
     userService := newUserServiceUnderTest(t)
 
-    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPasswordHash("john doe", security.Sha256Hex("whatever"))
+    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword("john doe", "whatever")
     if nil != authenticationErr {
         t.Fatalf("expected the quiet refusal, got error %v", authenticationErr)
     }

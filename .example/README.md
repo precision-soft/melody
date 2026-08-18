@@ -51,7 +51,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── presenter/        # HTTP error / response presenters
 ├── repository/       # repository interfaces with an in-memory and a database-backed implementation each, plus the seed data and the helpers both share
 ├── route/            # named route constants and patterns
-├── security/         # session auth wiring (login/logout handlers, entry point, access denied handler, token resolver, password hasher)
+├── security/         # session auth wiring (login/logout handlers, entry point, access denied handler, token resolver, password hasher, api-key request matcher)
 ├── service/          # application services (Category, Currency, Product, User, plus the catalog journal, the request-scoped change attribution and the catalog report)
 ├── subscriber/       # event subscribers
 ├── url/              # route registry adapters: the route manifest every page is given

@@ -1,6 +1,6 @@
 module github.com/precision-soft/melody/v2/.example
 
-go 1.24.9
+go 1.25.0
 
 require (
 	github.com/precision-soft/melody/integrations/bunorm/migrate/v2 v2.0.0
@@ -11,6 +11,7 @@ require (
 	github.com/precision-soft/melody/v2 v2.12.0
 	github.com/redis/rueidis v1.0.71
 	github.com/uptrace/bun v1.2.17
+	golang.org/x/crypto v0.51.0
 )
 
 require (
@@ -25,7 +26,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/mod v0.33.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 )
 
 replace github.com/precision-soft/melody/v2 => ../

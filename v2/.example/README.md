@@ -26,6 +26,15 @@ For convenience, the example ships with a few predefined users:
 - `editor` / `editor` — `ROLE_USER`, `ROLE_EDITOR`
 - `admin` / `admin` — `ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`
 
+Passwords are stored as **bcrypt hashes** ([`security/password_hasher.go`](./security/password_hasher.go)):
+`security.HashPassword` at seeding and in the user handlers, `security.PasswordMatches`
+(`bcrypt.CompareHashAndPassword`) at login. The hash is salted, so the same password produces a different
+stored value on every boot; the credentials above are the stable contract, not the bytes in the table.
+
+A database provisioned before this example moved off unsalted SHA-256 still holds the old digests, and the
+seeding only fills an EMPTY table — so an existing development volume answers every login with a refusal
+until its `melody_example_v2_user` rows are dropped once and reseeded on the next boot.
+
 ---
 
 ## Structure overview
@@ -45,7 +54,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── presenter/        # HTTP error / response presenters
 ├── repository/       # repository interfaces + in-memory implementations
 ├── route/            # named route constants and patterns
-├── security/         # session auth wiring (login/logout handlers, entry point, token resolver, password hasher)
+├── security/         # session auth wiring (login/logout handlers, entry point, access denied handler, token resolver, password hasher, api-key request matcher)
 ├── service/          # application services (CategoryService, CurrencyService, ProductService, UserService)
 ├── subscriber/       # event subscribers
 ├── url/              # route registry adapters: the route manifest every page is given
@@ -122,6 +131,26 @@ once the scheduled refresh has warmed it, and computable with no backend at all.
 
 The `catalog:journal` command prints the latest entries of the write journal over the same repository the
 listeners write it through, so the record is reachable from the command line as well as from a request.
+
+### Security and HTTP showcase wirings
+
+Beside the integrations, the example wires several framework doors that need no backend at all. Each follows
+the same switch convention as the integrations — the value ships in [`.env`](./.env), and an empty or removed
+value leaves that door unwired:
+
+| wiring | switch | what it shows |
+|---|---|---|
+| api-key firewall | `APP_API_TOKEN` | a stateless firewall on `/products/api` ([`config/security.go`](./config/security.go)): `X-Api-Key` with the configured token authenticates as an editor-role client, no session involved. The firewall's matcher ([`security/api_key_request_matcher.go`](./security/api_key_request_matcher.go)) claims only requests that PRESENT the header, so browser cookie traffic keeps falling through to the session firewall on the same paths |
+| cors listeners | `APP_CORS_ALLOW_ORIGINS` | the [`http/cors`](../http/cors/) LISTENERS rather than the middleware ([`config/event.go`](./config/event.go)): a preflight is answered before routing and before the security chain can refuse it, and the security refusals themselves carry the cors headers — responses the middleware chain never sees |
+| compression | always on | the framework's `CompressionMiddleware` with its defaults ([`config/middleware.go`](./config/middleware.go)): gzip for bodies of at least a kilobyte, already-compressed media excluded, `Vary: Accept-Encoding` added |
+| trusted proxies | always on | one `ForwardedHeadersPolicy` ([`config/http.go`](./config/http.go)) read by the http kernel for the scheme and by the rate limiter's client-ip resolver for the budget key, so a write arriving through a trusted proxy is budgeted against the `X-Forwarded-For` address rather than the proxy's |
+| file-backed sessions | `APP_SESSION_FILE` | `session.NewFileStorageFromPath` registered under the framework's storage service id ([`config/service.go`](./config/service.go)), so a signed-in session survives a process restart; a relative path is anchored to the project directory. Empty keeps the framework's in-memory default |
+| static cache | `MELODY_STATIC_ENABLE_CACHE` | the framework's static file server with its validators armed (`.env` ships `true` and `MELODY_STATIC_CACHE_MAX_AGE=3600`): assets answer with a strong `ETag`, `Last-Modified` and `Cache-Control: public, max-age=3600`, a replayed validator is answered `304`, and `If-None-Match` silences `If-Modified-Since`, as the precedence demands |
+
+The session token resolver ([`security/session_token_resolver.go`](./security/session_token_resolver.go))
+accepts the role list in the two spellings a session can carry: the `[]string` the login handler writes, and
+the `[]any` the file storage answers after a restart — its snapshot round-trips through json, which keeps no
+element type.
 
 ### The migration set
 

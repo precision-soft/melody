@@ -72,6 +72,7 @@ v2 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, name
 v1 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
 v1 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
 v1 ~ symbol ~ security.Sha256Hex       ~ replaced in the example by HashPassword/MustHashPassword; the changelog entry names it to say so
+v2 ~ symbol ~ security.Sha256Hex       ~ replaced in the example by HashPassword/MustHashPassword; the changelog entry names it to say so
 
 v2 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
 v2 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
