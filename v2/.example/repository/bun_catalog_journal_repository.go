@@ -6,6 +6,7 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v2/.example/migration"
     melodycontainer "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     "github.com/uptrace/bun"
@@ -53,16 +54,6 @@ type BunCatalogJournalRepository struct {
     database *bun.DB
 }
 
-func (instance *BunCatalogJournalRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*catalogJournalRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-
-    return createErr
-}
-
 func (instance *BunCatalogJournalRepository) Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error) {
     if nil == entry {
         return nil, fmt.Errorf("journal entry is required")
@@ -98,18 +89,18 @@ func (instance *BunCatalogJournalRepository) Append(ctx context.Context, entry *
 }
 
 func (instance *BunCatalogJournalRepository) Latest(ctx context.Context, limit int) ([]*CatalogJournalEntry, error) {
-    if 0 >= limit {
-        limit = 10
-    }
+    rowList := make([]*catalogJournalRow, 0)
 
-    rowList := make([]*catalogJournalRow, 0, limit)
-
-    selectErr := instance.database.
+    query := instance.database.
         NewSelect().
         Model(&rowList).
-        Order("id DESC").
-        Limit(limit).
-        Scan(ctx)
+        Order("id DESC")
+
+    if 0 < limit {
+        query = query.Limit(limit)
+    }
+
+    selectErr := query.Scan(ctx)
     if nil != selectErr {
         return nil, selectErr
     }
@@ -129,7 +120,7 @@ func (instance *BunCatalogJournalRepository) Count(ctx context.Context) (int, er
         Count(ctx)
 }
 
-/* CatalogJournalRepositoryProvider resolves the database by the name the configuration published it under, so the repository stays unaware of how the connection was wired. The table is created here rather than on the path that writes to it, because a journal that only exists once somebody has already changed something would be missing exactly the entry it was created for. */
+/* CatalogJournalRepositoryProvider resolves the database by the name the configuration published it under, so the repository stays unaware of how the connection was wired. The migration set is applied here rather than on the path that writes to the journal, because a journal that only exists once somebody has already changed something would be missing exactly the entry it was created for. */
 func CatalogJournalRepositoryProvider(databaseServiceName string) func(resolver melodycontainercontract.Resolver) (CatalogJournalRepository, error) {
     return func(resolver melodycontainercontract.Resolver) (CatalogJournalRepository, error) {
         database, databaseErr := melodycontainer.FromResolver[*bun.DB](resolver, databaseServiceName)
@@ -137,14 +128,11 @@ func CatalogJournalRepositoryProvider(databaseServiceName string) func(resolver 
             return nil, databaseErr
         }
 
-        repositoryInstance := NewBunCatalogJournalRepository(database)
-
-        ensureSchemaErr := repositoryInstance.EnsureSchema(context.Background())
-        if nil != ensureSchemaErr {
-            return nil, ensureSchemaErr
+        if migrateErr := migration.EnsureMigrated(context.Background(), database); nil != migrateErr {
+            return nil, migrateErr
         }
 
-        return repositoryInstance, nil
+        return NewBunCatalogJournalRepository(database), nil
     }
 }
 

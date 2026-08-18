@@ -33,11 +33,9 @@ type CatalogJournalEntry struct {
 }
 
 type CatalogJournalRepository interface {
-    /* EnsureSchema creates the journal table when it is absent. The example carries no migration runner, so the repository owns the one table it writes and creates it on the path that reaches it. */
-    EnsureSchema(ctx context.Context) error
-
     Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error)
 
+    /* Latest answers the entries newest first. A limit of zero or below answers all of them. */
     Latest(ctx context.Context, limit int) ([]*CatalogJournalEntry, error)
 
     Count(ctx context.Context) (int, error)

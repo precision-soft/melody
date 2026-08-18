@@ -3,6 +3,7 @@ module github.com/precision-soft/melody/v2/.example
 go 1.24.9
 
 require (
+	github.com/precision-soft/melody/integrations/bunorm/migrate/v2 v2.0.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql/v2 v2.0.5
 	github.com/precision-soft/melody/integrations/bunorm/v2 v2.1.0
 	github.com/precision-soft/melody/integrations/cron/v2 v2.1.0
@@ -34,5 +35,7 @@ replace github.com/precision-soft/melody/integrations/cron/v2 => ../../integrati
 replace github.com/precision-soft/melody/integrations/bunorm/v2 => ../../integrations/bunorm/v2
 
 replace github.com/precision-soft/melody/integrations/bunorm/mysql/v2 => ../../integrations/bunorm/mysql/v2
+
+replace github.com/precision-soft/melody/integrations/bunorm/migrate/v2 => ../../integrations/bunorm/migrate/v2
 
 replace github.com/precision-soft/melody/integrations/rueidis/v2 => ../../integrations/rueidis/v2

@@ -12,11 +12,16 @@ registers runs the same set from the operator's side, so neither door can
 drift from the other.
 
 Every up statement creates its table with IF NOT EXISTS: the tables may already
-exist on a volume provisioned before the migration set, and several example
-processes sharing one database may apply the set at the same time. The bun
-bookkeeping tables keep their default names (bun_migrations and
-bun_migration_locks); they live in the catalog database, which only this set
-writes.
+exist on a volume provisioned before the migration set, and several processes of
+this example may apply the set at the same time. The bun bookkeeping tables keep
+their default names (bun_migrations and bun_migration_locks); they live in this
+example's own catalog database, melody_example_v1, which only this set writes.
+
+That database is this major's alone. The three examples share the development
+mysql and not a database in it, because bun matches an applied migration by NAME
+and the migrate module builds its migrator on the default bookkeeping tables: on
+one shared database the three sets would share one bun_migrations, and the first
+to land would answer for the others.
 */
 var Migrations = migrate.NewMigrations()
 

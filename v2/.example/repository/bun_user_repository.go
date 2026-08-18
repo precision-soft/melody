@@ -53,17 +53,8 @@ type bunUserRepository struct {
     database *bun.DB
 }
 
-/* EnsureSchema creates the table when it is absent and writes the opening directory into it when it is empty. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
-func (instance *bunUserRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*userRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
-    }
-
+/* seedIfEmpty writes the opening directory into an empty table; the table itself belongs to the migration set the provider has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
+func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
     count, countErr := instance.database.
         NewSelect().
         Model((*userRow)(nil)).

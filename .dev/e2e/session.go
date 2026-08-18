@@ -41,11 +41,14 @@ const sessionProbeSeparator = "|"
 /* runSessionRotationCheck drives http.RegenerateRequestSession over a real loopback http server, through a
 real kernel and a real on-disk session store, with a cookie-jar client standing in for the browser.
 
-It runs in process rather than against the .example application because no example route rotates a session and
-the harness may not add one: driving it over EXAMPLE_BASE_URL would mean reshaping an application this task
-puts out of bounds, and the surface would otherwise stay unexercised end to end. Nothing that matters is
-faked, though — the kernel's own session load and save path runs, the store is a file the assertions read back
-from disk, and the client keeps only what the responses told it to keep.
+It runs in process rather than against the .example application, and stays that way now that the login doors
+of the two published majors do rotate: the fixation window a rotation closes cannot be OPENED from outside
+those applications. No example route writes to the session before authentication, and the cookie is emitted
+only for a session that was modified, so a client never reaches the login holding an id of its own; a forged
+one is not adopted either, since the manager answers an unknown id with a fresh session under an id of its
+own. A probe over EXAMPLE_BASE_URL would therefore pass just as readily with the rotation removed. Nothing
+that matters is faked here, though — the kernel's own session load and save path runs, the store is a file the
+assertions read back from disk, and the client keeps only what the responses told it to keep.
 
 Three properties are asserted: the rotation changes the id, carries the values over and advertises the new id
 to the client; the id the client used to hold is gone from storage and buys nothing when presented again; and a

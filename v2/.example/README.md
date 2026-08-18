@@ -40,6 +40,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── entity/           # domain entities (Category, Currency, Product, User)
 ├── event/            # domain event types
 ├── handler/          # HTTP handlers (pages + JSON APIs), with category/, currency/, product/, user/ subpackages
+├── migration/        # the one migration set that owns this example's schema on mysql
 ├── page/             # HTML page templates
 ├── presenter/        # HTTP error / response presenters
 ├── repository/       # repository interfaces + in-memory implementations
@@ -48,6 +49,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── service/          # application services (CategoryService, CurrencyService, ProductService, UserService)
 ├── subscriber/       # event subscribers
 ├── url/              # route registry adapters: the route manifest every page is given
+├── assets/           # frontend sources (TypeScript) and the npm manifest the bundle is built from
 ├── public/           # static assets (CSS / JS)
 ├── embedded_*.go     # build-tag–controlled embedding for env and static assets
 ├── main.go           # application entry point
@@ -72,7 +74,7 @@ The [`config/`](./config/) package keeps [`main.go`](./main.go) small by groupin
 
 ### Cron integration
 
-The example demonstrates Melody's [`integrations/cron`](../../integrations/cron/v2/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cron.go`](./config/cron.go) through a `cron.Configuration` registry:
+The example demonstrates Melody's [`integrations/cron`](../../integrations/cron/v2/) package, registered as a module facade in [`config/configure.go`](./config/configure.go). The module registers two commands over one shared `cron.Configuration`: `melody:cron:generate`, which renders the crontab manifests, and `melody:cron:run`, the in-process runner that invokes each scheduled command when its minute comes (`--once` evaluates a single tick). Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cron.go`](./config/cron.go) through a `cron.Configuration` registry:
 
 ```go
 cronConfiguration := cron.NewConfiguration().
@@ -121,6 +123,33 @@ once the scheduled refresh has warmed it, and computable with no backend at all.
 The `catalog:journal` command prints the latest entries of the write journal over the same repository the
 listeners write it through, so the record is reachable from the command line as well as from a request.
 
+### The migration set
+
+The schema is owned by one migration set in [`migration/`](./migration/) — five mysql DDL migrations, one per
+table, the journal among them: this major keeps the journal on the same connection as the catalogue, where v1
+gives it a second database on postgres. Two doors run the set, so neither can drift from the other:
+
+- the **repository providers** call `migration.EnsureMigrated` at first resolution, and the four catalogue
+  providers then seed an empty table. That is what keeps a freshly recreated volume usable with no operator
+  step — the tables appear when the first request reaches a repository — and it is why every `CREATE TABLE`
+  carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by
+  bun's migration lock with a bounded retry;
+- the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`)
+  runs the same set from the operator's side. It comes from the
+  [`integrations/bunorm/migrate`](../../integrations/bunorm/migrate/v2/) module facade registered in
+  [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service
+  (`service.example.database.registry`).
+
+The module is registered whether or not a database is configured, so the command surface does not change
+between environments; without one every `db:*` command fails at `Run` with the container refusal naming the
+registry service.
+
+The set lives in a database of this major's own — `melody_example_v2`, named in [`.env`](./.env). The three
+example applications share the development mysql and not a database in it: the bun bookkeeping tables
+(`bun_migrations`, `bun_migration_locks`) keep their default names, and bun matches an applied migration by
+name, so on one shared database the three sets would share one bookkeeping table and the first to land would
+answer for the others.
+
 Two details are worth reading in the source rather than guessed at:
 
 - [`config/bootstrap_resolver.go`](./config/bootstrap_resolver.go) explains why an integration provider cannot
@@ -150,7 +179,7 @@ All wiring and integration logic lives outside `main.go`.
 
 ## Running locally
 
-The example is a standalone Go module (`v2/.example/go.mod`) that depends on Melody and the cron integration. From the repository root:
+The example is a standalone Go module (`v2/.example/go.mod`) that depends on Melody and on five integration modules: [`bunorm`](../../integrations/bunorm/v2/) with its [`mysql`](../../integrations/bunorm/mysql/v2/) provider and its [`migrate`](../../integrations/bunorm/migrate/v2/) command family, [`cron`](../../integrations/cron/v2/), and [`rueidis`](../../integrations/rueidis/v2/). From the repository root:
 
 ```bash
 cd v2/.example
@@ -207,14 +236,26 @@ cd v2/.example
 go run . -h
 ```
 
-Among the commands you will find `melody:cron:generate` from the cron integration. To generate a crontab fragment from the `cron.Configuration` declared in [`config/cron.go`](./config/cron.go):
+Among the commands you will find the cron pair (`melody:cron:generate` and `melody:cron:run`) and the `db:*` migration family, all three from the two module facades [`config/configure.go`](./config/configure.go) registers. To generate a crontab fragment from the `cron.Configuration` declared in [`config/cron.go`](./config/cron.go):
 
 ```bash
 cd v2/.example
 go run . melody:cron:generate --out ./generated_conf/cron/crontab
 ```
 
-The example schedules three commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
+The example schedules three commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty. The same schedule drives the in-process runner:
+
+```bash
+cd v2/.example
+go run . melody:cron:run --once
+```
+
+The example's own commands (`app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh`) render
+through the framework's `cli/output` envelope, so each accepts the standard flag set
+(`--format=table|json|json-pretty`, `--limit`, `--offset`, `--order`, `--quiet`, `--verbose`,
+`--table-width`) and answers one machine-readable document under `--format=json`. For `catalog:journal` the
+standard `--limit` replaces the flag the command used to declare itself: `0` (the default) answers every
+entry, newest first.
 
 ---
 

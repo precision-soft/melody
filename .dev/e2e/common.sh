@@ -26,6 +26,19 @@ REPOSITORY_ROOT_DIRECTORY_STRING="$(cd -P "${E2E_DIRECTORY_STRING}/../.." && pwd
 . "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/utility.sh"
 
 E2E_SERVICE_NAME_STRING="dev"
+E2E_MYSQL_SERVICE_NAME_STRING="mysql"
+
+# every major's database is provisioned whatever MELODY_E2E_MAJORS narrows the RUN to: the variable picks
+# which majors are exercised, not which ones are allowed to exist, and a database missing because a previous
+# run was narrowed would surface much later as an unrelated failure.
+#
+# An ARRAY rather than a space-separated string: the e2e scripts run under IFS=$'\n\t', so a string would
+# not split on the spaces and the whole list would arrive as one element — and mysql accepts a backtick-quoted
+# identifier containing spaces, so the run would report success having created one junk database and none of
+# the three real ones
+E2E_EXAMPLE_MAJOR_NUMBER_LIST=(1 2 3)
+
+E2E_MYSQL_PROVISION_ATTEMPT_LIMIT_INTEGER=15
 
 # paths as seen from inside the dev container
 E2E_HARNESS_DIRECTORY_STRING="/app/.dev/e2e"
@@ -81,7 +94,10 @@ EXAMPLE_LOAD_BALANCER_URL="${EXAMPLE_LOAD_BALANCER_URL-http://load-balancer:80}"
 # created. Clearing it keeps both sections running with their out-of-band halves announced as skipped.
 # The credentials are the example's own (v3/.example/.env) and the address is the compose service name on the
 # compose network, as seen from inside the dev container.
-MYSQL_DSN="${MYSQL_DSN-melody:melody@tcp(mysql:3306)/melody_example}"
+# The database it names is v3's, because the sections that read through it drive the v3 example. The per-major
+# sections do not inherit it: each major keeps its schema in a database of its own, and the Go harness swaps
+# the database of this dsn for the major it is driving (exampleMysqlDsn in .dev/e2e/example.go).
+MYSQL_DSN="${MYSQL_DSN-melody:melody@tcp(mysql:3306)/melody_example_v3}"
 # the dev prometheus that scrapes the example's /metrics (.dev/docker/prometheus/prometheus.yml). The port is the
 # IN-NETWORK 9090, not the 9091 the host mapping publishes: every e2e variable addresses the compose services from
 # inside the dev container. Clearing it skips the scrape half of the metrics section.
@@ -107,6 +123,61 @@ e2e_require_dev_service() {
     fi
 
     ensure_service_running "${E2E_SERVICE_NAME_STRING}"
+
+    e2e_ensure_example_databases
+}
+
+# each .example application holds its schema in a database of its own, all three in the one mysql container:
+# the bunorm/migrate command family builds its migrator on bun's default bookkeeping tables and bun matches
+# an applied migration by NAME, so three majors sharing one database would share one bun_migrations and the
+# first set to land would answer for the others.
+#
+# .dev/docker/mysql/init.sql creates them, but only on a FRESH volume — every development volume provisioned
+# before that file existed would otherwise refuse the examples with "unknown database". These statements are
+# the door for those: idempotent, run as root because the melody user cannot create a database, and cheap
+# enough to pay on every harness invocation.
+#
+# Clearing MYSQL_DSN opts out, the same way it opts out of the out-of-band reads: a run told there is no
+# database to reach is not asked to provision one.
+e2e_ensure_example_databases() {
+    if [[ "" = "${MYSQL_DSN}" ]]; then
+        info "MYSQL_DSN is cleared, so the per-major example databases were not provisioned"
+
+        return 0
+    fi
+
+    # the mysql service sits behind the 'all' compose profile, so the profile-blind helpers do not see it:
+    # docker_compose_service_exists reads `config --services` and ensure_service_running reads `ps -q`, and
+    # both answer empty for a profiled service. The profile is named here rather than the service looked up.
+    if [[ "" = "$(docker_compose_no_log --profile all ps -q "${E2E_MYSQL_SERVICE_NAME_STRING}" 2>/dev/null || true)" ]]; then
+        info "service ${E2E_MYSQL_SERVICE_NAME_STRING} is not running [starting]"
+        docker_compose --profile all up -d "${E2E_MYSQL_SERVICE_NAME_STRING}"
+    fi
+
+    local STATEMENT_STRING=""
+    local MAJOR_STRING
+    for MAJOR_STRING in "${E2E_EXAMPLE_MAJOR_NUMBER_LIST[@]}"; do
+        STATEMENT_STRING="${STATEMENT_STRING}CREATE DATABASE IF NOT EXISTS \`melody_example_v${MAJOR_STRING}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; "
+    done
+    STATEMENT_STRING="${STATEMENT_STRING}GRANT ALL PRIVILEGES ON \`melody\\_example\\_%\`.* TO 'melody'@'%'; FLUSH PRIVILEGES;"
+
+    # the mysql client is asked for a machine answer and the whole thing is retried: the service can report
+    # healthy through mysqladmin while the server is still finishing its own initialisation, and a create
+    # that lands then fails on a connection refused rather than on anything about the statement
+    local ATTEMPT_INTEGER=0
+    while true; do
+        if docker_compose_no_log --profile all exec -T "${E2E_MYSQL_SERVICE_NAME_STRING}" \
+            mysql -uroot -proot --batch --skip-column-names -e "${STATEMENT_STRING}" </dev/null >/dev/null 2>&1; then
+            return 0
+        fi
+
+        ATTEMPT_INTEGER=$((ATTEMPT_INTEGER + 1))
+        if [[ "${ATTEMPT_INTEGER}" -ge "${E2E_MYSQL_PROVISION_ATTEMPT_LIMIT_INTEGER}" ]]; then
+            fail "could not create the per-major example databases on the ${E2E_MYSQL_SERVICE_NAME_STRING} service after ${ATTEMPT_INTEGER} attempts"
+        fi
+
+        sleep 2
+    done
 }
 
 # builds the in-container command line: go on the PATH, GOWORK=off, the backend env exported, then cd into

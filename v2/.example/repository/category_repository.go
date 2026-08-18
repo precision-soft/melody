@@ -6,6 +6,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v2/.example/entity"
+    "github.com/precision-soft/melody/v2/.example/migration"
     melodycontainer "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     "github.com/uptrace/bun"
@@ -44,11 +45,14 @@ func CategoryRepositoryProvider(databaseServiceName string) melodycontainercontr
             return nil, databaseErr
         }
 
+        if migrateErr := migration.EnsureMigrated(context.Background(), database); nil != migrateErr {
+            return nil, migrateErr
+        }
+
         repositoryInstance := NewBunCategoryRepository(database)
 
-        ensureSchemaErr := repositoryInstance.EnsureSchema(context.Background())
-        if nil != ensureSchemaErr {
-            return nil, ensureSchemaErr
+        if seedErr := repositoryInstance.seedIfEmpty(context.Background()); nil != seedErr {
+            return nil, seedErr
         }
 
         return repositoryInstance, nil

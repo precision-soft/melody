@@ -6,6 +6,7 @@ import (
     "database/sql/driver"
     "errors"
     "io"
+    "strings"
     "sync"
     "time"
 
@@ -40,7 +41,15 @@ func validUser() *entity.User {
     return entity.NewUser("user-1", "user", "hash", []string{entity.RoleUser})
 }
 
-/* The fake database/sql driver below wraps a real *bun.DB around a statement recorder, so a bun repository guard can be proven on the exact SQL it emits without a live server. */
+func validCategory() *entity.Category {
+    return entity.NewCategory("cat-1", "Peripherals")
+}
+
+func validCurrency() *entity.Currency {
+    return entity.NewCurrency("cur-1", "EUR", "Euro")
+}
+
+/* The fake database/sql driver below wraps a real *bun.DB around a statement recorder, so a bun repository guard can be proven on the exact SQL it emits without a live server. It mirrors the fixture of the migration package; the two cannot share code because a fixture is compiled only into its own package's test binary. */
 
 type queryRecorder struct {
     mutex     sync.Mutex
@@ -65,6 +74,16 @@ func (instance *queryRecorder) recordedQueries() []string {
     return queries
 }
 
+func (instance *queryRecorder) firstMatching(matcher func(query string) bool) string {
+    for _, query := range instance.recordedQueries() {
+        if true == matcher(query) {
+            return query
+        }
+    }
+
+    return ""
+}
+
 func (instance *queryRecorder) countMatching(matcher func(query string) bool) int {
     count := 0
     for _, query := range instance.recordedQueries() {
@@ -74,6 +93,20 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
     }
 
     return count
+}
+
+/*
+countingRows answers every count select with the given total and every other
+select with no rows, which is all the seeding and listing guards need.
+*/
+func countingRows(total int64) func(query string) ([]string, [][]driver.Value, error) {
+    return func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "count(*)") {
+            return []string{"count"}, [][]driver.Value{{total}}, nil
+        }
+
+        return []string{}, nil, nil
+    }
 }
 
 type fakeConnection struct {

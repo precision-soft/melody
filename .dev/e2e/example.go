@@ -51,6 +51,10 @@ type exampleMajor struct {
     other, so these are per-major capabilities like integrationDemos, not shared surface. */
     showcaseProbes      bool
     sessionRestartProbe bool
+    /* loginThrottleProbe names the majors whose example puts the login submit behind the shared per-address
+    write budget. It is a per-major capability like the two above: v3's example declares the route public and
+    leaves it unthrottled, so asserting the refusal there would assert a wiring it does not carry. */
+    loginThrottleProbe bool
     /* journalOnPostgres names where the major keeps its catalog journal: the v1 example runs two live
     databases in one process — the catalogue on mysql, the journal on postgres — so its out-of-band
     journal reads go through the postgres door while the later majors keep reading mysql. */
@@ -58,9 +62,42 @@ type exampleMajor struct {
 }
 
 var exampleMajorCatalog = []exampleMajor{
-    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, journalOnPostgres: true},
-    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true},
+    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
+    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, loginThrottleProbe: true},
     {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false},
+}
+
+/* exampleMysqlDsn answers the dsn of one major's own database. The three examples share the development mysql
+but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads
+what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one
+the supervised sections use, and this swaps the database segment of it for the major being driven.
+
+An empty dsn stays empty: it is how a caller says there is no database to reach, and the sections that receive
+it already announce their out-of-band half as skipped. A dsn with no database segment is answered unchanged
+rather than repaired — the caller configured it, and silently pointing it somewhere else would hide that. */
+func exampleMysqlDsn(major exampleMajor, mysqlDsn string) string {
+    if "" == mysqlDsn {
+        return ""
+    }
+
+    separatorIndex := strings.LastIndex(mysqlDsn, "/")
+    if 0 > separatorIndex {
+        return mysqlDsn
+    }
+
+    parameters := ""
+    remainder := mysqlDsn[separatorIndex+1:]
+    if parameterIndex := strings.Index(remainder, "?"); 0 <= parameterIndex {
+        parameters = remainder[parameterIndex:]
+    }
+
+    return mysqlDsn[:separatorIndex+1] + exampleMysqlDatabase(major) + parameters
+}
+
+/* exampleMysqlDatabase names one major's database. The spelling is the one the .env of that example carries and
+the one .dev/docker/mysql/init.sql creates. */
+func exampleMysqlDatabase(major exampleMajor) string {
+    return "melody_example_v" + strconv.Itoa(major.number)
 }
 
 /* exampleMajorList resolves the majors to exercise from MELODY_E2E_MAJORS, which accepts space or comma
@@ -141,6 +178,10 @@ The binary is built UNTAGGED on purpose: under melody_env_embedded the env files
 the example directory, so a .env.local written into the workspace afterwards would be ignored and the
 application would fight the supervised one for :8080. */
 func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDsn string, postgresDsn string) {
+    /* swapped here rather than at each reader: everything below this line is about ONE major, and the dsn the
+    caller passes names v3's database whatever major is being driven */
+    mysqlDsn = exampleMysqlDsn(major, mysqlDsn)
+
     workspace := filepath.Join(os.TempDir(), "melody-e2e-example-"+major.label)
 
     prepareExampleWorkspace(major, workspace)
@@ -573,6 +614,11 @@ const (
     exampleFrontendBundle     = "/assets/app.js"
 )
 
+/* the login-throttle probe stops here rather than looping forever: the examples allow 30 writes a minute, so
+a ceiling comfortably past it turns "the throttle is missing" into a failure with a number in it instead of a
+run that never ends. */
+const exampleLoginThrottleAttemptCeiling = 60
+
 /* the icons every page links in its head. They exist in exactly ONE place in the tree — <root>/.assets — and
 are git-ignored under every example, so nothing here is a second copy that could go stale. What puts them in
 public/ is assets/sync-icons.mjs, run as the prebuild step of `npm run build` and by the container entrypoint
@@ -594,6 +640,11 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
     assertExampleBrowserAssets(major, client)
     assertExampleAnonymousRejection(major, client)
     assertExampleLoginFlow(major, client)
+
+    if true == major.loginThrottleProbe {
+        assertExampleLoginIsThrottled(major, client, redisAddress)
+    }
+
     assertExampleStaticTraversal(major, client)
 
     /* the showcase probes run BEFORE the integration demos on purpose: the throttled writes they spend are
@@ -808,6 +859,97 @@ func assertExampleBrowserAssets(major exampleMajor, client *exampleClient) {
         fail("[%s] %s does not load %s, so nothing installs window.melodyExample", major.label, exampleLoginRoute, exampleFrontendBundle)
     }
     pass("[%s] the login page carries the route manifest envelope and loads the bundle", major.label)
+}
+
+/* assertExampleLoginIsThrottled proves the credential door sits behind the shared per-address write budget.
+
+The signal has to distinguish the throttle from every other refusal: an unthrottled login answers 401 to a
+wrong password however many times it is asked, so the assertion is that the answer CHANGES — 401 up to the
+allowance and 429 past it. A run that only checked "some request was refused" would pass with the throttle
+removed, because the wrong password refuses on its own.
+
+The budget is reset on the way in AND on the way out. On the way in because the login flow above already
+spent two writes against it and the exact exhaustion point is what the allowance means; on the way out
+because this is the only probe in the harness whose whole purpose is to leave the budget empty, and every
+section after it signs somebody in — the showcase probes and the session-restart probe do it through the same
+throttled door, so an exhausted budget left behind fails them with a 429 that says nothing about what they
+assert.
+
+The password is deliberately wrong: a correct one would rotate the session under the client's jar on every
+accepted attempt and leave the flow below signed in as somebody else's request.
+
+The allowance is read from the answer rather than hardcoded here: the two examples configure their own, and a
+harness constant would silently stop measuring the exhaustion point if either changed it. */
+func assertExampleLoginIsThrottled(major exampleMajor, client *exampleClient, redisAddress string) {
+    if "" == redisAddress {
+        skip("[%s] REDIS_ADDRESS is cleared, so the login throttle has no limiter behind it and was not asserted", major.label)
+
+        return
+    }
+
+    label := fmt.Sprintf("[%s] login throttle", major.label)
+    prefix := "melody-example-" + major.label + ":rate_limit:"
+
+    resetExampleRateLimitCounters(label, redisAddress, prefix)
+    defer resetExampleRateLimitCounters(label, redisAddress, prefix)
+
+    body := exampleCredentialBody(exampleUsername, exampleWrongPassword)
+
+    acceptedCount := 0
+    throttledAt := 0
+
+    for attempt := 1; attempt <= exampleLoginThrottleAttemptCeiling; attempt++ {
+        response := client.call("POST", exampleLoginRoute, "", "application/json", body)
+
+        if http.StatusTooManyRequests == response.statusCode {
+            throttledAt = attempt
+
+            break
+        }
+
+        if http.StatusUnauthorized != response.statusCode {
+            fail(
+                "[%s] the %d%s login attempt answered %d, wanted 401 or 429: %s",
+                major.label, attempt, exampleOrdinalSuffix(attempt), response.statusCode, exampleTruncate(response.body),
+            )
+        }
+
+        acceptedCount = acceptedCount + 1
+    }
+
+    if 0 == throttledAt {
+        fail(
+            "[%s] %d wrong-password logins in a row were all answered 401 — the login submit is not behind the write budget",
+            major.label, exampleLoginThrottleAttemptCeiling,
+        )
+    }
+
+    if 0 == acceptedCount {
+        fail(
+            "[%s] the very first login attempt answered 429, so the budget was already spent and nothing about the login door was measured",
+            major.label,
+        )
+    }
+
+    pass("[%s] the login submit is throttled: %d attempts answered 401 and the next answered 429", major.label, acceptedCount)
+}
+
+/* exampleOrdinalSuffix keeps the diagnostic readable when it names which attempt broke the pattern. */
+func exampleOrdinalSuffix(number int) string {
+    if 11 <= number%100 && 13 >= number%100 {
+        return "th"
+    }
+
+    switch number % 10 {
+    case 1:
+        return "st"
+    case 2:
+        return "nd"
+    case 3:
+        return "rd"
+    }
+
+    return "th"
 }
 
 /* assertExampleStaticTraversal probes the static surface with percent-encoded dot segments, which a client will

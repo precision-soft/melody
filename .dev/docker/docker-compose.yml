@@ -122,11 +122,16 @@ services:
         restart: 'no'
         environment:
             MYSQL_ROOT_PASSWORD: root
+            # the scratch database of the live integration suites, which point MYSQL_DSN at it and create
+            # tables of their own. The .example applications do NOT use it: each holds its schema in a
+            # melody_example_v<major> database of its own, created by the init script mounted below.
             MYSQL_DATABASE: melody_example
             MYSQL_USER: melody
             MYSQL_PASSWORD: melody
         ports:
             - "${MYSQL_HOST_PORT:-3307}:3306"
+        volumes:
+            - ${RELATIVE_PATH_TO_ROOT}/${DOCKER_PATH}/mysql/init.sql:/docker-entrypoint-initdb.d/10-example-databases.sql:ro
         healthcheck:
             test: [ 'CMD-SHELL', 'mysqladmin ping -h localhost -proot' ]
             interval: 5s

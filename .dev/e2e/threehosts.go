@@ -15,10 +15,13 @@ var threeHostCatalog = []struct {
     label    string
     hostName string
     table    string
+    /* the major whose database holds that table: the three examples share the development mysql and no longer
+    share a database in it, so each host's catalogue is read through a connection of its own */
+    major int
 }{
-    {label: "v1", hostName: "v1-example.melody.localhost.precision-soft.com", table: "melody_example_v1_product"},
-    {label: "v2", hostName: "v2-example.melody.localhost.precision-soft.com", table: "melody_example_v2_product"},
-    {label: "v3", hostName: "example.melody.localhost.precision-soft.com", table: exampleV3ProductTable},
+    {label: "v1", hostName: "v1-example.melody.localhost.precision-soft.com", table: "melody_example_v1_product", major: 1},
+    {label: "v2", hostName: "v2-example.melody.localhost.precision-soft.com", table: "melody_example_v2_product", major: 2},
+    {label: "v3", hostName: "example.melody.localhost.precision-soft.com", table: exampleV3ProductTable, major: 3},
 }
 
 /* the probe name carries the host it was written through, because the three majors number their products
@@ -50,16 +53,29 @@ func runThreeHostsCheck(loadBalancerUrl string, mysqlDsn string, redisAddress st
         return
     }
 
-    database := openMysql("three hosts", mysqlDsn)
-    defer func() {
-        _ = database.Close()
-    }()
-
-    /* a run that failed midway leaves its probe behind, and the assertion below is about which table a row is
-       in — so the tables start clean rather than carrying somebody else's answer */
+    /* one connection per major, because one dsn no longer reaches all three catalogues. The cross-check below
+       gets stronger for it: a row must be in its own major's database AND absent from the other two databases,
+       where before it only had to be absent from two other tables of one. */
+    databaseByLabel := map[string]*bun.DB{}
     for _, host := range threeHostCatalog {
-        for _, table := range threeHostCatalog {
-            removeThreeHostProbe(database, table.table, host.label)
+        major, exists := exampleMajorByNumber(host.major)
+        if false == exists {
+            fail("three hosts: %s names major %d, which the harness does not know", host.hostName, host.major)
+        }
+
+        database := openMysql("three hosts "+host.label, exampleMysqlDsn(major, mysqlDsn))
+        defer func() {
+            _ = database.Close()
+        }()
+
+        databaseByLabel[host.label] = database
+    }
+
+    /* a run that failed midway leaves its probe behind, and the assertion below is about which catalogue a row
+       is in — so every catalogue starts clean rather than carrying somebody else's answer */
+    for _, host := range threeHostCatalog {
+        for _, other := range threeHostCatalog {
+            removeThreeHostProbe(databaseByLabel[other.label], other.table, host.label)
         }
     }
 
@@ -81,7 +97,7 @@ func runThreeHostsCheck(loadBalancerUrl string, mysqlDsn string, redisAddress st
         productId := createThreeHostProbe(client, loadBalancerUrl, host.hostName, host.label)
 
         for _, other := range threeHostCatalog {
-            found := threeHostProbeExists(database, other.table, productId, host.label)
+            found := threeHostProbeExists(databaseByLabel[other.label], other.table, productId, host.label)
 
             if other.label == host.label && false == found {
                 fail(
@@ -98,7 +114,7 @@ func runThreeHostsCheck(loadBalancerUrl string, mysqlDsn string, redisAddress st
             }
         }
 
-        removeThreeHostProbe(database, host.table, host.label)
+        removeThreeHostProbe(databaseByLabel[host.label], host.table, host.label)
 
         pass("[%s] %s reached the application that writes to %s, and no other", host.label, host.hostName, host.table)
     }

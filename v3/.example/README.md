@@ -249,7 +249,7 @@ cd v3/.example
 AMQP_DSN="amqp://guest:guest@localhost:5673/" \
 REDIS_ADDRESS="localhost:6380" \
 S3_ENDPOINT="localhost:4566" S3_ACCESS_KEY="test" S3_SECRET_KEY="test" S3_BUCKET="melody-example" \
-MYSQL_HOST="localhost" MYSQL_PORT="3307" MYSQL_DATABASE="melody_example" MYSQL_USER="melody" MYSQL_PASSWORD="melody" \
+MYSQL_HOST="localhost" MYSQL_PORT="3307" MYSQL_DATABASE="melody_example_v3" MYSQL_USER="melody" MYSQL_PASSWORD="melody" \
 go run .
 ```
 
