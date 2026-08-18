@@ -70,7 +70,7 @@ v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParam
 # ------------------------------------------------------------------------------------------------------
 
 v1:v2 ~ text ~ integrations/bunorm/migrate ~ base_command_test.go ~ the provider double implements the v2 Open signature and is constructed with a logger
-v1:v2 ~ text ~ integrations/bunorm/migrate ~ migrate_test.go      ~ the provider double implements the v2 Open signature and is constructed with a logger
+v1:v2 ~ text ~ integrations/bunorm/migrate ~ fixture_test.go      ~ the provider double implements the v2 Open signature and is constructed with a logger
 
 # ------------------------------------------------------------------------------------------------------
 # bunorm/mysql and bunorm/pgsql: the same boundary reaching the two drivers. The v1-only surface is two

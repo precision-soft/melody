@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- the package's shared test material moves to `fixture_test.go`, and `control_character.go` gains the mirror it never had. The doubles the whole suite is built on — the fake connector, driver, connection, rows and dialect, the query recorder, the runtime and command helpers — lived inside `migrate_test.go` beside that file's own ten tests, so seven other files reached into a file whose name says it tests one source. The escaping helper that renders text of server origin for an operator's terminal had no test at all; it has one now, covering the named escapes, the hexadecimal ones, DEL, and the multi-line form the query rendering uses
+
 - documentation: the readme states that without the `--manager` flag the registration's own `ManagerName` pin is used, and only an empty pin falls back to the registry default. The dedicated migration connection is attributed to all six commands rather than to migrate and rollback, since they share one manager resolution. The released `v2.0.0` block names the symbols the tag actually shipped — `RegisterCommands` rather than `Register`, the unexported identity probe rather than a `DatabaseIdentity` type, the `Query`/`RunnerOption` runner surface rather than a `Migrate` type, the unexported `baseCommand` rather than a `BaseCommand`, and `Options`/`DefaultOptions` for the registration settings, with runner output and colour left to `RunnerOption` where they belong
 
 - the unknown-manager test pins the refusal it always meant to pin: it accepted any error, so a regression that ignored the `--manager` flag and dialed the default database still read as the guard working; it now requires `bunorm.ErrProviderDefinitionNotFound`

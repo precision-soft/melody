@@ -595,6 +595,22 @@ func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
     if elapsed > time.Second {
         t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
     }
+
+    /* the cause stays the cancellation, but the outage that was being retried arrives STRUCTURED beside it. Flattened into openErr.Error() it handed the operator a sentence and nothing to act on, while the retry warning one branch above lifted the same failure's context and cause chain — one record shape for the same failure, decided by whether the caller happened to cancel. */
+    var melodyErr *exception.Error
+    if false == errors.As(openErr, &melodyErr) {
+        t.Fatalf("expected a melody error carrying the failed attempt, got %T", openErr)
+    }
+
+    errorContext := melodyErr.Context()
+
+    if _, hasAttempt := errorContext["attempt"]; false == hasAttempt {
+        t.Fatalf("expected the attempt in the record, got %v", errorContext)
+    }
+
+    if _, hasConnection := errorContext["connection"]; false == hasConnection {
+        t.Fatalf("expected the failed attempt's own connection diagnostics beside the cancellation, got %v", errorContext)
+    }
 }
 
 /* the context-less door stays what it was for every caller that holds no context: it is OpenForMigrationContext under a background one, which is why it can still be reached without changing a single call site */
@@ -654,6 +670,22 @@ func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
     if elapsed > time.Second {
         t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
     }
+
+    /* the cause stays the cancellation, but the outage that was being retried arrives STRUCTURED beside it. Flattened into openErr.Error() it handed the operator a sentence and nothing to act on, while the retry warning one branch above lifted the same failure's context and cause chain — one record shape for the same failure, decided by whether the caller happened to cancel. */
+    var melodyErr *exception.Error
+    if false == errors.As(openErr, &melodyErr) {
+        t.Fatalf("expected a melody error carrying the failed attempt, got %T", openErr)
+    }
+
+    errorContext := melodyErr.Context()
+
+    if _, hasAttempt := errorContext["attempt"]; false == hasAttempt {
+        t.Fatalf("expected the attempt in the record, got %v", errorContext)
+    }
+
+    if _, hasConnection := errorContext["connection"]; false == hasConnection {
+        t.Fatalf("expected the failed attempt's own connection diagnostics beside the cancellation, got %v", errorContext)
+    }
 }
 
 /* the diagnostic context of a failed connection carries the pool sizing and the deadlines that governed the attempt, the pgsql sibling's shape, so the operator reading the record does not see only the address that refused. */
@@ -664,12 +696,18 @@ func TestToConnectionContextCarriesThePoolAndTimeoutConfiguration(t *testing.T) 
         NewConnectionConfig("host", "3306", "database", "user", "password"),
         DefaultPoolConfig(),
         DefaultTimeoutConfig(),
+        "rewritten-host:3307",
     )
 
-    for _, key := range []string{"connection", "poolConfig", "timeoutConfig"} {
+    for _, key := range []string{"connection", "poolConfig", "timeoutConfig", "dialedAddress"} {
         if _, exists := connectionContext[key]; false == exists {
             t.Fatalf("expected the connection context to carry %q, got %v", key, connectionContext)
         }
+    }
+
+    /* the address the dial reached is named apart from the configured one, because the post-build hook may have rewritten it after the connection config was built */
+    if "rewritten-host:3307" != connectionContext["dialedAddress"] {
+        t.Fatalf("expected the dialled endpoint, got %v", connectionContext["dialedAddress"])
     }
 }
 
@@ -894,5 +932,97 @@ func TestConnectionTlsConfig(t *testing.T) {
     explicitProvider := NewProvider(WithTlsConfig(explicitConfig))
     if explicitConfig != explicitProvider.connectionTlsConfig("db.example.com") {
         t.Fatalf("expected WithTlsConfig to win outright")
+    }
+}
+
+/* the transient markers are matched as WORDS, not as bare substrings. The short ones sit inside ordinary identifiers — "eof" inside a table named `geofences`, "timeout" inside a `session_timeout` column — and a permanent failure classified transient is retried for the whole budget before dying under "failed after max retry attempts" instead of "non-transient". */
+func TestIsTransientError_AMarkerInsideAnIdentifierIsNotAMarker(t *testing.T) {
+    provider := &Provider{}
+
+    for _, permanentMessage := range []string{
+        "Error 1146 (42S02): Table 'app.geofences' doesn't exist",
+        "Error 1054 (42S22): Unknown column 'session_timeout' in 'field list'",
+    } {
+        if true == provider.isTransientError(errors.New(permanentMessage)) {
+            t.Fatalf("a permanent failure must not be retried: %q", permanentMessage)
+        }
+    }
+}
+
+func TestIsTransientError_TheMarkersThemselvesStillMatch(t *testing.T) {
+    provider := &Provider{}
+
+    for _, transientMessage := range []string{
+        "unexpected EOF",
+        "read tcp 10.0.0.1:3306: i/o timeout",
+        "dial tcp 10.0.0.1:3306: connect: connection refused",
+        "invalid connection: bad connection",
+        "commands out of sync; read timeout",
+    } {
+        if false == provider.isTransientError(errors.New(transientMessage)) {
+            t.Fatalf("a transient failure must still be retried: %q", transientMessage)
+        }
+    }
+}
+
+/* the TLS posture is read where the DRIVER receives it, not only from the helper that computes it. The helper has its own test, but nothing observed that its answer reaches the connector, and the wiring is what decides whether a session is encrypted — a deleted assignment would have left every default connection in plaintext with the helper's test still green. The post-build hook is handed the very configuration the connector is built from, so it is the seam; it refuses afterwards, which stops the attempt before any dial. */
+func openObservingTheTlsPosture(t *testing.T, providerOptions ...ProviderOption) *tls.Config {
+    t.Helper()
+
+    stopBeforeDial := errors.New("stop before the dial")
+
+    var seenTlsConfig *tls.Config
+    observingOptions := append(
+        []ProviderOption{
+            WithPostBuildHook(func(ctx context.Context, driverConfig *driver.Config) error {
+                seenTlsConfig = driverConfig.TLS
+
+                return stopBeforeDial
+            }),
+        },
+        providerOptions...,
+    )
+
+    provider := NewProvider(observingOptions...)
+
+    _, openErr := provider.Open(newTestParams("db.internal", "3306", "melody", "melody_user", "melody_password"), nil)
+    if false == errors.Is(openErr, stopBeforeDial) {
+        t.Fatalf("expected the hook to stop the attempt before the dial, got %v", openErr)
+    }
+
+    return seenTlsConfig
+}
+
+func TestProviderOpen_TheDefaultPostureReachesTheDriverAsAVerifyingConfig(t *testing.T) {
+    tlsConfig := openObservingTheTlsPosture(t)
+
+    if nil == tlsConfig {
+        t.Fatal("the default must reach the driver as a verifying config, not as plaintext")
+    }
+
+    if "db.internal" != tlsConfig.ServerName {
+        t.Fatalf("expected the configured host as the name to verify against, got %q", tlsConfig.ServerName)
+    }
+
+    if tls.VersionTLS12 != tlsConfig.MinVersion {
+        t.Fatalf("expected TLS 1.2 as the floor, got %d", tlsConfig.MinVersion)
+    }
+
+    if true == tlsConfig.InsecureSkipVerify {
+        t.Fatal("the default must VERIFY the server certificate; an unverified session is the driver's own convenience spelling and is refused deliberately")
+    }
+}
+
+func TestProviderOpen_TheInsecureOptOutReachesTheDriverAsPlaintext(t *testing.T) {
+    if nil != openObservingTheTlsPosture(t, WithInsecure(true)) {
+        t.Fatal("WithInsecure is the one plaintext path and must leave the driver without a TLS configuration")
+    }
+}
+
+func TestProviderOpen_AnExplicitTlsConfigReachesTheDriverUntouched(t *testing.T) {
+    pinnedTlsConfig := &tls.Config{ServerName: "pinned.example.com", MinVersion: tls.VersionTLS13}
+
+    if pinnedTlsConfig != openObservingTheTlsPosture(t, WithTlsConfig(pinnedTlsConfig)) {
+        t.Fatal("an explicit TLS configuration must reach the driver exactly as it was given")
     }
 }

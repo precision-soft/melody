@@ -18,6 +18,22 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Bunorm: the registry refuses new callers while a pool is still closing
+
+**What changed.** `ManagerRegistry.Close` marked the registry closed and then held the registry lock for the whole teardown, closing every manager and every migration database inside the critical section. It now publishes the flag under the lock, takes a snapshot of the two maps, releases the lock, and closes the pools outside it.
+
+**Symptom.** A call to `Manager`, `Database` or `MigrationDatabase` arriving while `Close` is running no longer waits for the teardown to finish; it is refused at once with `ErrManagerRegistryClosed`. Previously such a call parked on the registry lock, and against a peer that had stopped answering — a network partition at shutdown, where the migration connection's write deadlines are deliberately lifted — it could park for as long as the driver waited, so a graceful-shutdown drain expired with goroutines wedged in the registry. Code that relied on that blocking to serialise its last queries behind the teardown now sees the refusal instead.
+
+**Remedy.** None for the ordinary case: the refusal is what the flag has always meant, and every caller already had to handle `ErrManagerRegistryClosed`, which is what the same call answered a moment later anyway. A caller that genuinely needs its work to finish before the pools close must order that itself — run it before `Close`, or gate `Close` behind it — rather than relying on the lock to do the ordering.
+
+### Bunorm mysql and pgsql: a transient marker inside a word is no longer transient
+
+**What changed.** The providers decide whether to retry a failed open by scanning the lowercased error message for a list of markers. The scan matched them as bare substrings, so the short spellings fired inside ordinary identifiers. The markers are now matched as words: a match counts only where the characters on either side are not letters, digits or underscores.
+
+**Symptom.** A permanent failure whose message happens to contain a marker inside a word now fails on the first attempt instead of being retried for the whole budget. The two measured cases are a missing table whose name contains `eof` — `Table 'app.geofences' doesn't exist` — and an unknown column named `session_timeout`; both were retried to exhaustion and then reported as "database connection failed after max retry attempts" rather than as a non-transient failure. Such a boot now fails faster and under the correct classification.
+
+**Remedy.** None is required, and the change is in the safe direction: the failure was permanent in both cases and the retries only delayed the report. The `io.EOF` and `net.Error` checks that run ahead of the message scan are untouched, so a genuine end-of-file or timeout is classified by type as before, and every marker that appears as its own word — `i/o timeout`, `connection refused`, `bad connection`, a bare `EOF` — matches exactly as it did. An operator who wants a permanent failure retried anyway raises the retry budget rather than relying on a substring collision.
+
 ### Security: `NewAccessControlRule` now builds a segment-bounded rule
 
 **What changed.** The plain constructor `NewAccessControlRule` built a raw prefix rule that matched across segment boundaries — `NewAccessControlRule("/admin", …)` governed `/administrator` and `/admin-tools` as readily as `/admin/panel`, and being the longest match it shadowed a correctly bounded rule that would have denied. The plain name now builds the segment-bounded rule: `/admin` governs `/admin` and its descendants under a `/` boundary, never a path that merely shares the prefix text. The cross-segment reach moves to the explicit `NewAccessControlRawPrefixRule`; the previous long-named safe constructor `NewAccessControlRuleWithSegmentPrefix` stays as a deprecated alias of `NewAccessControlRule`. The signature of `NewAccessControlRule` is unchanged, so this is a behavioural change, not a compile break.

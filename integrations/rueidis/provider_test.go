@@ -244,18 +244,23 @@ func TestProvider_Ping_NilClientReturnsError(t *testing.T) {
     }
 }
 
-func TestProvider_Open_ZeroConnectTimeoutPingsWithoutDeadline(t *testing.T) {
+/* the name of this test used to say the ping ran WITHOUT a deadline at a zero connect timeout, which is the opposite of what the code does: resolveConnectTimeout reads a non-positive value as the default rather than as "unbounded", so the ping is bounded either way. The claim it can make against a live store is that a config naming only the command timeout still opens and pings — the bound itself is proven, without a store, by TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound below. */
+func TestProvider_Open_AZeroConnectTimeoutPingsUnderTheDefaultBound(t *testing.T) {
     address := os.Getenv("REDIS_ADDRESS")
     if "" == address {
         t.Skip("REDIS_ADDRESS not set; skipping redis provider integration test")
     }
 
-    provider := newTestProvider().WithTimeoutConfig(
-        &TimeoutConfig{
-            ConnectTimeout: 0,
-            CommandTimeout: 3 * time.Second,
-        },
-    )
+    timeoutConfig := &TimeoutConfig{
+        ConnectTimeout: 0,
+        CommandTimeout: 3 * time.Second,
+    }
+
+    if DefaultTimeoutConfig().ConnectTimeout != resolveConnectTimeout(timeoutConfig) {
+        t.Fatalf("a zero connect timeout must take the default bound, got %s", resolveConnectTimeout(timeoutConfig))
+    }
+
+    provider := newTestProvider().WithTimeoutConfig(timeoutConfig)
 
     client, openErr := provider.Open(newProviderTestResolver(t, address, "", ""))
     if nil != openErr {

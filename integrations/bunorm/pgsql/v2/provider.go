@@ -292,9 +292,13 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
             delayTimer.Stop()
 
             /* the same clean stop as the branch above, reached one step later: the cancellation arrived while this attempt was waiting out its backoff. It is recorded here and marked, because an unmarked cancellation travelling up as a bare resolution failure is filed at error by whichever writer meets it — the very record this classification exists to prevent. */
+            /* the cause stays the cancellation — the classification upstream reads it, and an outage put in its place would file a clean stop as an outage — but the failure that was being retried travels STRUCTURED beside it rather than flattened into one string. LogContext lifts that failure's own context and its cause chain, which is the shape the retry warning twenty lines above already hands the operator: the host and port dialled, the pool sizing, the deadlines that governed the attempt. openErr.Error() handed on a message and nothing to act on, the exact aplatizare the comment at retryErr condemns. */
             cancelledErr := exception.NewError(
                 "database connection retry cancelled by the caller's context",
-                map[string]any{"attempt": attempt, "error": openErr.Error()},
+                exception.LogContext(
+                    exception.FromError(openErr),
+                    map[string]any{"attempt": attempt},
+                ),
                 ctx.Err(),
             )
 
@@ -400,7 +404,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
 
         return nil, exception.NewError(
             "database connection failed",
-            instance.toConnectionContext(connectionConfig, poolConfig, timeoutConfig),
+            instance.toConnectionContext(connectionConfig, poolConfig, timeoutConfig, connector.Config().Addr),
             pingErr,
         )
     }
@@ -412,11 +416,14 @@ func (instance *Provider) toConnectionContext(
     connectionConfig *ConnectionConfig,
     poolConfig *PoolConfig,
     timeoutConfig *TimeoutConfig,
+    dialedAddress string,
 ) exceptioncontract.Context {
     return map[string]any{
         "connection":    connectionConfig.SafeContext(),
         "poolConfig":    poolConfig,
         "timeoutConfig": timeoutConfig,
+        /* the endpoint the dial actually reached, which is not always the configured one: the connection config is built from the parameters BEFORE the post-build hook runs, and the hook may rewrite the address — it is handed the very field the hook tests read. Named separately rather than folded into the connection, so a record where the two differ says so. */
+        "dialedAddress": dialedAddress,
     }
 }
 
@@ -460,6 +467,40 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
     }
 
     return time.Duration(delay)
+}
+
+/* containsTransientMarker matches a marker as a WORD rather than as a bare substring. The short spellings fire inside ordinary identifiers otherwise — "eof" sits inside `Table 'app.geofences' doesn't exist`, "timeout" inside a `session_timeout` column — so a PERMANENT failure was retried for the whole budget and then died under "failed after max retry attempts" instead of "non-transient", costing the delay and telling the operator the wrong thing. A boundary is any character that is not a letter, a digit or an underscore, so the spellings carrying spaces and slashes match exactly as they did. The types io.EOF and net.Error are read above this scan and are unaffected. */
+func containsTransientMarker(message string, marker string) bool {
+    searchStart := 0
+
+    for {
+        offset := strings.Index(message[searchStart:], marker)
+        if 0 > offset {
+            return false
+        }
+
+        matchStart := searchStart + offset
+        matchEnd := matchStart + len(marker)
+
+        if false == isWordCharacterAt(message, matchStart-1) && false == isWordCharacterAt(message, matchEnd) {
+            return true
+        }
+
+        searchStart = matchStart + 1
+    }
+}
+
+func isWordCharacterAt(value string, index int) bool {
+    if 0 > index || len(value) <= index {
+        return false
+    }
+
+    character := value[index]
+
+    return ('a' <= character && 'z' >= character) ||
+        ('A' <= character && 'Z' >= character) ||
+        ('0' <= character && '9' >= character) ||
+        '_' == character
 }
 
 func (instance *Provider) isTransientError(inputErr error) bool {
@@ -510,7 +551,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
                 continue
             }
 
-            if true == strings.Contains(message, marker) {
+            if true == containsTransientMarker(message, marker) {
                 return true
             }
         }

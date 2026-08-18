@@ -6,6 +6,7 @@ import (
     "database/sql/driver"
     "errors"
     "fmt"
+    "runtime"
     "io"
     "strings"
     "sync"
@@ -286,22 +287,40 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
         t.Fatalf("the provider open never started")
     }
 
+    /* the in-flight entry the open registered before it dialled is the thing a waiter coalesces onto, so the test takes it and reads the answer from it. Sleeping until the second caller was presumed to have found it decided the test by scheduling: a lost interleaving made that caller a fresh opener, the provider panicked again on a goroutine with no recover above it, and the whole test binary died where one assertion should have failed. The second caller stays as the liveness half of the claim, with a recover of its own for the same reason. */
+    registry.lock.Lock()
+    pendingOpen := registry.pendingOpenByName["x"]
+    registry.lock.Unlock()
+
+    if nil == pendingOpen {
+        close(releaseOpen)
+        t.Fatal("the open registered no in-flight entry for a waiter to coalesce onto")
+    }
+
     secondResult := make(chan error, 1)
     go func() {
+        defer func() {
+            if recovered := recover(); nil != recovered {
+                secondResult <- fmt.Errorf("the coalescing caller opened afresh and panicked: %v", recovered)
+            }
+        }()
+
         _, secondErr := registry.Manager("x")
         secondResult <- secondErr
     }()
 
-    /*
-       Give the coalescing caller time to observe the in-flight open and park on
-       the done channel before the first open is released to panic.
-    */
-    time.Sleep(100 * time.Millisecond)
-
     close(releaseOpen)
 
     select {
-    case secondErr := <-secondResult:
+    case <-pendingOpen.done:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the in-flight entry was never released, so a coalesced waiter would park forever")
+    }
+
+    select {
+    case <-secondResult:
+        /* the answer is read from the entry, not from the call: Manager hands a waiter back exactly pendingOpen.manager and pendingOpen.openError, so this is the value every coalesced caller receives, and reading it here does not depend on which goroutine the scheduler favoured */
+        secondErr := pendingOpen.openError
         if nil == secondErr {
             t.Fatalf("expected the coalesced caller to receive an error after the open panicked")
         }
@@ -604,13 +623,20 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
         closeReturned <- registry.Close()
     }()
 
-    /*
-       Give Close time to take the registry lock and mark the registry closed before
-       the parked open is released. The open runs off-lock, so Close returns
-       immediately and wins the flag; the resumed open then observes a closed
-       registry.
-    */
-    time.Sleep(100 * time.Millisecond)
+    /* the flag is OBSERVED rather than waited out. Close publishes it under the lock before it tears any pool down, and from that instant every door answers ErrManagerRegistryClosed for any name — so a probe for a name the registry never had says exactly when the parked open may be released, where a fixed sleep only guessed that Close had got that far and decided the test by scheduling. */
+    closePublishedDeadline := time.Now().Add(2 * time.Second)
+    for {
+        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+            break
+        }
+
+        if true == time.Now().After(closePublishedDeadline) {
+            close(releaseOpen)
+            t.Fatal("Close never published the closed flag")
+        }
+
+        runtime.Gosched()
+    }
 
     close(releaseOpen)
 
@@ -1183,8 +1209,20 @@ func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuse
         closeReturned <- registry.Close()
     }()
 
-    /* give Close time to take the registry lock and mark it closed before the parked open resumes */
-    time.Sleep(100 * time.Millisecond)
+    /* the flag is OBSERVED rather than waited out. Close publishes it under the lock before it tears any pool down, and from that instant every door answers ErrManagerRegistryClosed for any name — so a probe for a name the registry never had says exactly when the parked open may be released, where a fixed sleep only guessed that Close had got that far and decided the test by scheduling. */
+    closePublishedDeadline := time.Now().Add(2 * time.Second)
+    for {
+        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+            break
+        }
+
+        if true == time.Now().After(closePublishedDeadline) {
+            close(releaseOpen)
+            t.Fatal("Close never published the closed flag")
+        }
+
+        runtime.Gosched()
+    }
 
     close(releaseOpen)
 
@@ -1609,18 +1647,40 @@ func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *te
         t.Fatalf("the provider open never started")
     }
 
+    /* the in-flight entry the open registered before it dialled is the thing a waiter coalesces onto, so the test takes it and reads the answer from it. Sleeping until the second caller was presumed to have found it decided the test by scheduling: a lost interleaving made that caller a fresh opener, the provider panicked again on a goroutine with no recover above it, and the whole test binary died where one assertion should have failed. The second caller stays as the liveness half of the claim, with a recover of its own for the same reason. */
+    registry.lock.Lock()
+    pendingOpen := registry.pendingOpenByName["x"]
+    registry.lock.Unlock()
+
+    if nil == pendingOpen {
+        close(releaseOpen)
+        t.Fatal("the open registered no in-flight entry for a waiter to coalesce onto")
+    }
+
     secondResult := make(chan error, 1)
     go func() {
+        defer func() {
+            if recovered := recover(); nil != recovered {
+                secondResult <- fmt.Errorf("the coalescing caller opened afresh and panicked: %v", recovered)
+            }
+        }()
+
         _, secondErr := registry.Manager("x")
         secondResult <- secondErr
     }()
 
-    time.Sleep(100 * time.Millisecond)
-
     close(releaseOpen)
 
     select {
-    case secondErr := <-secondResult:
+    case <-pendingOpen.done:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the in-flight entry was never released, so a coalesced waiter would park forever")
+    }
+
+    select {
+    case <-secondResult:
+        /* the answer is read from the entry, not from the call: Manager hands a waiter back exactly pendingOpen.manager and pendingOpen.openError, so this is the value every coalesced caller receives, and reading it here does not depend on which goroutine the scheduler favoured */
+        secondErr := pendingOpen.openError
         if nil == secondErr {
             t.Fatal("expected the coalesced caller to receive an error after the open panicked")
         }
@@ -1688,18 +1748,40 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
         t.Fatalf("the provider open never started")
     }
 
+    /* the in-flight entry the open registered before it dialled is the thing a waiter coalesces onto, so the test takes it and reads the answer from it. Sleeping until the second caller was presumed to have found it decided the test by scheduling: a lost interleaving made that caller a fresh opener, the provider panicked again on a goroutine with no recover above it, and the whole test binary died where one assertion should have failed. The second caller stays as the liveness half of the claim, with a recover of its own for the same reason. */
+    registry.lock.Lock()
+    pendingOpen := registry.pendingOpenByName["x"]
+    registry.lock.Unlock()
+
+    if nil == pendingOpen {
+        close(releaseOpen)
+        t.Fatal("the open registered no in-flight entry for a waiter to coalesce onto")
+    }
+
     secondResult := make(chan error, 1)
     go func() {
+        defer func() {
+            if recovered := recover(); nil != recovered {
+                secondResult <- fmt.Errorf("the coalescing caller opened afresh and panicked: %v", recovered)
+            }
+        }()
+
         _, secondErr := registry.Manager("x")
         secondResult <- secondErr
     }()
 
-    time.Sleep(100 * time.Millisecond)
-
     close(releaseOpen)
 
     select {
-    case secondErr := <-secondResult:
+    case <-pendingOpen.done:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the in-flight entry was never released, so a coalesced waiter would park forever")
+    }
+
+    select {
+    case <-secondResult:
+        /* the answer is read from the entry, not from the call: Manager hands a waiter back exactly pendingOpen.manager and pendingOpen.openError, so this is the value every coalesced caller receives, and reading it here does not depend on which goroutine the scheduler favoured */
+        secondErr := pendingOpen.openError
         if nil == secondErr {
             t.Fatal("expected the coalesced caller to receive an error after the open panicked")
         }
@@ -1785,5 +1867,339 @@ func TestManagerRegistry_AnUnknownMigrationDefinitionNamesTheRequestedAndTheRegi
 
     if "repots" != melodyErr.Context()["requested"] {
         t.Fatalf("expected the requested name in the record, got %v", melodyErr.Context()["requested"])
+    }
+}
+
+/*
+   blockingCloseConnector parks the close of the *sql.DB it backs until the test
+   releases it. That is the shape a partitioned peer produces at shutdown, where the
+   driver waits on a COM_QUIT nobody answers and the migration connection has its
+   write deadlines deliberately lifted.
+*/
+type blockingCloseConnector struct {
+    closeEntered chan struct{}
+    releaseClose chan struct{}
+    closeOnce    sync.Once
+}
+
+func (instance *blockingCloseConnector) Connect(ctx context.Context) (driver.Conn, error) {
+    return nil, errors.New("connect is not supported by the blocking-close connector")
+}
+
+func (instance *blockingCloseConnector) Driver() driver.Driver {
+    return &closeRaceDriver{}
+}
+
+func (instance *blockingCloseConnector) Close() error {
+    instance.closeOnce.Do(
+        func() {
+            close(instance.closeEntered)
+        },
+    )
+
+    <-instance.releaseClose
+
+    return nil
+}
+
+func newBlockingCloseDatabase() (*bun.DB, chan struct{}, chan struct{}) {
+    closeEntered := make(chan struct{})
+    releaseClose := make(chan struct{})
+
+    connector := &blockingCloseConnector{closeEntered: closeEntered, releaseClose: releaseClose}
+
+    return bun.NewDB(sql.OpenDB(connector), newCloseRaceDialect()), closeEntered, releaseClose
+}
+
+type fixedDatabaseProvider struct {
+    database *bun.DB
+}
+
+func (instance *fixedDatabaseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.database, nil
+}
+
+func TestManagerRegistry_CloseRefusesAnotherCallerWhileAPoolIsStillTearingDown(t *testing.T) {
+    database, closeEntered, releaseClose := newBlockingCloseDatabase()
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &fixedDatabaseProvider{database: database}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
+    }
+
+    if _, managerErr := registry.Manager("main"); nil != managerErr {
+        t.Fatalf("the first resolution must memoize the manager: %v", managerErr)
+    }
+
+    closeReturned := make(chan error, 1)
+    go func() {
+        closeReturned <- registry.Close()
+    }()
+
+    select {
+    case <-closeEntered:
+    case <-time.After(2 * time.Second):
+        close(releaseClose)
+        t.Fatal("the pool teardown never started")
+    }
+
+    refusal := make(chan error, 1)
+    go func() {
+        _, managerErr := registry.Manager("main")
+        refusal <- managerErr
+    }()
+
+    var managerErr error
+    select {
+    case managerErr = <-refusal:
+    case <-time.After(2 * time.Second):
+        close(releaseClose)
+        t.Fatal("a caller parked on the registry lock while a pool was still tearing down, instead of being refused")
+    }
+
+    if false == errors.Is(managerErr, ErrManagerRegistryClosed) {
+        close(releaseClose)
+        t.Fatalf("expected ErrManagerRegistryClosed while the teardown is in flight, got %v", managerErr)
+    }
+
+    close(releaseClose)
+
+    select {
+    case closeErr := <-closeReturned:
+        if nil != closeErr {
+            t.Fatalf("unexpected error closing registry: %v", closeErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("Close never returned")
+    }
+}
+
+func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *testing.T) {
+    _, missingNameErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "", Provider: &fakeProvider{}},
+    )
+    assertConstructionRefusalNames(t, missingNameErr, ErrProviderDefinitionNameIsRequired, 1, "")
+
+    _, missingProviderErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "analytics", Provider: nil},
+    )
+    assertConstructionRefusalNames(t, missingProviderErr, ErrProviderIsRequired, 1, "analytics")
+
+    _, duplicateErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "reports", Provider: &fakeProvider{}},
+    )
+    assertConstructionRefusalNames(t, duplicateErr, ErrProviderDefinitionNameMustBeUnique, 1, "reports")
+}
+
+/* assertConstructionRefusalNames is the shared shape of the three construction refusals: the sentinel stays the cause, so errors.Is keeps answering, and the record says which definition of the set is the broken one — the thing a bare sentinel cannot say when a configuration carries three. */
+func assertConstructionRefusalNames(t *testing.T, refusalErr error, sentinel error, position int, name string) {
+    t.Helper()
+
+    if false == errors.Is(refusalErr, sentinel) {
+        t.Fatalf("expected the sentinel to stay the cause, got %v", refusalErr)
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(refusalErr, &melodyErr) {
+        t.Fatalf("expected a melody error carrying the definition, got %T", refusalErr)
+    }
+
+    errorContext := melodyErr.Context()
+
+    if position != errorContext["position"] {
+        t.Fatalf("expected position %d in the record, got %v", position, errorContext["position"])
+    }
+
+    if name != errorContext["name"] {
+        t.Fatalf("expected name %q in the record, got %v", name, errorContext["name"])
+    }
+}
+
+type goexitProvider struct {
+    openStarted chan struct{}
+    releaseOpen chan struct{}
+    startOnce   sync.Once
+}
+
+func (instance *goexitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.startOnce.Do(
+        func() {
+            close(instance.openStarted)
+        },
+    )
+
+    <-instance.releaseOpen
+
+    /* what a t.Fatalf inside a provider does, and the reason the recovery boundary must not call it a panic: the goroutine unwinds running its defers with recover() answering nil */
+    runtime.Goexit()
+
+    return nil, nil
+}
+
+func TestManagerRegistry_AProviderThatExitsItsGoroutineIsNotReportedAsAPanic(t *testing.T) {
+    provider := &goexitProvider{openStarted: make(chan struct{}), releaseOpen: make(chan struct{})}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
+    }
+
+    go func() {
+        _, _ = registry.Manager("x")
+    }()
+
+    select {
+    case <-provider.openStarted:
+    case <-time.After(2 * time.Second):
+        close(provider.releaseOpen)
+        t.Fatal("the provider open never started")
+    }
+
+    registry.lock.Lock()
+    pendingOpen := registry.pendingOpenByName["x"]
+    registry.lock.Unlock()
+
+    if nil == pendingOpen {
+        close(provider.releaseOpen)
+        t.Fatal("the open registered no in-flight entry")
+    }
+
+    close(provider.releaseOpen)
+
+    select {
+    case <-pendingOpen.done:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the in-flight entry was never released after the provider exited its goroutine")
+    }
+
+    if nil == pendingOpen.openError {
+        t.Fatal("expected the waiters to receive a refusal after the provider exited its goroutine")
+    }
+
+    if true == strings.Contains(pendingOpen.openError.Error(), "panicked") {
+        t.Fatalf("a goroutine exit is not a panic, and the record must not say it is: %v", pendingOpen.openError)
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(pendingOpen.openError, &melodyErr) {
+        t.Fatalf("expected a melody error, got %T", pendingOpen.openError)
+    }
+
+    /* the "panic" key is what carried the literal text "<nil>" to every waiter of an open that never panicked */
+    if _, hasPanicValue := melodyErr.Context()["panic"]; true == hasPanicValue {
+        t.Fatalf("expected no panic value where nothing panicked, got %v", melodyErr.Context()["panic"])
+    }
+}
+
+type errorBesideAPanickingCloseProvider struct {
+    database    *bun.DB
+    openStarted chan struct{}
+    releaseOpen chan struct{}
+    startOnce   sync.Once
+}
+
+func (instance *errorBesideAPanickingCloseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.startOnce.Do(
+        func() {
+            close(instance.openStarted)
+        },
+    )
+
+    <-instance.releaseOpen
+
+    /* the Provider contract allows a database beside an error, and the publish closes it — which is where the panic below is raised, one stage past the provider */
+    return instance.database, errors.New("the provider refused the dial")
+}
+
+type panickingCloseConnector struct{}
+
+func (instance *panickingCloseConnector) Connect(ctx context.Context) (driver.Conn, error) {
+    return nil, errors.New("connect is not supported by the panicking-close connector")
+}
+
+func (instance *panickingCloseConnector) Driver() driver.Driver {
+    return &closeRaceDriver{}
+}
+
+func (instance *panickingCloseConnector) Close() error {
+    panic("the pool close exploded")
+}
+
+func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T) {
+    database := bun.NewDB(sql.OpenDB(&panickingCloseConnector{}), newCloseRaceDialect())
+
+    provider := &errorBesideAPanickingCloseProvider{
+        database:    database,
+        openStarted: make(chan struct{}),
+        releaseOpen: make(chan struct{}),
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
+    }
+
+    firstDone := make(chan struct{})
+    go func() {
+        defer func() {
+            _ = recover()
+            close(firstDone)
+        }()
+
+        _, _ = registry.Manager("x")
+    }()
+
+    select {
+    case <-provider.openStarted:
+    case <-time.After(2 * time.Second):
+        close(provider.releaseOpen)
+        t.Fatal("the provider open never started")
+    }
+
+    registry.lock.Lock()
+    pendingOpen := registry.pendingOpenByName["x"]
+    registry.lock.Unlock()
+
+    if nil == pendingOpen {
+        close(provider.releaseOpen)
+        t.Fatal("the open registered no in-flight entry")
+    }
+
+    close(provider.releaseOpen)
+
+    select {
+    case <-pendingOpen.done:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the in-flight entry was never released after the publish panicked")
+    }
+
+    <-firstDone
+
+    if nil == pendingOpen.openError {
+        t.Fatal("expected the waiters to receive a refusal after the publish panicked")
+    }
+
+    /* the provider returned before this panic was raised, so naming it sends whoever reads the record to code that did nothing wrong */
+    if true == strings.Contains(pendingOpen.openError.Error(), "provider panicked") {
+        t.Fatalf("a panic raised by the registry's own publish must not be attributed to the provider: %v", pendingOpen.openError)
+    }
+
+    if false == strings.Contains(pendingOpen.openError.Error(), "registry panicked while publishing") {
+        t.Fatalf("expected the record to name the stage that actually unwound, got %v", pendingOpen.openError)
     }
 }
