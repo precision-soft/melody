@@ -409,3 +409,41 @@ func TestProvider_TheConnectionContextCarriesTheGoverningDialTimeout(t *testing.
         t.Fatalf("dialTimeout = %v, want the governing value", connectionContext["dialTimeout"])
     }
 }
+
+func TestProvider_SecretParameterNames_NamesThePasswordParameterAlone(t *testing.T) {
+    names := newTestProvider().SecretParameterNames()
+
+    if 1 != len(names) {
+        t.Fatalf("secret parameter names: expected exactly one, got %v", names)
+    }
+
+    if testPasswordParameterName != names[0] {
+        t.Fatalf("secret parameter names: expected %q, got %q", testPasswordParameterName, names[0])
+    }
+}
+
+func TestMarkSecretParameters_ArmsTheRedactionWithoutADial(t *testing.T) {
+    resolver := newProviderTestResolver(t, "127.0.0.1:6379", "melody", "melody-password")
+
+    MarkSecretParameters(resolver, newTestProvider())
+
+    configuration := config.ConfigMustFromResolver(resolver)
+
+    if false == configuration.MustGet(testPasswordParameterName).IsSecret() {
+        t.Fatalf("the password parameter must be secret after MarkSecretParameters, before any dial")
+    }
+
+    if true == configuration.MustGet(testUserParameterName).IsSecret() {
+        t.Fatalf("the user parameter must stay unmarked: the provider names only the credential")
+    }
+}
+
+func TestMarkSecretParameters_ToleratesAResolverWithoutConfiguration(t *testing.T) {
+    MarkSecretParameters(container.NewContainer(), newTestProvider())
+}
+
+func TestMarkSecretParameters_SkipsANilProviderAndAnEmptyParameterName(t *testing.T) {
+    resolver := newProviderTestResolver(t, "127.0.0.1:6379", "melody", "melody-password")
+
+    MarkSecretParameters(resolver, nil, NewProvider(testAddressParameterName, testUserParameterName, ""))
+}

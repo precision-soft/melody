@@ -60,6 +60,8 @@ v1:v2 ~ test-target ~ integrations/bunorm ~ .TestNewManagerRegistry_ErrorsWhenLo
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersMarksTheNamesItIsGiven                   ~ the setter's own guard, which v1 reaches at construction instead
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersMarksEverySecretParameterOfEveryDefinition ~ the setter's own guard, which v1 reaches at construction instead
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersAsksTheProvidersBesideTheNamesItIsGiven  ~ the setter marks the names it is given and the ones a provider declares; v1 has only the second half
+v1:v2 ~ test-target ~ integrations/bunorm/mysql ~ .TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError          ~ the nil fallback of the logger argument v2's Open takes; v1's Open takes a resolver and has no logger to pass nil for
+v1:v2 ~ test-target ~ integrations/bunorm/pgsql ~ .TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError          ~ the nil fallback of the logger argument v2's Open takes; v1's Open takes a resolver and has no logger to pass nil for
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersLeavesAProviderWithoutTheCapabilityAlone ~ the setter's own guard, which v1 reaches at construction instead
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersToleratesAnAbsentConfiguration           ~ the setter's own guard, which v1 reaches at construction instead
 v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParametersSkipsAnEmptyParameterName                ~ the setter's own guard, which v1 reaches at construction instead

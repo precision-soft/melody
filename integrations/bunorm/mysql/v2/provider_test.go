@@ -5,6 +5,7 @@ import (
     "crypto/tls"
     "errors"
     "fmt"
+    "io"
     "math"
     "net"
     "os"
@@ -15,6 +16,7 @@ import (
     driver "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     "github.com/uptrace/bun/schema"
 )
@@ -1024,5 +1026,55 @@ func TestProviderOpen_AnExplicitTlsConfigReachesTheDriverUntouched(t *testing.T)
 
     if pinnedTlsConfig != openObservingTheTlsPosture(t, WithTlsConfig(pinnedTlsConfig)) {
         t.Fatal("an explicit TLS configuration must reach the driver exactly as it was given")
+    }
+}
+
+func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *testing.T) {
+    logging.CloseEmergencyLogger()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("stderr pipe: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+        logging.CloseEmergencyLogger()
+    }()
+
+    provider := newTestProvider().
+        WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)).
+        WithRetryConfig(NewRetryConfig(1, time.Millisecond, 5*time.Millisecond, 2.0))
+
+    database, openErr := provider.Open(
+        newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
+        nil,
+    )
+
+    os.Stderr = originalStderr
+    _ = writeEnd.Close()
+    captured, readErr := io.ReadAll(readEnd)
+    _ = readEnd.Close()
+    if nil != readErr {
+        t.Fatalf("read captured stderr: %v", readErr)
+    }
+
+    if nil != database {
+        _ = database.Close()
+        t.Fatalf("expected no database handle for an unreachable host")
+    }
+
+    if nil == openErr {
+        t.Fatalf("expected a connection error for an unreachable host")
+    }
+
+    if false == exception.IsAlreadyLogged(openErr) {
+        t.Fatalf("the terminal error must carry the logged mark")
+    }
+
+    if false == strings.Contains(string(captured), "database connection failed") {
+        t.Fatalf("the terminal record must reach standard error when the logger is nil, got: %q", string(captured))
     }
 }

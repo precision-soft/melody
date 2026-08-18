@@ -3,9 +3,12 @@ package rueidis
 import (
     "context"
     "net"
+    "reflect"
     "time"
 
     "github.com/precision-soft/melody/v2/config"
+    configcontract "github.com/precision-soft/melody/v2/config/contract"
+    "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
@@ -63,10 +66,37 @@ func (instance *Provider) WithTimeoutConfig(timeoutConfig *TimeoutConfig) *Provi
     return instance
 }
 
+/* SecretParameterNames names the configuration parameters that hold this provider's credentials, the capability shape the bunorm siblings expose to their registry. This integration has no registry to ask it at construction, so MarkSecretParameters is the door that reads it at wiring time. */
+func (instance *Provider) SecretParameterNames() []string {
+    return []string{instance.passwordParameterName}
+}
+
+/* MarkSecretParameters arms the framework's redaction for every credential parameter the providers name, at wiring rather than at the first dial: the marking inside Open covers only a process that reaches the dial, and debug:parameters is precisely the process that does not. The configuration is asked through the tolerant door — a resolver that carries no configuration service leaves the marking undone, the same way MarkSecret leaves an absent parameter alone — so the call is safe from any wiring, including one that builds no configuration at all. */
+func MarkSecretParameters(resolver containercontract.Resolver, providerList ...*Provider) {
+    configuration, configurationErr := container.FromResolver[configcontract.Configuration](resolver, config.ServiceConfig)
+    if nil != configurationErr || true == isNilInterface(configuration) {
+        return
+    }
+
+    for _, provider := range providerList {
+        if nil == provider {
+            continue
+        }
+
+        for _, parameterName := range provider.SecretParameterNames() {
+            if "" == parameterName {
+                continue
+            }
+
+            configuration.MarkSecret(parameterName)
+        }
+    }
+}
+
 func (instance *Provider) Open(resolver containercontract.Resolver) (rueidis.Client, error) {
     configuration := config.ConfigMustFromResolver(resolver)
 
-    /* the provider is the component told authoritatively which parameter holds the credential, so it arms the framework's own redaction for it — the introspection output masks the password and every template derived from it, without the application repeating the knowledge */
+    /* the provider is the component told authoritatively which parameter holds the credential, so it arms the framework's own redaction for it — the introspection output masks the password and every template derived from it, without the application repeating the knowledge. This covers only a process that reaches the dial; the process that never does — a console run, debug:parameters above all — is covered by MarkSecretParameters, called at wiring. */
     configuration.MarkSecret(instance.passwordParameterName)
 
     /* all three parameters read through MustString, the convention of the bunorm siblings: a credential registered with the wrong type panics at boot naming the parameter and the type, where String() would fold it to "" and connect with no credential at all — green against a passwordless store, "redis connection failed" pointing at the network against a secured one */
@@ -213,4 +243,20 @@ func (instance *Provider) Ping(client rueidis.Client) error {
     defer cancel()
 
     return client.Do(ctx, client.B().Ping().Build()).Error()
+}
+
+/* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */
+func isNilInterface(value any) bool {
+    if nil == value {
+        return true
+    }
+
+    reflected := reflect.ValueOf(value)
+
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
 }

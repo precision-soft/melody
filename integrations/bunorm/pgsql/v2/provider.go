@@ -7,6 +7,7 @@ import (
     "errors"
     "fmt"
     "net"
+    "reflect"
     "strings"
     "time"
 
@@ -71,10 +72,14 @@ func (instance *Provider) Open(params bunorm.ConnectionParameters, logger loggin
     return instance.OpenContext(context.Background(), params, logger)
 }
 
-/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The dialect performs no server round trip at construction — pgdialect's Init is empty, unlike its mysql twin — so the first packet on the wire is the boot ping's dial, made under the caller's context and bounded by the connect timeout. A nil context reads as context.Background(), which is exactly Open. */
+/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The dialect performs no server round trip at construction — pgdialect's Init is empty, unlike its mysql twin — so the first packet on the wire is the boot ping's dial, made under the caller's context and bounded by the connect timeout. A nil context reads as context.Background(), which is exactly Open. A nil logger reads as the emergency logger rather than a discard sink: the retry loop's terminal branches mark the returned error as logged — a mark the framework's writers honour by not filing the outage again — and the diagnostics routing consumes a process-lifetime once, so both doors need a sink that actually writes. */
 func (instance *Provider) OpenContext(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if nil == ctx {
         ctx = context.Background()
+    }
+
+    if nil == logger || true == isNilInterface(logger) {
+        logger = logging.EmergencyLogger()
     }
 
     if nil == instance.retryConfig {
@@ -202,8 +207,6 @@ func (instance *Provider) resolvedPoolConfig() *PoolConfig {
 }
 
 func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    logger = logging.EnsureLogger(logger)
-
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts
     if 0 == maxAttempts {
@@ -324,7 +327,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     }
 
     /* the routing lives here because open is the one funnel every door shares — Open, OpenContext, the retry loop and the migration door all pass through it. Routed only on the retry path, the default retry-less open left bun's declaration mistakes on standard error. RouteDiagnostics is once per process, so repeated attempts cost nothing. */
-    bunorm.RouteDiagnostics(logging.EnsureLogger(logger))
+    bunorm.RouteDiagnostics(logger)
 
     connectionConfig := NewConnectionConfig(params.Host, params.Port, params.Database, params.User, params.Password)
 
@@ -569,3 +572,19 @@ var (
     _ bunorm.ContextOpener          = (*Provider)(nil)
     _ bunorm.MigrationContextOpener = (*Provider)(nil)
 )
+
+/* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */
+func isNilInterface(value any) bool {
+    if nil == value {
+        return true
+    }
+
+    reflected := reflect.ValueOf(value)
+
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
+}

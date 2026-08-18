@@ -47,6 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), aligning with the pgsql provider
 
 - README — the retry paragraph states what the code does with a zero `ConnectTimeout`: every non-positive value falls back to the 10s default before the connector is built, so the dial, ping and hook always run under a deadline — the claim that zero "leaves both unbounded" described a state `resolvedTimeoutConfig` cannot produce
+- `provider.go` — a nil logger no longer routes the retry loop's records to a discard sink while the terminal error still carries the already-logged mark, which suppressed the framework's own writers too and let a down database fail with zero diagnostic output anywhere; `OpenContext` now reads a nil logger — typed nil included — as the emergency logger, so the retry warnings and the terminal record reach standard error the way the first major always wrote them
+- `provider.go` — an open with a nil logger no longer consumes the process-lifetime diagnostics routing with a logger that discards everything, which silenced bun's declaration warnings — unknown struct tag options, queries with arguments but no placeholders — for every later open in the process, the correctly wired ones included; the routing now receives the logger the retry loop logs to, which the nil fallback above guarantees is a sink that actually writes
 
 ## [v2.0.5] - 2026-07-24 - Server Shutdown Transient Marker
 

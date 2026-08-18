@@ -5,6 +5,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "io"
     "math"
     "net"
     "os"
@@ -14,6 +15,7 @@ import (
 
     "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     "github.com/uptrace/bun/driver/pgdriver"
     "github.com/uptrace/bun/schema"
@@ -1025,5 +1027,55 @@ func TestToConnectionContextCarriesThePoolAndTimeoutConfiguration(t *testing.T) 
     /* the address the dial reached is named apart from the configured one, because the post-build hook may have rewritten it after the connection config was built */
     if "rewritten-host:5433" != connectionContext["dialedAddress"] {
         t.Fatalf("expected the dialled endpoint, got %v", connectionContext["dialedAddress"])
+    }
+}
+
+func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *testing.T) {
+    logging.CloseEmergencyLogger()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("stderr pipe: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+        logging.CloseEmergencyLogger()
+    }()
+
+    provider := NewProvider().
+        WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)).
+        WithRetryConfig(NewRetryConfig(1, time.Millisecond, 5*time.Millisecond, 2.0))
+
+    database, openErr := provider.Open(
+        newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
+        nil,
+    )
+
+    os.Stderr = originalStderr
+    _ = writeEnd.Close()
+    captured, readErr := io.ReadAll(readEnd)
+    _ = readEnd.Close()
+    if nil != readErr {
+        t.Fatalf("read captured stderr: %v", readErr)
+    }
+
+    if nil != database {
+        _ = database.Close()
+        t.Fatalf("expected no database handle for an unreachable host")
+    }
+
+    if nil == openErr {
+        t.Fatalf("expected a connection error for an unreachable host")
+    }
+
+    if false == exception.IsAlreadyLogged(openErr) {
+        t.Fatalf("the terminal error must carry the logged mark")
+    }
+
+    if false == strings.Contains(string(captured), "database connection failed") {
+        t.Fatalf("the terminal record must reach standard error when the logger is nil, got: %q", string(captured))
     }
 }

@@ -12,6 +12,8 @@ Entry point: [`NewProvider`](./provider.go)
 
 The provider reads parameters (address, username, password) using the names you pass to the constructor. If you provide a comma-separated list of addresses, each item is used as an init address.
 
+The password parameter is redacted in the framework's introspection output — `debug:parameters` above all — only once something arms the marking. `Open` arms it at the first dial, which covers no process that never resolves the client, so call [`MarkSecretParameters`](./provider.go) at wiring time with the providers you construct: it reads each provider's [`SecretParameterNames`](./provider.go) and marks the parameters through the configuration's own `MarkSecret`, tolerating a resolver that carries no configuration service. This is the arming the bunorm drivers get from their registry at construction; this integration has no registry, so the wiring is the construction site.
+
 Optional configuration:
 
 * [`ClientConfig`](./client_config.go) (client name, DB selection, TLS, disable client-side cache, ping on start, and the two deadlines that actually reach the client: `DialTimeout` and `ConnWriteTimeout`)
