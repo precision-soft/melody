@@ -158,13 +158,7 @@ extract_documented_entry_list() {
     local DOCUMENT_PATH_STRING="${1:?}"
     local LINK_MODE_STRING="${2:-major}"
 
-    local LINK_PATTERN_STRING='\]\(\.\./\.\./[^)]*\)'
-    if [[ "relative" = "${LINK_MODE_STRING}" ]]; then
-        LINK_PATTERN_STRING='\]\(\.\.?/[^)]*\)'
-    fi
-
     awk -v linkMode="${LINK_MODE_STRING}" \
-        -v linkPattern="${LINK_PATTERN_STRING}" \
         -v documentDirectory="$(dirname "${DOCUMENT_PATH_STRING}")" '
         # a relative target resolved against the directory it was written in, as a repository-relative
         # path. Walking the segments is what makes `../../v2/manager_registry.go` in a driver readme come
@@ -250,6 +244,21 @@ extract_documented_entry_list() {
             return directory
         }
 
+        # the link pattern, as a regex LITERAL per mode rather than one string chosen outside and passed
+        # in. A pattern handed to awk through -v is a dynamic regex, so the implementation processes its
+        # escapes before compiling it, and `\]` is not a defined escape sequence: mawk keeps the bracket
+        # and matches, the awk on a clean ubuntu runner drops the whole match. The band then read no link
+        # at all, reported 977 symbol/major pairs instead of 3530, and turned 38 baseline lines stale
+        # while inventing 42 gaps — green on the machine that wrote it, red everywhere else. A literal is
+        # compiled by the lexer and never passes through string escaping, so both implementations agree.
+        function matchLink(text) {
+            if ("relative" == linkMode) {
+                return match(text, /\]\(\.\.?\/[^)]*\)/)
+            }
+
+            return match(text, /\]\(\.\.\/\.\.\/[^)]*\)/)
+        }
+
         # every symbol named inside a link in the text, printed with the package its own target names, and
         # answering with the package of the first link so the caller can file an unlinked head under it.
         #
@@ -263,7 +272,7 @@ extract_documented_entry_list() {
             headPackageDirectory = ""
             rest = text
 
-            while (0 != match(rest, linkPattern)) {
+            while (0 != matchLink(rest)) {
                 closeStart = RSTART
                 closeLength = RLENGTH
                 head = substr(rest, 1, closeStart - 1)
