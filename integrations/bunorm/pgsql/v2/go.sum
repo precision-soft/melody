@@ -10,6 +10,10 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0 h1:ykn7QOpIqjAKyjW53VaVTTAZR9neADN6u0BC9nZPY7Y=
 github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0/go.mod h1:m+OzQ1AXShYcP0Z5Jc8yM4lDnw6w4XsN94oPa0o+WvE=
+github.com/precision-soft/melody/integrations/bunorm/v2 v2.1.0 h1:rOxUgUQReDVoZ2Dm7SfdBjcks4nZepZrOtznLiLOAaQ=
+github.com/precision-soft/melody/integrations/bunorm/v2 v2.1.0/go.mod h1:m+OzQ1AXShYcP0Z5Jc8yM4lDnw6w4XsN94oPa0o+WvE=
+github.com/precision-soft/melody/integrations/bunorm/v2 v2.2.0 h1:egisMzf9XNPpPaUMMxZL/qWKt1jAIdDCmmhyDLzIxI8=
+github.com/precision-soft/melody/integrations/bunorm/v2 v2.2.0/go.mod h1:1pGlbID1UXSxtJFT0ytoJ2PuVHlvwnqMBqGHNaemrak=
 github.com/precision-soft/melody/v2 v2.0.0 h1:SSuB2Hc4Zznj+SvQxt3ij5zWn+IxtwmmSWJxP/sznEw=
 github.com/precision-soft/melody/v2 v2.0.0/go.mod h1:m3DOQkXgGVXryTtj0H1NaJFBih/vQ6syUxdM7ziziEU=
 github.com/precision-soft/melody/v2 v2.13.0 h1:Ia14MLg63FgfDv/eS3lNOtDBGRBazN4awoYuxmvwwJE=

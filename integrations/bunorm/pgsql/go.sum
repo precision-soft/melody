@@ -16,6 +16,10 @@ github.com/precision-soft/melody v1.19.0 h1:pv7B52T2GPudIoWO1lJnSfimRoOzC9G4ITHW
 github.com/precision-soft/melody v1.19.0/go.mod h1:HrsrI8DN92qrvXSB/FANxpiym6evQRO4FB/tJ5UC3YY=
 github.com/precision-soft/melody/integrations/bunorm v1.0.0 h1:TzRmn264Gvkv6FvMS0HcY5fAkdiKwC5KSgRBij86Buk=
 github.com/precision-soft/melody/integrations/bunorm v1.0.0/go.mod h1:C63jwkbCwdS5Px3Z8YnKt6knjKspaDMGJDSzFzjfKgQ=
+github.com/precision-soft/melody/integrations/bunorm v1.0.1 h1:TZqzaInCbCvPOXh5UvQeUsIz4e4N/GrcsCOlzRVPgTc=
+github.com/precision-soft/melody/integrations/bunorm v1.0.1/go.mod h1:3pDuivfJ3iBkLq2KcX+miUfJfvXcoabLWGhAbnw0Rvo=
+github.com/precision-soft/melody/integrations/bunorm v1.1.0 h1:J3d8EqdR1HTPfYs1QdIxJnhPUW6nKea2i4SW16D1p8o=
+github.com/precision-soft/melody/integrations/bunorm v1.1.0/go.mod h1:EgEOhQ6Z4zHLdSmSowFR9Av1dnZRtw3MFL6ZHOnKz/U=
 github.com/puzpuzpuz/xsync/v3 v3.5.1 h1:GJYJZwO6IdxN/IKbneznS6yPkVC+c3zyY/j19c++5Fg=
 github.com/puzpuzpuz/xsync/v3 v3.5.1/go.mod h1:VjzYrABPabuM4KyBh1Ftq6u8nhwY5tBPKP9jpmh0nnA=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

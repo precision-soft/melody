@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/precision-soft/melody/integrations/bunorm/migrate/v2 v2.0.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql/v2 v2.0.5
-	github.com/precision-soft/melody/integrations/bunorm/v2 v2.1.0
+	github.com/precision-soft/melody/integrations/bunorm/v2 v2.2.0
 	github.com/precision-soft/melody/integrations/cron/v2 v2.1.0
 	github.com/precision-soft/melody/integrations/rueidis/v2 v2.1.0
 	github.com/precision-soft/melody/v2 v2.13.0

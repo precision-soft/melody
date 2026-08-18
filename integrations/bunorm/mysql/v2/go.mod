@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0
+	github.com/precision-soft/melody/integrations/bunorm/v2 v2.2.0
 	github.com/precision-soft/melody/v2 v2.13.0
 	github.com/uptrace/bun v1.2.17
 	github.com/uptrace/bun/dialect/mysqldialect v1.2.17
