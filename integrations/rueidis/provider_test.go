@@ -278,7 +278,6 @@ func TestProvider_Open_AZeroConnectTimeoutPingsUnderTheDefaultBound(t *testing.T
     }
 }
 
-
 /* the boot ping is bounded even where the connect timeout is left at zero: a TimeoutConfig naming only the command timeout would otherwise put the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. Ping one screen below reads its own zero the same way. */
 func TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound(t *testing.T) {
     defaultConnectTimeout := DefaultTimeoutConfig().ConnectTimeout

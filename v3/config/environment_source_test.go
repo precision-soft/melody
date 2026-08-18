@@ -302,7 +302,7 @@ func TestEnvironmentSource_ResolvesBareAndChainedReferences(t *testing.T) {
 /* @info The environment name picks the next two files to load, so a reference inside it is resolved against the two files already read. */
 func TestEnvironmentSource_ResolvesReferenceInsideTheEnvironmentName(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
-        ".env":       "TARGET=prod\nMELODY_ENV=${TARGET}\n",
+        ".env":      "TARGET=prod\nMELODY_ENV=${TARGET}\n",
         ".env.prod": "APP_TAG=production\n",
     })
 

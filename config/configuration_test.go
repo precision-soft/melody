@@ -363,7 +363,6 @@ func TestRegisterRuntime_BeforeBootLeavesAForwardReferenceForTheBootPass(t *test
     }
 }
 
-
 func TestRegisterRuntimeSecret_MarksOnlyTheDeclaredParameter(t *testing.T) {
     configuration := newResolvedConfiguration(
         t,

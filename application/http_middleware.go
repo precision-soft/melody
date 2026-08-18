@@ -10,10 +10,10 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
-    "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/http/middleware"
     middlewarepipeline "github.com/precision-soft/melody/http/middleware/pipeline"
     "github.com/precision-soft/melody/http/static"
+    "github.com/precision-soft/melody/internal"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
 )
 

@@ -398,7 +398,7 @@ func TestEnvironmentSource_ResolvesBareAndChainedReferences(t *testing.T) {
 
 func TestEnvironmentSource_ResolvesReferenceInsideTheEnvironmentName(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
-        ".env":       "TARGET=prod\nMELODY_ENV=${TARGET}\n",
+        ".env":      "TARGET=prod\nMELODY_ENV=${TARGET}\n",
         ".env.prod": "APP_TAG=production\n",
     })
 

@@ -270,7 +270,6 @@ func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group stri
     return nil
 }
 
-
 /* definitionsEnabledForGroup keeps the definitions the named group assembles. The environment is deliberately not applied: an environment is a property of the running process and the whole point of the check is to settle, at every boot, a reference that would survive one environment and vanish in another. */
 func definitionsEnabledForGroup(definitions []*HttpMiddlewareDefinition, group string) []*HttpMiddlewareDefinition {
     enabled := make([]*HttpMiddlewareDefinition, 0, len(definitions))

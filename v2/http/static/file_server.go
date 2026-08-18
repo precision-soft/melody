@@ -78,9 +78,9 @@ func NewFileServer(options *Options) *FileServer {
     }
 
     /* the configuration is copied here — struct and both lists — so the server is immutable once
-    built: the defaults below land on the copy instead of being written into the caller's struct,
-    and a setter called after construction configures the next server rather than racing the
-    in-flight requests of this one, which read these fields with no lock. */
+       built: the defaults below land on the copy instead of being written into the caller's struct,
+       and a setter called after construction configures the next server rather than racing the
+       in-flight requests of this one, which read these fields with no lock. */
     configCopy := *options.fileServerConfig
     configCopy.allowedDotPrefixList = append([]string{}, options.fileServerConfig.allowedDotPrefixList...)
     configCopy.excludedPathList = append([]string{}, options.fileServerConfig.excludedPathList...)

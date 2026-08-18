@@ -75,7 +75,7 @@ type JwtConfig struct {
     SubjectClaim string
     RolesClaim   string
     ScopeClaim   string
-    DeviceClaim string
+    DeviceClaim  string
 
     RevocationEpochSkew time.Duration
 

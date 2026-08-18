@@ -148,7 +148,7 @@ func (instance *container) serviceWithCreationGuardLocked(
 
     /* a provider the CONTAINER owns resolves what it needs from the container alone: a process-lifetime singleton assembled out of one request's values would hold that request for the life of the process, and closing it with the request would take it away from every other one. A provider a SCOPE owns is the opposite case and reads both levels, so it is left unsuspended.
 
-    Both answers ride on the view handed to the provider rather than on the caller's own context, so the resolution that continues above this frame keeps seeing the scope whatever happens here — including a provider that panics. */
+       Both answers ride on the view handed to the provider rather than on the caller's own context, so the resolution that continues above this frame keeps seeing the scope whatever happens here — including a provider that panics. */
     providerResolver := resolver.childOwnedBy(creation.ownerNodeKey, creation.suspendsScope)
 
     createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {

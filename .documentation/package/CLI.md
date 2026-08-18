@@ -100,17 +100,17 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 [`output.StandardFlags()`](../../cli/output/standard_flag.go) is the shared flag set for a command that renders an envelope. [`output.DebugFlags()`](../../cli/output/standard_flag.go) returns the same flags with `--quiet` defaulted to `false` instead of `true`; the flag set is otherwise identical.
 
-| Flag             | Type   | Default (`StandardFlags`)             |
-|------------------|--------|---------------------------------------|
-| `--format`       | string | `table` (`table`, `json`, `json-pretty`) |
-| `--no-color`     | bool   | `false`                               |
-| `--verbose`      | bool   | `false`                               |
-| `--verbosity`    | int    | `0` (accepts `-v`/`-vv`/`-vvv` through argument normalization) |
-| `--quiet`        | bool   | `true` (`false` under `DebugFlags`)   |
-| `--order`        | string | `asc`                                 |
-| `--limit`        | int    | `0` (unlimited)                       |
-| `--offset`       | int    | `0`                                   |
-| `--table-width`  | int    | `0` (built-in default)                |
+| Flag            | Type   | Default (`StandardFlags`)                                      |
+|-----------------|--------|----------------------------------------------------------------|
+| `--format`      | string | `table` (`table`, `json`, `json-pretty`)                       |
+| `--no-color`    | bool   | `false`                                                        |
+| `--verbose`     | bool   | `false`                                                        |
+| `--verbosity`   | int    | `0` (accepts `-v`/`-vv`/`-vvv` through argument normalization) |
+| `--quiet`       | bool   | `true` (`false` under `DebugFlags`)                            |
+| `--order`       | string | `asc`                                                          |
+| `--limit`       | int    | `0` (unlimited)                                                |
+| `--offset`      | int    | `0`                                                            |
+| `--table-width` | int    | `0` (built-in default)                                         |
 
 Note the flag is spelled `--table-width`, though its constant is `FlagNameTableMaxWidth`.
 

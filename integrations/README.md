@@ -6,19 +6,19 @@ Integrations are optional modules that connect Melody to third-party systems (da
 
 ## Available integrations
 
-| Integration        | What it provides                                                                               | Version lines | Docs                                   |
-|--------------------|------------------------------------------------------------------------------------------------|---------------|----------------------------------------|
-| **amqp**           | RabbitMQ transport for the message bus (publisher confirms, auto-reconnect, dead-lettering).   | v3            | [README](./amqp/v3/README.md)          |
-| **awss3**          | S3-compatible object-storage backend for the `storage` package.                                | v3            | [README](./awss3/v3/README.md)         |
+| Integration        | What it provides                                                                                                 | Version lines | Docs                                   |
+|--------------------|------------------------------------------------------------------------------------------------------------------|---------------|----------------------------------------|
+| **amqp**           | RabbitMQ transport for the message bus (publisher confirms, auto-reconnect, dead-lettering).                     | v3            | [README](./amqp/v3/README.md)          |
+| **awss3**          | S3-compatible object-storage backend for the `storage` package.                                                  | v3            | [README](./awss3/v3/README.md)         |
 | **bunorm**         | [Bun](https://bun.uptrace.dev/) ORM database access; column encryption and audit helpers ship in the v3 binding. | v1 / v2 / v3  | [README](./bunorm/README.md)           |
-| **bunorm/migrate** | Database migration CLI commands.                                                               | v1 / v2 / v3  | [README](./bunorm/migrate/README.md)   |
-| **bunorm/mysql**   | MySQL driver wiring; the distributed-lock backend ships in the v3 binding.                     | v1 / v2 / v3  | [README](./bunorm/mysql/README.md)     |
-| **bunorm/pgsql**   | PostgreSQL driver wiring; the distributed-lock backend ships in the v3 binding.                | v1 / v2 / v3  | [README](./bunorm/pgsql/README.md)     |
-| **cron**           | Crontab generation from registered schedules (`melody:cron:generate`).                         | v1 / v2 / v3  | [README](./cron/README.md)             |
-| **opentelemetry**  | Distributed tracing (OTLP) and HTTP metrics (Prometheus exposition) as middlewares.            | v3            | [README](./opentelemetry/v3/README.md) |
-| **outbox**         | Transactional outbox for the message bus (atomic enqueue, relay with retry and dead-letter).   | v3            | [README](./outbox/v3/README.md)        |
+| **bunorm/migrate** | Database migration CLI commands.                                                                                 | v1 / v2 / v3  | [README](./bunorm/migrate/README.md)   |
+| **bunorm/mysql**   | MySQL driver wiring; the distributed-lock backend ships in the v3 binding.                                       | v1 / v2 / v3  | [README](./bunorm/mysql/README.md)     |
+| **bunorm/pgsql**   | PostgreSQL driver wiring; the distributed-lock backend ships in the v3 binding.                                  | v1 / v2 / v3  | [README](./bunorm/pgsql/README.md)     |
+| **cron**           | Crontab generation from registered schedules (`melody:cron:generate`).                                           | v1 / v2 / v3  | [README](./cron/README.md)             |
+| **opentelemetry**  | Distributed tracing (OTLP) and HTTP metrics (Prometheus exposition) as middlewares.                              | v3            | [README](./opentelemetry/v3/README.md) |
+| **outbox**         | Transactional outbox for the message bus (atomic enqueue, relay with retry and dead-letter).                     | v3            | [README](./outbox/v3/README.md)        |
 | **rueidis**        | Redis-backed cache and rate limiter; the distributed lock, token store and SSE backplane ship in the v3 binding. | v1 / v2 / v3  | [README](./rueidis/README.md)          |
-| **websocket**      | WebSocket support (connection hub, bound to the server-sent-event hub).                        | v3            | [README](./websocket/v3/README.md)     |
+| **websocket**      | WebSocket support (connection hub, bound to the server-sent-event hub).                                          | v3            | [README](./websocket/v3/README.md)     |
 
 ## Usage
 
@@ -26,10 +26,10 @@ Most integrations ship a `module.go` with a `NewModule` facade and `Register*` h
 
 Some deliberately do not, and are wired by hand instead:
 
-| Integration                                        | Why no module                                                                             |
-|----------------------------------------------------|-------------------------------------------------------------------------------------------|
-| [`bunorm`](./bunorm/) (all majors)                 | the core registry is built from application-owned `ProviderDefinition` values; register the `ManagerRegistry` and the default `Manager` as your own services |
-| [`bunorm/pgsql`](./bunorm/pgsql/) (all majors)     | provider and advisory-lock `Locker` are registered by the application; the MySQL sibling's v3 binding does ship one |
-| [`bunorm/mysql`](./bunorm/mysql/) v1 / v2          | the module (and `RegisterLockerService`) ships only in the v3 binding                      |
-| [`rueidis`](./rueidis/) v1 / v2                    | the module and the `Register*Service` helpers ship only in the v3 binding                  |
-| [`bunorm/v3/audit`](./bunorm/v3/audit/)            | a `Recorder`/`Tracker` is constructed and held by application code, not resolved by name   |
+| Integration                                    | Why no module                                                                                                                                                |
+|------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`bunorm`](./bunorm/) (all majors)             | the core registry is built from application-owned `ProviderDefinition` values; register the `ManagerRegistry` and the default `Manager` as your own services |
+| [`bunorm/pgsql`](./bunorm/pgsql/) (all majors) | provider and advisory-lock `Locker` are registered by the application; the MySQL sibling's v3 binding does ship one                                          |
+| [`bunorm/mysql`](./bunorm/mysql/) v1 / v2      | the module (and `RegisterLockerService`) ships only in the v3 binding                                                                                        |
+| [`rueidis`](./rueidis/) v1 / v2                | the module and the `Register*Service` helpers ship only in the v3 binding                                                                                    |
+| [`bunorm/v3/audit`](./bunorm/v3/audit/)        | a `Recorder`/`Tracker` is constructed and held by application code, not resolved by name                                                                     |

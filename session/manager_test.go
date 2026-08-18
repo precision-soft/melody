@@ -799,10 +799,10 @@ func TestInMemoryStorage_CloseConcurrentWithLoadAndSaveIsRaceFree(t *testing.T) 
 }
 
 type blockingSaveStorage struct {
-    inner        *InMemoryStorage
-    enteredSave  chan struct{}
-    releaseSave  chan struct{}
-    enterOnce    sync.Once
+    inner       *InMemoryStorage
+    enteredSave chan struct{}
+    releaseSave chan struct{}
+    enterOnce   sync.Once
 }
 
 func (instance *blockingSaveStorage) Load(sessionId string) (map[string]any, bool, error) {

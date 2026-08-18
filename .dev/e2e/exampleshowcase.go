@@ -92,7 +92,7 @@ func assertExampleStaticCacheValidators(major exampleMajor) {
     pass("[%s] a replayed Last-Modified is answered 304", major.label)
 
     /* the negative that separates the precedence from a date-only implementation: the date says unchanged,
-    the ETag says stale, and an implementation consulting the date despite the offered ETag answers 304 here */
+       the ETag says stale, and an implementation consulting the date despite the offered ETag answers 304 here */
     precedence := client.callWithHeaderList("GET", exampleStaticAsset, "", "", map[string]string{
         "If-None-Match":     `"not-the-etag"`,
         "If-Modified-Since": lastModified,
@@ -319,7 +319,7 @@ func assertExampleForwardedAddressKeysTheLimiter(major exampleMajor, application
     )
 
     /* the payload is the same two-mistake refusal as above on purpose: the limiter counts the request before
-    the validator refuses it, so the probe spends budget without creating a row to clean up */
+       the validator refuses it, so the probe spends budget without creating a row to clean up */
     if http.StatusBadRequest != forwarded.statusCode {
         fail("[%s] the forwarded probe answered %d, wanted the validator's 400", major.label, forwarded.statusCode)
     }
@@ -390,7 +390,7 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
     }
 
     /* the user table persists between runs, so a probe user a failed run left behind would turn the create
-    below into "username already exists"; both spellings the probe ever writes are removed first */
+       below into "username already exists"; both spellings the probe ever writes are removed first */
     removeExampleProbeUsers(major, admin, "café-probe", "cafe-probe-renamed")
 
     created := admin.call(

@@ -29,13 +29,13 @@ width = 12 + len(keyId) + ceil(4 * (plaintextBytes + 28) / 3)
 
 That is roughly **1.34 characters per plaintext byte, plus 52**. The expansion is over **bytes**, not characters, so a multi-byte UTF-8 character costs its full encoded length. Reference points for a two-character key id such as `v1`:
 
-| Longest plaintext | Column width needed |
-|-------------------|---------------------|
-| 32 bytes          | 94                  |
-| 64 bytes          | 137                 |
-| 152 bytes         | 254                 |
+| Longest plaintext | Column width needed                       |
+|-------------------|-------------------------------------------|
+| 32 bytes          | 94                                        |
+| 64 bytes          | 137                                       |
+| 152 bytes         | 254                                       |
 | **153 bytes**     | **256** — a `VARCHAR(255)` no longer fits |
-| 255 bytes         | 392                 |
+| 255 bytes         | 392                                       |
 
 Widen the column **before** running the bulk migration. `melody:encrypt:database` refuses to start when a target column is too narrow for the widest value it holds, and the refusal reports the `requiredWidth`; `Migrator.EnsureColumnCapacity` performs the same check for programmatic callers. The check matters most on a server whose `sql_mode` is not strict: MySQL then accepts an overflowing `UPDATE` with a warning, storing a **truncated** ciphertext that can never be decrypted again while reporting the row as migrated and exiting `0`.
 

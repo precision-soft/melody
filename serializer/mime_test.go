@@ -72,4 +72,3 @@ func TestParseAcceptHeader_SkipsTheMembersThatAreNotMediaRanges(t *testing.T) {
         t.Fatalf("expected no empty mime to enter the negotiation, got %#v", parsed)
     }
 }
-

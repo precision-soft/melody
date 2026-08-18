@@ -37,9 +37,9 @@ type LeaderGateOptions struct {
 
     /* MaxConsecutiveRefreshFailures is how many renewals in a row may fail before the gate leaves its term, whatever the lease still says. Zero takes the default of three; a negative value removes the threshold and leaves the lease clock as the only signal.
 
-    It exists because the two things a failed renewal can mean are not the same. A store that dropped a connection and reconnected is transient — and the lease it wrote is still the store's own promise that nobody else gets this lock until it lapses, which is why the cadence is half the lease: a lost renewal is meant to be survivable. Leaving on the first one turns an eight-second failover into a cancelled term, a re-election and work restarted from the beginning, for a lock that was never in danger.
+       It exists because the two things a failed renewal can mean are not the same. A store that dropped a connection and reconnected is transient — and the lease it wrote is still the store's own promise that nobody else gets this lock until it lapses, which is why the cadence is half the lease: a lost renewal is meant to be survivable. Leaving on the first one turns an eight-second failover into a cancelled term, a re-election and work restarted from the beginning, for a lock that was never in danger.
 
-    A store that is simply gone is not transient, and there the gate should stop being useful rather than wait out a lease it will certainly not renew. The threshold is what tells the two apart in the one configuration where the lease clock cannot: at the default cadence of half the ttl, three failures already outlast the lease, so the lease clock decides and this never fires. It bites only where the cadence is deliberately much denser than the lease, which is itself the operator saying they want to hear about failure quickly. */
+       A store that is simply gone is not transient, and there the gate should stop being useful rather than wait out a lease it will certainly not renew. The threshold is what tells the two apart in the one configuration where the lease clock cannot: at the default cadence of half the ttl, three failures already outlast the lease, so the lease clock decides and this never fires. It bites only where the cadence is deliberately much denser than the lease, which is itself the operator saying they want to hear about failure quickly. */
     MaxConsecutiveRefreshFailures int
 
     /* OnCampaignError runs on the Run goroutine for every campaign that could not even ask the store who leads — the gate then backs off and campaigns again, so without this hook the error is never seen. A store outage and a permanent misconfiguration (a redis locker built with a non-positive ttl, whose Acquire fails closed on every call) are indistinguishable from the outside: both look exactly like a deployment that quietly elects no leader and does no work. */
@@ -281,7 +281,6 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
         }
     }
 }
-
 
 /* refreshFailureEndsTheTerm answers the one question a failed renewal poses: is the lock still ours to hold? Two things say no, and they answer different failures.
 

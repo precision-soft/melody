@@ -407,8 +407,6 @@ func TestScope_MustGetByTypeNilTypePanicsDescriptively(t *testing.T) {
     _ = scope.MustGetByType(nil)
 }
 
-
-
 /* A service that reads nothing out of the scope has to stay a process singleton. Melody instantiates lazily, so the first resolution of nearly every service happens inside a request; scoping all of them would rebuild the whole graph — connection pools included — once per request. */
 func TestScope_ServiceThatReadsNothingFromTheScopeStaysASingleton(t *testing.T) {
     serviceContainer := NewContainer()
@@ -514,7 +512,6 @@ func (instance *closeCountingScopeService) Close() error {
     return instance.closeErr
 }
 
-
 /* An override was installed from outside and outlives the scope, and a singleton belongs to the root container which closes it at the end of the process; closing either here would tear down, once per request, something the next request still needs. */
 func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
     serviceContainer := NewContainer()
@@ -571,8 +568,6 @@ func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
         t.Fatalf("expected an installed override to survive the scope, got %d close calls", atomic.LoadInt32(&overrideCloseCalls))
     }
 }
-
-
 
 /* scopeLifetimeProbe counts how many times it was built and closed, which is the whole question a request scope poses about a container service. */
 type scopeLifetimeProbe struct {

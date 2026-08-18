@@ -43,10 +43,10 @@ func WriteToHttpResponseWriter(
     headers := response.Headers()
     if nil != headers {
         /* a key the response names is owned by the response: the writer's values for it are
-        replaced rather than appended to, so a header both sides set — the request id the kernel
-        puts on the raw writer, and any header a kernel.response listener sets on the response —
-        reaches the client once instead of twice. Keys the response does not name keep whatever
-        the writer already carries. */
+           replaced rather than appended to, so a header both sides set — the request id the kernel
+           puts on the raw writer, and any header a kernel.response listener sets on the response —
+           reaches the client once instead of twice. Keys the response does not name keep whatever
+           the writer already carries. */
         for key, values := range headers {
             responseWriter.Header().Del(key)
             for _, value := range values {

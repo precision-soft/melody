@@ -5,11 +5,12 @@ import (
     "strings"
     "time"
 
+    "reflect"
+    "testing"
+
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
     "github.com/precision-soft/melody/v2/runtime"
-    "reflect"
-    "testing"
 )
 
 func TestBackendServiceWithContextReturnType(t *testing.T) {

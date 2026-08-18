@@ -1,12 +1,12 @@
 package migrate
 
 import (
-    "time"
-    "strings"
     "context"
     "errors"
+    "strings"
     "testing"
     "testing/fstest"
+    "time"
 
     "github.com/precision-soft/melody/integrations/bunorm/v3"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -168,11 +168,11 @@ func TestResolveDatabase_RegistryDefaultWithoutPinOrFlag(t *testing.T) {
 }
 
 type recordingMigrationUnlocker struct {
-    called              bool
-    errorAtCall         error
-    deadlineAtCall      time.Time
-    hasDeadlineAtCall   bool
-    unlockError         error
+    called            bool
+    errorAtCall       error
+    deadlineAtCall    time.Time
+    hasDeadlineAtCall bool
+    unlockError       error
 }
 
 func (instance *recordingMigrationUnlocker) Unlock(ctx context.Context) error {

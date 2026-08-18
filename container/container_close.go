@@ -240,8 +240,8 @@ func (instance *container) closeInternal() error {
     }
 
     /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the
-    teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering
-    runs over it */
+       teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering
+       runs over it */
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
@@ -434,7 +434,7 @@ func errorText(err error) (text string) {
 }
 
 type nodeKeyHeap struct {
-    items          []string
+    items           []string
     creationOrderOf map[string]int
 }
 

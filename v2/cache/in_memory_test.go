@@ -977,7 +977,7 @@ func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
 /* the sweep-driving clock is separate from cacheTestClock on purpose: once ticks actually fire, the backend goroutine reads the clock while the test advances it, so the time behind this one is guarded — the shared fixture is written by its tests as a plain field and is safe only because no tick ever reaches it. */
 func newCacheTickableTestClock(now time.Time) *cacheTickableTestClock {
     return &cacheTickableTestClock{
-        now:          now,
+        now:           now,
         tickerChannel: make(chan time.Time),
     }
 }

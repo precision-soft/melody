@@ -6,8 +6,8 @@ import (
     nethttp "net/http"
     "time"
 
-    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"

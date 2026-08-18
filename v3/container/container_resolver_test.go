@@ -225,4 +225,3 @@ func TestServiceWithCreationGuard_RestoresScopeVisibilityAfterAPanickingProvider
         t.Fatalf("expected the resolution to see its scope again after the panic")
     }
 }
-

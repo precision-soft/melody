@@ -891,7 +891,6 @@ func TestResolveErrorCauseChain_StartsBelowTheErrorItself(t *testing.T) {
     }
 }
 
-
 /* the noise filter is a display concern, so full verbosity turns it off: an operator who asks for everything gets the context whole, stack keys included — below that the frames would flood the table, and the drop stands */
 func TestResolveErrorContextJson_FullVerbosityShowsTheNoiseKeys(t *testing.T) {
     contextValue := exceptioncontract.Context{

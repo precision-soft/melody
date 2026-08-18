@@ -37,7 +37,7 @@ const exampleDirectory = resolve(assetsDirectory, "..");
 const findSourceDirectory = () => {
     let candidate = exampleDirectory;
 
-    for (;;) {
+    for (; ;) {
         const sourceDirectory = join(candidate, ".assets");
         if (true === existsSync(sourceDirectory)) {
             return sourceDirectory;

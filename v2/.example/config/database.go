@@ -3,12 +3,12 @@ package config
 import (
     "time"
 
+    melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v2"
+    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/.example/repository"
     melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     melodyexception "github.com/precision-soft/melody/v2/exception"
-    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v2"
-    melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v2"
     melodykernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v2/logging"
     "github.com/uptrace/bun"

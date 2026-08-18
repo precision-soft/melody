@@ -3124,7 +3124,7 @@ func TestRunLoop_ReportsAnIdleMinuteWhenAsked(t *testing.T) {
 
     document := struct {
         Data struct {
-            Configured int             `json:"configured"`
+            Configured int              `json:"configured"`
             Ran        []map[string]any `json:"ran"`
         } `json:"data"`
     }{}

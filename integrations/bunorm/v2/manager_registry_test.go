@@ -6,8 +6,8 @@ import (
     "database/sql/driver"
     "errors"
     "fmt"
-    "runtime"
     "io"
+    "runtime"
     "strings"
     "sync"
     "testing"
@@ -1466,7 +1466,6 @@ func (instance *recordingConfiguration) MarkSecret(name string) bool {
     return true
 }
 
-
 type secretNamingProvider struct {
     fakeProvider
 
@@ -1478,7 +1477,6 @@ func (instance *secretNamingProvider) SecretParameterNames() []string {
 }
 
 var _ SecretParameterProvider = (*secretNamingProvider)(nil)
-
 
 /* the credential is redacted by a process that never dials: without the marking, debug:parameters — which touches no route and opens no pool — prints the password in full */
 func TestManagerRegistry_MarkSecretParametersMarksTheNamesItIsGiven(t *testing.T) {

@@ -1727,7 +1727,7 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
     }
 
     /* the folds the router does not apply but the access-control matcher does: each must be refused
-    here, before the two can disagree about which rule answers the request */
+       here, before the two can disagree about which rule answers the request */
     foldedPaths := []string{
         "/admin/x/../../login",
         "/admin/..",
@@ -1749,7 +1749,7 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
 
 func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
     /* the asterisk-form of OPTIONS and an authority-form CONNECT do not begin with "/" and are not
-    path-routed, so the fold guard must not answer for them */
+       path-routed, so the fold guard must not answer for them */
     for _, target := range []string{"*", "example.com:443", ""} {
         if false == requestPathIsCanonical(target) {
             t.Fatalf("expected non-path target %q to be left to the router", target)

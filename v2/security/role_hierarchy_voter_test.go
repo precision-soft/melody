@@ -152,8 +152,8 @@ func TestNewRoleHierarchyVoter_RefusesATypedNilDelegate(t *testing.T) {
 
 /* tenantProbeVoter stands in for an integrator's own voter: it grants what it is asked for and records the roles it was handed, so the expansion reaching it is observable */
 type tenantProbeVoter struct {
-    observedRoles     []string
-    sawExpandedRoles  bool
+    observedRoles    []string
+    sawExpandedRoles bool
 }
 
 func (instance *tenantProbeVoter) Supports(attribute string, subject any) bool {

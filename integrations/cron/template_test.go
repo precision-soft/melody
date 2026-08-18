@@ -24,7 +24,6 @@ func TestBuiltinTemplatesReturnsCrontabVariants(t *testing.T) {
     }
 }
 
-
 /* the package-level Render is the door onto the crontab template, so it answers what that template answers rather than a shape of its own. */
 func TestRender_RendersThroughTheCrontabTemplate(t *testing.T) {
     entries := []Entry{

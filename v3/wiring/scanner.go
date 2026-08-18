@@ -34,10 +34,10 @@ type Constructor struct {
     /* ServiceNameIdentifier is the exported constant a //melody:service directive names. The generated file references the constant rather than copying its value, so the service name keeps a single definition. Empty registers the service by type alone. */
     ServiceNameIdentifier string
     /* IsScoped marks a constructor a //melody:scoped directive declares as request-lifetime. It is emitted into the scoped registration function instead of the container one, so the service is built once per scope and closed with it. */
-    IsScoped     bool
-    ReturnsError bool
-    Arguments             []*Argument
-    DirectiveBinds        map[string]string
+    IsScoped       bool
+    ReturnsError   bool
+    Arguments      []*Argument
+    DirectiveBinds map[string]string
 }
 
 /* Argument is one constructor parameter. A scalar is filled from a configuration parameter through a bind; anything else is resolved from the container by type. */

@@ -28,17 +28,17 @@ Unlike the [MySQL provider](../../mysql/v3/README.md), this package ships no sel
 
 Applied when the matching option is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
 
-| Config          | Field                   | Default              |
-|-----------------|-------------------------|----------------------|
-| `PoolConfig`    | `MaxOpenConnections`    | `50`                 |
-| `PoolConfig`    | `MaxIdleConnections`    | `25`                 |
-| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`                 |
-| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`                 |
-| `TimeoutConfig` | `ConnectTimeout`        | `5s`                 |
-| `RetryConfig`   | `MaxAttempts`           | `3`                  |
-| `RetryConfig`   | `InitialDelay`          | `500ms`              |
-| `RetryConfig`   | `MaxDelay`              | `5s`                 |
-| `RetryConfig`   | `BackoffMultiplier`     | `2.0`                |
+| Config          | Field                   | Default |
+|-----------------|-------------------------|---------|
+| `PoolConfig`    | `MaxOpenConnections`    | `50`    |
+| `PoolConfig`    | `MaxIdleConnections`    | `25`    |
+| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    |
+| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    |
+| `TimeoutConfig` | `ConnectTimeout`        | `5s`    |
+| `RetryConfig`   | `MaxAttempts`           | `3`     |
+| `RetryConfig`   | `InitialDelay`          | `500ms` |
+| `RetryConfig`   | `MaxDelay`              | `5s`    |
+| `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
 
 `RetryConfig` values are also individually defaulted: a non-positive `InitialDelay`/`MaxDelay` or a `BackoffMultiplier` that is not at least `1` (including `NaN`) falls back to the value above, so a partially-filled config cannot collapse the backoff into a re-dial storm.
 

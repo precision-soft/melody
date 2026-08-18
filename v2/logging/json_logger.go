@@ -78,7 +78,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
 
     /* the stamp and the encoding both happen under the write lock, and the order of the stamps is therefore the order of the writes. Taken above the lock, the stamp said when the record was FORMED, and the two orders diverged by however long the encoding took: measured at eight goroutines writing records of a dozen keys, 484 of 1600 records reached the file out of stamp order, while LOGGING.md promises the ordering is reconstructible from the stamps and the comment on this very line claimed the precision was what the write mutex paid for. Nanosecond precision keeps that ordering legible once it is true — whole-second stamps made every record of a busy second indistinguishable, and the fraction still parses under the RFC 3339 layouts consumers already use.
 
-    The cost is the encoding serialized across writers: measured at eight goroutines against a real file, 8648 ns per record became 13755. A logger writes to one destination through one lock either way, so what this buys is the one ordering guarantee the document already sold. */
+       The cost is the encoding serialized across writers: measured at eight goroutines against a real file, 8648 ns per record became 13755. A logger writes to one destination through one lock either way, so what this buys is the one ordering guarantee the document already sold. */
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 

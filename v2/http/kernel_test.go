@@ -2715,7 +2715,7 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
     /* the path folds to "/login", which the access-control matcher would authorize as a different
-    rule than the admin handler the router reaches; the kernel must refuse it before either runs */
+       rule than the admin handler the router reaches; the kernel must refuse it before either runs */
     request := httptest.NewRequest(nethttp.MethodGet, "/admin/x/../../login", nil)
     recorder := httptest.NewRecorder()
 

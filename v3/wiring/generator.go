@@ -29,7 +29,7 @@ type GenerateRequest struct {
     FunctionName     string
     /* ScopedFunctionName names the function the scope-owned registrations are emitted into. It defaults to the container function's name with Scoped appended, and the function is only emitted when something carries the scoped directive. */
     ScopedFunctionName string
-    BindSet          *BindSet
+    BindSet            *BindSet
     /* DeclaredParameters is the set of parameter names the application declares. When it is empty the generator cannot check a bind target and says so instead of assuming the target exists. */
     DeclaredParameters map[string]bool
     /* BuildTags are the build tags the target binary carries, so a constructor gated on one of them is scanned rather than dropped. */
@@ -40,7 +40,7 @@ type GenerateReport struct {
     ConstructorCount int
     /* ScopedConstructorCount counts the constructors emitted into the scoped registration function, so the command can report the two lifetimes apart. */
     ScopedConstructorCount int
-    Skipped          []*SkippedConstructor
+    Skipped                []*SkippedConstructor
     /* SkippedVendorDirectories names the vendor trees the scan stepped over; strict does not fail on them — they cannot contribute services — but the command can name them on request. */
     SkippedVendorDirectories []string
     /* ExcludedFiles names the build-excluded files that hold a constructor candidate; strict does not fail on them, but the command can name them on request so a missing service traces back to the tag it needs. */

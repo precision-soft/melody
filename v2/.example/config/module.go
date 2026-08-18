@@ -1,10 +1,10 @@
 package config
 
 import (
-    melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v2"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v2"
     melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v2/cache"
+    melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
     "github.com/redis/rueidis"
 )
 

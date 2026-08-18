@@ -28,8 +28,7 @@ For convenience, the example ships with a few predefined users:
 
 Passwords are stored as **bcrypt hashes** ([`security/password_hasher.go`](./security/password_hasher.go)):
 `security.HashPassword` at seeding and in the user handlers, `security.PasswordMatches`
-(`bcrypt.CompareHashAndPassword`) at login. The hash is salted, so the same password produces a different
-stored value on every boot; the credentials above are the stable contract, not the bytes in the table.
+(`bcrypt.CompareHashAndPassword`) at login. The hash is salted, so the same password produces a different stored value on every boot; the credentials above are the stable contract, not the bytes in the table.
 
 ---
 
@@ -118,99 +117,61 @@ Cron defaults (user, logs directory, destination file, template, heartbeat) come
 ### Live integrations: database, cache and clock
 
 Beside cron, the example wires [`integrations/bunorm`](../integrations/bunorm/) with its
-[mysql provider](../integrations/bunorm/mysql/) **and** its [pgsql provider](../integrations/bunorm/pgsql/) —
-two live databases in one process, each with its own function — plus
+[mysql provider](../integrations/bunorm/mysql/) **and** its [pgsql provider](../integrations/bunorm/pgsql/) — two live databases in one process, each with its own function — plus
 [`integrations/rueidis`](../integrations/rueidis/) with its
 [cache backend](../integrations/rueidis/cache/), and the framework's own [`clock`](../clock/).
 
-Each one is gated on an endpoint parameter, and an unset endpoint leaves the integration unwired: no service,
-nothing dialled, and the nomenclature falls back to what it can reach inside the process. That is what keeps the
-example bootable with no containers at all. The endpoints ship in [`.env`](./.env) pointing at the
-docker-compose service names, and a configured-but-unreachable endpoint is a warning rather than a boot failure,
-so `go run .` works on a laptop.
+Each one is gated on an endpoint parameter, and an unset endpoint leaves the integration unwired: no service, nothing dialled, and the nomenclature falls back to what it can reach inside the process. That is what keeps the example bootable with no containers at all. The endpoints ship in [`.env`](./.env) pointing at the docker-compose service names, and a configured-but-unreachable endpoint is a warning rather than a boot failure, so `go run .` works on a laptop.
 
-None of the integrations has a route of its own. Each one carries a function of the nomenclature instead, so
-what it does is visible in what the application does:
+None of the integrations has a route of its own. Each one carries a function of the nomenclature instead, so what it does is visible in what the application does:
 
-| integration | what carries it |
-|---|---|
-| `bunorm` + mysql provider | products, categories, currencies and users are kept in mysql when one is configured, and in memory when it is not |
+| integration               | what carries it                                                                                                                                                                                                                                                                                                                                                            |
+|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `bunorm` + mysql provider | products, categories, currencies and users are kept in mysql when one is configured, and in memory when it is not                                                                                                                                                                                                                                                          |
 | `bunorm` + pgsql provider | the write journal is kept in postgres when one is configured, and absent when it is not — the writes still succeed, unjournalled. The two switches are independent (`MYSQL_HOST` and `PGSQL_HOST`), so all four combinations boot. The compose postgres speaks plain TCP, so `.env` arms `PGSQL_INSECURE=true`; the provider verifies the TLS handshake on any other value |
-| `rueidis` cache backend | the product listing is served from redis and dropped from it on every write |
-| `rueidis` rate limiter | the nomenclature's write endpoints share a per-address budget; the reads stay open |
-| `clock` | every write is stamped by the injected clock rather than by the wall, in the services and in the timing middleware |
+| `rueidis` cache backend   | the product listing is served from redis and dropped from it on every write                                                                                                                                                                                                                                                                                                |
+| `rueidis` rate limiter    | the nomenclature's write endpoints share a per-address budget; the reads stay open                                                                                                                                                                                                                                                                                         |
+| `clock`                   | every write is stamped by the injected clock rather than by the wall, in the services and in the timing middleware                                                                                                                                                                                                                                                         |
 
-`GET /catalog/report/` is the one endpoint kept: the clock-stamped catalogue reading, served from the cache
-once the scheduled refresh has warmed it, and computable with no backend at all.
+`GET /catalog/report/` is the one endpoint kept: the clock-stamped catalogue reading, served from the cache once the scheduled refresh has warmed it, and computable with no backend at all.
 
-The `catalog:journal` command prints the latest entries of the write journal over the same repository the
-listeners write it through, so the record is reachable from the command line as well as from a request.
+The `catalog:journal` command prints the latest entries of the write journal over the same repository the listeners write it through, so the record is reachable from the command line as well as from a request.
 
-The journal is also where the example demonstrates the container's request scope and lazy resolution. Who is
-behind a request's changes is resolved ONCE per request, by the scoped
+The journal is also where the example demonstrates the container's request scope and lazy resolution. Who is behind a request's changes is resolved ONCE per request, by the scoped
 [`service.ChangeAttribution`](./service/change_attribution.go) registered through the module's
-`RegisterScopedServices` hook ([`config/scoped_service.go`](./config/scoped_service.go)); its provider refuses
-any scope without a request context, which is how a console run — whose scope carries a process context
-instead — falls back to per-call attribution through the same fold, so the verdicts cannot drift. The journal
-service holds its repository as a [`container.Lazy`](../container/lazy.go) handle: nothing dials postgres
-until the first recorded change, so the process boots and serves the catalogue with the journal database down.
+`RegisterScopedServices` hook ([`config/scoped_service.go`](./config/scoped_service.go)); its provider refuses any scope without a request context, which is how a console run — whose scope carries a process context instead — falls back to per-call attribution through the same fold, so the verdicts cannot drift. The journal service holds its repository as a [`container.Lazy`](../container/lazy.go) handle: nothing dials postgres until the first recorded change, so the process boots and serves the catalogue with the journal database down.
 
 Two details are worth reading in the source rather than guessed at:
 
-- [`config/bootstrap_resolver.go`](./config/bootstrap_resolver.go) explains why an integration provider cannot
-  resolve the configuration through the application's own container while the modules are being wired: boot runs
-  the module hooks before it registers the framework's services. The database sidesteps it by opening lazily;
-  redis cannot, because the rate-limit middleware is handed a live limiter at the moment a route is declared.
-- The clock is injected into [`config/middleware.go`](./config/middleware.go) rather than read from the wall.
-  That is what makes the `X-Example-Duration-Ms` header assertable at all — a frozen clock advanced by the
-  handler underneath lets [`config/middleware_test.go`](./config/middleware_test.go) demand an exact value,
-  which no test can do against `time.Now`.
+- [`config/bootstrap_resolver.go`](./config/bootstrap_resolver.go) explains why an integration provider cannot resolve the configuration through the application's own container while the modules are being wired: boot runs the module hooks before it registers the framework's services. The database sidesteps it by opening lazily; redis cannot, because the rate-limit middleware is handed a live limiter at the moment a route is declared.
+- The clock is injected into [`config/middleware.go`](./config/middleware.go) rather than read from the wall. That is what makes the `X-Example-Duration-Ms` header assertable at all — a frozen clock advanced by the handler underneath lets [`config/middleware_test.go`](./config/middleware_test.go) demand an exact value, which no test can do against `time.Now`.
 
 ### Security and HTTP showcase wirings
 
-Beside the integrations, the example wires several framework doors that need no backend at all. Each follows
-the same switch convention as the integrations — the value ships in [`.env`](./.env), and an empty or removed
-value leaves that door unwired:
+Beside the integrations, the example wires several framework doors that need no backend at all. Each follows the same switch convention as the integrations — the value ships in [`.env`](./.env), and an empty or removed value leaves that door unwired:
 
-| wiring | switch | what it shows |
-|---|---|---|
-| api-key firewall | `APP_API_TOKEN` | a stateless firewall on `/products/api` ([`config/security.go`](./config/security.go)): `X-Api-Key` with the configured token authenticates as an editor-role client, no session involved. The firewall's matcher ([`security/api_key_request_matcher.go`](./security/api_key_request_matcher.go)) claims only requests that PRESENT the header, so browser cookie traffic keeps falling through to the session firewall on the same paths |
-| cors listeners | `APP_CORS_ALLOW_ORIGINS` | the [`http/cors`](../http/cors/) LISTENERS rather than the middleware ([`config/event.go`](./config/event.go)): a preflight is answered before routing and before the security chain can refuse it, and the security refusals themselves carry the cors headers — responses the middleware chain never sees |
-| compression | always on | the framework's `CompressionMiddleware` with its defaults ([`config/middleware.go`](./config/middleware.go)): gzip for bodies of at least a kilobyte, already-compressed media excluded, `Vary: Accept-Encoding` added |
-| trusted proxies | always on | one `ForwardedHeadersPolicy` ([`config/http.go`](./config/http.go)) read by the http kernel for the scheme and by the rate limiter's client-ip resolver for the budget key, so a write arriving through a trusted proxy is budgeted against the `X-Forwarded-For` address rather than the proxy's |
-| file-backed sessions | `APP_SESSION_FILE` | `session.NewFileStorageFromPath` registered under the framework's storage service id ([`config/service.go`](./config/service.go)), so a signed-in session survives a process restart; a relative path is anchored to the project directory. Empty keeps the framework's in-memory default |
-| static cache | `MELODY_STATIC_ENABLE_CACHE` | the framework's static file server with its validators armed (`.env` ships `true` and `MELODY_STATIC_CACHE_MAX_AGE=3600`): assets answer with a strong `ETag`, `Last-Modified` and `Cache-Control: public, max-age=3600`, a replayed validator is answered `304`, and `If-None-Match` silences `If-Modified-Since`, as the precedence demands |
+| wiring               | switch                       | what it shows                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|----------------------|------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| api-key firewall     | `APP_API_TOKEN`              | a stateless firewall on `/products/api` ([`config/security.go`](./config/security.go)): `X-Api-Key` with the configured token authenticates as an editor-role client, no session involved. The firewall's matcher ([`security/api_key_request_matcher.go`](./security/api_key_request_matcher.go)) claims only requests that PRESENT the header, so browser cookie traffic keeps falling through to the session firewall on the same paths |
+| cors listeners       | `APP_CORS_ALLOW_ORIGINS`     | the [`http/cors`](../http/cors/) LISTENERS rather than the middleware ([`config/event.go`](./config/event.go)): a preflight is answered before routing and before the security chain can refuse it, and the security refusals themselves carry the cors headers — responses the middleware chain never sees                                                                                                                                |
+| compression          | always on                    | the framework's `CompressionMiddleware` with its defaults ([`config/middleware.go`](./config/middleware.go)): gzip for bodies of at least a kilobyte, already-compressed media excluded, `Vary: Accept-Encoding` added                                                                                                                                                                                                                     |
+| trusted proxies      | always on                    | one `ForwardedHeadersPolicy` ([`config/http.go`](./config/http.go)) read by the http kernel for the scheme and by the rate limiter's client-ip resolver for the budget key, so a write arriving through a trusted proxy is budgeted against the `X-Forwarded-For` address rather than the proxy's                                                                                                                                          |
+| file-backed sessions | `APP_SESSION_FILE`           | `session.NewFileStorageFromPath` registered under the framework's storage service id ([`config/service.go`](./config/service.go)), so a signed-in session survives a process restart; a relative path is anchored to the project directory. Empty keeps the framework's in-memory default                                                                                                                                                  |
+| static cache         | `MELODY_STATIC_ENABLE_CACHE` | the framework's static file server with its validators armed (`.env` ships `true` and `MELODY_STATIC_CACHE_MAX_AGE=3600`): assets answer with a strong `ETag`, `Last-Modified` and `Cache-Control: public, max-age=3600`, a replayed validator is answered `304`, and `If-None-Match` silences `If-Modified-Since`, as the precedence demands                                                                                              |
 
 The session token resolver ([`security/session_token_resolver.go`](./security/session_token_resolver.go))
-accepts the role list in the two spellings a session can carry: the `[]string` the login handler writes, and
-the `[]any` the file storage answers after a restart — its snapshot round-trips through json, which keeps no
-element type.
+accepts the role list in the two spellings a session can carry: the `[]string` the login handler writes, and the `[]any` the file storage answers after a restart — its snapshot round-trips through json, which keeps no element type.
 
 ### Database migrations
 
-The database schemas are owned by two migration sets in [`migration/`](./migration/), one per database: the
-catalog set (`migration.Migrations`, four mysql DDL migrations, one per catalog table) and the journal set
-(`migration.JournalMigrations`, one postgres DDL migration). Two doors run each set, so neither can drift from
-the other:
+The database schemas are owned by two migration sets in [`migration/`](./migration/), one per database: the catalog set (`migration.Migrations`, four mysql DDL migrations, one per catalog table) and the journal set (`migration.JournalMigrations`, one postgres DDL migration). Two doors run each set, so neither can drift from the other:
 
 - the **repository providers** call `migration.EnsureMigrated` (catalog) or `migration.EnsureJournalMigrated`
-  (journal) at first resolution, and the catalog providers then seed an empty table. That is what keeps a
-  freshly recreated volume usable with no operator step — the tables appear when the first request reaches a
-  repository — and it is why every `CREATE TABLE` in both sets carries `IF NOT EXISTS`: several example
-  processes share the databases and may apply a set at the same time, serialized by bun's migration lock with
-  a bounded retry;
+  (journal) at first resolution, and the catalog providers then seed an empty table. That is what keeps a freshly recreated volume usable with no operator step — the tables appear when the first request reaches a repository — and it is why every `CREATE TABLE` in both sets carries `IF NOT EXISTS`: several example processes share the databases and may apply a set at the same time, serialized by bun's migration lock with a bounded retry;
 - the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`)
-  runs the catalog set, and the **`db:journal:*` context family** — same six verbs — runs the journal set;
-  both come from the [`integrations/bunorm/migrate`](../integrations/bunorm/migrate/) module facade registered
-  in [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service
-  (`service.example.database.registry`). The base family is pinned to the catalog manager by name, so a
-  journal-only environment refuses it cleanly instead of aiming mysql DDL at postgres.
+  runs the catalog set, and the **`db:journal:*` context family** — same six verbs — runs the journal set; both come from the [`integrations/bunorm/migrate`](../integrations/bunorm/migrate/) module facade registered in [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service (`service.example.database.registry`). The base family is pinned to the catalog manager by name, so a journal-only environment refuses it cleanly instead of aiming mysql DDL at postgres.
 
-The module is registered whether or not a database is configured, so the command surface does not change
-between environments; without one every `db:*` command fails at `Run` with the container refusal naming the
-registry service. The bun bookkeeping tables (`bun_migrations`, `bun_migration_locks`) keep their default,
-major-unprefixed names in both databases — bookkeeping is per database, and within each one only the set that
-lives there uses bun's migrator.
+The module is registered whether or not a database is configured, so the command surface does not change between environments; without one every `db:*` command fails at `Run` with the container refusal naming the registry service. The bun bookkeeping tables (`bun_migrations`, `bun_migration_locks`) keep their default, major-unprefixed names in both databases — bookkeeping is per database, and within each one only the set that lives there uses bun's migrator.
 
 ### [`main.go`](./main.go) (why it stays small)
 
@@ -251,10 +212,8 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
-The application also answers `GET /health` without a session, which is the route a monitoring system or a
-container orchestrator probes. It is public on purpose: everything else in the example falls under the
-`^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate
-would be answered with a redirect to the login page instead of the readiness of the process.
+The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose: everything else in the example falls under the
+`^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate would be answered with a redirect to the login page instead of the readiness of the process.
 
 ### Frontend bundle
 
@@ -302,12 +261,8 @@ cd .example
 go run . melody:cron:run --once
 ```
 
-The example's own commands (`app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh`) render
-through the framework's `cli/output` envelope, so each accepts the standard flag set
-(`--format=table|json|json-pretty`, `--limit`, `--offset`, `--order`, `--quiet`, `--verbose`,
-`--table-width`) and answers one machine-readable document under `--format=json`. For `catalog:journal` the
-standard `--limit` replaces the flag the command used to declare itself: `0` (the default) answers every
-entry, newest first.
+The example's own commands (`app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh`) render through the framework's `cli/output` envelope, so each accepts the standard flag set (`--format=table|json|json-pretty`, `--limit`, `--offset`, `--order`, `--quiet`, `--verbose`,
+`--table-width`) and answers one machine-readable document under `--format=json`. For `catalog:journal` the standard `--limit` replaces the flag the command used to declare itself: `0` (the default) answers every entry, newest first.
 
 ---
 
@@ -317,9 +272,7 @@ Every JSON endpoint answers through the same envelope, built in [`presenter/erro
 
 - `success` — a boolean, so a caller branches on the envelope rather than on the status code
 - `payload` — the answer itself, `null` on a failure
-- `errors` — a list of messages, empty on success rather than absent. A validation refusal carries **one
-  entry per violated field**, each spelled `field: message` (`presenter.ApiValidationError`), so a client
-  attaches every message to the input that earned it instead of splitting a joined string
+- `errors` — a list of messages, empty on success rather than absent. A validation refusal carries **one entry per violated field**, each spelled `field: message` (`presenter.ApiValidationError`), so a client attaches every message to the input that earned it instead of splitting a joined string
 - `context` — present only when the kernel environment enables debug material
 - `trace` — likewise
 

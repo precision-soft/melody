@@ -78,9 +78,9 @@ func renderNegotiatedErrorPayload(
     payload map[string]any,
 ) httpcontract.Response {
     /* the manager is resolved quietly, not through the soft resolver that logs its failure: a
-    runtime without a serializer manager is a legitimate configuration whose error bodies simply
-    stay json, and an error line per rendered error would let a refused request write to the log
-    through the very absence the fallback exists for */
+       runtime without a serializer manager is a legitimate configuration whose error bodies simply
+       stay json, and an error line per rendered error would let a refused request write to the log
+       through the very absence the fallback exists for */
     serializerManager := (*serializer.SerializerManager)(nil)
     if nil != runtimeInstance {
         serializerManager, _ = runtime.FromRuntime[*serializer.SerializerManager](runtimeInstance, serializer.ServiceSerializerManager)

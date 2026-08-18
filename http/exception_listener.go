@@ -98,7 +98,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
 
             /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the detail the validator computed reached neither the client nor, structured, anything else.
 
-            Public is the operative word. An entry blaming the declaration rather than the value carries the developer's own typo, the parameters the constraint refused and its reason, and those belong to the operator reading the record, not to whoever sent the request. The projection is taken here and only here: the record is rendered from the exception's own context, which keeps everything — the marshaler the two renderings share is the same one, and it stays the one that says the same thing in both places. */
+               Public is the operative word. An entry blaming the declaration rather than the value carries the developer's own typo, the parameters the constraint refused and its reason, and those belong to the operator reading the record, not to whoever sent the request. The projection is taken here and only here: the record is rendered from the exception's own context, which keeps everything — the marshaler the two renderings share is the same one, and it stays the one that says the same thing in both places. */
             if nil != httpException {
                 if errorsValue, exists := httpException.Context()["errors"]; true == exists {
                     payloadExtras["errors"] = clientVisibleValidationErrors(errorsValue)

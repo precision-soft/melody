@@ -21,7 +21,6 @@ const (
     dollarLiteralMarker   = "\x00melodyDotEnvLiteralDollar\x00"
 )
 
-
 func NewEnvironmentSource(
     fileSystem fs.FS,
     baseDir string,

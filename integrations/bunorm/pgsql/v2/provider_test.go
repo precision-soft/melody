@@ -1,8 +1,8 @@
 package pgsql
 
 import (
-    "crypto/tls"
     "context"
+    "crypto/tls"
     "errors"
     "fmt"
     "io"

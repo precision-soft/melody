@@ -138,7 +138,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         /* the scope is closed before anything that can fail, so a panic during request-logger setup cannot leak it; the logger is captured by reference and nil-guarded for the pre-setup failure path.
 
-        The report falls back to the emergency logger rather than being dropped: the request logger is read after the scope it was installed into has closed, which is safe only because it is an override and Close leaves overrides alone. A close failure is the one thing that must never go unreported, so the path that has no request logger to name still says what happened. */
+           The report falls back to the emergency logger rather than being dropped: the request logger is read after the scope it was installed into has closed, which is safe only because it is an override and Close leaves overrides alone. A close failure is the one thing that must never go unreported, so the path that has no request logger to name still says what happened. */
         var requestLogger loggingcontract.Logger
         var requestId string
         defer func() {
@@ -160,7 +160,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         /* the last guard, covering the window the main recovery defer cannot: everything between the scope opening and its own installation — the request logger, the request context override, the config and dispatcher resolutions, the routing — plus a panic raised inside the main guard itself, after it has already recovered once. Above it a panic escapes ServeHttp, net/http closes the connection with no response, the terminate listener never fires and the access-log line is lost; the comment on the session load below names the same failure mode as the reason that step was moved under the main guard.
 
-        It is registered under the scope-close defer so the response is written while the scope is still open, and it is inert on every request the main guard already answered: recover returns nil there and nothing else is read. What it cannot restore is written where it is lost — no terminate dispatch, so no access-log line, and no kernel.exception dispatch, so no application error page. The record it files is that line's degraded substitute, which is why it carries the method and the path the main guard's twin also carries. */
+           It is registered under the scope-close defer so the response is written while the scope is still open, and it is inert on every request the main guard already answered: recover returns nil there and nothing else is read. What it cannot restore is written where it is lost — no terminate dispatch, so no access-log line, and no kernel.exception dispatch, so no application error page. The record it files is that line's degraded substitute, which is why it carries the method and the path the main guard's twin also carries. */
         defer func() {
             recoveredValue := recover()
             if nil == recoveredValue {

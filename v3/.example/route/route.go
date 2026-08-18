@@ -110,7 +110,7 @@ const (
 
     AccessTokenRevokeUserName    = "example.access_token.revoke.user"
     AccessTokenRevokeUserPattern = AccessTokenPrefix + "/revoke/user/"
-    DevicePrefix = "/device"
+    DevicePrefix                 = "/device"
 
     DeviceIdentityName    = "example.device.identity"
     DeviceIdentityPattern = DevicePrefix + "/identity/"

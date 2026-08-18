@@ -17,13 +17,13 @@ func TestEscapeControlCharactersRendersEveryControlCharacterVisibly(t *testing.T
 /* the named three are spelled by name and everything else by its hexadecimal code, so a reader can tell a tab from a vertical tab instead of reading one escape for both */
 func TestEscapeControlCharactersSpellsTheNamedThreeByNameAndTheRestInHexadecimal(t *testing.T) {
     for value, expected := range map[string]string{
-        "\n":     `\n`,
-        "\r":     `\r`,
-        "\t":     `\t`,
-        "\x00":   `\x00`,
-        "\x0b":   `\x0b`,
-        "\x1f":   `\x1f`,
-        "\x7f":   `\x7f`,
+        "\n":   `\n`,
+        "\r":   `\r`,
+        "\t":   `\t`,
+        "\x00": `\x00`,
+        "\x0b": `\x0b`,
+        "\x1f": `\x1f`,
+        "\x7f": `\x7f`,
     } {
         if expected != escapeControlCharacters(value, false) {
             t.Fatalf("expected %q to render as %s, got %s", value, expected, escapeControlCharacters(value, false))

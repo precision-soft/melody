@@ -552,7 +552,6 @@ func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
     }
 }
 
-
 type waitingResolverProbe struct {
     value string
 }

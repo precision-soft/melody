@@ -10,6 +10,7 @@ import (
 )
 
 const DeviceClaim = "device_id"
+
 type ResolvedTokenStore struct{}
 
 func (instance ResolvedTokenStore) Lookup(

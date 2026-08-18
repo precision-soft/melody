@@ -1,10 +1,10 @@
 package config
 
 import (
-    "github.com/precision-soft/melody/v2/.example/migration"
-    melodyapplication "github.com/precision-soft/melody/v2/application"
     bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v2"
     melodycron "github.com/precision-soft/melody/integrations/cron/v2"
+    "github.com/precision-soft/melody/v2/.example/migration"
+    melodyapplication "github.com/precision-soft/melody/v2/application"
 )
 
 func Configure(app *melodyapplication.Application) {

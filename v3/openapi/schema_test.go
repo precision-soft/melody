@@ -2330,7 +2330,6 @@ func TestSchemaFromType_NilTypeYieldsEmptySchema(t *testing.T) {
     }
 }
 
-
 type marshalerEmbedPrice struct {
     Amount   int64  `json:"amount"`
     Currency string `json:"currency"`
@@ -2780,7 +2779,6 @@ func TestBuildSchema_JsonNamedTimeEmbedStillPromotesItsCodec(t *testing.T) {
         t.Fatalf("expected a date-time string, got %+v", schema)
     }
 }
-
 
 var componentKeyGrammar = regexp.MustCompile(`^[a-zA-Z0-9.\-_]+$`)
 

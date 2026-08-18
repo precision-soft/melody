@@ -32,10 +32,10 @@ func (instance *securityTestVoter) Vote(token securitycontract.Token, attribute 
 
 /* recordingTestVoter counts the attributes it was consulted about, which is how a test tells "the decision stopped early" from "the decision ran on and happened to agree". */
 type recordingTestVoter struct {
-    attribute       string
-    result          securitycontract.VoteResult
-    consultedCount  int
-    supportedCount  int
+    attribute      string
+    result         securitycontract.VoteResult
+    consultedCount int
+    supportedCount int
 }
 
 func (instance *recordingTestVoter) Supports(attribute string, subject any) bool {

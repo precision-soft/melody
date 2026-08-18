@@ -37,10 +37,10 @@ func TestNewHttpException_AcceptsTheRangeBoundaries(t *testing.T) {
 
 func TestNamedHttpExceptionConstructors_CarryTheirStatusAndDefaultMessage(t *testing.T) {
     constructorList := []struct {
-        name            string
-        constructor     func(string) *HttpException
-        statusCode      int
-        defaultMessage  string
+        name           string
+        constructor    func(string) *HttpException
+        statusCode     int
+        defaultMessage string
     }{
         {"BadRequest", BadRequest, nethttp.StatusBadRequest, "bad request"},
         {"Unauthorized", Unauthorized, nethttp.StatusUnauthorized, "unauthorized"},

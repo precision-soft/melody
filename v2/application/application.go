@@ -26,22 +26,22 @@ type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 type Application struct {
     booted bool
     /* raised for the boot window so the module doors can refuse a registration arriving from inside a module boot hook: the phase loops iterate a snapshot of the module list, so a module registered mid-boot would receive only the hooks of whatever phases had not run yet — a half-booted module reporting a successful boot */
-    booting               bool
-    configuration         configcontract.Configuration
-    runtimeFlags          *RuntimeFlags
+    booting             bool
+    configuration       configcontract.Configuration
+    runtimeFlags        *RuntimeFlags
     kernel              kernelcontract.Kernel
     embeddedPublicFiles fs.FS
     modules             []applicationcontract.Module
     /* the identity set behind the module dedup: one instance reached through two providers boots once. Keyed by the interface value and populated lazily, because tests legitimately assemble a bare Application without the constructor. */
     registeredModuleInstances map[applicationcontract.Module]struct{}
-    cliCommands           []clicontract.Command
-    httpRouteRegistrars   []RouteRegistrar
-    httpMiddlewares       *HttpMiddleware
-    securityConfiguration *security.CompiledConfiguration
-    routeRegistry         httpcontract.RouteRegistry
-    moduleConfigurations  map[string]any
-    bootCollisions        []bootCollision
-    unappliedSecretMarks  []string
+    cliCommands               []clicontract.Command
+    httpRouteRegistrars       []RouteRegistrar
+    httpMiddlewares           *HttpMiddleware
+    securityConfiguration     *security.CompiledConfiguration
+    routeRegistry             httpcontract.RouteRegistry
+    moduleConfigurations      map[string]any
+    bootCollisions            []bootCollision
+    unappliedSecretMarks      []string
     /* set when the framework had to supply the cache backend itself, because the one it supplies keeps every entry it is ever given; runHttp is what turns it into a warning, and only there */
     unboundedDefaultCacheBackend bool
     /* set when the framework had to supply the session storage itself; paired with an unbounded session ttl it is the same unbounded growth, reached from the request path rather than from anything the application wrote */

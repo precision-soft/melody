@@ -100,9 +100,9 @@ A parameter may be declared as holding a credential so that the commands renderi
 
 How long a stored session stays valid. Read through [`Http().SessionTtl()`](../../config/http.go).
 
-| Environment key            | Parameter name             | Default     |
-|----------------------------|----------------------------|-------------|
-| `MELODY_HTTP_SESSION_TTL`  | `kernel.http.session_ttl`  | `0s`        |
+| Environment key           | Parameter name            | Default |
+|---------------------------|---------------------------|---------|
+| `MELODY_HTTP_SESSION_TTL` | `kernel.http.session_ttl` | `0s`    |
 
 The value is a Go duration string, so it **must carry a unit** — `30m`, `24h`, `168h`. An environment value always arrives as a string and is parsed with `time.ParseDuration`, so a unit-less number such as `1800` is not "1800 seconds" but a parse failure that **fails the boot** with `invalid environment value`. A negative duration is rejected by validation (`session ttl must be zero or positive`), and so is a positive duration below [`MinimumSessionTtl`](../../config/http.go), one second: `session ttl is positive but shorter than one second, which stores no usable session; use zero for no expiry`. Below a second the value does not describe a short session but a broken one — the store purges every lapsed entry on the very write that stores the new one, so the save reports success and persists nothing, and no sub-second lifetime survives the response reaching the client and the client coming back.
 

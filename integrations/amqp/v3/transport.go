@@ -892,7 +892,7 @@ func (instance *Transport) rejectUncountedRequeue(
 
     /* where a dead-letter queue exists, refusing without requeue routes the delivery to it: the message is kept, an operator can see it, and the counters it lost are recoverable from there. Where one does NOT exist, the same refusal DESTROYS the message — the broker has nowhere to route it and discards it — so the transport is handed back to the caller having silently turned at-least-once into at-most-once, and it happens under exactly the conditions that produce these failures in the first place: a max-length policy with overflow=reject-publish, an unroutable return, a queue that filled up. A message is worth more than an accurate redelivery count, so it goes back on the queue.
 
-    What is given up by requeuing is the accounting, and that is real: the counters advanced for this attempt travel only on the re-publish that just failed, so the delivery returns carrying the counts it arrived with and a failure that persists will be seen again at the same count. Configure a dead-letter queue to bound that; without one there is nothing to bound it WITH, and dropping is not a bound, it is a loss. */
+       What is given up by requeuing is the accounting, and that is real: the counters advanced for this attempt travel only on the re-publish that just failed, so the delivery returns carrying the counts it arrived with and a failure that persists will be seen again at the same count. Configure a dead-letter queue to bound that; without one there is nothing to bound it WITH, and dropping is not a bound, it is a loss. */
     requeue := requeueOnRejectedRepublish(instance.deadLetter)
 
     rejectMessage := message + ", dead-lettering rather than returning it uncounted"
@@ -908,7 +908,6 @@ func (instance *Transport) rejectUncountedRequeue(
 
     return instance.nackChannel(channel, stamp.Tag, requeue)
 }
-
 
 /* requeueOnRejectedRepublish decides what a refused re-publish does with the delivery still on the channel. It is a named predicate rather than an inline negation because it is the transport's at-least-once guarantee in one line, and a broker is needed to observe it any other way: without a dead-letter exchange bound to the queue, refusing without requeue does not park the message anywhere, it discards it. */
 func requeueOnRejectedRepublish(deadLetter bool) bool {

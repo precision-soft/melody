@@ -198,15 +198,16 @@ RabbitMQ expires only the **head** of a queue, so a single delay queue holding h
 
 The consequence to plan for: **an effective delay quantizes DOWN to its bucket.** With the default tiers a requested 45s delay fires at 5s, and 55m fires at 10m. [`TransportConfig.DelayBuckets`](./transport.go) overrides the tiers (ascending, positive, at most 8; a violation panics at construction) — add tiers wherever your retry policy needs the delay honoured more closely.
 
-| Requested delay | Default bucket | Queue                        |
-|-----------------|----------------|------------------------------|
-| `< 5s`          | none           | `<queue>.delay`              |
-| `5s` – `< 1m`   | `5s`           | `<queue>.delay.5000ms`       |
-| `1m` – `< 10m`  | `1m`           | `<queue>.delay.60000ms`      |
-| `10m` – `< 1h`  | `10m`          | `<queue>.delay.600000ms`     |
-| `>= 1h`         | `1h`           | `<queue>.delay.3600000ms`    |
+| Requested delay | Default bucket | Queue                     |
+|-----------------|----------------|---------------------------|
+| `< 5s`          | none           | `<queue>.delay`           |
+| `5s` – `< 1m`   | `5s`           | `<queue>.delay.5000ms`    |
+| `1m` – `< 10m`  | `1m`           | `<queue>.delay.60000ms`   |
+| `10m` – `< 1h`  | `10m`          | `<queue>.delay.600000ms`  |
+| `>= 1h`         | `1h`           | `<queue>.delay.3600000ms` |
 
 A delay **below the smallest bucket** keeps the legacy `<queue>.delay` queue with a precise per-message `expiration`, where head-of-line waiting is bounded by that smallest bucket. That queue is always declared, so messages parked by an older deployment still drain. A per-message expiration is clamped to ~49.7 days, the range RabbitMQ's 32-bit millisecond parse allows.
+
 - A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is `Nack`ed without requeue. It is dead-lettered only when `DeadLetter` is enabled; otherwise the broker discards it (enable `DeadLetter` in production so undecodable deliveries are retained).
 
 ## Server-Sent Events backplane

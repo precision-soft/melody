@@ -1,10 +1,11 @@
 package security
 
 import (
-    "github.com/precision-soft/melody/v3/internal/testhelper"
     "reflect"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func TestAccessControl_Match_ReturnsFalseWhenNoRules(t *testing.T) {

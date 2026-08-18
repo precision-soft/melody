@@ -16,7 +16,7 @@ var threeHostCatalog = []struct {
     hostName string
     table    string
     /* the major whose database holds that table: the three examples share the development mysql and no longer
-    share a database in it, so each host's catalogue is read through a connection of its own */
+       share a database in it, so each host's catalogue is read through a connection of its own */
     major int
 }{
     {label: "v1", hostName: "v1-example.melody.localhost.precision-soft.com", table: "melody_example_v1_product", major: 1},

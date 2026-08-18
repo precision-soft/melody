@@ -9,15 +9,15 @@ import (
 
 /* The refusal reasons name which branch produced a 403. Every branch answers the same status and the same client-facing message, so without a reason the journal could not tell a real denial from a firewall whose attribute no configured voter looks at — a wiring fault answered fail-closed. The access control listener reads these to pick the level it files the refusal at. */
 const (
-    RefusalReasonEmptyAttributeList        = "empty_attribute_list"
-    RefusalReasonNoAttributeGranted        = "no_attribute_granted"
-    RefusalReasonAllVotersAbstained        = "all_voters_abstained"
-    RefusalReasonNoVoterSupportsAttribute  = "no_voter_supports_attribute"
-    RefusalReasonAffirmativeNoGrant        = "affirmative_no_grant"
-    RefusalReasonConsensusDenied           = "consensus_denied"
-    RefusalReasonConsensusTie              = "consensus_tie"
-    RefusalReasonUnanimousDenied           = "unanimous_denied"
-    RefusalReasonUnanimousNoGrant          = "unanimous_no_grant"
+    RefusalReasonEmptyAttributeList       = "empty_attribute_list"
+    RefusalReasonNoAttributeGranted       = "no_attribute_granted"
+    RefusalReasonAllVotersAbstained       = "all_voters_abstained"
+    RefusalReasonNoVoterSupportsAttribute = "no_voter_supports_attribute"
+    RefusalReasonAffirmativeNoGrant       = "affirmative_no_grant"
+    RefusalReasonConsensusDenied          = "consensus_denied"
+    RefusalReasonConsensusTie             = "consensus_tie"
+    RefusalReasonUnanimousDenied          = "unanimous_denied"
+    RefusalReasonUnanimousNoGrant         = "unanimous_no_grant"
 )
 
 /*

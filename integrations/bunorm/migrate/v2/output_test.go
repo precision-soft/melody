@@ -502,7 +502,7 @@ func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
     plain, plainBuffer := newBufferedOutput(true)
     plain.printError(errors.New("boom\x1b[2J\rforged"))
 
-    if `ERROR: boom\x1b[2J\rforged` + "\n" != plainBuffer.String() {
+    if `ERROR: boom\x1b[2J\rforged`+"\n" != plainBuffer.String() {
         t.Fatalf("expected the control characters escaped visibly, got %q", plainBuffer.String())
     }
 }

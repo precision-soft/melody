@@ -71,6 +71,7 @@ v1:v2 ~ test-target ~ integrations/bunorm ~ .TestManagerRegistry_MarkSecretParam
 # core's signature forces on them.
 # ------------------------------------------------------------------------------------------------------
 
+v1:v2 ~ text ~ integrations/bunorm/migrate ~ base_command.go      ~ each major keeps its import block alphabetical under its own paths, and the path rewrite changes the sort keys — the bunorm import sorts mid-block on v1 and first on v2, so the two orders cannot mirror
 v1:v2 ~ text ~ integrations/bunorm/migrate ~ base_command_test.go ~ the provider double implements the v2 Open signature and is constructed with a logger
 v1:v2 ~ text ~ integrations/bunorm/migrate ~ fixture_test.go      ~ the provider double implements the v2 Open signature and is constructed with a logger
 

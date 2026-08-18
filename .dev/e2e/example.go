@@ -42,22 +42,22 @@ type exampleMajor struct {
     relativeDirectory string
     port              int
     /* integrationDemos is off for v3 on purpose. Its example drives the same rate-limit counter that
-    EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running
-    the demos here as well would spend a budget another section is counting. */
+       EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running
+       the demos here as well would spend a budget another section is counting. */
     integrationDemos bool
     /* showcaseProbes and sessionRestartProbe gate the wirings the two published examples carry — cors, gzip,
-    the api-key firewall, per-field validation errors, the trusted-proxy client address, the file-backed
-    session storage and the static cache validators. The three examples deliberately do not mirror each
-    other, so these are per-major capabilities like integrationDemos, not shared surface. */
+       the api-key firewall, per-field validation errors, the trusted-proxy client address, the file-backed
+       session storage and the static cache validators. The three examples deliberately do not mirror each
+       other, so these are per-major capabilities like integrationDemos, not shared surface. */
     showcaseProbes      bool
     sessionRestartProbe bool
     /* loginThrottleProbe names the majors whose example puts the login submit behind the shared per-address
-    write budget. It is a per-major capability like the two above: v3's example declares the route public and
-    leaves it unthrottled, so asserting the refusal there would assert a wiring it does not carry. */
+       write budget. It is a per-major capability like the two above: v3's example declares the route public and
+       leaves it unthrottled, so asserting the refusal there would assert a wiring it does not carry. */
     loginThrottleProbe bool
     /* journalOnPostgres names where the major keeps its catalog journal: the v1 example runs two live
-    databases in one process — the catalogue on mysql, the journal on postgres — so its out-of-band
-    journal reads go through the postgres door while the later majors keep reading mysql. */
+       databases in one process — the catalogue on mysql, the journal on postgres — so its out-of-band
+       journal reads go through the postgres door while the later majors keep reading mysql. */
     journalOnPostgres bool
 }
 
@@ -179,7 +179,7 @@ the example directory, so a .env.local written into the workspace afterwards wou
 application would fight the supervised one for :8080. */
 func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDsn string, postgresDsn string) {
     /* swapped here rather than at each reader: everything below this line is about ONE major, and the dsn the
-    caller passes names v3's database whatever major is being driven */
+       caller passes names v3's database whatever major is being driven */
     mysqlDsn = exampleMysqlDsn(major, mysqlDsn)
 
     workspace := filepath.Join(os.TempDir(), "melody-e2e-example-"+major.label)
@@ -648,13 +648,13 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
     assertExampleStaticTraversal(major, client)
 
     /* the showcase probes run BEFORE the integration demos on purpose: the throttled writes they spend are
-    reset by the rate-limit subsection in there, which clears the counters before its exact count */
+       reset by the rate-limit subsection in there, which clears the counters before its exact count */
     if true == major.showcaseProbes {
         runExampleShowcaseAssertions(major, application, redisAddress)
     }
 
     /* the demo routes sit under the example's ROLE_USER catch-all, so they are driven here — between the
-    login and the logout — with the session the login flow established */
+       login and the logout — with the session the login flow established */
     if true == major.integrationDemos {
         runExampleIntegrationAssertions(major, client, application, redisAddress, mysqlDsn, postgresDsn)
     }

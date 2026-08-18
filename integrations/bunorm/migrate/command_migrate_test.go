@@ -97,7 +97,9 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
         t.Fatalf("the bun lock failure must survive as the cause, got %q", runErr.Error())
     }
 
-    contextual, isContextual := runErr.(interface{ Context() exceptioncontract.Context })
+    contextual, isContextual := runErr.(interface {
+        Context() exceptioncontract.Context
+    })
     if false == isContextual {
         t.Fatalf("the lock refusal carries no context at all: %q", runErr.Error())
     }

@@ -3,14 +3,14 @@ package config
 import (
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v2"
+    melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v2/cache"
     melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
     melodycache "github.com/precision-soft/melody/v2/cache"
     melodycachecontract "github.com/precision-soft/melody/v2/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     melodyexception "github.com/precision-soft/melody/v2/exception"
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v2"
-    melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v2/cache"
     melodykernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v2/logging"
     "github.com/redis/rueidis"
@@ -124,7 +124,7 @@ func (instance *Module) registerRedisServices(registrar melodyapplicationcontrac
 
     /* the same backend also becomes the framework's, so the nomenclature itself is cached in redis rather than only inside this process — which is what lets the catalogue survive a restart warm, and what lets the end-to-end harness read the listing key out of band instead of taking the application's word for it.
 
-    The application caches domain entities through a gob serializer, and gob keys its wire format on the fully qualified type name, which carries the major. Three example applications sharing one redis would therefore write entries none of the others can decode — the per-major key prefix above is what keeps them apart, and it is the reason this registration is safe. */
+       The application caches domain entities through a gob serializer, and gob keys its wire format on the fully qualified type name, which carries the major. Three example applications sharing one redis would therefore write entries none of the others can decode — the per-major key prefix above is what keeps them apart, and it is the reason this registration is safe. */
     registrar.RegisterService(
         melodycache.ServiceCacheBackend,
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Backend, error) {

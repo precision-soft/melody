@@ -34,7 +34,7 @@ type InMemoryTokenStore struct {
     mutex          sync.RWMutex
     entriesByToken map[string]tokenEntry
     tokensByUser   map[string]map[string]struct{}
-    epochsByUser map[string]map[string]time.Time
+    epochsByUser   map[string]map[string]time.Time
 }
 
 const (

@@ -1,13 +1,14 @@
 package cli
 
 import (
-    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "crypto/hmac"
     "crypto/sha256"
     "encoding/base64"
     "encoding/json"
     "fmt"
     "time"
+
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
 
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"

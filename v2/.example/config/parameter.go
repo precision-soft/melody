@@ -1,8 +1,8 @@
 package config
 
 import (
-    melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
     melodycron "github.com/precision-soft/melody/integrations/cron/v2"
+    melodyapplicationcontract "github.com/precision-soft/melody/v2/application/contract"
 )
 
 func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.ParameterRegistrar) {

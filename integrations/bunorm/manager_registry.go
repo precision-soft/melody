@@ -274,7 +274,6 @@ func (instance *ManagerRegistry) MustDefaultDatabase() *bun.DB {
     return database
 }
 
-
 /* providerDefinitionRefusal names the definition a construction-time refusal is about, the way providerDefinitionNotFoundErrorLocked names the one that was asked for. Over a configuration carrying three definitions, a bare "provider is required" does not say which of the three is broken and a duplicate name does not say its own name, so the operator reading the boot failure is left to guess. The position is always known — it is the definition's place in the argument list — and the name is empty exactly for the refusal that exists because it is. The sentinel stays the CAUSE: every caller testing errors.Is against it keeps its answer through Unwrap. */
 func providerDefinitionRefusal(sentinel error, position int, name string) error {
     return exception.NewError(
@@ -286,6 +285,7 @@ func providerDefinitionRefusal(sentinel error, position int, name string) error 
         sentinel,
     )
 }
+
 /* providerDefinitionNotFoundErrorLocked names the definition that was asked for and the ones that are registered, the way the framework's own container names an unregistered service id rather than answering a bare sentinel. It is called with the registry lock held, because it reads the definition map. The sentinel stays the CAUSE: every caller testing errors.Is(err, ErrProviderDefinitionNotFound) keeps its answer through Unwrap, and a replacement that dropped it would break them silently. */
 func (instance *ManagerRegistry) providerDefinitionNotFoundErrorLocked(name string) error {
     registered := make([]string, 0, len(instance.providerDefinitionByName))

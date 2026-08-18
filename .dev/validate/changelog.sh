@@ -289,6 +289,7 @@ for CHANGELOG_PATH_STRING in "${CHANGELOG_PATH_STRING_LIST[@]}"; do
     FAMILY_STRING="$(family_of_changelog "${CHANGELOG_PATH_STRING}")"
 
     BLOCK_TITLE_STRING=""
+    NEWEST_RELEASED_BLOCK_TITLE_STRING=""
     CURRENT_SECTION_STRING=""
     PREVIOUS_SECTION_STRING=""
     declare -A BLOCK_SECTION_LINE_INTEGER_MAP=()
@@ -304,6 +305,10 @@ for CHANGELOG_PATH_STRING in "${CHANGELOG_PATH_STRING_LIST[@]}"; do
             PREVIOUS_SECTION_STRING=""
             BLOCK_SECTION_LINE_INTEGER_MAP=()
             BLOCK_COUNT_INTEGER=$((BLOCK_COUNT_INTEGER + 1))
+
+            if [[ "" = "${NEWEST_RELEASED_BLOCK_TITLE_STRING}" && "Unreleased" != "${BLOCK_TITLE_STRING//[\[\]]/}" ]]; then
+                NEWEST_RELEASED_BLOCK_TITLE_STRING="${BLOCK_TITLE_STRING}"
+            fi
 
             continue
         fi
@@ -356,7 +361,7 @@ for CHANGELOG_PATH_STRING in "${CHANGELOG_PATH_STRING_LIST[@]}"; do
             FILE_ENTRY_COUNT_INTEGER=$((FILE_ENTRY_COUNT_INTEGER + 1))
             ENTRY_COUNT_INTEGER=$((ENTRY_COUNT_INTEGER + 1))
 
-            if [[ "Unreleased" = "${BLOCK_TITLE_STRING//[\[\]]/}" && ("v1" = "${MAJOR_STRING}" || "v2" = "${MAJOR_STRING}") ]]; then
+            if [[ ("Unreleased" = "${BLOCK_TITLE_STRING//[\[\]]/}" || "${NEWEST_RELEASED_BLOCK_TITLE_STRING}" = "${BLOCK_TITLE_STRING}") && ("v1" = "${MAJOR_STRING}" || "v2" = "${MAJOR_STRING}") ]]; then
                 printf '%s\t%s\t%s\t%s\n' "${MAJOR_STRING}" "${CURRENT_SECTION_STRING}" "${FAMILY_STRING}" "${LINE_STRING#- }" >> "${ENTRY_PATH_STRING}"
             fi
         fi
@@ -386,7 +391,10 @@ done
 # paired on the entry text itself rather than on position, because the two blocks diverge by hundreds of
 # lines and neither is a reordering of the other. An entry that only one major carries is not a finding —
 # the two majors legitimately diverge, the example applications most of all — so only the common ones are
-# asked about.
+# asked about. The corpus is the `[Unreleased]` block plus the newest released block of each file: a
+# release train empties `[Unreleased]` into a dated block, and a pairing that read only `[Unreleased]`
+# would go empty at that exact commit — the newest released pair carries the same twin proof one commit
+# later, and reading both keeps the non-vacuity control below armed across the whole cycle.
 CROSS_MAJOR_COUNT_INTEGER=0
 COMMON_ENTRY_COUNT_INTEGER=0
 

@@ -300,7 +300,6 @@ func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
     }
 }
 
-
 /* A closed storage refuses the operation the way FileStorage does. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is reclaimed by nothing except a Load that happens to name it, and the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
 func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
     storage := NewInMemoryStorage()

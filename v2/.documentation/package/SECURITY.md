@@ -44,9 +44,7 @@ The `security/config` subpackage provides the user-facing builder and the compil
 
 ### Access control merge strategies
 
-When a firewall inherits the global access control, `security/config` merges the global and local rule lists in
-the order the strategy names. The strategy orders the LIST; the matcher still resolves by category first, so an
-earlier position only decides what the categories leave tied:
+When a firewall inherits the global access control, `security/config` merges the global and local rule lists in the order the strategy names. The strategy orders the LIST; the matcher still resolves by category first, so an earlier position only decides what the categories leave tied:
 
 - [`securityconfig.AccessControlMergeStrategy`](../../security/config/security_module.go)
     - [`AccessControlMergeLocalFirst`](../../security/config/security_module.go) — `localFirst`, the default
@@ -54,15 +52,10 @@ earlier position only decides what the categories leave tied:
     - [`AccessControlMergeOverrideOnly`](../../security/config/security_module.go) — `overrideOnly`, the global policy is cut off entirely and nothing is merged
 
 The strategy is chosen with
-[`(FirewallOverrideConfiguration).WithMergeStrategy`](../../security/config/security_module.go), and inheritance
-is turned off entirely with
-[`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl`](../../security/config/security_module.go). A
-value that is none of the three is refused at the setter with a named panic.
+[`(FirewallOverrideConfiguration).WithMergeStrategy`](../../security/config/security_module.go), and inheritance is turned off entirely with
+[`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl`](../../security/config/security_module.go). A value that is none of the three is refused at the setter with a named panic.
 
-An override built from `NewFirewallOverrideConfiguration()` — or from the zero value, which every setter reads as
-the constructor — inherits the global policy under `localFirst`. A firewall that inherits nothing and declares no
-access control of its own **enforces nothing behind it**: the compiled control is empty, no rule matches, and
-every request reaches its handler. Pair `WithInheritGlobalAccessControl(false)` with `WithAccessControl`.
+An override built from `NewFirewallOverrideConfiguration()` — or from the zero value, which every setter reads as the constructor — inherits the global policy under `localFirst`. A firewall that inherits nothing and declares no access control of its own **enforces nothing behind it**: the compiled control is empty, no rule matches, and every request reaches its handler. Pair `WithInheritGlobalAccessControl(false)` with `WithAccessControl`.
 
 ## Container integration
 
@@ -287,7 +280,8 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - Both methods of the decision manager refuse an empty attribute list. `DecideAll` used to read it as an AND over nothing and grant, so a call site whose attributes came from a configuration value that resolved away was authorized rather than refused; it now answers `403` exactly as `DecideAny` always did. The compiled access control cannot produce a rule with no attribute, so this only ever affected a caller reaching the decision manager directly.
 - A typed nil — an interface variable holding a nil pointer — is refused wherever a nil is refused, both at the definition site and in `Compile`. Such a value is not equal to nil, so before this it survived both walls and was first dereferenced on the request path, outside any recovery. Declaring a dependency as `var handler *MyLoginHandler` and never assigning it now fails the boot with the piece named, rather than the first request that reaches it.
 - A constructor that takes a slice copies it. Keeping your own reference to the rules, authenticators or voters you registered and editing it afterwards changes nothing about the firewall that was built from it — the swap would otherwise land past every nil check and past compilation, in the decision path of a live request.
-- **`AccessControl` and `RoleHierarchy` are concrete types, not contracts, and that is deliberate.** Everything else a firewall is assembled from — `Matcher`, `Rule`, `Voter`, `EntryPoint`, `AccessDeniedHandler`, `TokenSource`, `LoginHandler`, `LogoutHandler` — is an interface an integrator can implement, so the absence here is a decision rather than an omission. These two own the two things the rest of the package is written against: the **match priority** documented above (exact, then longest prefix, then regex in registration order, then the empty-prefix fallback) and the **expansion rule** the role voters and `IsGranted` both read. A substituted matcher that ordered rules differently would silently change which rule answers a path, and this is the one place in melody where "silently changes which rule answers" means an authorization decision — the paragraph on the match priority would stop being true of the running application while still being the only thing anyone had read. Bring your own policy through a `Voter` instead: it is consulted for every attribute, it composes with the strategies, and it cannot reorder what it did not build. `RoleHierarchy` reaches a foreign decision manager through the [`RoleHierarchyAware`](../../security/access_decision_manager.go) capability, and a foreign voter through [`NewRoleHierarchyVoter`](../../security/role_hierarchy_voter.go), so the expansion is available without the type being replaceable.
+- **`AccessControl` and `RoleHierarchy` are concrete types, not contracts, and that is deliberate.** Everything else a firewall is assembled from — `Matcher`, `Rule`, `Voter`, `EntryPoint`, `AccessDeniedHandler`, `TokenSource`, `LoginHandler`, `LogoutHandler` — is an interface an integrator can implement, so the absence here is a decision rather than an omission. These two own the two things the rest of the package is written against: the **match priority** documented above (exact, then longest prefix, then regex in registration order, then the empty-prefix fallback) and the **expansion rule** the role voters and `IsGranted` both read. A substituted matcher that ordered rules differently would silently change which rule answers a path, and this is the one place in melody where "silently changes which rule answers" means an authorization decision — the paragraph on the match priority would stop being true of the running application while still being the only thing anyone had read. Bring
+  your own policy through a `Voter` instead: it is consulted for every attribute, it composes with the strategies, and it cannot reorder what it did not build. `RoleHierarchy` reaches a foreign decision manager through the [`RoleHierarchyAware`](../../security/access_decision_manager.go) capability, and a foreign voter through [`NewRoleHierarchyVoter`](../../security/role_hierarchy_voter.go), so the expansion is available without the type being replaceable.
 
 ## Userland API
 

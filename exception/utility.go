@@ -279,7 +279,6 @@ func causesOf(err error) []error {
     return causeErrs
 }
 
-
 func BuildCauseChain(causeErr error, maxDepth int) []string {
     if nil == causeErr || true == isNilInterfaceValue(causeErr) {
         return nil

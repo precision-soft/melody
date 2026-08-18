@@ -126,9 +126,9 @@ func (instance *Application) registerKernelHttpListeners() {
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
 
     /* the framework exception listener answers every kernel.exception dispatch, so with it
-    registered an error handler the application installed at boot could never run — the kernel
-    consults the handler only when the dispatch produced no response. A handler installed by boot
-    therefore takes the listener's place; without one the listener renders exactly as before. */
+       registered an error handler the application installed at boot could never run — the kernel
+       consults the handler only when the dispatch produced no response. A handler installed by boot
+       therefore takes the listener's place; without one the listener renders exactly as before. */
     if false == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
         http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
     }

@@ -14,10 +14,15 @@
 -- melody_example stays behind for the live integration suites, which point MYSQL_DSN at it and create
 -- tables of their own there. It is not an example's database any more.
 
-CREATE DATABASE IF NOT EXISTS `melody_example_v1` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS `melody_example_v2` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS `melody_example_v3` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE
+DATABASE IF NOT EXISTS `melody_example_v1` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE
+DATABASE IF NOT EXISTS `melody_example_v2` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE
+DATABASE IF NOT EXISTS `melody_example_v3` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 -- the wildcard covers the three above in one statement and any later major without another grant
-GRANT ALL PRIVILEGES ON `melody\_example\_%`.* TO 'melody'@'%';
-FLUSH PRIVILEGES;
+GRANT ALL PRIVILEGES ON `melody\_example\_%`.* TO
+'melody'@'%';
+FLUSH
+PRIVILEGES;

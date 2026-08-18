@@ -40,9 +40,9 @@ func (instance dialectNamedAs) Name() dialect.Name {
 
 func TestFetchDatabaseIdentity_DispatchesPerDialect(t *testing.T) {
     testCases := []struct {
-        name          string
-        dialectName   dialect.Name
-        reachesFetch  bool
+        name         string
+        dialectName  dialect.Name
+        reachesFetch bool
     }{
         {name: "mysql has a fetcher", dialectName: dialect.MySQL, reachesFetch: true},
         {name: "pgsql has a fetcher", dialectName: dialect.PG, reachesFetch: true},

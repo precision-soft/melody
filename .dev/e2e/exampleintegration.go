@@ -433,7 +433,7 @@ func assertExampleJournalRecordedTheWrite(major exampleMajor, editor *exampleCli
     }
 
     /* the seeded editor is user-2, and the journal records the identifier the token carries rather than the
-    display name, so a write attributed to the system would mean the actor was lost on the way */
+       display name, so a write attributed to the system would mean the actor was lost on the way */
     if "" == row.Actor || "system" == row.Actor {
         fail(
             "[%s] the journal attributed a signed-in editor's write to %q, so the actor was not carried",
@@ -455,7 +455,7 @@ func assertExampleWritesAreRateLimited(major exampleMajor, editor *exampleClient
     }
 
     /* the counter is keyed by client address, and every major calls from the same one, so without a reset the
-    second major starts with the first one's budget already spent */
+       second major starts with the first one's budget already spent */
     resetExampleRateLimitCounters(major.label, redisAddress, exampleMajorRateLimitPrefix(major))
 
     refused := `{"name":""}`

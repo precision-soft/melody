@@ -29,9 +29,9 @@ const (
 
 /* scheduledRunEntry pairs a parsed schedule with the registered command it fires, resolved once at construction so the tick loop never looks a command up by name at run time. fixedTime carries the vixie-cron entry class the wall-clock reconciliation reads: a fixed-time entry pins both a minute and an hour, a wildcard entry leaves either as a plain or stepped wildcard. */
 type scheduledRunEntry struct {
-    commandName     string
-    command         clicontract.Command
-    arguments       []string
+    commandName string
+    command     clicontract.Command
+    arguments   []string
     /* the rendered expression is kept beside the parsed matcher because the runner's own document and its declaration record name the schedule an entry runs under, and the matcher is a set of admitted values with no way back to the text that produced it */
     schedule        string
     matcher         *scheduleMatcher
@@ -56,10 +56,10 @@ const commandUnwindGrace = 300 * time.Second
 
 Due commands run concurrently, each in its own goroutine, the way crontab starts an independent process per entry: one slow job delays neither the commands sharing its minute nor the scheduler loop, and an entry that runs longer than its own interval overlaps itself — wrap the command in a locker-backed exclusivity wrapper to serialize successive runs. A run is bounded only where EntryConfig.Timeout asks for it, because nothing in the runtime context would ever end a command wedged on a deadline-less read and a bound melody picked would cut short a job that had always been allowed to take as long as it takes. Where a deadline is set, reaching it cancels the command's context; a command still running one EntryConfig.GracefulTimeout later is reported at warning, has its scope closed under it and stops counting towards the shutdown wait, since waiting on it would never end either. Wall-clock jumps follow the vixie-cron virtual-time algorithm, documented on reconcileWallClock, so a schedule pinned inside a daylight-saving gap still runs exactly once. Multi-instance safety is left to composition — wrap each command in a distributed-lock exclusivity wrapper, or gate the whole runner behind a leader gate, before handing the commands in. */
 type RunnerCommand struct {
-    entries             []*scheduledRunEntry
-    now                 func() time.Time
-    unwindGrace         time.Duration
-    inFlight            sync.WaitGroup
+    entries     []*scheduledRunEntry
+    now         func() time.Time
+    unwindGrace time.Duration
+    inFlight    sync.WaitGroup
     /* the scheduler loop hands each minute's wait to a goroutine of its own, so two minutes' documents can complete in any order: the writer is guarded to keep one document one line */
     writeMutex sync.Mutex
     /* the output posture the scheduler loop reports under, installed by Run from the parsed flags before the loop starts and read by it alone. It is nil for a loop driven directly, which is how the loop's own tests reach it without a cli command context, and a nil reporting loop writes nothing — the behaviour every caller had before the document existed. */

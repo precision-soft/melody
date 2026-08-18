@@ -16,10 +16,10 @@ import (
     melodyhttp "github.com/precision-soft/melody/v2/http"
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodyruntime "github.com/precision-soft/melody/v2/runtime"
-    melodyvalidation "github.com/precision-soft/melody/v2/validation"
     melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v2/serializer"
     melodyserializercontract "github.com/precision-soft/melody/v2/serializer/contract"
+    melodyvalidation "github.com/precision-soft/melody/v2/validation"
 )
 
 const causeSecret = "connection to 10.0.0.7 refused: password=hunter2"

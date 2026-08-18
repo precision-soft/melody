@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.1.0] - 2026-08-18 - Verified TLS by Default, Context-Threaded Retries and Word-Bounded Transient Markers
+
 ### Added
 
 - opening a connection routes bun's own diagnostic channel into the application's journal, once per process, through `bunorm.RouteDiagnostics`: bun's reports of a declaration mistake — an unknown struct tag option, a query carrying arguments and no placeholders — arrive as warning records instead of unstructured lines on standard error. See the `bunorm` changelog for the door itself, and this package's readme for the one line that deliberately stays on standard error: the dialect writes `can't discover MySQL version` through the standard library's default logger, not bun's, so routing it would mean taking `log.SetOutput` for the whole process
@@ -95,7 +97,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code moved to `integrations/bunorm/mysql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.5...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.1.0...HEAD
+
+[v2.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.5...integrations/bunorm/mysql/v2.1.0
 
 [v2.0.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v2.0.4...integrations/bunorm/mysql/v2.0.5
 
