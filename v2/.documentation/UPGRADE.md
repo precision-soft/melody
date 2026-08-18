@@ -12,6 +12,14 @@ The same decision covers a **method added to an exported contract**, which break
 
 An upgrader who needs the old behaviour of any entry below pins the previous patch release; the remedies here are the supported path forward.
 
+## Migrating to v3
+
+v2 is feature-frozen: the major is stabilized, no new feature lands on it, and what still arrives is security work and critical correctness fixes. The recommended move for an application on this major is v3, where development continues.
+
+v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version: `github.com/precision-soft/melody/v2` becomes `github.com/precision-soft/melody/v3`, and each integration module trades its `/v2` suffix for `/v3` on its module path — a package inside such a module then carries the major mid-path, as in `integrations/rueidis/v3/cache`. The one rewrite that does not compile afterwards — twelve deprecated validation constants that v3 has never carried — is recorded with its replacements in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
+
+From the move on, that document plays this file's role: it records, per v3 release, every change that can require an action, and an upgrader walks its entries newest-first from the release moved onto.
+
 ## Unreleased
 
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).

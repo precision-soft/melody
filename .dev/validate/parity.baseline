@@ -126,12 +126,3 @@ v1:v2 ~ test-target ~ integrations/bunorm/pgsql ~ .TestProviderOpenWithRetryAndN
 # release train, and these two lines go with them.
 v1:v2 ~ dependency-source ~ integrations/bunorm/mysql ~ github.com/joho/godotenv // indirect ~ recorded against the older melody floor this module declares; E4-06
 v1:v2 ~ dependency-source ~ integrations/bunorm/pgsql ~ github.com/joho/godotenv // indirect ~ recorded against the older melody floor this module declares; E4-06
-
-# the one upgrade note that is not a porting residue. Every other section E4-11 counted has landed on v2 and
-# its line here is gone; this one stays, and stays for a different reason than the one it was written under.
-#
-# Measured: the websocket integration has a v3 directory and no other, and its go.mod requires melody/v3, so
-# neither a v1 application nor a v2 one can import the module the note is about. Carrying it to v2 would
-# document a breaking change no reader of that major can encounter. v1 carries it for the same reason it
-# should not, which is a question for the sealing stage rather than for a port.
-v1:v2 ~ document-source ~ . ~ UPGRADE.md ### Boot-level: `websocket/v3` refuses a zero `IdleTimeout` ~ the note is about a module that ships on v3 alone, so no reader of either of these majors can meet it

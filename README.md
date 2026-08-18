@@ -101,15 +101,17 @@ At a high level, a Melody application is assembled as follows:
 
 Melody ships as three parallel Go module lines:
 
-| Version line | Module path                                              | Status                                                       |
-|--------------|----------------------------------------------------------|--------------------------------------------------------------|
-| **v3**       | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | **Stable, actively maintained — use this for new projects.** |
-| v2           | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | Maintenance — fixes only.                                    |
-| v1           | `github.com/precision-soft/melody` (repository root)     | Maintenance — fixes only.                                    |
+| Version line | Module path                                              | Status                                                                |
+|--------------|----------------------------------------------------------|-----------------------------------------------------------------------|
+| **v3**       | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | **Stable, actively maintained — use this for new projects.**          |
+| v2           | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | Feature-frozen — security and critical correctness fixes still land.  |
+| v1           | `github.com/precision-soft/melody` (repository root)     | Feature-frozen — security and critical correctness fixes still land.  |
 
 Three versions exist for historical reasons: earlier major versions introduced changes that were not backwards compatible, and each was maintained in parallel. **Going forward, all new features land on v3 only.**
-v1 and v2 receive security and critical correctness fixes (see [`SECURITY.md`](./SECURITY.md) and
-[`CONTRIBUTING.md`](./CONTRIBUTING.md)).
+v1 and v2 are feature-frozen and receive security and critical correctness fixes (see [`SECURITY.md`](./SECURITY.md) and
+[`CONTRIBUTING.md`](./CONTRIBUTING.md)). An application moving off a frozen major starts at the
+"Migrating to v3" section of its upgrade guide: [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md)
+for v1, [`v2/.documentation/UPGRADE.md`](./v2/.documentation/UPGRADE.md) for v2.
 
 Within v3, evolution follows the standard Go approach: APIs that need to change are first marked with a
 `/* Deprecated: ... */` doc comment and kept working, and a future **v4** will be cut once enough breaking changes have accumulated.

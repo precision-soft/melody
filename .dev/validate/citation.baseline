@@ -36,7 +36,6 @@ v1 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the strea
 v1 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
 v1 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
 v1 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
-v1 ~ symbol ~ http.Server            ~ net/http.Server, whose read and write deadlines an accepted websocket leaves behind
 v1 ~ symbol ~ runtime.FuncForPC      ~ runtime.FuncForPC, named where a frame is resolved to a function name
 v1 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
 

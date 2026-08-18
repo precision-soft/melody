@@ -4,10 +4,10 @@
 
 # Melody (v2)
 
-> **v2 is being driven to complete stability and will then be frozen.** New features land on **v3**;
-> what still arrives here is security work, correctness fixes and the capabilities being levelled
-> across the majors while the stabilisation runs — the releases since v2.8.0 each carried some. For
-> new projects use [`../v3/`](../v3/) and its [example](../v3/.example/). See the repository
+> **v2 is stabilized and feature-frozen.** New features land on **v3**; what still arrives here is
+> security work and critical correctness fixes. For new projects use [`../v3/`](../v3/) and its
+> [example](../v3/.example/); an application moving off v2 starts at the "Migrating to v3" section of
+> [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md). See the repository
 > [`README.md`](../README.md#versions--project-status) for the versioning rationale.
 
 Melody is a Go framework focused on building **HTTP applications and CLI commands** on top of the same runtime, container, configuration, logging, and validation infrastructure.
