@@ -3,7 +3,7 @@ package output
 func SelectPrinter(option Option) Printer {
     normalized := NormalizeOption(option)
 
-    if FormatJson == normalized.Format {
+    if true == IsJsonFormat(normalized.Format) {
         return &JsonPrinter{}
     }
 

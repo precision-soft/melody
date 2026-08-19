@@ -12,6 +12,14 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
+/* IsClosed reports whether a Close already began tearing the container down. Because a repeated Close returns the first teardown's memoized error, a caller that closes defensively cannot tell a failure it just caused from one somebody else already discovered and reported; asking before closing is what keeps one failure from being presented as two incidents. */
+func (instance *container) IsClosed() bool {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.isClosed
+}
+
 /* Close tears the container down exactly once. A concurrent or repeated call blocks until the first teardown finishes and returns the same error, so a second caller never reports a premature success while services are still being closed. */
 func (instance *container) Close() error {
     instance.closeOnce.Do(func() {
@@ -33,7 +41,7 @@ func (instance *container) closeInternal() error {
 
     instance.mutex.Lock()
 
-    /* @important mark closed while still holding the lock so the resolver's creation guard refuses new creations for the whole teardown; the sync.Once in Close serializes repeated callers. */
+    /* mark closed while still holding the lock so the resolver's creation guard refuses new creations for the whole teardown; the sync.Once in Close serializes repeated callers. */
     instance.isClosed = true
 
     typeStringToType := make(map[string]reflect.Type, len(instance.typeInstances))
@@ -82,7 +90,7 @@ func (instance *container) closeInternal() error {
         return nil, false
     }
 
-    /* @important the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order. The "type:<T>" node is collapsed onto its backing "service:<name>" structurally (via typeRegistrationNamesByType), which is correct even for a value-type service whose dynamic contents are not hashable; pointer/value identity then groups any remaining same-instance aliases */
+    /* the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order. The "type:<T>" node is collapsed onto its backing "service:<name>" structurally (via typeRegistrationNamesByType), which is correct even for a value-type service whose dynamic contents are not hashable; pointer/value identity then groups any remaining same-instance aliases */
     valueOfNodeKey := make(map[string]any, len(createdNodeKeys))
     representativeOf := make(map[string]string, len(createdNodeKeys))
     pointerRepresentative := make(map[pointerIdentity]string, len(createdNodeKeys))
@@ -106,7 +114,7 @@ func (instance *container) closeInternal() error {
         return false
     }
 
-    /* @important every zero-size allocation shares one address, so the address plus the type still cannot tell two distinct services of such a type apart; a genuine alias is one whose value came through the resolver from the other service, which is exactly the case the dependency graph records, so an unrelated node keeps its own representative and is closed on its own */
+    /* every zero-size allocation shares one address, so the address plus the type still cannot tell two distinct services of such a type apart; a genuine alias is one whose value came through the resolver from the other service, which is exactly the case the dependency graph records, so an unrelated node keeps its own representative and is closed on its own */
     zeroSizeAliasRepresentative := func(nodeKey string, pointerKey pointerIdentity) (string, bool) {
         for _, memberNodeKey := range pointerGroupMembers[pointerKey] {
             if true == nodesAreRelated(nodeKey, memberNodeKey) {
@@ -342,7 +350,7 @@ func (instance *container) closeInternal() error {
     return resultErr
 }
 
-/* @important contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned. */
+/* contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned. */
 func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -363,7 +371,7 @@ func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
     return closeable.Close()
 }
 
-/* @important a user error whose Error() panics must not abort the teardown loop, so the recorded failure text is produced under a recover. */
+/* a user error whose Error() panics must not abort the teardown loop, so the recorded failure text is produced under a recover. */
 func errorText(err error) (text string) {
     defer func() {
         recoveredValue := recover()

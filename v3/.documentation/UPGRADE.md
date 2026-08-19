@@ -66,6 +66,54 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** Move your own `github.com/uptrace/bun/...` requirements to `v1.2.17` in the same change — `go get github.com/uptrace/bun@v1.2.17 github.com/uptrace/bun/dialect/mysqldialect@v1.2.17` and the equivalent for `pgdialect` / `pgdriver`. Applications that declare no bun dependency of their own need no action.
 
+### CLI: `--format=json` writes one document per line
+
+**What changed.** The json printer no longer indents. Every melody command's `--format=json` envelope — the framework's `debug:*` family and the core commands it contributes — is now one compact line terminated by a newline, where it used to be a block of indented lines. `--format=json-pretty` is the same document with the indentation back.
+
+**Symptom.** Output that was read by eye, or a test asserting the rendered text with the spacing `encoding/json` puts after a colon (`"error": null`), sees the compact spelling instead (`"error":null`). Nothing that decodes the document is affected: it is the same document.
+
+**Remedy.** For reading by hand, use `--format=json-pretty`, or pipe through `| jq`, which the documentation already recommended. For an assertion on rendered output, decode the document and assert the value rather than the text — the format the printer chooses is not part of what the command reports. Consumers that read the stream a document at a time, and every `jq` pipeline, need no change at all; the reason for the change is the consumers that could not work before, since a long-running command that renders a document per unit of work promised a stream of closed documents and emitted fragments.
+
+### Cli: a duplicated flag name and a mismatched table row fail fast
+
+**What changed.** `output.MergeFlags` panics on a flag name declared twice, and on a nil flag — the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name was silently inert. `TableBlockBuilder.AddRow` panics on a row whose cell count disagrees with the block's declared columns — a surplus cell silently never rendered; the single-token separator row stays admitted.
+
+**Symptom.** A command whose flags redeclare a standard name, or whose table rows disagree with their block's columns, panics at registration or at the row instead of silently misbehaving.
+
+**Remedy.** Rename the colliding flag (the standard names are the `FlagName*` constants), or make the row's cell count match the columns.
+
+### Cli: negative values for the standard integer flags are refused
+
+**What changed.** `--verbosity`, `--limit`, `--offset` and `--table-width` carry validators refusing a negative value, the way `--format` and `--order` refuse an unsupported one. A negative was clamped to zero, and zero means unlimited for the limit — an argument asking for less than nothing silently delivered everything.
+
+**Symptom.** `--limit=-5` fails at argument parsing, naming the flag, instead of listing everything with exit 0.
+
+**Remedy.** Pass a non-negative value; `0` keeps meaning unlimited/default.
+
+### Cli: the table format stops hiding warnings and errors, and printing failures fail the command
+
+**What changed.** Three output changes in the table format. The `WARNINGS` block renders under `--quiet` too — with `StandardFlags` defaulting quiet to true, an application command's warning was invisible at every verbosity; the warning details stay behind `--verbose`. The envelope error now renders whole (message, code, details, cause) — it previously rendered nowhere in the table format. And the first write failure is returned instead of discarded, so a report truncated by a full disk no longer ends in a success banner and exit zero.
+
+**Symptom.** Quiet table runs may print new `WARNINGS:`/`ERROR:` lines; a run whose output stream fails now exits non-zero.
+
+**Remedy.** None for correct runs; output parsers that assumed quiet suppressed warnings read the json format instead, which has always carried both.
+
+### Cli: a failed run reaches the application log
+
+**What changed.** The exit-coded errors built from a rendered envelope and from the command-suggestion refusal travel unmarked, so the exit path logs them through the application logger before the teardown. They were pre-marked as logged while the rendered report lived only on stdout/stderr — a failed run was invisible to anything reading the log file.
+
+**Symptom.** The log file gains one record per failed command run and per mistyped command name. Exit codes are unchanged.
+
+**Remedy.** None; log-volume alerts keyed on error records may need the new entries accounted for.
+
+### Cli: the command action leaves the container to the process-exit owner
+
+**What changed.** A registered command's action closes the request scope and reports its teardown failure beside the command's own error, and no longer closes the service container. The handler that owns the process exit closes it, after it resolved the logger the final record is written through.
+
+**Symptom.** A container close failure is now reported by the exit handler rather than folded into the command's aggregate, and a failed command's final record is written through the live application logger instead of the stderr fallback. A command that closes the container itself is unaffected.
+
+**Remedy.** None. A command that relied on the container being closed by the time its action returned should close what it owns itself, or use the scope.
+
 ### Opaque tokens: a stored token with no issue instant is refused once its user is revoked
 
 **What changed.** A revocation is no longer an enumeration. [`security/contract.RevocationEpochStore`](../security/contract/token_store.go) publishes a boundary per user, and per device of a user, and [`Lookup`](../security/in_memory_token_store.go) refuses a token issued before the boundary that governs it. This closes the window [`DeleteByUser`](../../integrations/rueidis/v3/token_store.go) could never close: it walks an index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during a revocation survived it. The comparison needs an issue instant, so [`security/contract.Claims`](../security/contract/token_validator.go) carries `IssuedAt`, stamped by the store on every write.

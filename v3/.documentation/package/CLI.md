@@ -53,15 +53,24 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 
 This subpackage provides shared helpers that commands can use for consistent output formatting.
 
+- Flag names (string constants):
+    - [`FlagNameFormat`, `FlagNameNoColor`, `FlagNameVerbose`, `FlagNameVerbosity`, `FlagNameQuiet`, `FlagNameOrder`, `FlagNameLimit`, `FlagNameOffset`, `FlagNameTableMaxWidth`](../../cli/output/flag.go)
+    - [`output.MergeFlags(standard []clicontract.Flag, commandSpecific []clicontract.Flag) []clicontract.Flag`](../../cli/output/flag.go) — concatenates the two sets and **panics on a duplicated flag name**, and on a nil flag: the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name would be silently inert. Do not reuse the `FlagName*` names.
+
+- Output format and ordering:
+    - [`type Format`](../../cli/output/format.go) with constants [`FormatTable`, `FormatJson`](../../cli/output/format.go)
+    - [`type SortOrder`](../../cli/output/format.go) with constants [`SortOrderAscending`, `SortOrderDescending`](../../cli/output/format.go)
+
 - Flags and options:
     - [`output.StandardFlags()`](../../cli/output/standard_flag.go)
     - [`output.DebugFlags()`](../../cli/output/standard_flag.go)
     - [`output.ParseOptionFromCommand(...)`](../../cli/output/option_parser.go)
     - [`output.NormalizeOption(option output.Option) output.Option`](../../cli/output/option_parser.go)
+    - [`type Option`](../../cli/output/option.go)
 
 - Printing and rendering:
-    - [`output.Printer`](../../cli/output/printer.go)
-    - [`output.Render(...)`](../../cli/output/renderer.go) — prints the envelope and then returns an **exit-coded error** when the envelope carries an error, so a failing command leaves the process with a non-zero status and a shell gate such as `app debug:container app.missing || exit 1` holds. That error is pre-marked as logged, since the rendered envelope already carries the full report; a printing failure is still returned as a plain error.
+    - [`output.Printer`](../../cli/output/printer.go) — the interface `SelectPrinter` answers with, exported so a caller can hold what it returns. **The set of formats is closed**: `table`, `json` and `json-pretty`, decided by [`isFormatSupported`](../../cli/output/format.go) and [`SelectPrinter`](../../cli/output/printer_selector.go), with no registration door. Implementing `Printer` in userland therefore gets a type that nothing dispatches to — `--format` refuses any value the two functions above do not know, before a command runs. This is deliberate for now, and it is the one exported interface of the framework that is not an extension point: the envelope, the flag set and the two renderings are the contract every melody command shares, and a fourth rendering chosen by an operator would make `--format=json` mean something different per application. A command that needs its own rendering writes it inside the command, from the envelope it already holds.
+    - [`output.Render(...)`](../../cli/output/renderer.go) — prints the envelope and then returns an **exit-coded error** when the envelope carries an error, so a failing command leaves the process with a non-zero status and a shell gate such as `app debug:container app.missing || exit 1` holds. The error travels **unmarked**, so the exit path also writes it to the application log — the rendered report lives only on the output streams. A printing failure is returned with the envelope's own failure preserved as its cause, never in its place.
     - [`output.SelectPrinter(option output.Option) output.Printer`](../../cli/output/printer_selector.go)
 
 - List payloads:
@@ -82,13 +91,16 @@ This subpackage provides shared helpers that commands can use for consistent out
     - [`output.NewListPayload[T](...)`](../../cli/output/list_payload.go)
     - [`output.Envelope`](../../cli/output/envelope.go)
 
+- Application version:
+    - [`output.SetApplicationVersion(versionString string)`](../../cli/output/application_version.go)
+
 ### Standard output flags
 
 [`output.StandardFlags()`](../../cli/output/standard_flag.go) is the shared flag set for a command that renders an envelope. [`output.DebugFlags()`](../../cli/output/standard_flag.go) returns the same flags with `--quiet` defaulted to `false` instead of `true`; the flag set is otherwise identical.
 
 | Flag            | Type   | Default (`StandardFlags`)                                      |
 |-----------------|--------|----------------------------------------------------------------|
-| `--format`      | string | `table`                                                        |
+| `--format`      | string | `table` (`table`, `json`, `json-pretty`)                       |
 | `--no-color`    | bool   | `false`                                                        |
 | `--verbose`     | bool   | `false`                                                        |
 | `--verbosity`   | int    | `0` (accepts `-v`/`-vv`/`-vvv` through argument normalization) |
@@ -100,10 +112,14 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 Note the flag is spelled `--table-width`, though its constant is `FlagNameTableMaxWidth`.
 
-Two behaviours are worth knowing before wiring a command against these, alongside the exit-code rule noted on `output.Render` above:
+The four integer flags refuse a negative value at parsing, naming the flag — a negative used to be clamped to zero, and zero means unlimited for the limit and "from the start" for the offset, so an argument asking for less than nothing silently delivered everything. The clamp in `NormalizeOption` stays as the defensive floor for an `Option` assembled in code.
 
-* **`--format=json` emits the envelope document and nothing else.** [`JsonPrinter`](../../cli/output/json_printer.go) encodes the `Envelope` as indented JSON and writes no headers, banners or trailing prose, so the output pipes straight into `jq`. Selecting it also **implies `--no-color`**: [`NormalizeOption`](../../cli/output/option_parser.go) forces `NoColor` on for the json format, because a single machine-readable document must not carry ANSI escapes — passing `--no-color=false` alongside `--format=json` does not put them back.
-* **`--format` and `--order` reject an unrecognised value.** Both carry a flag `Validator`, so argument parsing fails with `unsupported output format "…", expected "table" or "json"` (respectively `unsupported sort order "…", expected "asc" or "desc"`) instead of quietly using the default. [`NormalizeOption`](../../cli/output/option_parser.go) *does* coerce an unsupported value to the default, but that is a defensive floor for an `Option` assembled in code, not the path a command-line argument takes.
+Four behaviours are worth knowing before wiring a command against these, alongside the exit-code rule noted on `output.Render` above:
+
+* **`--format=json` emits the envelope document and nothing else, on ONE line.** [`JsonPrinter`](../../cli/output/json_printer.go) encodes the `Envelope` compactly, terminated by a newline, and writes no headers, banners or trailing prose, so the output pipes straight into `jq` — and a long-running command that renders a document per unit of work is a stream a line reader can follow, handing each line to a parser whole. Use `--format=json-pretty` for the same document indented for reading by hand, or `| jq` where the pipeline already has it; the two formats differ in whitespace alone and every rule below holds for both. Selecting it also **implies `--no-color`**: [`NormalizeOption`](../../cli/output/option_parser.go) forces `NoColor` on for the json format, because a single machine-readable document must not carry ANSI escapes — passing `--no-color=false` alongside `--format=json` does not put them back.
+* **`--format` and `--order` reject an unrecognised value.** Both carry a flag `Validator`, so argument parsing fails with `unsupported output format "…", expected "table", "json" or "json-pretty"` (respectively `unsupported sort order "…", expected "asc" or "desc"`) instead of quietly using the default. [`NormalizeOption`](../../cli/output/option_parser.go) *does* coerce an unsupported value to the default, but that is a defensive floor for an `Option` assembled in code, not the path a command-line argument takes.
+* **`--quiet` suppresses the headers, never the warnings or the error.** The table printer renders the `WARNINGS` block and the envelope error (message, code, details, cause) under quiet as well — they are what the command said beside its result; only the warning *details* stay behind `--verbose`. The json document has always carried both.
+* **The `-v`/`-vv`/`-vvv` normalization rewrites tokens, not grammar.** Every standalone argv token of that exact shape becomes `--verbosity=N`, before the parser knows whether the token was meant as the *value* of the preceding flag — `some:cmd --pattern -vv` hands `--pattern` the rewritten token. Write such a value in the attached form (`--pattern=-vv`) or after the `--` terminator, which stops the normalization.
 
 ## Usage
 

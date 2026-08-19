@@ -28,26 +28,6 @@
 # closes on its own, and so that a symbol v3 stops declaring fails the run rather than passing quietly.
 # ------------------------------------------------------------------------------------------------------
 
-# `cli/output` — v1 and v2 enumerate the flag names, the two formats and the two sort orders a command
-# renders through; the v3 document describes the command surface and stops there.
-v3 ~ CLI.md ~ FlagNameFormat        ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ FlagNameLimit         ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ FlagNameNoColor       ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ FlagNameOffset        ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ FlagNameOrder         ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ FlagNameQuiet         ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ FlagNameTableMaxWidth ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ FlagNameVerbose       ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ FlagNameVerbosity     ~ the output flag-name constants are enumerated by v1 and v2 only
-v3 ~ CLI.md ~ MergeFlags            ~ the flag-merging door is listed by v1 and v2 only
-v3 ~ CLI.md ~ SetApplicationVersion ~ the version door of the output package is listed by v1 and v2 only
-v3 ~ CLI.md ~ Format                ~ the output format type is listed by v1 and v2 only
-v3 ~ CLI.md ~ FormatJson            ~ the output format constants are listed by v1 and v2 only
-v3 ~ CLI.md ~ FormatTable           ~ the output format constants are listed by v1 and v2 only
-v3 ~ CLI.md ~ SortOrder             ~ the sort order type is listed by v1 and v2 only
-v3 ~ CLI.md ~ SortOrderAscending    ~ the sort order constants are listed by v1 and v2 only
-v3 ~ CLI.md ~ SortOrderDescending   ~ the sort order constants are listed by v1 and v2 only
-
 # the frozen clock's ticker door, listed by v1 and v2 beside the clock it belongs to.
 v3 ~ CLOCK.md ~ Stop ~ the frozen clock's Stop is listed by v1 and v2 only
 
