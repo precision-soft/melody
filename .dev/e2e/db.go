@@ -37,7 +37,8 @@ func openMysql(label string, dsn string) *bun.DB {
 
     host, port := splitMysqlAddress(config.Addr)
 
-    database, openErr := melodymysql.NewProvider().Open(
+    /* the development mysql answers TLS with an auto-generated certificate no hostname verifies against, so the harness arms the insecure opt-out the way the example applications do — the provider's verified default would refuse the dial before the out-of-band read it exists for */
+    database, openErr := melodymysql.NewProvider(melodymysql.WithInsecure(true)).Open(
         melodybunorm.ConnectionParameters{
             Host:     host,
             Port:     port,

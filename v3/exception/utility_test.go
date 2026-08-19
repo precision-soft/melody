@@ -44,8 +44,6 @@ func TestFromError_WrapsNonExceptionError(t *testing.T) {
     }
 }
 
-/* @info BuildCauseChain / BuildCauseContextChain / LogContext */
-
 func TestBuildCauseChain_NilReturnsNil(t *testing.T) {
     chain := BuildCauseChain(nil, 8)
 
@@ -233,8 +231,6 @@ func TestLogContext_NilErrorNilExtra(t *testing.T) {
     }
 }
 
-/* @info unclamped huge maxDepth must not drive the up-front allocation */
-
 func TestBuildCauseChain_HugeMaxDepthDoesNotPanic(t *testing.T) {
     causeErr := errors.New("cause")
 
@@ -313,5 +309,163 @@ func TestLogContext_WithExtra_MergesExtraIntoContext(t *testing.T) {
 
     if "value" != context["extra"] {
         t.Fatalf("expected extra context to be merged")
+    }
+}
+
+func TestMarkLogged_TypedNil_ReturnsItUnchangedWithoutPanicking(t *testing.T) {
+    typedNil := (*Error)(nil)
+
+    result := MarkLogged(typedNil)
+
+    resultError, ok := result.(*Error)
+    if false == ok || nil != resultError {
+        t.Fatalf("expected the typed nil back, got %v", result)
+    }
+}
+
+func TestMarkLogged_MarksThroughAPlainWrapper(t *testing.T) {
+    innerErr := NewError("inner", nil, nil)
+    wrappedErr := fmt.Errorf("outer: %w", innerErr)
+
+    result := MarkLogged(wrappedErr)
+
+    if wrappedErr != result {
+        t.Fatalf("expected the same error back")
+    }
+
+    if false == innerErr.AlreadyLogged() {
+        t.Fatalf("expected the wrapped error to carry the mark")
+    }
+}
+
+func TestMarkLogged_TypedNilWithUnwrap_DoesNotWalkTheChain(t *testing.T) {
+    typedNil := (*ExitError)(nil)
+
+    result := MarkLogged(typedNil)
+
+    resultExit, ok := result.(*ExitError)
+    if false == ok || nil != resultExit {
+        t.Fatalf("expected the typed nil back, got %v", result)
+    }
+}
+
+func TestIsAlreadyLogged_ReadsTheMarkAtTheDepthMarkLoggedWritesIt(t *testing.T) {
+    httpException := NewHttpException(500, "reported once")
+
+    if true == IsAlreadyLogged(httpException) {
+        t.Fatalf("expected a fresh http exception to carry no mark")
+    }
+
+    _ = MarkLogged(httpException)
+
+    if false == IsAlreadyLogged(httpException) {
+        t.Fatalf("expected the mark written on the http exception to be read back")
+    }
+}
+
+func TestIsAlreadyLogged_FindsTheMarkThroughAWrapper(t *testing.T) {
+    marked := NewError("the reported failure", nil, nil)
+
+    _ = MarkLogged(marked)
+
+    wrapper := fmt.Errorf("while serving the request: %w", marked)
+
+    if false == IsAlreadyLogged(wrapper) {
+        t.Fatalf("expected the mark to be found through the wrapper")
+    }
+}
+
+func TestIsAlreadyLogged_TypedNilCarriesNoMarkAndDoesNotPanic(t *testing.T) {
+    var typedNil *Error
+
+    var asError error = typedNil
+
+    if nil == asError {
+        t.Fatalf("test setup broken: the typed nil must be a non-nil interface")
+    }
+
+    if true == IsAlreadyLogged(asError) {
+        t.Fatalf("expected a typed nil to carry no mark")
+    }
+
+    if true == IsAlreadyLogged(nil) {
+        t.Fatalf("expected a nil error to carry no mark")
+    }
+
+    /* an *Error is matched by errors.As at the top node, so the post-search guard answers it and the entry guard is never the only thing standing. An *ExitError implements no AlreadyLogged, so the search has to walk it through Unwrap, which reads a field off the nil receiver. */
+    var typedNilExit *ExitError
+
+    var exitAsError error = typedNilExit
+
+    if true == IsAlreadyLogged(exitAsError) {
+        t.Fatalf("expected a typed nil exit error to carry no mark")
+    }
+}
+
+func TestLogged_AForeignErrorComesBackAsAMarkedCarrier(t *testing.T) {
+    original := errors.New("plain handler failure")
+
+    reported := Logged(original)
+
+    if true == IsAlreadyLogged(original) {
+        t.Fatalf("a plain error has nowhere to carry the mark; it must not appear marked")
+    }
+
+    if false == IsAlreadyLogged(reported) {
+        t.Fatalf("expected the carrier to report itself already logged")
+    }
+
+    if false == errors.Is(reported, original) {
+        t.Fatalf("expected the carrier to keep the original as its cause")
+    }
+}
+
+func TestLogged_AMelodyErrorIsMarkedInPlaceAndKeepsItsIdentity(t *testing.T) {
+    original := NewError("melody failure", nil, nil)
+
+    reported := Logged(original)
+
+    if original != reported {
+        t.Fatalf("expected the very same error back, not a wrapper")
+    }
+
+    if false == IsAlreadyLogged(original) {
+        t.Fatalf("expected the original to carry the mark")
+    }
+}
+
+func TestLogged_AnHttpExceptionKeepsItsStatusThroughTheCarrier(t *testing.T) {
+    original := NotFound("no such article")
+
+    reported := Logged(original)
+
+    httpException := AsHttpException(reported)
+    if nil == httpException {
+        t.Fatalf("expected the status to stay resolvable")
+    }
+
+    if 404 != httpException.StatusCode() {
+        t.Fatalf("expected 404, got %d", httpException.StatusCode())
+    }
+}
+
+/* the wrapped shape is what the early return is for: on a bare melody error FromError is the identity, so only a foreign wrapper around a marked error can tell a return from a rewrap — and that is the shape a second writer meets, every writer between it and the failure having added its own context */
+func TestLogged_AnAlreadyLoggedErrorIsNotWrappedAgain(t *testing.T) {
+    original := MarkLogged(NewError("melody failure", nil, nil))
+
+    if original != Logged(original) {
+        t.Fatalf("expected an already marked error to come back untouched")
+    }
+
+    wrapped := fmt.Errorf("while saving the article: %w", original)
+
+    if wrapped != Logged(wrapped) {
+        t.Fatalf("expected a wrapper around a marked error to come back untouched, not wrapped a second time")
+    }
+}
+
+func TestLogged_ANilErrorStaysNil(t *testing.T) {
+    if nil != Logged(nil) {
+        t.Fatalf("expected nil")
     }
 }

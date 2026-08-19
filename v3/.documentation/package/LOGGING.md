@@ -173,6 +173,7 @@ Implemented in:
 - [`NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels)`](../../logging/default_logger.go)
 - [`NewNopLogger()`](../../logging/nop_logger.go)
 - [`NewRequestLogger(logger loggingcontract.Logger, requestId string, contextKey string)`](../../logging/request_logger.go)
+- [`NewStandardErrorLogger(logger loggingcontract.Logger, message string) *log.Logger`](../../logging/standard_logger.go) — the adapter net/http's `Server.ErrorLog` wants: one record per line at warning, the line carried in the context under `line`, the message left as the one groupable string a query can key on. A nil logger is inert and an empty line writes nothing
 - [`NewLoggingConfiguration(labels loggingcontract.LevelLabels)`](../../logging/logging_config.go)
 
 #### Utilities

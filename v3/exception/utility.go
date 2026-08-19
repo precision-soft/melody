@@ -2,10 +2,27 @@ package exception
 
 import (
     "errors"
+    "reflect"
 
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
+
+/* isNilInterfaceValue reports whether value is an interface holding a typed nil. It duplicates internal.IsNilInterface because that package imports this one. */
+func isNilInterfaceValue(value any) bool {
+    if nil == value {
+        return true
+    }
+
+    reflectedValue := reflect.ValueOf(value)
+
+    switch reflectedValue.Kind() {
+    case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+        return reflectedValue.IsNil()
+    default:
+        return false
+    }
+}
 
 func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract.Context {
     if nil == err {
@@ -135,17 +152,47 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
     return newWithLevel(err.Error(), mergedContext, err, level)
 }
 
+/* MarkLogged marks the nearest AlreadyLogged implementer in the chain — the depth IsAlreadyLogged reads the mark back from — and returns the error unchanged. */
 func MarkLogged(err error) error {
-    if nil == err {
-        return nil
+    if nil == err || true == isNilInterfaceValue(err) {
+        return err
     }
 
-    exceptionErr, ok := err.(exceptioncontract.AlreadyLogged)
-    if true == ok && nil != exceptionErr {
-        exceptionErr.MarkAsLogged()
+    var alreadyLoggedValue exceptioncontract.AlreadyLogged
+    if true == errors.As(err, &alreadyLoggedValue) && false == isNilInterfaceValue(alreadyLoggedValue) {
+        alreadyLoggedValue.MarkAsLogged()
     }
 
     return err
+}
+
+/* Logged answers an error that reports itself already logged, and is what a writer returns after filing its record. An error whose chain carries an AlreadyLogged implementer is marked in place and handed back unchanged, so its identity — and every errors.Is and errors.As its readers perform on it — survives. An error whose chain carries none has nowhere for the mark to live: errors.New, fmt.Errorf and every runtime error make MarkLogged a silent no-op, and the next reader then files the same failure a second time. That error is wrapped in a marked melody error keeping it as its cause, so the mark the writer meant to leave is the mark the reader finds. The wrap cannot change how a status is resolved: it happens exactly when no HttpException is in the chain, which is exactly when the status was already going to be the generic one. */
+func Logged(err error) error {
+    if nil == err || true == isNilInterfaceValue(err) {
+        return err
+    }
+
+    _ = MarkLogged(err)
+
+    if true == IsAlreadyLogged(err) {
+        return err
+    }
+
+    return MarkLogged(FromError(err))
+}
+
+/* IsAlreadyLogged reads the mark at the depth MarkLogged writes it. It is the single reader: reading the mark off a concrete *Error instead misses a marked HttpException and anything wrapping a marked error, which are then rendered a second time. */
+func IsAlreadyLogged(err error) bool {
+    if nil == err || true == isNilInterfaceValue(err) {
+        return false
+    }
+
+    var alreadyLoggedValue exceptioncontract.AlreadyLogged
+    if false == errors.As(err, &alreadyLoggedValue) || true == isNilInterfaceValue(alreadyLoggedValue) {
+        return false
+    }
+
+    return alreadyLoggedValue.AlreadyLogged()
 }
 
 func copyStringMap[T any](input map[string]T) map[string]T {
@@ -209,7 +256,7 @@ func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
 
     current := causeErr
     for depth := 0; depth < maxDepth && nil != current; depth++ {
-        /* @important assert on the immediate node, do not errors.As: a deep search jumps ahead to the nearest *Error while the cursor advances one link at a time, so a plain wrapper in front of an *Error would emit that *Error's context once per intervening level. One entry per link, matching BuildCauseChain. */
+        /* assert on the immediate node, do not errors.As: a deep search jumps ahead to the nearest *Error while the cursor advances one link at a time, so a plain wrapper in front of an *Error would emit that *Error's context once per intervening level. One entry per link, matching BuildCauseChain. */
         causeException, isException := current.(*Error)
         if true == isException && nil != causeException {
             causeContext := causeException.Context()

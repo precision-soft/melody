@@ -96,6 +96,7 @@ const (
     environmentKeyMysqlDatabase = "MYSQL_DATABASE"
     environmentKeyMysqlUser     = "MYSQL_USER"
     environmentKeyMysqlPassword = "MYSQL_PASSWORD"
+    environmentKeyMysqlInsecure = "MYSQL_INSECURE"
 
     environmentKeyRedisAddress = "REDIS_ADDRESS"
 

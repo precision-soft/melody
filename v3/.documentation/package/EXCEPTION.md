@@ -31,6 +31,8 @@ Melody uses this package to:
     - [`FromErrorWithLevelAndContext`](../../exception/utility.go)
     - [`LogContext`](../../exception/utility.go)
     - [`MarkLogged`](../../exception/utility.go)
+    - [`Logged`](../../exception/utility.go)
+    - [`IsAlreadyLogged`](../../exception/utility.go)
 - Fail-fast helpers:
     - [`Panic`](../../exception/panic.go)
     - [`Exit`](../../exception/panic.go)
@@ -106,7 +108,8 @@ func readFile(path string) []byte {
 
 - `exception.Panic` is the framework-standard fail-fast mechanism; it intentionally does not attempt to recover.
 - Context keys should use camelCase (for example, `"serviceName"`, `"httpStatusCode"`), consistent with framework conventions.
-- `MarkLogged` enables suppressing duplicate logs when errors cross layers.
+- `MarkLogged` enables suppressing duplicate logs when errors cross layers. It marks the nearest markable error in the chain — the same depth at which `IsAlreadyLogged` reads the mark back — so marking a wrapped error is not a no-op.
+- `MarkLogged` has nowhere to write on an error whose chain carries no markable link: `errors.New`, `fmt.Errorf` and every runtime error implement neither exception type, so the call is a silent no-op and the next reader files the same failure again. `Logged` is what a writer returns after filing its record — it marks in place when it can, keeping the error's identity and every `errors.Is`/`errors.As` its readers perform, and otherwise hands back a marked melody error keeping the original as its cause. The wrap cannot change a resolved status: it happens exactly when no `HttpException` is in the chain, which is exactly when the status was already the generic one.
 
 ## Userland API
 
@@ -144,6 +147,8 @@ func readFile(path string) []byte {
     - [`FromErrorWithLevel`](../../exception/utility.go)
     - [`FromErrorWithLevelAndContext`](../../exception/utility.go)
     - [`MarkLogged`](../../exception/utility.go)
+    - [`Logged(err error) error`](../../exception/utility.go)
+    - [`IsAlreadyLogged(err error) bool`](../../exception/utility.go)
 - Fail-fast and exit:
     - [`Panic(err *Error)`](../../exception/panic.go)
     - [`Exit(err *ExitError)`](../../exception/panic.go)

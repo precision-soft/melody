@@ -111,17 +111,6 @@ v3 ~ SECURITY.md ~ Source                           ~ the matched rule's Source 
 # bunorm core — the v1 and v2 readmes name the registry constructor and the v3 readme does not. The audit
 # and encrypt types stood here too, until the published readmes stopped carrying sections about a binding
 # they do not ship: all three readmes now leave those to the sub-readmes that live beside the code.
-v3 ~ integrations/bunorm/README.md ~ NewManagerRegistry ~ the registry constructor is named by v1 and v2 only
-
-# bunorm drivers — the published readmes carry a typed-configuration section and a migration-open section
-# that the v3 readmes do not.
-v3 ~ integrations/bunorm/mysql/README.md ~ PoolConfig      ~ the typed configurations are listed by v1 and v2 only
-v3 ~ integrations/bunorm/mysql/README.md ~ TimeoutConfig   ~ the typed configurations are listed by v1 and v2 only
-v3 ~ integrations/bunorm/mysql/README.md ~ RetryConfig     ~ the typed configurations are listed by v1 and v2 only
-v3 ~ integrations/bunorm/mysql/README.md ~ PostBuildHook   ~ the post-build hook signature is listed by v1 and v2 only
-v3 ~ integrations/bunorm/mysql/README.md ~ OpenForMigration ~ the migration open is named by v1 and v2 only
-v3 ~ integrations/bunorm/pgsql/README.md ~ PoolConfig      ~ the typed configurations are listed by v1 and v2 only
-v3 ~ integrations/bunorm/pgsql/README.md ~ RetryConfig     ~ the typed configurations are listed by v1 and v2 only
 
 # rueidis — the published readmes name the configuration defaults and the runtime helper; the v3 readme
 # names neither, and `WithTokenStorePrefix` is a v3-only door its own readme still does not list.

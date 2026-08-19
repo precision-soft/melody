@@ -16,6 +16,18 @@ encrypt database factory resolve it at their first use instead of receiving the 
 composition-root time. */
 const serviceDatabase = "service-example-database"
 
+/*
+dialIsInsecure reads a transport switch. The provider negotiates a verified
+TLS handshake by default; the development compose mysql speaks plain TCP, so
+the shipped .env arms the insecure dial explicitly — the decision is visible
+in configuration rather than buried in the wiring. The spelling is exact: any
+value but "true" keeps the verified handshake, because a credential-bearing
+dial downgrades only on an unambiguous instruction.
+*/
+func dialIsInsecure(insecureValue string) bool {
+    return "true" == insecureValue
+}
+
 func (instance *Module) buildDatabase() {
     host := instance.environmentValue(environmentKeyMysqlHost)
     if "" == host {
@@ -31,9 +43,14 @@ func (instance *Module) buildDatabase() {
        database container — mysql often takes 20-30s to accept connections while the app boots in seconds,
        and buildDatabase panics on a hard failure. The provider only retries transient errors (connection
        refused), so a real misconfiguration still fails fast. */
-    provider := melodymysql.NewProvider(
+    optionList := []melodymysql.ProviderOption{
         melodymysql.WithRetryConfig(melodymysql.NewRetryConfig(10, time.Second, 5*time.Second, 2.0)),
-    )
+    }
+    if true == dialIsInsecure(instance.environmentValue(environmentKeyMysqlInsecure)) {
+        optionList = append(optionList, melodymysql.WithInsecure(true))
+    }
+
+    provider := melodymysql.NewProvider(optionList...)
 
     database, openErr := provider.Open(
         melodybunorm.ConnectionParameters{

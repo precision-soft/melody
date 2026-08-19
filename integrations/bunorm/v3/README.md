@@ -107,6 +107,8 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
 }
 ```
 
+[`NewManagerRegistry`](./manager_registry.go) takes a `logging/contract.Logger` as its first argument (it is handed to every `Provider.Open`), then the provider definitions as variadic values. It fails with `ErrLoggerIsRequired` on a nil logger and `ErrNoProviderDefinitions` when no definition is given. `NewManagerRegistryWithContext` additionally binds the registry to a context its lazy opens run under: a provider that implements `ContextOpener` refuses an open the context already cancelled and has its retry sleeps watch the context alongside the clock, and the same preference reaches the migration open through `MigrationContextOpener`. Because this major hands providers the connection values rather than the configuration keys they came from, credential redaction is armed by the application through `ManagerRegistry.MarkSecretParameters` — it marks every parameter the caller names and every one a definition's provider declares through `SecretParameterProvider`, without a dial, so `debug:parameters` redacts the password in a process that never opens a connection. Opening a connection also routes bun's own diagnostic channel into the application's journal, once per process, through `RouteDiagnostics`.
+
 ### Consuming the default database
 
 ```go
