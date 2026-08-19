@@ -208,6 +208,7 @@ The example wires **every v3 platform integration**. Each backend that needs ext
 | [`rueidis`](../../integrations/rueidis/v3/) — Redis cache backend, distributed lock (`lock.ServiceLocker`), revocable token store, SSE backplane | `REDIS_ADDRESS`                              | in-memory cache/lock     | `POST /access-token/issue/`                   |
 | [`bunorm/mysql`](../../integrations/bunorm/mysql/v3/) — MySQL `GET_LOCK` distributed lock                                                        | `MYSQL_HOST` (when `REDIS_ADDRESS` is unset) | in-memory lock           | `GET /platform/check`                         |
 | [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                 | —                        | every catalogue write: audited and journalled |
+| [`bunorm/migrate`](../../integrations/bunorm/migrate/v3/) — the `db:*` migration command family                                                   | always on (fails at `Run` without a database) | —                        | `db:migrate`, `db:status`, `db:rollback`      |
 
 The lock service follows a single priority: Redis if configured, otherwise MySQL, otherwise in-memory. Transparent encryption-at-rest is not shown through a route of its own: the two-factor enrollment table stores the shared secret and the recovery codes as `encrypt.EncryptedString` columns, so `POST /twofactor/enroll` writes ciphertext MySQL holds and `POST /twofactor/verify` reads it back to recompute a code. `GET /encrypt/roundtrip` reports the ciphertext beside the value that came back, which is the half a stored column cannot show.
 
@@ -216,6 +217,21 @@ Several wirings deliberately defer their resolution to first use instead of the 
 - `example:exclusive:tick` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the first `CreateLock` — with a distributed locker configured (Redis or MySQL), run it from two shells at once and exactly one executes while the other exits zero. Under the in-memory fallback the exclusivity is per-process, so two separate shells both execute.
 - The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered in the `StoreFactory`/`RelayFactory` shape: the store (which ensures the `melody_outbox` schema) and the relay (which opens the transport) are built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. Endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
 - The encrypt module resolves the shared `*bun.DB` through a `DatabaseFactory` evaluated at the first `melody:encrypt:database` run, so http- and worker-mode processes register the command without touching the database.
+
+### The migration set
+
+The schema is owned by one migration set in [`migration/`](./migration/) — six MySQL DDL migrations, one per table: the four catalogue tables, the journal, and the two-factor enrollment table neither frozen major carries. This major keeps all six on one connection, so one set covers the whole schema and no migration context is declared. Two doors run the set, so neither can drift from the other:
+
+- the **composition root and the repository constructors** call `migration.EnsureMigrated`. `buildTwoFactor` calls it at boot — this example dials eagerly, so the schema is in place before the first request rather than at the first resolution the way v1 and v2 do it — and each repository constructor calls it again before seeding, which is what keeps a freshly recreated volume usable with no operator step. It is also why every `CREATE TABLE` carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry that names `db:unlock` when it gives up;
+- the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`) runs the same set from the operator's side. It comes from the [`integrations/bunorm/migrate`](../../integrations/bunorm/migrate/v3/) module facade registered in [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service.
+
+The connection itself is declared in a `bunorm.ManagerRegistry` ([`config/database.go`](./config/database.go)) rather than opened directly: the registry is the one door the commands resolve, and the `*bun.DB` the rest of the application holds is its default manager. Closing the registry is what closes the pool.
+
+The module is registered whether or not a database is configured, so the command surface does not change between environments; without one every `db:*` command fails at `Run` with the container refusal naming the registry service.
+
+The framework's own tables are not in the set: the outbox store and the audit registry each open their schema through the module that owns it, and a set belonging to the application would claim tables it does not own.
+
+The set lives in a database of this major's own — `melody_example_v3`, named in [`.env`](./.env). The three example applications share the development MySQL and not a database in it: the bun bookkeeping tables (`bun_migrations`, `bun_migration_locks`) keep their default names, and bun matches an applied migration by name, so on one shared database the three sets would share one bookkeeping table and the first to land would answer for the others.
 
 ### Running fully against containers
 

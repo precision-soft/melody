@@ -114,7 +114,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerStorageService(registrar)
     instance.registerLockerService(registrar)
-    instance.registerDatabaseService(registrar)
+    instance.registerDatabaseServices(registrar)
 
     /* @info the repositories, the domain services and the reporting services are not registered here: melody:wiring:generate scans the packages declared in NewWiringBindSet, resolves every constructor argument that is a service from the container and every scalar from the parameter it is bound to, and renders the registrations below. Adding one is a matter of writing the constructor and regenerating. Regenerate with `go run . melody:wiring:generate --package generated --function RegisterGeneratedServices --out generated/wiring_gen.go`. */
     generated.RegisterGeneratedServices(registrar)

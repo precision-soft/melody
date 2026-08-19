@@ -8,8 +8,6 @@ import (
     "github.com/uptrace/bun"
 )
 
-const catalogJournalTable = "melody_example_v3_catalog_journal"
-
 /* catalogJournalRow is the journal as the database holds it. */
 type catalogJournalRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_catalog_journal,alias:journal"`
@@ -53,22 +51,6 @@ func newBunCatalogJournalRepository(database *bun.DB) *bunCatalogJournalReposito
 
 type bunCatalogJournalRepository struct {
     database *bun.DB
-}
-
-/* EnsureSchema creates the table when it is absent and adds the columns a table created by an earlier version of this application does not have yet.
-
-The second half is not optional here: the development database outlives the code that created its tables, so a CREATE TABLE IF NOT EXISTS alone leaves an old table standing without the new column and every write then fails on a column the model declares. */
-func (instance *bunCatalogJournalRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*catalogJournalRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
-    }
-
-    return ensureColumn(ctx, instance.database, catalogJournalTable, "request_id", "VARCHAR(255) NOT NULL DEFAULT ''")
 }
 
 func (instance *bunCatalogJournalRepository) Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error) {

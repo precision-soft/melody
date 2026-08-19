@@ -4,6 +4,7 @@ import (
     "time"
 
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
+    bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     melodycron "github.com/precision-soft/melody/integrations/cron/v3"
     melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v3"
@@ -12,6 +13,7 @@ import (
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
     melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v3"
+    "github.com/precision-soft/melody/v3/.example/migration"
     melodyapplication "github.com/precision-soft/melody/v3/application"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
@@ -61,6 +63,18 @@ func Configure(app *melodyapplication.Application) {
             RelayFactory: moduleInstance.outboxRelayFactory,
         }))
     }
+
+    /* the db:* family is registered whether or not a database is configured, so the command surface does not
+       change between environments; without one every db:* command fails at Run with the container refusal
+       naming the registry service. No context family is declared: this major keeps the journal, the
+       two-factor enrollment and the catalogue on one connection, so a single set covers the whole schema and
+       the registry has a single manager for the unprefixed commands to reach. */
+    app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
+        Migrations: migration.Migrations,
+        Options: bunormmigrate.Options{
+            ManagerRegistryServiceId: serviceDatabaseRegistry,
+        },
+    }))
 
     /* @info cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
     app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{

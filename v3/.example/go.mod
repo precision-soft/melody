@@ -6,6 +6,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.77
 	github.com/precision-soft/melody/integrations/amqp/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/awss3/v3 v3.0.0
+	github.com/precision-soft/melody/integrations/bunorm/migrate/v3 v3.1.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql/v3 v3.1.0
 	github.com/precision-soft/melody/integrations/bunorm/v3 v3.3.0
 	github.com/precision-soft/melody/integrations/cron/v3 v3.3.0
@@ -91,5 +92,7 @@ replace github.com/precision-soft/melody/integrations/rueidis/v3 => ../../integr
 replace github.com/precision-soft/melody/integrations/bunorm/v3 => ../../integrations/bunorm/v3
 
 replace github.com/precision-soft/melody/integrations/bunorm/mysql/v3 => ../../integrations/bunorm/mysql/v3
+
+replace github.com/precision-soft/melody/integrations/bunorm/migrate/v3 => ../../integrations/bunorm/migrate/v3
 
 replace github.com/precision-soft/melody/integrations/outbox/v3 => ../../integrations/outbox/v3

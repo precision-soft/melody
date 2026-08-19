@@ -180,6 +180,20 @@ e2e_ensure_example_databases() {
     done
 }
 
+# e2e_mysql_scalar <database> <statement> prints the single value a statement answers, read straight from the
+# mysql service rather than through an application. It is how a check states what the database holds when the
+# application cannot say so — a rollback that dropped live tables leaves nothing to ask a command about, and a
+# log line saying it happened is the application's word for it rather than the state itself. An unreachable
+# server prints nothing, which every caller reads as a mismatch rather than as agreement.
+e2e_mysql_scalar() {
+    local DATABASE_STRING="${1:?}"
+    local STATEMENT_STRING="${2:?}"
+
+    docker_compose_no_log --profile all exec -T "${E2E_MYSQL_SERVICE_NAME_STRING}" \
+        mysql -uroot -proot --batch --skip-column-names -D "${DATABASE_STRING}" -e "${STATEMENT_STRING}" \
+        </dev/null 2>/dev/null | tr -d '\r\n' || true
+}
+
 # builds the in-container command line: go on the PATH, GOWORK=off, the backend env exported, then cd into
 # the working directory. The cd is a statement of its own: joining it to the command with && would make a
 # trailing & background the whole chain, leaving the foreground shell outside the working directory.

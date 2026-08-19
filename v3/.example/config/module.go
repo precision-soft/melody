@@ -5,6 +5,7 @@ import (
 
     minio "github.com/minio/minio-go/v7"
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
+    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/twofactor"
@@ -63,8 +64,11 @@ type Module struct {
     storageBucket string
     storage       *melodyawss3.Storage
 
-    database *bun.DB
-    cipher   melodyencrypt.Cipher
+    /* the registry is the one door onto the connection: the db:* command family resolves it by name, and the
+    handle below is its default manager rather than a second pool opened beside it. */
+    databaseRegistry *melodybunorm.ManagerRegistry
+    database         *bun.DB
+    cipher           melodyencrypt.Cipher
 }
 
 func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module {

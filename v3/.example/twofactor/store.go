@@ -35,17 +35,6 @@ type Store struct {
     database *bun.DB
 }
 
-/* EnsureSchema creates the enrollment table. Production code would express this through the
- * bunorm migrate package instead of creating the table inline. */
-func (instance *Store) EnsureSchema(ctx context.Context) error {
-    _, execErr := instance.database.NewCreateTable().
-        Model((*Enrollment)(nil)).
-        IfNotExists().
-        Exec(ctx)
-
-    return execErr
-}
-
 /* Enroll generates a fresh secret and recovery codes for a user, persists them
  * encrypted, and returns the secret, the otpauth URI to render as a QR code, and the
  * plaintext recovery codes to show the user once. */

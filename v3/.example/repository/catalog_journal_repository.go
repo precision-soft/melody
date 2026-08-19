@@ -4,6 +4,7 @@ import (
     "context"
     "time"
 
+    "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -37,9 +38,6 @@ type CatalogJournalEntry struct {
 }
 
 type CatalogJournalRepository interface {
-    /* EnsureSchema creates the journal table when it is absent. The example carries no migration runner, so the repository owns the one table it writes and creates it on the path that reaches it. */
-    EnsureSchema(ctx context.Context) error
-
     Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error)
 
     /* AppendBatch writes everything one request accumulated in a single statement. It is what the request-scoped trail flushes into, so a request that changed several records costs one round trip rather than one per change. An empty batch is not an error and touches nothing. */
@@ -61,12 +59,10 @@ func NewCatalogJournalRepository(storage *persistence.CatalogStorage) (CatalogJo
         return newInMemoryCatalogJournalRepository(), nil
     }
 
-    repositoryInstance := newBunCatalogJournalRepository(storage.Database())
-
-    ensureSchemaErr := repositoryInstance.EnsureSchema(context.Background())
-    if nil != ensureSchemaErr {
-        return nil, ensureSchemaErr
+    migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
+    if nil != migrateErr {
+        return nil, migrateErr
     }
 
-    return repositoryInstance, nil
+    return newBunCatalogJournalRepository(storage.Database()), nil
 }

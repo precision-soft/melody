@@ -39,6 +39,9 @@
 #                        while an ordinary parameter still prints in clear
 #   - OPTIONAL ENV KEY   the default processor falls back when the key is unset, an .env.local override
 #                        wins over the fallback, and the empty-string fallback resolves to ""
+#   - V3 MIGRATIONS      the db:* family over the v3 example's own six-migration set — the catalogue, the
+#                        journal and the two-factor enrollment table — with the machine document asserted
+#                        from a live application and the rollback read straight out of mysql
 #   - V1 CRON RUNNER     the v1 example registers the cron module: melody:cron:run boots from the shared
 #                        Configuration, reports its user-carrying entries and answers the json envelope
 #   - V1 MIGRATIONS      the bunorm/migrate command family runs the same migration set the v1 providers
@@ -58,7 +61,7 @@
 # Everything runs inside the dev container against the compose stack, through the helpers in common.sh.
 # The example's .env.local is written and restored by the process-role check; it is git-ignored.
 #
-# The checks up to OPTIONAL ENV KEY drive the v3 example, and say so in the banner they print at the start; the
+# The checks up to V3 MIGRATIONS drive the v3 example, and say so in the banner they print at the start; the
 # sections whose banner begins with V1 or V2 drive /app/.example and /app/v2/.example through
 # e2e_example_directory. The v3 pin is not an
 # oversight to be generalized later. Some of those checks exercise a module that exists only in v3: wiring
@@ -67,9 +70,10 @@
 # and example:grant:role, the command-owned --role flag, the process_role line its app:info prints, the
 # product:list --limit flag, the cron configuration the templates render, and the parameter the optional-env-key
 # check reads. Generalizing those would mean changing the v1 and v2 example applications, not this script. The
-# V1 and V2 sections exist for the mirror-image reason: the cron module registration, the bunorm/migrate
-# command family and the cli/output rendering of the example's own commands are wiring the two published
-# majors carry and the v3 example does not.
+# V1 and V2 sections exist for the mirror-image reason: the cron module registration and the cli/output
+# rendering of the example's own commands are wiring the two published majors carry over their own
+# migration sets, and each major's set is its own — the tables, the identifiers and the count differ, so
+# one section per major is what states them.
 #
 # The coverage that DOES generalize across the three majors — boot, a public route, the login/session flow,
 # path-traversal containment, a 404, the command line and a single-SIGINT shutdown — lives in the run.sh harness,
@@ -90,13 +94,14 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=91
+EXPECTED_CHECK_COUNT_INTEGER=101
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
 info "stack checks drive the v3 example application: ${EXAMPLE_DIRECTORY_STRING}"
 info "v3-only module: wiring generate, openapi generate, outbox relay, encrypt bulk"
 info "v3-only through the example app: exclusive/grant demo commands, command-owned --role, app:info process_role, product:list --limit, cron configuration, optional-env-key parameter"
+info "the v3 example registers the bunorm/migrate family over its own six-migration set (V3 DATABASE MIGRATIONS)"
 info "the V1 sections drive the v1 example application: $(e2e_example_directory 1) (cron module, bunorm/migrate family, cli/output envelope, dev debug commands)"
 info "the V2 sections drive the v2 example application: $(e2e_example_directory 2) (the same four, over a five-migration set that carries the journal)"
 info "per-major coverage (boot, login/session, traversal, 404, cli, SIGINT) runs in .dev/e2e/run.sh for majors: ${MELODY_E2E_MAJORS:-<none>}"
@@ -920,6 +925,123 @@ restore_example_env_local
 trap - EXIT
 
 check_section_end "OPTIONAL ENV KEY" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 DATABASE MIGRATIONS — the db:* family and the composition root run one set over six tables
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
+
+# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops all six tables of the v3 example's own
+# melody_example_v3 database — the four catalogue ones, the journal, and the two-factor enrollment table
+# neither frozen major carries. Every later step exists to put the state back — the next boot restores the
+# schema, and the two resolutions after it reseed the catalogue and the user directory — so the section must
+# run to its end whatever the intermediate verdicts, which check_fail already guarantees. The journal is
+# append-only with no seeds and nobody is enrolled by default, so an empty journal and an empty enrollment
+# table ARE their restored state. The framework's own tables are untouched: the outbox store and the audit
+# registry open their schema through the module that owns it, and the set claims neither.
+#
+# This major differs from the two frozen ones in WHEN the set is applied. Its composition root is eager —
+# the connection is dialled at boot and the two-factor build step applies the set there — where v1 and v2
+# apply it lazily at the first repository resolution. So every command of this application boots over an
+# up-to-date schema, and what the checks below read is the database itself rather than a command's word for
+# it: the count of the example's own tables before and after each step.
+#
+# The six are named one by one rather than matched on a prefix: the audit registry's own table is called
+# melody_example_v3_audit and would be counted by any LIKE that catches the six, while it belongs to the
+# framework module that opens it and correctly survives a rollback of this set. Its survival is the check's
+# quiet half — a set that had claimed it would take it down with the rest.
+V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'melody_example_v3' AND table_name IN ('melody_example_v3_category', 'melody_example_v3_currency', 'melody_example_v3_product', 'melody_example_v3_user', 'melody_example_v3_catalog_journal', 'melody_example_v3_two_factor')"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:init >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 db:init is idempotent over the existing bookkeeping tables"
+else
+    check_fail "v3 db:init failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:migrate >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 db:migrate answers success over the set the composition root already applied"
+else
+    check_fail "v3 db:migrate failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_STATUS_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${V3_STATUS_OUTPUT_STRING}" | grep -q '0 pending' && printf '%s' "${V3_STATUS_OUTPUT_STRING}" | grep -q '20260819000006'; then
+    check_pass "v3 db:status reports the applied set by name with nothing pending"
+else
+    check_fail "v3 db:status does not report the applied set (${V3_STATUS_OUTPUT_STRING:-<empty>})"
+fi
+
+# the machine document is the half of the command family a person never reads: one closed json object on one
+# line, keyed on stable names rather than on the headings the table renders, with the server's own identity
+# beside the set. Only an application wired to a live database can answer it, which is why it is asserted
+# here rather than in the package's own tests.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:status --format=json 2>/dev/null | tail -1"
+V3_STATUS_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+
+if printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"migrations":{"applied":\["20260819000006"' \
+    && printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"database":"melody_example_v3"' \
+    && printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"error":null'; then
+    check_pass "v3 db:status --format=json renders one document naming the set, the database and no error"
+else
+    check_fail "the v3 db:status machine document is not the expected envelope (${V3_STATUS_JSON_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:unlock >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 db:unlock clears the lock table over a database nobody is migrating"
+else
+    check_fail "v3 db:unlock failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:rollback 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qi 'rolled back'; then
+    check_pass "v3 db:rollback reverted the last group (the six live tables are dropped until the next boot)"
+else
+    check_fail "v3 db:rollback did not report the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# read out of band, between the rollback and the next boot: this is the one window in which the drop is
+# observable, because the very next application process applies the set again on its way up
+V3_TABLE_COUNT_AFTER_ROLLBACK_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING}")"
+if [[ "0" = "${V3_TABLE_COUNT_AFTER_ROLLBACK_STRING}" ]]; then
+    check_pass "the six v3 example tables are gone from mysql after the rollback (read out of band; the audit table, which the set does not own, stands)"
+else
+    check_fail "the rollback left ${V3_TABLE_COUNT_AFTER_ROLLBACK_STRING:-<no answer>} v3 example tables standing"
+fi
+
+# a fresh process resolves the product repository, which runs the same migration set programmatically and
+# then reseeds the empty catalogue — the first-request tolerance the migration switch had to preserve. The
+# boot has already recreated every table by this point; what this step adds is the seed, which belongs to
+# the repository rather than to the set
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . product:list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'prod-1'; then
+    check_pass "a fresh v3 resolution migrated and reseeded the emptied catalogue (prod-1 is back)"
+else
+    check_fail "the fresh v3 resolution did not restore the catalogue (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+V3_TABLE_COUNT_AFTER_RESTORE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING}")"
+if [[ "6" = "${V3_TABLE_COUNT_AFTER_RESTORE_STRING}" ]]; then
+    check_pass "the operator's set and the application's are one: all six tables are back (read out of band)"
+else
+    check_fail "the restored schema holds ${V3_TABLE_COUNT_AFTER_RESTORE_STRING:-<no answer>} of the six v3 example tables"
+fi
+
+# the user table has no command of its own; resolving the user repository by name through debug:container
+# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container service.example.user.repository >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "resolving the v3 user repository reseeded the user directory"
+else
+    check_fail "the v3 user repository resolution failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+check_section_end "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # The V1 sections: the wiring only the v1 example carries today. They address the v1 example explicitly
