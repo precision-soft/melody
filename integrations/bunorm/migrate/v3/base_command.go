@@ -15,20 +15,25 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-/* @important the unlock must not ride the command context: an interrupted migration cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
+/* the unlock must not ride the command context: an interrupted migration cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
 const migrationUnlockTimeout = 5 * time.Second
 
 type migrationUnlocker interface {
     Unlock(ctx context.Context) error
 }
 
-func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput) {
+/* unlockMigrations reports the failed release through both channels: printed for the operator, returned for the exit code — a lock row that survives refuses every later migration on every replica, and a command that exits 0 over it tells the calling deploy script the opposite of the truth */
+func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput) error {
     unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), migrationUnlockTimeout)
     defer cancelUnlock()
 
     if unlockErr := unlocker.Unlock(unlockContext); nil != unlockErr {
         outputInstance.printError(unlockErr)
+
+        return unlockErr
     }
+
+    return nil
 }
 
 type baseCommand struct {

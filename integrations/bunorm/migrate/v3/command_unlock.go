@@ -1,6 +1,8 @@
 package migrate
 
 import (
+    "time"
+
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -27,26 +29,28 @@ func (instance *UnlockCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), []clicontract.Flag{instance.base.managerFlag()})
 }
 
-func (instance *UnlockCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *UnlockCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer, option)
 
+    startedAt := time.Now()
+    defer func() {
+        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+    }()
+
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
-        outputInstance.printError(dbErr)
         return dbErr
     }
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {
-        outputInstance.printError(migratorErr)
         return migratorErr
     }
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
-            outputInstance.printError(identityErr)
             return identityErr
         }
         if nil != identity {
@@ -57,13 +61,12 @@ func (instance *UnlockCommand) Run(runtimeInstance runtimecontract.Runtime, comm
 
     unlockErr := migrator.Unlock(runtimeInstance.Context())
     if nil != unlockErr {
-        outputInstance.printError(unlockErr)
         return unlockErr
     }
 
     outputInstance.printSuccess("migrations table unlocked")
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         outputInstance.newline()
         outputInstance.printDetailsBlock(map[string]string{
             "manager": managerName,

@@ -95,14 +95,48 @@ If you deliberately keep separate registries per context, set each context's `Ma
 
 * `CommandPrefix` (default `db`) controls the command namespace (`db:init`, `db:migrate`, …).
 * `ManagerFlagName` (default `manager`) controls the manager-selection flag (`--manager`).
-* `ManagerRegistryServiceId` (default `service.database.manager.registry`) is the container service id of the `*bunorm.ManagerRegistry`.
+* `ManagerRegistryServiceId` (default `service.database.manager.registry`) is the container service id of the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: they resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
 * `ManagerName` (default empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
 
-`RegisterCommands` returns an empty slice when `migrations` is `nil`.
+`RegisterCommands` refuses a `nil` migration set rather than answering with no commands: the silence left a
+caller believing it had registered the family and finding out at invocation time, as "unknown command".
+`NewModule` gates its own optional set before calling, so a binary that registers only `Contexts` never
+reaches the refusal — and a `ModuleConfig` carrying neither `Migrations` nor `Contexts` is itself refused by
+name at registration.
 
 ## Commands
 
-All commands accept the standard Melody output flags, but only `--verbose` and `--no-color` affect the output; `--format=json` is not implemented (the commands always print their plain-text output). The manager can be selected with `--<managerFlagName>`; if omitted, the registry default manager is used.
+All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output
+and renders one machine-readable json envelope on a single line — the failure included — instead of the
+plain-text output; `--format=json-pretty` renders the same document indented for reading by hand, and
+`--verbose` and `--no-color` shape the plain-text output alone.
+
+The json document therefore carries every block the command produces at any verbosity: `--verbose` never
+shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`,
+`data.migrations.rolledBack`, `data.database`, `data.files`, `data.messages` — and are not the headings the
+text blocks print. `data.database.database` is json `null` when the connection reports no current database,
+where the text block renders `<null>`. One consequence is worth knowing: a json run performs the
+database-identity query a text run only performs under `--verbose`.
+
+The plain-text rendering escapes C0 control characters and DEL visibly (`\n`, `\r`, `\t`, the rest as `\xNN`)
+in every string the commands did not write themselves — the error text off the wire, the failed statement,
+the query names, the identity block the server answers and the migration names — and it does so before the
+table cells are measured, so the alignment counts the escaped spelling. The failed statement alone keeps its
+real line breaks. The json rendering needs none of this: its encoder escapes on its own.
+
+The verbose `DATABASE` block is answered for MySQL and for PostgreSQL. Over a unix socket — the connection a
+local migration is most likely to take — PostgreSQL reports no server address, so the host reads
+`<local socket>`.
+
+All six commands prefer the dedicated migration connection when the registry's provider implements
+`bunorm.MigrationProvider`, and fall back to the ordinary pool otherwise: the request pool carries driver
+deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement. The
+manager label says which connection carried the run — `(dedicated migration connection)`.
+
+The manager can be selected with `--<managerFlagName>`. Without the flag the `ManagerName` pin from the
+registration options is used, and only an empty pin falls back to the registry default — which is the point
+of pinning one manager per command set, so a multi-context binary cannot migrate the wrong database by
+omitting the flag.
 
 With the default prefix (`db`):
 

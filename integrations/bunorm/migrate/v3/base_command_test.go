@@ -21,7 +21,7 @@ import (
 
 type stubProvider struct{}
 
-func (instance *stubProvider) Open(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *stubProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("stub provider open must not be called for an unknown manager")
 }
 
@@ -73,8 +73,8 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
         t.Fatalf("resolveDatabase panicked on an unknown manager name instead of returning an error")
     }
 
-    if nil == resolveErr {
-        t.Fatalf("expected an error for an unknown manager name, got nil")
+    if false == errors.Is(resolveErr, bunorm.ErrProviderDefinitionNotFound) {
+        t.Fatalf("expected ErrProviderDefinitionNotFound for the unknown manager name, got %v", resolveErr)
     }
 }
 
@@ -191,7 +191,9 @@ func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{}
     outputInstance, _ := newBufferedOutput(true)
 
-    unlockMigrations(cancelledContext, unlocker, outputInstance)
+    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance); nil != unlockErr {
+        t.Fatalf("expected no error from a successful unlock, got %v", unlockErr)
+    }
 
     if false == unlocker.called {
         t.Fatalf("expected the unlock to be attempted")
@@ -211,13 +213,96 @@ func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
 }
 
 func TestUnlockMigrations_ReportsAFailedUnlock(t *testing.T) {
-    unlocker := &recordingMigrationUnlocker{unlockError: errors.New("delete refused")}
+    deleteRefused := errors.New("delete refused")
+    unlocker := &recordingMigrationUnlocker{unlockError: deleteRefused}
     outputInstance, buffer := newBufferedOutput(true)
 
-    unlockMigrations(context.Background(), unlocker, outputInstance)
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance)
 
     if false == strings.Contains(buffer.String(), "delete refused") {
         t.Fatalf("expected the unlock failure to be reported, got %q", buffer.String())
+    }
+
+    /* the printed line alone is not enough: the failure must also reach the exit code, or a deploy script reads success over a lock row that refuses every later migration */
+    if false == errors.Is(unlockErr, deleteRefused) {
+        t.Fatalf("expected the unlock failure to be returned for the exit code, got %v", unlockErr)
+    }
+}
+
+type migrationCapableDatabaseProvider struct {
+    database          *bun.DB
+    migrationDatabase *bun.DB
+}
+
+func (instance *migrationCapableDatabaseProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.database, nil
+}
+
+func (instance *migrationCapableDatabaseProvider) OpenForMigration(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.migrationDatabase, nil
+}
+
+/* the commands prefer the dedicated migration connection and say so in the label, so a verbose run names the connection its DDL actually rides */
+func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
+    ordinaryDatabase, _ := newFakeBunDatabase()
+    migrationDatabase, _ := newFakeBunDatabase()
+
+    registry, registryErr := bunorm.NewManagerRegistry(
+        logging.NewNopLogger(),
+        bunorm.ProviderDefinition{
+            Name:      "primary",
+            Provider:  &migrationCapableDatabaseProvider{database: ordinaryDatabase, migrationDatabase: migrationDatabase},
+            IsDefault: true,
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    options := DefaultOptions()
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[*bunorm.ManagerRegistry](
+        serviceContainer,
+        options.ManagerRegistryServiceId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+    )
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    base := &baseCommand{options: options}
+
+    resolvedDatabase := (*bun.DB)(nil)
+    resolvedLabel := ""
+
+    command := &clicontract.CommandContext{
+        Name:  "migrate",
+        Flags: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
+        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
+            database, label, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            if nil != resolveErr {
+                t.Errorf("unexpected resolve error: %s", resolveErr.Error())
+                return nil
+            }
+
+            resolvedDatabase = database
+            resolvedLabel = label
+
+            return nil
+        },
+    }
+
+    if runErr := command.Run(context.Background(), []string{"migrate"}); nil != runErr {
+        t.Fatalf("unexpected command error: %s", runErr.Error())
+    }
+
+    if migrationDatabase != resolvedDatabase {
+        t.Fatalf("expected the dedicated migration database, not the ordinary pool")
+    }
+
+    if "<default> (dedicated migration connection)" != resolvedLabel {
+        t.Fatalf("expected the dedicated label, got %q", resolvedLabel)
     }
 }
 

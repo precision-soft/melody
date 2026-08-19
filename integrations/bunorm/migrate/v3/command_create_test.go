@@ -78,7 +78,8 @@ func TestCreateCommand_MissingNameFails(t *testing.T) {
         t.Fatalf("error = %q, want the missing-name message", runErr.Error())
     }
 
-    if false == strings.Contains(rendered, "ERROR:") {
-        t.Fatalf("error was not printed to the command output: %q", rendered)
+    /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it */
+    if true == strings.Contains(rendered, "ERROR:") {
+        t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
 }

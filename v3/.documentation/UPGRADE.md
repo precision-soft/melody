@@ -66,6 +66,54 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** Move your own `github.com/uptrace/bun/...` requirements to `v1.2.17` in the same change — `go get github.com/uptrace/bun@v1.2.17 github.com/uptrace/bun/dialect/mysqldialect@v1.2.17` and the equivalent for `pgdialect` / `pgdriver`. Applications that declare no bun dependency of their own need no action.
 
+### Bunorm migrate: the held-lock refusal names the resource and the remedy
+
+**What changed.** `<prefix>:migrate` and `<prefix>:rollback` wrap bun's lock error in a melody error naming the manager label, the lock table and the `<prefix>:unlock` command, with bun's error kept as the cause. It previously travelled as bun's own error, carrying no melody context at all.
+
+**Symptom.** Code matching the refusal on the text `already locked` no longer matches at the top of the chain: `Error()` answers `migrate: the migration lock is held; another migration is running, or a crashed one left it behind`.
+
+**Remedy.** Match through the chain — `errors.Is` and `errors.As` reach bun's error exactly as before — or read the `manager`, `locksTable` and `unlockCommand` keys of the context, which is what the wrap exists to provide.
+
+### Bunorm migrate: a failed lock release fails the command
+
+**What changed.** A `db:migrate` or `db:rollback` whose unlock fails now returns that failure instead of printing it and exiting 0. A migration that itself failed keeps its own error as the verdict, with the unlock failure printed beside it. The release also runs on a context detached from the command's own, so an interrupted migration no longer leaves the lock row behind.
+
+**Symptom.** A deploy step that read exit 0 over a surviving lock row — and then found every later migration refused on every replica — now fails at the step that caused it.
+
+**Remedy.** None for a healthy run. For the failure, `<prefix>:unlock` clears a lock a crashed process left behind, and the refusal above names it.
+
+### Bunorm migrate: the json document is not shaped by `--verbose`, and its keys are stable
+
+**What changed.** Under `--format=json`, `db:migrate`, `db:rollback`, `db:status`, `db:init` and `db:unlock` render one machine-readable envelope where they used to print the plain-text blocks, and they collect every block at any verbosity: verbosity remains a rendering decision about the plain text alone, which is what the readme always said. The document keys are stable names rather than display headings — `data.migrations.applied`, `.pending`, `.rolledBack` — and `data.database.database` is json `null` when the connection reports no current database, where the text block renders `<null>`. `--format=json-pretty` is the same document indented for reading by hand.
+
+**Symptom.** `db:status --format=json | jq` used to fail on the first byte of a plain-text table; it now decodes. A json run performs the database-identity query that a text run performs only under `--verbose`.
+
+**Remedy.** Read `data.migrations.applied`, `data.migrations.pending` and `data.migrations.rolledBack`; test `data.database.database` for null rather than for the string `"<null>"`. Anything that parsed the plain text under `--format=json` must decode the document instead — which is what the flag always promised.
+
+### Bunorm migrate: a nil migration set and an empty module configuration are refused
+
+**What changed.** `RegisterCommands(nil, ...)` panics at registration instead of answering no commands, and `NewModule(ModuleConfig{})` — neither `Migrations` nor `Contexts` — is refused by name when the kernel asks it for its commands. Both used to be silent.
+
+**Symptom.** A binary whose wiring passed a nil set, or registered the module with an empty configuration, fails at boot with a named refusal where it used to boot and answer `unknown command` at the first `db:migrate`.
+
+**Remedy.** Pass the migration set, or the contexts, that the registration was meant to carry. A binary that registers only `Contexts` is unaffected: the module gates its own optional set before calling `RegisterCommands`.
+
+### Bunorm migrate: the plain text escapes control characters, and the commands stop pre-printing their failure
+
+**What changed.** Every string the commands did not write themselves — the error text off the wire, the failed statement, the query names, the identity block the server answers and the migration names — is escaped visibly (`\n`, `\r`, `\t`, the rest as `\xNN`) before the terminal sees it, and before the table cells are measured, so the alignment counts the escaped spelling. The failed statement alone keeps its real line breaks. Separately, the commands no longer pre-print the failure they return: the cli runner's `[error]` line and the log record already report it. The json rendering is untouched — its encoder escapes on its own.
+
+**Symptom.** A test asserting an exact rendered line that contained a raw control byte sees its escaped spelling. A console that showed the same failure three times shows it twice.
+
+**Remedy.** Assert on the escaped spelling, which is what an operator's terminal now receives. The deliberate exception stays: an unlock failure beside a failed migration is still printed, because the return keeps the migration's error and would otherwise lose it.
+
+### Bunorm migrate: the verbose DATABASE block answers for PostgreSQL, and cells are cut by runes
+
+**What changed.** The `--verbose` DATABASE block was MySQL-only, so on a pgsql-backed manager the operator's confirmation of which database a migration was about to touch was silently absent rather than reported as unavailable; it is answered now through `current_database()`, `inet_server_addr()`, `inet_server_port()`, `current_user` and `version()`. Table cells are truncated by rune count rather than by bytes, matching the format widths that pad by runes.
+
+**Symptom.** `db:migrate --verbose` against postgres prints a DATABASE block where it printed none. Over a unix socket — the connection a local migration is most likely to take — the host reads `<local socket>`, because `inet_server_addr()` is NULL there. A multi-byte value that fit its column is no longer truncated, and no cut lands mid-rune.
+
+**Remedy.** None. Read the block; it reports the same five fields on both dialects.
+
 ### CLI: `--format=json` writes one document per line
 
 **What changed.** The json printer no longer indents. Every melody command's `--format=json` envelope — the framework's `debug:*` family and the core commands it contributes — is now one compact line terminated by a newline, where it used to be a block of indented lines. `--format=json-pretty` is the same document with the indentation back.
