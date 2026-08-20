@@ -291,7 +291,7 @@ A run writes the destinations the **current** configuration names, and by defaul
 `--prune` closes that. It empties, in `dir(--out)`, the destinations this run did not produce, so the retired job stops. Three rules bound it, because emptying a file is not reversible:
 
 * **Opt-in.** Without the flag the behaviour is exactly what it was. A deployment that manages the output directory itself — a release directory built fresh every time — needs nothing here.
-* **Proof of ownership.** Only a file whose head carries the current template's ownership marker is touched. The built-in dialects render `cron.CrontabOwnershipMarker` in their header block; a file you or another tool put in the same directory carries no marker and is left alone. A template of your own opts in by implementing `cron.OwnedTemplate` and including the string it returns in **everything** `Render` produces, entries or none — a template that does not implement it is never pruned.
+* **Proof of ownership.** Only a file whose head carries the current template's ownership marker is touched. The built-in dialects render `cron.CrontabOwnershipMarker` — the two crontab dialects in their header block, the v3 binding's `k8s` template as a leading YAML comment header on every manifest file; a file you or another tool put in the same directory carries no marker and is left alone. A template of your own opts in by implementing `cron.OwnedTemplate` and including the string it returns in **everything** `Render` produces, entries or none — a template that does not implement it is never pruned.
 * **The output directory only.** The sweep reads `dir(--out)` and does not recurse. An entry that named an absolute `DestinationFile` outside that directory is written where you asked and is never swept: those files live where the operator put them.
 
 Emptying means re-rendering the template with no entries, so the destination keeps its header — and with it its marker — and stays recognisable to the next run instead of becoming an unowned file the sweep would refuse to touch ever again. An empty configuration sweeps too: that is precisely the version in which every previously written destination is stale. The run stays a success either way, and the destinations it emptied are named on stdout and under `data.pruned` in the `--format=json` envelope, which is a list on every run.
@@ -334,34 +334,62 @@ These parameters are **not** registered by `RegisterDefaultParameters` (the cron
 
 ### Registering a custom template
 
+A dialect the binding does not ship — the example renders the registry as `ansible.builtin.cron` playbook tasks, whose `minute`/`hour`/`day`/`month`/`weekday` arguments take the five `Schedule` fields one to one, so no expression conversion is involved. (The full version, with the heartbeat task and the schedule defaulting, lives in [`v3/.example`](./v3/.example).)
+
 ```go
 import (
 melodycron "github.com/precision-soft/melody/integrations/cron/v3"
 )
 
-type KubernetesCronjobTemplate struct {
-Namespace string
-Image     string
+const ansibleCronOwnershipMarker = "# owned by melody:cron:generate (ansible-cron)"
+
+type AnsibleCronTemplate struct {
+TaskNamePrefix string
 }
 
-func (instance *KubernetesCronjobTemplate) Name() string {
-return "k8s_cronjob"
+func (instance *AnsibleCronTemplate) Name() string {
+return "ansible-cron"
 }
 
-func (instance *KubernetesCronjobTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
+func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
 forbidden := []melodycron.ForbiddenCharacter{
-{Char: '\t', Reason: "tabs break yaml indentation"},
+{Char: '\n', Reason: "a literal newline terminates the yaml scalar"},
 }
+
+var builder strings.Builder
+builder.WriteString(ansibleCronOwnershipMarker + "\n---\n")
+
 for _, entry := range entries {
-if validationErr := melodycron.ValidateNoForbiddenCharacters(entry.Command, forbidden, "k8s entry "+entry.Name); nil != validationErr {
+job := entry.Command
+if 0 == len(job) {
+job = append([]string{entry.Binary}, entry.Args...)
+}
+
+if validationErr := melodycron.ValidateNoForbiddenCharacters(job, forbidden, "ansible-cron entry "+entry.Name); nil != validationErr {
 return "", validationErr
 }
-}
-// ... build the YAML from entries + instance.Namespace + instance.Image ...
-return yamlContent, nil
+
+// ... one ansible.builtin.cron task per entry, from the schedule fields + instance.TaskNamePrefix ...
 }
 
-var _ melodycron.Template = (*KubernetesCronjobTemplate)(nil)
+return builder.String(), nil
+}
+
+/* the optional capabilities: the marker opts the dialect into --prune, and the user-column answer
+   keeps the generator's heartbeat-user demand honest for a dialect it knows nothing about */
+func (instance *AnsibleCronTemplate) OwnershipMarker() string {
+return ansibleCronOwnershipMarker
+}
+
+func (instance *AnsibleCronTemplate) RendersUserColumn() bool {
+return true
+}
+
+var (
+_ melodycron.Template           = (*AnsibleCronTemplate)(nil)
+_ melodycron.OwnedTemplate      = (*AnsibleCronTemplate)(nil)
+_ melodycron.UserColumnTemplate = (*AnsibleCronTemplate)(nil)
+)
 ```
 
 Hand the instance to `GenerateCommand.RegisterTemplate` before the kernel runs `melody:cron:generate`:
@@ -379,14 +407,13 @@ Schedule: &melodycron.Schedule{Minute: "0", Hour: "3"},
 })
 
 generateCommand := melodycron.NewGenerateCommand(cronConfiguration)
-generateCommand.RegisterTemplate(&KubernetesCronjobTemplate{
-Namespace: "production",
-Image:     "myapp:latest",
-})
+generateCommand.RegisterTemplate(&AnsibleCronTemplate{TaskNamePrefix: "app cron: "})
 
 return append(commands, generateCommand)
 }
 ```
+
+A template that renders **no** user column says so through `UserColumnTemplate` — without the answer it is judged by the builtin names alone and treated as one that does, so a heartbeat under it demands a user it could never place.
 
 ### Selecting the active template
 
@@ -400,7 +427,7 @@ If the resolved name has no template registered, `melody:cron:generate` errors w
 
 ### Template-specific configuration
 
-Each template owns its config shape via struct fields (`Namespace`, `Image` in the example above). Userland reads whatever it needs from melody parameters / env / config files at bootstrap and injects the values when constructing the template instance. The cron integration does **not** mediate template-specific config — it only resolves the active template name. This keeps each template self-contained and avoids leaking unrelated knobs into `cron`'s parameter namespace.
+Each template owns its config shape via struct fields (`TaskNamePrefix` in the example above). Userland reads whatever it needs from melody parameters / env / config files at bootstrap and injects the values when constructing the template instance. The cron integration does **not** mediate template-specific config — it only resolves the active template name. This keeps each template self-contained and avoids leaking unrelated knobs into `cron`'s parameter namespace.
 
 ## Usage
 
@@ -540,18 +567,18 @@ When no command declares a schedule and `--heartbeat-path` (after the cascade) i
 
 ## Package surface
 
-The v1, v2 and v3 bindings share a common core surface, and **neither side is a superset of the other**. v3 additionally ships the built-in `k8s` template with its errors and parameters, plus a `Commands` helper. v1 and v2 additionally declare `OwnedTemplate`, `UserColumnTemplate`, `RendersUserColumn`, `CrontabOwnershipMarker` and `ErrBusyboxDivergentDaySchedule`, none of which v3 has. Do not treat the surface as identical across bindings: code written against either side's own identifiers does not compile on the other.
+The v1, v2 and v3 bindings share a common core surface — `OwnedTemplate`, `UserColumnTemplate`, `RendersUserColumn`, `CrontabOwnershipMarker` and `ErrBusyboxDivergentDaySchedule` included, in all three since the v3 binding's generator caught up. Two things still tell the bindings apart: v3 additionally ships the built-in `k8s` template with its errors and parameters, plus a `Commands` helper; and v3 alone has dropped the deprecated abbreviated aliases the frozen majors keep. Code using the v3-only identifiers, or the aliases, compiles on one side only.
 
 Common to all three, from any of `github.com/precision-soft/melody/integrations/cron`, `.../cron/v2`, or `.../cron/v3`:
 
-* Types: `Schedule`, `EntryConfig`, `Configuration`, `ScheduledCommand`, `Entry`, `RenderOptions`, `GenerateCommand`, `RunnerCommand`, `RunnerDialect`, `Module`, `ModuleConfig`, `Template`, `CrontabTemplate`, `ParameterRegistrar`, `ForbiddenCharacter`.
+* Types: `Schedule`, `EntryConfig`, `Configuration`, `ScheduledCommand`, `Entry`, `RenderOptions`, `GenerateCommand`, `RunnerCommand`, `RunnerDialect`, `Module`, `ModuleConfig`, `Template`, `OwnedTemplate`, `UserColumnTemplate`, `CrontabTemplate`, `ParameterRegistrar`, `ForbiddenCharacter`.
 * Constructors / helpers: `NewConfiguration`, `NewGenerateCommand`, `NewRunnerCommand`, `NewModule`, `CommandName`, `Render`, `BuiltinTemplates`, `ValidateNoForbiddenCharacters`, `RegisterDefaultParameters`.
 * Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterHeartbeatAutoEnabled`, `ParameterTemplate`.
-* Template-name constants: `TemplateNameCrontab`, `TemplateNameCrontabNoUser`.
+* Template-name constants: `TemplateNameCrontab`, `TemplateNameCrontabNoUser`; the ownership marker `CrontabOwnershipMarker`.
 * Globals: `CrontabForbiddenCharacters`.
-* Sentinel errors ([`./errors.go`](./errors.go)) for `errors.Is` matching: `ErrNoOutputPath`, `ErrNoLogsDir`, `ErrEntryEmptyUser`, `ErrEntryEmptyCommand`, `ErrDestinationEscape`, `ErrFieldContainsWhitespace`, `ErrSteppedSingleValue`, `ErrInvalidSchedule`, `ErrForbiddenCharacter`, `ErrTemplateNotFound`, `ErrHeartbeatUserMissing`, `ErrHeartbeatDestinationUnmatched`, `ErrHeartbeatDestinationDefaultMissing`, `ErrUnknownScheduledCommand`, `ErrDuplicateRunnerCommand`, `ErrSharedRunnerCommandFlags`, `ErrUnsupportedRunnerEntry`, `ErrUnknownRunnerDialect`, `ErrCommandTimeout`.
+* Sentinel errors ([`./errors.go`](./errors.go)) for `errors.Is` matching: `ErrNoOutputPath`, `ErrNoLogsDir`, `ErrEntryEmptyUser`, `ErrEntryEmptyCommand`, `ErrDestinationEscape`, `ErrFieldContainsWhitespace`, `ErrSteppedSingleValue`, `ErrBusyboxDivergentDaySchedule`, `ErrInvalidSchedule`, `ErrForbiddenCharacter`, `ErrTemplateNotFound`, `ErrHeartbeatUserMissing`, `ErrHeartbeatDestinationUnmatched`, `ErrHeartbeatDestinationDefaultMissing`, `ErrUnknownScheduledCommand`, `ErrDuplicateRunnerCommand`, `ErrSharedRunnerCommandFlags`, `ErrUnsupportedRunnerEntry`, `ErrUnknownRunnerDialect`, `ErrCommandTimeout`.
 
-`ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` still exist in all three bindings as **deprecated** aliases of `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` ([`./validation.go`](./validation.go)); use the spelled-out names in new code.
+`ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` still exist in the v1 and v2 bindings as **deprecated** aliases of `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` ([`./validation.go`](./validation.go)); the v3 binding has removed them. Use the spelled-out names in new code on every binding.
 
 The **v3 binding only** additionally exposes:
 

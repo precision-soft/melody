@@ -94,7 +94,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=102
+EXPECTED_CHECK_COUNT_INTEGER=107
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -308,6 +308,53 @@ else
     else
         check_fail "the default crontab template lost its user column (got '${WITH_USER_SIXTH_FIELD_STRING}')"
     fi
+
+    # the ownership marker is what --prune reads to prove a file is the generator's own; asserted on the
+    # file the run just wrote, not on the command's word
+    if printf '%s' "${CRONTAB_WITH_USER_STRING}" | grep -qF '# owned by melody:cron:generate'; then
+        check_pass "the generated crontab carries the ownership marker"
+    else
+        check_fail "the generated crontab does not carry the ownership marker"
+    fi
+
+    # EntryConfig.Arguments reach the generated line: the example schedules product:list with --limit=2
+    if printf '%s' "${CRONTAB_WITH_USER_STRING}" | grep -q 'product:list --limit=2'; then
+        check_pass "EntryConfig.Arguments reach the generated crontab line (product:list --limit=2)"
+    else
+        check_fail "EntryConfig.Arguments did not reach the generated crontab line"
+    fi
+fi
+
+# --prune reconciles dir(--out): a stale file the marker proves ours is emptied down to its header, and
+# the operator's own file beside it is untouched — both read back from the directory afterwards, which is
+# what proves the sweep, not the command's report of it
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -rf /tmp/cron-prune-band && mkdir -p /tmp/cron-prune-band; go run . melody:cron:generate --out /tmp/cron-prune-band/stale.crontab >/dev/null 2>&1; printf '# written by the operator\n*/5 * * * * root /usr/local/bin/backup\n' > /tmp/cron-prune-band/operator.crontab; go run . melody:cron:generate --out /tmp/cron-prune-band/crontab --prune >/dev/null 2>&1; cat /tmp/cron-prune-band/stale.crontab 2>/dev/null"
+PRUNED_STALE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${PRUNED_STALE_STRING}" | grep -qF '# owned by melody:cron:generate' && ! printf '%s' "${PRUNED_STALE_STRING}" | grep -q 'product:list'; then
+    check_pass "--prune emptied the stale destination down to its marker-carrying header"
+else
+    check_fail "--prune left the stale destination running or destroyed its marker"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "cat /tmp/cron-prune-band/operator.crontab 2>/dev/null"
+OPERATOR_FILE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${OPERATOR_FILE_STRING}" | grep -q '/usr/local/bin/backup'; then
+    check_pass "--prune left the operator's unowned file untouched"
+else
+    check_fail "--prune touched a file it cannot prove it wrote"
+fi
+
+# the k8s manifests open with the same marker as a leading YAML comment, which is what makes a k8s output
+# directory reconcilable by the same sweep
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/cron-band-k8s.yaml; go run . melody:cron:generate --template k8s --image registry.example/app:1 --out /tmp/cron-band-k8s.yaml >/dev/null 2>&1; cat /tmp/cron-band-k8s.yaml 2>/dev/null"
+K8S_MANIFEST_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${K8S_MANIFEST_STRING}" | grep -qF '# owned by melody:cron:generate' && printf '%s' "${K8S_MANIFEST_STRING}" | grep -q 'apiVersion: batch/v1'; then
+    check_pass "the k8s manifests carry the ownership marker beside their CronJob documents"
+else
+    check_fail "the k8s manifests do not carry the ownership marker (or rendered no CronJob)"
 fi
 
 check_section_end "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"

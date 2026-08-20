@@ -357,3 +357,19 @@ func TestK8sRenderEscapesControlCharacterInImage(t *testing.T) {
         t.Fatalf("expected no raw tab byte in the manifest, got:\n%s", content)
     }
 }
+
+/* the empty render is what --prune writes into a stale manifest: it must carry the marker so the file stays recognizable to the next sweep, and it must not demand the container image, because there are zero containers to build and the sweep runs under RenderOptions{} */
+func TestK8sRenderWithoutEntriesCarriesTheMarkerAndNeedsNoImage(t *testing.T) {
+    rendered, renderErr := defaultK8sTemplate.Render(nil, RenderOptions{})
+    if nil != renderErr {
+        t.Fatalf("expected the empty render to succeed without an image, got: %v", renderErr)
+    }
+
+    if false == strings.Contains(rendered, CrontabOwnershipMarker) {
+        t.Fatalf("expected the empty manifest to carry the ownership marker, got: %s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "apiVersion") {
+        t.Fatalf("expected no CronJob document in the empty render, got: %s", rendered)
+    }
+}

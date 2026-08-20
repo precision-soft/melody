@@ -130,9 +130,14 @@ trap 'rm -rf "${TEMPORARY_DIRECTORY_STRING}"' EXIT
 # every path the tree would carry into a commit: what git tracks, plus what it does not yet track and does
 # not ignore either. `git ls-files` alone answers with the index, and the index belongs to whoever is
 # committing, so a document a session ADDS would be invisible to every dimension below until someone staged
-# it — the shape of blindness the parity band was measured to have and had to be repaired for.
+# it — the shape of blindness the parity band was measured to have and had to be repaired for. The files
+# DELETED in the working tree are subtracted for the mirror-image reason: the index still lists them, and a
+# reader handed a path with no file behind it dies mid-band on the one state every deleting session passes
+# through before its commit.
 list_repository_path() {
-    git ls-files --cached --others --exclude-standard -- "$@" | sort -u
+    comm -23 \
+        <(git ls-files --cached --others --exclude-standard -- "$@" | sort -u) \
+        <(git ls-files --deleted -- "$@" | sort -u)
 }
 
 # ------------------------------------------------------------------------------------------------------

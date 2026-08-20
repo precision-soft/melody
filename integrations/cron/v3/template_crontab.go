@@ -13,11 +13,15 @@ const TemplateNameCrontab = "crontab"
 /* TemplateNameCrontabNoUser renders the user-less crontab dialect: busybox crond (alpine images) and per-user `crontab` files reject the /etc/cron.d user column, so this variant omits it — no more cutting the column with sed in the image build. */
 const TemplateNameCrontabNoUser = "crontab-no-user"
 
+/* CrontabOwnershipMarker is the line every destination this generator's builtin templates render carries — the two crontab dialects in their header block, the k8s dialect as a leading YAML comment — so a later --prune can tell a file this generator wrote from one the operator put in the same directory. It names the command rather than saying "generated", because "GENERATED FILE" is what every generator writes and proves nothing about which one. The marker is shared across the builtin dialects: it proves the writing command, not the dialect, exactly as the two crontab variants already share it on the published majors. */
+const CrontabOwnershipMarker = "# owned by melody:cron:generate"
+
 const crontabHeaderBlock = `#############################################################################
 #
 # GENERATED FILE
 # DO NOT EDIT LOCALLY
 #
+` + CrontabOwnershipMarker + `
 #############################################################################
 # Example of job definition:
 # .---------------- minute (0 - 59)
@@ -35,6 +39,7 @@ const crontabNoUserHeaderBlock = `##############################################
 # GENERATED FILE
 # DO NOT EDIT LOCALLY
 #
+` + CrontabOwnershipMarker + `
 #############################################################################
 # Example of job definition (user-less dialect: busybox crond, per-user crontab):
 # .---------------- minute (0 - 59)
@@ -67,6 +72,16 @@ var defaultCrontabNoUserTemplate = &CrontabTemplate{
 
 func (instance *CrontabTemplate) Name() string {
     return instance.name
+}
+
+/* OwnershipMarker names the line both dialects carry in their header block, so --prune can prove a destination is one this template wrote before it empties it */
+func (instance *CrontabTemplate) OwnershipMarker() string {
+    return CrontabOwnershipMarker
+}
+
+/* RendersUserColumn answers for the generator's heartbeat-user guard before anything is rendered: the /etc/cron.d dialect places a user column on every line, the user-less dialect never does. */
+func (instance *CrontabTemplate) RendersUserColumn() bool {
+    return instance.includeUserColumn
 }
 
 func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
@@ -189,6 +204,29 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
         return "", scheduleValidationErr
     }
 
+    /* the user-less dialect targets busybox crond, which classifies a day field by its expanded values where vixie reads the spelling's first character — so a day-field pair the two daemons read differently is refused at generation, the same way the stepped single value is: emitting it would run one schedule in-process and another on the box. */
+    if false == includeUserColumn && nil != entry.Schedule {
+        dayOfMonthExpression := fieldOrWildcard(entry.Schedule.DayOfMonth)
+        dayOfWeekExpression := normalizeCronNameTokens(fieldOrWildcard(entry.Schedule.DayOfWeek), cronDayOfWeekNameValues)
+
+        if true == busyboxDayFieldsDiverge(dayOfMonthExpression, dayOfWeekExpression) {
+            return "", exception.NewError(
+                fmt.Sprintf(
+                    "cron: entry %q pairs day fields (DayOfMonth %q, DayOfWeek %q) that busybox crond — the scheduler the user-less crontab dialect targets — runs as a different schedule than vixie crond and the in-process runner: busybox classifies a day field by its expanded values, so a field admitting every value is unused and the other governs alone, while vixie reads the first character; restrict a single day field and leave the other as the plain wildcard so every target reads the same schedule",
+                    entry.Name,
+                    dayOfMonthExpression,
+                    dayOfWeekExpression,
+                ),
+                exceptioncontract.Context{
+                    "entry":      entry.Name,
+                    "dayOfMonth": dayOfMonthExpression,
+                    "dayOfWeek":  dayOfWeekExpression,
+                },
+                ErrBusyboxDivergentDaySchedule,
+            )
+        }
+    }
+
     var commandPart string
     if 0 < len(entry.Command) {
         if "" == strings.Join(entry.Command, "") {
@@ -248,4 +286,8 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
     ), nil
 }
 
-var _ Template = (*CrontabTemplate)(nil)
+var (
+    _ Template           = (*CrontabTemplate)(nil)
+    _ OwnedTemplate      = (*CrontabTemplate)(nil)
+    _ UserColumnTemplate = (*CrontabTemplate)(nil)
+)

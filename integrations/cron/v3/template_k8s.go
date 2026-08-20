@@ -29,6 +29,12 @@ var k8sScheduleForbiddenCharacters = []ForbiddenCharacter{
     {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
 }
 
+/* k8sHeaderBlock opens every rendered manifest file with the ownership marker as leading YAML comments, so a k8s output directory can be reconciled by --prune exactly as a crontab directory can: without the marker a stale manifest could never prove itself this generator's and would stay live forever. */
+const k8sHeaderBlock = `# GENERATED FILE
+# DO NOT EDIT LOCALLY
+` + CrontabOwnershipMarker + `
+`
+
 type K8sTemplate struct{}
 
 var defaultK8sTemplate = &K8sTemplate{}
@@ -37,8 +43,23 @@ func (instance *K8sTemplate) Name() string {
     return TemplateNameK8s
 }
 
-/* @info renders one batch/v1 CronJob document per entry, separated by the YAML document marker; heartbeat options are crontab-only and ignored here */
+/* OwnershipMarker names the comment line every rendered manifest file opens with; the marker is the generating command's, shared with the crontab dialects, because --prune proves who wrote a file, not which dialect rendered it. */
+func (instance *K8sTemplate) OwnershipMarker() string {
+    return CrontabOwnershipMarker
+}
+
+/* RendersUserColumn answers false: a CronJob manifest has no user column, so the generator must not demand a heartbeat user this dialect could never place. */
+func (instance *K8sTemplate) RendersUserColumn() bool {
+    return false
+}
+
+/* Render renders one batch/v1 CronJob document per entry under a marker-carrying comment header, separated by the YAML document marker; heartbeat options are crontab-only and ignored here */
 func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    /* an empty render needs no image: it is what --prune writes into a stale manifest file, and demanding the container image to render zero containers would fail the sweep exactly when the configuration was emptied — the version in which every previously written manifest is stale */
+    if 0 == len(entries) {
+        return k8sHeaderBlock, nil
+    }
+
     if "" == options.Image {
         return "", exception.NewError(
             "cron: the k8s template requires a container image; pass --image or register the melody.cron.k8s.image parameter",
@@ -83,6 +104,7 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
     }
 
     var builder strings.Builder
+    builder.WriteString(k8sHeaderBlock)
 
     documentsWritten := 0
 
@@ -301,4 +323,8 @@ func yamlQuote(value string) string {
     return builder.String()
 }
 
-var _ Template = (*K8sTemplate)(nil)
+var (
+    _ Template           = (*K8sTemplate)(nil)
+    _ OwnedTemplate      = (*K8sTemplate)(nil)
+    _ UserColumnTemplate = (*K8sTemplate)(nil)
+)

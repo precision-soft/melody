@@ -194,6 +194,46 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None for a reader that only renders the error. A caller that branches on `errors.Is` against a sentinel it also uses for non-panic failures should check whether it means to treat a panicked job the same way; the message still says the boundary was a panic.
 
+### Cron: the deprecated abbreviated validation aliases are removed
+
+**What changed.** `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` are gone from the cron binding. They were deprecated aliases of `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters`, which are unchanged.
+
+**Symptom.** Code naming an alias stops compiling with an undefined-identifier error.
+
+**Remedy.** Spell the name out; the replacement is a rename, signature-identical. The templates have read `CrontabForbiddenCharacters` since the aliases were deprecated, so nothing behavioural changes.
+
+### Cron: the generated k8s manifests open with the ownership marker
+
+**What changed.** Every file the builtin `k8s` template renders starts with three comment lines carrying `# owned by melody:cron:generate`, the same marker the crontab dialects carry in their header block, and the template renders the marker header alone — demanding no container image — when it has no entries. That is what lets `--prune` reconcile a k8s output directory: the sweep empties only a file whose first bytes prove this generator wrote it.
+
+**Symptom.** Manifests gain three leading YAML comment lines; a byte-exact comparison against previously generated files sees the difference. `kubectl apply` reads comments as comments — the documents are unchanged.
+
+**Remedy.** Regenerate; anything diffing manifests byte-for-byte should regenerate its baseline. Nothing to do for the cluster.
+
+### Cron: a malformed heartbeat opt-in fails the generation
+
+**What changed.** A `melody.cron.heartbeat.enabled` value that does not hold a boolean fails `melody:cron:generate` with an error naming the parameter, under every template. It used to be read as "not enabled".
+
+**Symptom.** A generation that silently produced a crontab without the liveness line the operator asked for — a misspelling indistinguishable from never having asked — now exits non-zero naming `melody.cron.heartbeat.enabled`.
+
+**Remedy.** Fix the value; `true`/`false` in any spelling the parameter conversion accepts. Removing the parameter keeps the opt-in unset, which stays legal.
+
+### Cron: a relative parameter path anchors at the project directory
+
+**What changed.** A relative path read from a parameter — `melody.cron.destination_file`, `melody.cron.logs_dir`, `melody.cron.heartbeat_path` — is anchored at the project directory, the way melody resolves `kernel.logs_dir` and its siblings. A relative path typed as a cli flag stays relative to the working directory, as a shell path should.
+
+**Symptom.** `melody.cron.logs_dir = var/log/cron` used to mean a different directory depending on where the binary was invoked from — under a supervisor starting from `/`, the generated crontab baked `/var/log/cron` into itself. The shipped defaults carry `%kernel.project_dir%` and never moved.
+
+**Remedy.** None for parameters using the shipped `%kernel.project_dir%`-anchored defaults or absolute paths. A deployment that relied on a relative parameter path following the working directory should either make the path absolute or run the generator from the directory it means.
+
+### Cron: the generator writes the machine document and names what a failed run left on disk
+
+**What changed.** `melody:cron:generate` accepts the standard flag set every melody command accepts — the framework rewrites `-v`/`-vv` into `--verbosity`, which used to kill the generator at parse — and under `--format=json` renders one closed envelope: `data.writes` and `data.pruned` as lists on every run, the failure inside the envelope's error with its context and cause chain. In text mode a failed run prints the writes and sweeps that had already happened before returning the failure.
+
+**Symptom.** `melody:cron:generate --format=json | jq` answers a document instead of an empty stream, and `-v` no longer fails with "flag provided but not defined". The heartbeat-only text line now says `wrote heartbeat-only crontab to …`, as the frozen majors' does.
+
+**Remedy.** Read the document rather than inferring the outcome from the exit code alone; anything matching the old `heartbeat-only file` text updates the one word.
+
 ### CLI: `--format=json` writes one document per line
 
 **What changed.** The json printer no longer indents. Every melody command's `--format=json` envelope — the framework's `debug:*` family and the core commands it contributes — is now one compact line terminated by a newline, where it used to be a block of indented lines. `--format=json-pretty` is the same document with the indentation back.
