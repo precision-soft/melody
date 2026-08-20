@@ -89,19 +89,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.1.0] - 2026-04-23 - Default TLS Handshake (MEL-161)
 
-### Fixed
-
-- `provider.go` — default TLS handshake is now enabled. The legacy hardcoded `pgdriver.WithInsecure(true)` silently disabled TLS on every Postgres connection; `insecure` now defaults to `false`, so new `NewProvider(...)` callers negotiate TLS out of the box. Operators who still rely on plain-TCP can opt in with `WithInsecure(true)`. This is a **behavioural change**: deployments without a TLS-capable Postgres endpoint must either expose TLS on the server or explicitly pass `WithInsecure(true)` (MEL-161); mirrored in `v2/` and `v3/`
-
-### Changed
-
-- `provider.go` — `Open(...)` now builds the `pgdriver` connector from `instance.insecure` / `instance.tlsConfig` instead of hardcoding `pgdriver.WithInsecure(true)` (MEL-161); mirrored in `v2/` and `v3/`
-
 ### Added
 
 - `provider_option.go` — `WithInsecure(insecure bool) ProviderOption` lets callers toggle the `pgdriver.WithInsecure(...)` flag (default `false`) (MEL-161); mirrored in `v2/` and `v3/`
 - `provider_option.go` — `WithTlsConfig(config *tls.Config) ProviderOption` lets callers pass a `*crypto/tls.Config` that is forwarded to `pgdriver.WithTLSConfig(...)`. When a non-nil `tls.Config` is supplied, it takes precedence over `WithInsecure(...)` (MEL-161); mirrored in `v2/` and `v3/`
 - `provider_option_test.go` — coverage for default (`insecure=false`, `tlsConfig=nil`), `WithInsecure(true)` override, and `WithTlsConfig(...)` field storage; mirrored in `v2/` and `v3/`
+
+### Changed
+
+- `provider.go` — `Open(...)` now builds the `pgdriver` connector from `instance.insecure` / `instance.tlsConfig` instead of hardcoding `pgdriver.WithInsecure(true)` (MEL-161); mirrored in `v2/` and `v3/`
+
+### Fixed
+
+- `provider.go` — default TLS handshake is now enabled. The legacy hardcoded `pgdriver.WithInsecure(true)` silently disabled TLS on every Postgres connection; `insecure` now defaults to `false`, so new `NewProvider(...)` callers negotiate TLS out of the box. Operators who still rely on plain-TCP can opt in with `WithInsecure(true)`. This is a **behavioural change**: deployments without a TLS-capable Postgres endpoint must either expose TLS on the server or explicitly pass `WithInsecure(true)` (MEL-161); mirrored in `v2/` and `v3/`
 
 ## [v3.0.1] - 2026-03-08 - Tidy v2 and v3 go.sum Dependencies
 

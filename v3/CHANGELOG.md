@@ -104,6 +104,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - cli: `--format=json` writes one document on one line, terminated by a newline, instead of an indented block. **Behavioural change**: the document is unchanged and `jq` reads either, but a consumer that counted lines or read the output as a single indented block sees the new shape; `--format=json-pretty` is the indented one from now on. Indenting by default made every document many lines, which every line-framed consumer — a log collector's json stage, a `while read line`, a `grep '\"failed\": true'` — receives as fragments that each fail to parse
 - cli: text of server or client origin reaching the terminal is escaped rather than obeyed. The start and finish banners embed the command's own error, which routinely echoes downstream values, and the table cells carry whatever the command was reporting: an embedded carriage return or escape sequence could repaint the status line as another verdict, or forge lines in a captured log
+- httpclient: the response body cap bounds `RequestStream` too, the inherited default of ten mebibytes included — the cap was completely inert on the streaming path: a caller who asked for ten bytes was handed everything the server sent, and a caller who never named a cap streamed unbounded behind a bounded contract. **Behavioural change**: a stream that legitimately carries more than the default names its own cap through `WithMaxResponseBodyBytes`; the body past the cap is refused with the cap, the method and the sanitized url in the record
 
 ### Removed
 
@@ -114,7 +115,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - exception: `MarkLogged` marks the nearest `AlreadyLogged` implementer in the chain rather than only the value it is handed, and answers a typed nil unchanged instead of attempting to mark it. A record filed against a wrapped melody error left the mark unwritten before, so the reader at the same depth found nothing and the same failure was rendered a second time
 - documentation: fifty-six exported doors this major has always carried are listed at last, added beside the same repair on the two published majors so a reader of any of the three finds the same surface. The access control merge strategies were given as the three string literals and never as the exported constants a caller is meant to pass; the session-fixation section taught the manual two-step rotation without naming `http.RegenerateRequestSession`, which does both; and the rest are doors of the same kind — the deferred-resolution handle and the container's four registration sentinels, the process-identity family and the signal context every `Run` example is handed out of thin air, the config resolver a provider actually comes through, the setters of the cache remember option, the session cookie constant, the interface a userland constraint has to implement, the cause-chain builders, four http contracts declared beside two siblings that were listed, both cookie helpers, the file
   server path every request actually takes, and the deprecated cors doors that were half listed. Where this major's code differs, the entry says what this major does rather than what the published ones do: `config.IntWithDefault` answers the default for a value that does not parse, where they refuse it
-- example: the embedded-env build embeds the committed `.env` alone. The `.env*` glob also baked the gitignored `.env.local` — the machine-local override file that holds real credentials precisely because it never enters git — into the shipped binary, where the loader's precedence then let it override the committed configuration at runtime. A file the repository does not carry must not ship in the artifact
 - example: the shared icons every page links — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — are produced by the same `npm run build` that produces the frontend bundle, so the one command a fresh clone needs for the browser interface delivers everything a browser asks for. They used to be produced only by a hand-written copy loop inside the development container's entrypoint, so anyone who did not run the Docker stack got a 404 for all four while the packaging matrix promised a binary requiring "nothing else" at runtime. They still exist in exactly one place in the tree, `<root>/.assets`, and are git-ignored under every example, so no second copy can go stale: `assets/sync-icons.mjs` owns the mapping from source name to served name and is what copies them, run as the `prebuild` step of the bundle and by the entrypoint for each major. The README also names that build step for the first time — `melody_static_embedded` freezes `public/` into the
   binary at compile time, so a binary built before it carries neither bundle nor icons and cannot gain them afterwards
 - example: the comment in `.env` no longer claims that an already-set process or host environment variable overrides the value beside it. melody reads configuration only from the `.env` files and writes a warning naming each process variable it ignored, so the pattern the comment taught — commit `.env` with development values and inject the secrets through a `env:` entry in an orchestrator manifest — started the application against the values in the file with the injected secret reaching nothing. The comment now names the real override, `.env.local` or `.env.<MELODY_ENV>`, and says that a key is unset in the file rather than out of the environment
@@ -144,7 +144,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: the compression middleware bounds the read it uses to decide whether a body reaches the compression threshold. A body reader answering zero bytes with no error pinned a request goroutine at full processor use indefinitely; the read fails the request after the same number of consecutive empty reads `bufio` tolerates
 - http: the static file server no longer trims whitespace off the path it resolves, so `/%20internal/secret.json` no longer retrieves `internal/secret.json`. Access control matches on the raw request path, so the trim let a padded spelling reach a file a path-prefix rule protects — the same aliasing the router already refuses, and it also made the two build modes answer the padded spelling differently
 - http: the static file server refuses a path that is not already canonical instead of serving the file `path.Clean` folds it onto. `/open/../internal/secret.json` and `//internal/secret.json` reached files that a path-prefix access-control rule, matching on the raw path, never saw. The spellings that fold onto the root still serve the index file
-- http: the static file server refuses a path element beginning with a dot, so a `.env` or `.git/config` left in the public directory is no longer served — and, with the shipped cache defaults, no longer stored by a shared cache. `.well-known` is allowed by default; see `SetAllowedDotPrefixList`
 - http: the static file server answers `GET` and `HEAD` only. Every other method received the full file body, so an `OPTIONS` preflight for a path that resolved to a real file was answered with the file instead of the cors headers, and every asset was a `POST` endpoint answering `200`
 - http: the static file server ignores `If-Modified-Since` when the request also carries `If-None-Match`, as RFC 9110 requires. A non-matching entity tag combined with an unchanged modification time answered `304`, so any deploy that preserves timestamps while changing content left revalidating caches serving the old bytes indefinitely
 - http: the static file server accepts all three HTTP date formats for `If-Modified-Since` (RFC 9110 requires accepting the obsolete RFC 850 and asctime forms, not only IMF-fixdate)
@@ -192,7 +191,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - event: two distinct subscribers whose types carry no fields no longer collapse onto one registration, so removing either one leaves the other's listeners registered instead of silently unregistering both. Every zero-size allocation in Go shares one address, so the registration key now pairs that address with the subscriber's concrete type, the same identity the container teardown uses
 - http: a request path that differs from a route only by leading or trailing whitespace no longer reaches that route's handler. The path was trimmed before matching, so `/admin%20`, `/admin%09`, `/admin%0a` and `/admin%c2%a0` all resolved to `/admin` — aliases a reverse proxy, ingress or firewall rule matching the exact path never sees, so a rule denying `/admin` could be walked around. Route patterns are still trimmed at registration
 - http: an empty path segment no longer satisfies a named route parameter, so `/users//profile` no longer matches `/users/:id/profile` and binds an empty identifier a handler cannot distinguish from a supplied one. A trailing catch-all still matches its bare prefix, which is what the url generator emits for an absent remainder. The url generator refuses to mint such a path in the first place, so the two stay in agreement
-- http: a static file server configured with both a strip prefix and an embedded public directory can no longer serve a file outside that directory. Stripping the prefix left a relative path, so a leading `..` survived cleaning and the join with the public directory absorbed it, past the only traversal guard; the path is re-anchored before it is cleaned. The filesystem mode was never affected — it rejects the escape twice over
 - http: the compression middleware no longer panics on a response whose header map is nil, matching the guard the cors middleware already carries. The response normalizer repairs such a response only after the middleware chain has unwound, which is too late for a middleware that runs inside it
 - logging: `EnsureLogger` replaces a typed nil logger with the no-op logger instead of returning it unchanged and letting the first call panic — the case the function exists to guard
 - container: two distinct services of one type that carries no fields are each closed at teardown instead of one of them being silently skipped. Every zero-size allocation shares a single address, so pairing that address with the concrete type still could not tell them apart; a genuine alias is one whose value came through the resolver from the other service, and that relationship is what the dependency graph already records, so an unrelated node keeps its own representative while a resolver-mediated alias is still closed exactly once
@@ -240,6 +238,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - logging: `jsonLogger.Close` recognizes the process console by identity — the `os.Stdout` and `os.Stderr` values themselves — instead of by file name.
 - exception: `NewExitError` refuses an exit code outside `[1, 255]`.
 - exception: the exit error's accessors answer the nil receiver instead of dereferencing it — `errors.As` matches the type on a typed-nil link and reports success with a nil pointer, which the callers that decide how the process ends read the code straight off
+- config: `MarkSecret` after the boot resolution travels to every parameter that reads the marked key, and follows the marking to a fixpoint — a reader of a freshly marked name is scanned in turn, so a whole derivation chain is covered however late the mark arrives, the way the early marking always did — the late call redacted the key while the dsn assembled from it printed in full in `debug:parameters`, and the end-of-boot retry reported that unapplied markings had landed when their propagation had nothing left to travel through
+- httpclient: a basic credential travels whenever the caller asked for one, empty halves included — an api key spelled as the password of an empty user is the ordinary shape of curl's `-u :key`, and the username guard dropped the whole credential and sent the request unauthenticated with nothing to say so; a typed-nil authorization or basic half now leaves the header unwritten instead of dereferencing nil on the request path
+- httpclient: an invalid response-body cap is refused before anything is dialled, on the buffered and the streaming path alike — validated after the exchange, a POST that had already committed its side effect answered with an error phrased as though nothing had been sent, and a caller retrying on it duplicated the operation; the refusal carries the cap, the method and the sanitized url instead of a bare message
+- clock: `FrozenClock.Advance` is forward-only and panics on a negative duration — moving the frozen clock backwards silently broke the monotonic invariants the code under test relies on; `TravelTo` remains the deliberate door for backwards motion
+- clock: the frozen ticker's `Stop` returns only after its relay goroutine has exited, so no tick can be minted after `Stop` returns — a Stop-then-TravelTo sequence used to find the traveled time in the channel of a stopped ticker, a tick `time.Ticker` can never produce
+- httpclient: a negative per-request timeout bounds a stream instead of unbounding it — a caller computing what is left of a deadline that has already passed hands over a negative duration, and the streaming path turned that exhausted budget into a stream with no deadline at all; it now folds into the configured timeout, the way the buffered path always read it
+- httpclient: `StreamResponse.Body` after `Close` answers a reader that fails on the first read instead of a nil one — a watchdog goroutine closing an indefinite stream while the consumer is deciding to read is the ordinary shape, and a consumer written as `io.Copy(destination, streamResponse.Body())` dereferenced that nil and took the process down; the stand-in reader's own `Close` succeeds, so a deferred close stays correct
+
+### Security
+
+- example: the embedded-env build embeds the committed `.env` alone. The `.env*` glob also baked the gitignored `.env.local` — the machine-local override file that holds real credentials precisely because it never enters git — into the shipped binary, where the loader's precedence then let it override the committed configuration at runtime. A file the repository does not carry must not ship in the artifact
+- http: the static file server refuses a path element beginning with a dot, so a `.env` or `.git/config` left in the public directory is no longer served — and, with the shipped cache defaults, no longer stored by a shared cache. `.well-known` is allowed by default; see `SetAllowedDotPrefixList`
+- http: a static file server configured with both a strip prefix and an embedded public directory can no longer serve a file outside that directory. Stripping the prefix left a relative path, so a leading `..` survived cleaning and the join with the public directory absorbed it, past the only traversal guard; the path is re-anchored before it is cleaned. The filesystem mode was never affected — it rejects the escape twice over
 
 ## [v3.13.0] - 2026-07-24 - Faithful OpenAPI Mirror, Wiring Codegen Guards and Contained Teardown Panics
 
@@ -325,6 +336,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.10.0] - 2026-07-11 - Lock Primitives, Distributed Rate Limiting, Process Roles, Multi-Context Migrate, Cipher Compartments, and Boot Diagnostics
 
+### Added
+
+- `application/application_http.go` — `Application.OnHttpShutdown(hook)`: callbacks that run the moment the http server begins shutting down. `http.Server.Shutdown` neither cancels an in-flight request's context nor tracks a hijacked connection, so a Server-Sent Events stream or a websocket held the entire shutdown timeout and was then cut mid-flight; closing the hub those handlers select on releases them at once.
+- `lock/leader_gate.go` — `LeaderGateOptions.OnCampaignError`: a hook for the acquire errors the gate swallows on purpose. Campaign errors back off and retry rather than abort, and were therefore never surfaced anywhere — so a store outage and a permanent misconfiguration (a redis locker built with a non-positive ttl fails closed on every `Acquire`) both looked exactly like a deployment that quietly elects no leader and does no work.
+- `lock/run_exclusive.go` — `RunExclusive(runtime, locker, name, ttl, fn)`: acquire-once → run → always-release over any `lock/contract.Locker` backend, the per-tick dedup primitive for cron-launched work on a multi-instance deployment. The ttl is crash-safety only — the lease is refreshed at half the ttl on a background goroutine while fn runs and released the moment it returns (on a runtime detached from the caller's context, so a SIGTERM that cancels the caller cannot silently skip the release and cost the next tick), which removes the "ttl must cover both the cron interval and the worst-case run time" trap entirely. A failed refresh cancels the child runtime handed to fn, because the lease may now be held by another instance; a non-positive ttl selects session-style locks (MySQL `GET_LOCK`, PostgreSQL advisory) whose `Refresh` is a liveness probe. Returns `(false, nil)` without running when another holder owns the lock and fails closed on an acquire error, so an unreachable store
+  never double-runs the work.
+- `lock/exclusive_command.go` — `NewExclusiveCommand(command, locker, ttl)` (and `NewExclusiveCommandWithName`): a `cli/contract.Command` decorator over `RunExclusive`, so a scheduled command wrapped once runs exactly once per tick across every instance. The lock name defaults to `melody:command:<name>`; a skipped run logs and exits zero, keeping cron green on the instances that did not win the lock.
+- `lock/leader_gate.go` — `NewLeaderGate(locker, name, ttl)` / `NewLeaderGateWithOptions(...)`: the become-leader, renew-periodically, release-on-shutdown pattern extracted into a reusable gate for long-running single-active workers. `Run(runtime)` blocks until the context is cancelled: it campaigns for the lock (a fresh lock — and so a fresh fencing token — per campaign), renews at half the ttl while leading, demotes itself and re-campaigns when a renewal fails (`IsLeader()` flips, optional `OnElected`/`OnLost` hooks fire), and releases on shutdown through a detached runtime so failover never waits out the ttl. Acquire errors never abort it — a store outage backs off doubling (capped at one minute) and campaigning resumes. Works with all four lock backends; the same generalized loop the outbox relay implements inline for its batch lease.
+- `http/contract/middleware.go` — optional `RuntimeRateLimiter` widening of `RateLimiter` for shared-store limiters: `AllowWithRuntime(runtime, key) (bool, error)` threads the request context to the store and reports store failures, with the returned allowed value already reflecting the limiter's failure policy. `middleware.RateLimitMiddleware` now prefers this method when the configured limiter implements it (logging the store failure and honoring the returned decision); every existing `RateLimiter` takes the unchanged plain path.
+- `config/environment.go`, `config/process_role.go`, `application/cli.go`, `application/service_resolver.go` — process roles for multi-instance deployments that split web serving from background work. A process now declares a role — `web`, `worker` or `all` (the default, byte-for-byte today's behavior) — via the `MELODY_PROCESS_ROLE` parameter in `.env` or the new `--role` runtime flag, the flag winning; the flag exists because melody deliberately never reads the process environment, so a docker-compose deployment differentiates containers built from one image with `command: ["/app", "--role=worker"]` instead of an inert environment variable. Melody itself gates nothing on the role — it is declared intent that composition-root wiring and long-running runners query through `Application.ProcessRole()`, the `KernelConfiguration.ProcessRole()` accessor, or the `ServiceProcessRole` container service, with `config.RoleAllowsBackgroundWork(role)` / `config.RoleAllowsHttp(role)` as the
+  standard predicates (previously every app reinvented this gate on `ModeHttp`, which conflates transport with responsibility). Like `--mode`, the `--role` flag never implies cli mode and is stripped before the cli framework parses the arguments. Note for external implementors of `config/contract.KernelConfiguration`: the interface gains `ProcessRole() string`.
+- `security/totp/totp.go` — `NormalizeCode(code)`: the single whitespace normalization `Verify` applies, exported so that any caller keying state on an accepted code (a replay guard above all) keys on the same form the comparison used.
+- `http/middleware/client_ip.go` — `NewForwardedClientIpResolver(policy)`: a trusted-proxy-aware `ClientIpResolver` that walks `X-Forwarded-For` right-to-left, skips hops matching the trusted proxy list (exact addresses and CIDR prefixes) and returns the first untrusted address — the client as attested by the trusted edge. It reuses the same `ForwardedHeadersPolicy` the kernel already takes for scheme detection, so one trusted-proxy list drives both, and falls back to `DefaultClientIp` whenever the chain cannot be trusted (untrusted direct peer, unparseable entry, all-trusted chain), so per-IP rate limits behind a reverse proxy key on the real client instead of collapsing onto the proxy address.
+
+### Changed
+
+- `application/boot_collision.go`, `application/application.go`, `application/application_container.go`, `application/application_cli.go`, `container/errors.go` — duplicate registrations now surface as ONE aggregated report at boot instead of one panic per run. Previously a consolidation that introduced several collisions (duplicate service ids, duplicate service types under the strict default, duplicate parameters, module configurations or cli command names) sent the developer around the fix-one-reboot-hit-the-next loop; the `Application.Register*` surface now records each duplicate (first registration wins for the remainder of the boot) and `Boot()` panics once, after the cli phase, listing every collision with the file:line of the registration that caused it. The container's raw `Register`/`MustRegister` and `Configuration.RegisterRuntime` keep their fail-fast behavior for direct callers, and any non-duplicate registration failure still panics immediately; the duplicate branches in
+  `container.Register` now carry `errors.Is`-able causes (`container.ErrServiceIdAlreadyRegistered`, `container.ErrServiceTypeAlreadyRegistered`) with unchanged messages.
+- `application/environment_warning.go`, `application/application.go` — boot now warns for every process environment variable whose name matches a known configuration parameter: melody deliberately reads configuration only from the `.env` artifacts (the application stays a black box), so such a variable is inert — the report's real-world case being an `APP_ROLE: web` set in docker-compose that consumers assumed was read while every container silently ran the outbox dispatcher. The known set is exactly the resolved parameter names, so `PATH`/`HOME` can never match; a variable whose value equals the resolved parameter value is skipped (platforms often mirror `.env` values); values are never logged. Log-only — behavior does not change.
+- `config/configuration.go`, `application/application.go` — the misplaced-binary foot-gun is now diagnosable: melody derives the project directory from the executable location (the working directory only under `go run`), so `go run .` finds the `.env` artifacts but the same app built to `/tmp/app` and run from the same directory does not — and previously failed much later with an unsuggestive "undefined environment key". Boot now warns when zero environment keys were loaded (naming the searched `projectDirectory` and explaining the derivation), and the resolve failure carries `projectDirectory` in its error context. Log/diagnostic only — the lookup semantics are unchanged and documented in `CONFIG.md`.
+- `security/totp/totp.go` — `Verify`/`VerifyAt` now strip whitespace anywhere in the submitted code before comparison (`"123 456"`, padded copy/paste, tabs and the non-breaking space mobile keyboards produce), mirroring the secret normalization that already handled spaces/dashes/padding/case. Whitespace can never be part of an all-digit code, so the tolerance is unambiguous; the comparison stays constant-time and dashes are untouched (they belong to recovery codes).
+- `lock/run_exclusive.go`, `lock/leader_gate.go` — the session-probe path (non-positive ttl) now renews for twice the probe interval instead of the interval itself. A session locker ignores the ttl handed to `Refresh`, but a *lease* locker rewrites the lease to `now+ttl`: renewing for exactly the probe cadence made every probe race the expiry it had just written, so roughly every other probe found the lease gone — cancelling `fn` mid-run with "lost the lock lease", and, worse, genuinely letting the lease lapse so a second instance could acquire and run alongside the first. The positive-ttl path (refresh at `ttl/2`) always had this margin; session mode now matches it.
+- `lock/run_exclusive.go` — a refresh in flight when the caller's context is cancelled is read as shutdown, not as a lost lease. A SIGTERM cancels the very runtime the refresh loop calls the backend with, so the in-flight `Refresh` fails with that cancellation; the shutdown check consulted only the `fn`-finished channel, so every graceful stop of a long-running exclusive command returned "exclusive run lost the lock lease while running" — an error a cron fleet reads as a failed run.
+- `lock/run_exclusive.go` — a refresh already in flight when `fn` returns no longer wedges the call. `close(refreshDone)` cannot interrupt a `Refresh` blocked on an unresponsive backend, and the child-context `cancel()` was deferred until *after* `waitGroup.Wait()` — so a network partition during the last moments of a cron command hung the process forever, holding an unreleased lock. The cancel now runs before the wait, and a refresh that fails because of that cancel is read as shutdown rather than reported as a lost lease.
+- `lock/run_exclusive.go`, `lock/leader_gate.go` — the derived refresh cadence is floored (`resolveRefreshSchedule`), so a ttl small enough to make `ttl/2` round to zero can no longer reach `time.NewTicker(0)`, whose panic on a background goroutine no `recover` can reach and which took the process down while holding the lock.
+- `security/totp_second_factor_authenticator.go` — the two-factor replay guard keys on the normalized code (`totp.NormalizeCode`) rather than the raw header value. Because `Verify` treats `"123 456"` and `"123456"` as the same code, a guard keyed on the raw value would have recorded them as two distinct nonces, letting a captured code be replayed within its validity window by re-spacing it. Caught before release: both the whitespace tolerance and this key live in the same unreleased change.
+
 ### Fixed
 
 - `openapi/schema.go` — the schema mirror's character-class scanner no longer treats `[.` and `[=` as POSIX collating and equivalence elements. RE2 supports only `[: :]` and reads a `[` inside a character class as a literal, so a valid tag such as `regex=[a,b[.c]` was mis-scanned as an unbalanced class: the rule split at the in-class comma and the field was advertised as accepting only the empty string, diverging from the validator (which scans only `[: :]`) and from `regexp.Compile`.
@@ -403,33 +441,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `openapi/schema.go` — the generator's regex character-class scanner recognizes POSIX named classes (`[:alpha:]` and friends), so a `validate` tag such as `regex=[[:alpha:],]` is no longer mis-split at the in-class comma and the real pattern is advertised. Mirrors the validation-rule scanner fix.
 - `http/cors/service.go` — a scheme-qualified wildcard allowed-origin (`<scheme>://*.suffix`, for example `https://*.example.com`) is recognized as a wildcard and matches an `Origin` only when the scheme is identical and the host is a subdomain of the suffix. Such patterns were previously not treated as wildcards and matched nothing; scheme-less patterns keep their existing scheme-agnostic host matching.
 - `validation/validator.go` — `validate` tags on nested struct fields, slice/array elements, map values and embedded structs are now enforced rather than silently ignored, so the runtime matches the constraints the OpenAPI schema mirror already advertises for nested components. A nested violation fails the whole validation with a path naming the offending field (`items[0].sku`, `bill.sku`). The descent is depth-bounded and cycle-guarded so a self-referential payload terminates, and nil pointers/interfaces and unexported fields are skipped, so a previously-valid flat payload is unaffected.
-
-### Added
-
-- `application/application_http.go` — `Application.OnHttpShutdown(hook)`: callbacks that run the moment the http server begins shutting down. `http.Server.Shutdown` neither cancels an in-flight request's context nor tracks a hijacked connection, so a Server-Sent Events stream or a websocket held the entire shutdown timeout and was then cut mid-flight; closing the hub those handlers select on releases them at once.
-- `lock/leader_gate.go` — `LeaderGateOptions.OnCampaignError`: a hook for the acquire errors the gate swallows on purpose. Campaign errors back off and retry rather than abort, and were therefore never surfaced anywhere — so a store outage and a permanent misconfiguration (a redis locker built with a non-positive ttl fails closed on every `Acquire`) both looked exactly like a deployment that quietly elects no leader and does no work.
-- `lock/run_exclusive.go` — `RunExclusive(runtime, locker, name, ttl, fn)`: acquire-once → run → always-release over any `lock/contract.Locker` backend, the per-tick dedup primitive for cron-launched work on a multi-instance deployment. The ttl is crash-safety only — the lease is refreshed at half the ttl on a background goroutine while fn runs and released the moment it returns (on a runtime detached from the caller's context, so a SIGTERM that cancels the caller cannot silently skip the release and cost the next tick), which removes the "ttl must cover both the cron interval and the worst-case run time" trap entirely. A failed refresh cancels the child runtime handed to fn, because the lease may now be held by another instance; a non-positive ttl selects session-style locks (MySQL `GET_LOCK`, PostgreSQL advisory) whose `Refresh` is a liveness probe. Returns `(false, nil)` without running when another holder owns the lock and fails closed on an acquire error, so an unreachable store
-  never double-runs the work.
-- `lock/exclusive_command.go` — `NewExclusiveCommand(command, locker, ttl)` (and `NewExclusiveCommandWithName`): a `cli/contract.Command` decorator over `RunExclusive`, so a scheduled command wrapped once runs exactly once per tick across every instance. The lock name defaults to `melody:command:<name>`; a skipped run logs and exits zero, keeping cron green on the instances that did not win the lock.
-- `lock/leader_gate.go` — `NewLeaderGate(locker, name, ttl)` / `NewLeaderGateWithOptions(...)`: the become-leader, renew-periodically, release-on-shutdown pattern extracted into a reusable gate for long-running single-active workers. `Run(runtime)` blocks until the context is cancelled: it campaigns for the lock (a fresh lock — and so a fresh fencing token — per campaign), renews at half the ttl while leading, demotes itself and re-campaigns when a renewal fails (`IsLeader()` flips, optional `OnElected`/`OnLost` hooks fire), and releases on shutdown through a detached runtime so failover never waits out the ttl. Acquire errors never abort it — a store outage backs off doubling (capped at one minute) and campaigning resumes. Works with all four lock backends; the same generalized loop the outbox relay implements inline for its batch lease.
-- `http/contract/middleware.go` — optional `RuntimeRateLimiter` widening of `RateLimiter` for shared-store limiters: `AllowWithRuntime(runtime, key) (bool, error)` threads the request context to the store and reports store failures, with the returned allowed value already reflecting the limiter's failure policy. `middleware.RateLimitMiddleware` now prefers this method when the configured limiter implements it (logging the store failure and honoring the returned decision); every existing `RateLimiter` takes the unchanged plain path.
-- `config/environment.go`, `config/process_role.go`, `application/cli.go`, `application/service_resolver.go` — process roles for multi-instance deployments that split web serving from background work. A process now declares a role — `web`, `worker` or `all` (the default, byte-for-byte today's behavior) — via the `MELODY_PROCESS_ROLE` parameter in `.env` or the new `--role` runtime flag, the flag winning; the flag exists because melody deliberately never reads the process environment, so a docker-compose deployment differentiates containers built from one image with `command: ["/app", "--role=worker"]` instead of an inert environment variable. Melody itself gates nothing on the role — it is declared intent that composition-root wiring and long-running runners query through `Application.ProcessRole()`, the `KernelConfiguration.ProcessRole()` accessor, or the `ServiceProcessRole` container service, with `config.RoleAllowsBackgroundWork(role)` / `config.RoleAllowsHttp(role)` as the
-  standard predicates (previously every app reinvented this gate on `ModeHttp`, which conflates transport with responsibility). Like `--mode`, the `--role` flag never implies cli mode and is stripped before the cli framework parses the arguments. Note for external implementors of `config/contract.KernelConfiguration`: the interface gains `ProcessRole() string`.
-- `security/totp/totp.go` — `NormalizeCode(code)`: the single whitespace normalization `Verify` applies, exported so that any caller keying state on an accepted code (a replay guard above all) keys on the same form the comparison used.
-- `http/middleware/client_ip.go` — `NewForwardedClientIpResolver(policy)`: a trusted-proxy-aware `ClientIpResolver` that walks `X-Forwarded-For` right-to-left, skips hops matching the trusted proxy list (exact addresses and CIDR prefixes) and returns the first untrusted address — the client as attested by the trusted edge. It reuses the same `ForwardedHeadersPolicy` the kernel already takes for scheme detection, so one trusted-proxy list drives both, and falls back to `DefaultClientIp` whenever the chain cannot be trusted (untrusted direct peer, unparseable entry, all-trusted chain), so per-IP rate limits behind a reverse proxy key on the real client instead of collapsing onto the proxy address.
-
-### Changed
-
-- `application/boot_collision.go`, `application/application.go`, `application/application_container.go`, `application/application_cli.go`, `container/errors.go` — duplicate registrations now surface as ONE aggregated report at boot instead of one panic per run. Previously a consolidation that introduced several collisions (duplicate service ids, duplicate service types under the strict default, duplicate parameters, module configurations or cli command names) sent the developer around the fix-one-reboot-hit-the-next loop; the `Application.Register*` surface now records each duplicate (first registration wins for the remainder of the boot) and `Boot()` panics once, after the cli phase, listing every collision with the file:line of the registration that caused it. The container's raw `Register`/`MustRegister` and `Configuration.RegisterRuntime` keep their fail-fast behavior for direct callers, and any non-duplicate registration failure still panics immediately; the duplicate branches in
-  `container.Register` now carry `errors.Is`-able causes (`container.ErrServiceIdAlreadyRegistered`, `container.ErrServiceTypeAlreadyRegistered`) with unchanged messages.
-- `application/environment_warning.go`, `application/application.go` — boot now warns for every process environment variable whose name matches a known configuration parameter: melody deliberately reads configuration only from the `.env` artifacts (the application stays a black box), so such a variable is inert — the report's real-world case being an `APP_ROLE: web` set in docker-compose that consumers assumed was read while every container silently ran the outbox dispatcher. The known set is exactly the resolved parameter names, so `PATH`/`HOME` can never match; a variable whose value equals the resolved parameter value is skipped (platforms often mirror `.env` values); values are never logged. Log-only — behavior does not change.
-- `config/configuration.go`, `application/application.go` — the misplaced-binary foot-gun is now diagnosable: melody derives the project directory from the executable location (the working directory only under `go run`), so `go run .` finds the `.env` artifacts but the same app built to `/tmp/app` and run from the same directory does not — and previously failed much later with an unsuggestive "undefined environment key". Boot now warns when zero environment keys were loaded (naming the searched `projectDirectory` and explaining the derivation), and the resolve failure carries `projectDirectory` in its error context. Log/diagnostic only — the lookup semantics are unchanged and documented in `CONFIG.md`.
-- `security/totp/totp.go` — `Verify`/`VerifyAt` now strip whitespace anywhere in the submitted code before comparison (`"123 456"`, padded copy/paste, tabs and the non-breaking space mobile keyboards produce), mirroring the secret normalization that already handled spaces/dashes/padding/case. Whitespace can never be part of an all-digit code, so the tolerance is unambiguous; the comparison stays constant-time and dashes are untouched (they belong to recovery codes).
-- `lock/run_exclusive.go`, `lock/leader_gate.go` — the session-probe path (non-positive ttl) now renews for twice the probe interval instead of the interval itself. A session locker ignores the ttl handed to `Refresh`, but a *lease* locker rewrites the lease to `now+ttl`: renewing for exactly the probe cadence made every probe race the expiry it had just written, so roughly every other probe found the lease gone — cancelling `fn` mid-run with "lost the lock lease", and, worse, genuinely letting the lease lapse so a second instance could acquire and run alongside the first. The positive-ttl path (refresh at `ttl/2`) always had this margin; session mode now matches it.
-- `lock/run_exclusive.go` — a refresh in flight when the caller's context is cancelled is read as shutdown, not as a lost lease. A SIGTERM cancels the very runtime the refresh loop calls the backend with, so the in-flight `Refresh` fails with that cancellation; the shutdown check consulted only the `fn`-finished channel, so every graceful stop of a long-running exclusive command returned "exclusive run lost the lock lease while running" — an error a cron fleet reads as a failed run.
-- `lock/run_exclusive.go` — a refresh already in flight when `fn` returns no longer wedges the call. `close(refreshDone)` cannot interrupt a `Refresh` blocked on an unresponsive backend, and the child-context `cancel()` was deferred until *after* `waitGroup.Wait()` — so a network partition during the last moments of a cron command hung the process forever, holding an unreleased lock. The cancel now runs before the wait, and a refresh that fails because of that cancel is read as shutdown rather than reported as a lost lease.
-- `lock/run_exclusive.go`, `lock/leader_gate.go` — the derived refresh cadence is floored (`resolveRefreshSchedule`), so a ttl small enough to make `ttl/2` round to zero can no longer reach `time.NewTicker(0)`, whose panic on a background goroutine no `recover` can reach and which took the process down while holding the lock.
-- `security/totp_second_factor_authenticator.go` — the two-factor replay guard keys on the normalized code (`totp.NormalizeCode`) rather than the raw header value. Because `Verify` treats `"123 456"` and `"123456"` as the same code, a guard keyed on the raw value would have recorded them as two distinct nonces, letting a captured code be replayed within its validity window by re-spacing it. Caught before release: both the whitespace tolerance and this key live in the same unreleased change.
 
 ## [v3.9.0] - 2026-07-06 - Cross-App Security, Route Manifest, Consumer Hardening and the Observability Seam
 
@@ -768,17 +779,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.5.0] - 2026-04-20 - Harden HTTP Server Timeouts and Align RunHttp Signature
 
-### Changed
-
-- `application/application_http.go` — `runHttp` now accepts a caller-supplied `context.Context` first parameter and observes it for shutdown instead of reading the receiver's stored `ctx` field. Aligns v3 with the v1/v2 `runHttp(ctx)` signature (MEL-171)
-
 ### Added
 
 - `application/application_http.go` — HTTP server now sets hardened timeout defaults (`ReadTimeout=15s`, `ReadHeaderTimeout=5s`, `WriteTimeout=30s`, `IdleTimeout=60s`, `MaxHeaderBytes=1MiB`) to defend against slowloris / slow-body attacks on exposed servers (MEL-148)
 - `application/application_http_timeouts.go` — new optional `HttpTimeoutConfiguration` interface; any `HttpConfiguration` that implements it can override the hardened defaults per timeout without breaking existing configurations (MEL-148)
 - `application/application_http_timeouts_test.go` — coverage for default application and interface-driven overrides
 
+### Changed
+
+- `application/application_http.go` — `runHttp` now accepts a caller-supplied `context.Context` first parameter and observes it for shutdown instead of reading the receiver's stored `ctx` field. Aligns v3 with the v1/v2 `runHttp(ctx)` signature (MEL-171)
+
 ## [v3.4.0] - 2026-04-17 - Extract HTTP CORS Subpackage and Harden Request Lifecycle
+
+### Added
+
+- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
+- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
+- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
+- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
+- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
+- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
 
 ### Changed
 
@@ -793,20 +813,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `session/file_storage.go` — file writes are now atomic (`os.CreateTemp` + `os.Rename`) instead of truncate-in-place; load path decoupled from a long-lived `*os.File` handle; `ownsFile` retired in favor of path-based ownership
 - `.documentation/package/*.md` — full documentation overhaul across APPLICATION/CACHE/CLI/CONFIG/CONTAINER/EVENT/HTTP/HTTPCLIENT/LOGGING/SECURITY/SESSION/VALIDATION: added missing userland types, constructors, container-access helpers, environment key tables, constants, and footgun notes
 
-### Added
-
-- `http/cors/` — new subpackage extracted from `http/middleware/cors.go`. Split into `cors.Service`, `cors.Middleware`, and `cors.RegisterResponseListener` so CORS headers are applied both on the happy path (middleware) and on error-path responses produced by the kernel (`kernel.response` listener, priority `-100`)
-- `http/response.go` — `BuildContentDisposition(disposition, filename)` emits RFC 6266 `Content-Disposition` with both `filename="..."` ASCII fallback and `filename*=UTF-8''...` RFC 5987 encoding for non-ASCII filenames; `AttachmentResponse` now routes through it
-- `http/middleware/rate_limit.go` — `ClientIpResolver` hook and `DefaultClientIp` for proxy-aware IP resolution; `RateLimitConfig.SetClientIpResolver(...)` lets userland install X-Forwarded-For / X-Real-IP strategies without rewriting key extractors
-- `http/request.go` — form auto-parsing now gated on `Content-Type` (`application/x-www-form-urlencoded` or `multipart/form-data`); JSON/XML/binary bodies are no longer consumed by `NewRequest`
-- `session/session.go` — `isValidSessionId` enforces 32-char lowercase-hex format; `Manager.Session`/`DeleteSession` reject malformed cookies before hitting storage
-- Test coverage: `http/cors/{listener,middleware,service}_test.go`, `http/request_test.go`, `http/response_test.go`, `container/scope_test.go` concurrent Close/resolve test, `logging/json_logger_test.go` concurrent writes, `session/file_storage_test.go` atomic write and reopen coverage
-
 ### Deprecated
 
 - `http/middleware.CorsConfig`, `http/middleware.NewCorsConfig`, `http/middleware.DefaultCorsConfig`, `http/middleware.RestrictiveCorsConfig`, `http/middleware.CorsMiddleware`, `http/middleware.DefaultCorsMiddleware`, `http/middleware.RestrictiveCors` — use the equivalents in `github.com/precision-soft/melody/v3/http/cors` instead. Deprecated symbols are kept for backwards compatibility; no removal scheduled.
 
 ## [v3.3.1] - 2026-04-17 - Fix Compression Error Propagation and Concurrent Access Races
+
+### Added
+
+- `http/static/utility_test.go` — symlink traversal rejection, absolute path rejection, parent traversal rejection, symlink within root allowed
+- `cli/output/application_version_test.go` — Set/Get coverage and concurrent access race test
+- `logging/emergency_logger_test.go` — singleton behavior, `Close`/recreate cycle, concurrent access
+- `httpclient/http_client_test.go` — concurrent `SetHeader`/`SetBaseUrl`/`SetTimeout` with in-flight requests, `HttpClientConfig.Headers()` defensive copy
+- `http/middleware/compression_test.go` — HuffmanOnly and BestCompression level boundary acceptance, out-of-range fallback to DefaultCompression
+- `config/configuration_test.go` — placeholder regex rejects identifiers starting with digits, accepts letter/underscore/dotted identifiers
+- `session/in_memory_storage_test.go`, `session/file_storage_test.go` — concurrent `Load`/`Save` race tests
+
+### Changed
+
+- `httpclient/http_client.go` — added `sync.RWMutex` to protect concurrent access to `baseUrl`, `headers`, and `timeout` fields
+- `httpclient/http_client_config.go` — `Headers()` now returns a defensive copy of the map
+- `cli/output/application_version.go` — application version storage replaced with `sync/atomic.Value` for thread safety
+- `logging/emergency_logger.go` — replaced `sync.Once` with `sync.Mutex` so `CloseEmergencyLogger()` can reset the singleton and a subsequent `EmergencyLogger()` call creates a fresh instance
+- `http/kernel.go` — `debugMode` variable hoisted to single computation at request entry
+- `application/application_http.go` — extracted `httpShutdownTimeout` constant for the HTTP server shutdown deadline
+- `cache/in_memory.go` — removed redundant map copy in `SetMultiple`
 
 ### Fixed
 
@@ -821,26 +852,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `httpclient/http_client.go` — `SetTimeout()` no longer mutates `http.Client.Timeout` on the shared client (which races with in-flight `Do()` calls); `clientForRequest` now reads the instance timeout under `RLock` and builds a per-request client only when it differs from the shared client's construction timeout
 - `logging/emergency_logger.go` — `CloseEmergencyLogger()` now resets the singleton to `nil` so that subsequent `EmergencyLogger()` calls actually create a fresh instance (previously the closed instance was retained)
 
-### Changed
-
-- `httpclient/http_client.go` — added `sync.RWMutex` to protect concurrent access to `baseUrl`, `headers`, and `timeout` fields
-- `httpclient/http_client_config.go` — `Headers()` now returns a defensive copy of the map
-- `cli/output/application_version.go` — application version storage replaced with `sync/atomic.Value` for thread safety
-- `logging/emergency_logger.go` — replaced `sync.Once` with `sync.Mutex` so `CloseEmergencyLogger()` can reset the singleton and a subsequent `EmergencyLogger()` call creates a fresh instance
-- `http/kernel.go` — `debugMode` variable hoisted to single computation at request entry
-- `application/application_http.go` — extracted `httpShutdownTimeout` constant for the HTTP server shutdown deadline
-- `cache/in_memory.go` — removed redundant map copy in `SetMultiple`
-
-### Added
-
-- `http/static/utility_test.go` — symlink traversal rejection, absolute path rejection, parent traversal rejection, symlink within root allowed
-- `cli/output/application_version_test.go` — Set/Get coverage and concurrent access race test
-- `logging/emergency_logger_test.go` — singleton behavior, `Close`/recreate cycle, concurrent access
-- `httpclient/http_client_test.go` — concurrent `SetHeader`/`SetBaseUrl`/`SetTimeout` with in-flight requests, `HttpClientConfig.Headers()` defensive copy
-- `http/middleware/compression_test.go` — HuffmanOnly and BestCompression level boundary acceptance, out-of-range fallback to DefaultCompression
-- `config/configuration_test.go` — placeholder regex rejects identifiers starting with digits, accepts letter/underscore/dotted identifiers
-- `session/in_memory_storage_test.go`, `session/file_storage_test.go` — concurrent `Load`/`Save` race tests
-
 ## [v3.3.0] - 2026-04-14 - Improve Goroutine Lifecycle and Default Logger
 
 ### Changed
@@ -854,6 +865,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.2.0] - 2026-04-13 - Fix Validators, Rate Limiter, and Router
 
+### Changed
+
+- `file_storage.go` — `copyAnyMap` performs recursive deep copy for nested `map[string]any` values
+- `exception/utility.go` — export `BuildCauseChain` and `BuildCauseContextChain`
+- `logging/logger.go` — remove duplicated cause chain functions; delegate to `exception.BuildCauseChain` / `exception.BuildCauseContextChain`
+- `router_utility.go` — remove implicit HEAD-to-GET match from `matchesMethod`; kernel `HeadFallbackToGet` policy is now the single control point
+- `config/configuration.go` — `RegisterRuntime` is now thread-safe via `sync.Mutex`
+- `http/static/file_server.go` — extract shared path-resolution and cache logic into `resolveAndOpen` helper; `Serve` and `serveForStreaming` both delegate to it
+
 ### Fixed
 
 - `validator.go` — `createConstraintWithParams` now handles `greaterThan` parameters; `validate:"greaterThan(value=5)"` was silently using `min=0`
@@ -866,16 +886,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `kernel.go` — logger creation failure returns 500 response instead of panicking
 - `cors.go` — panic at middleware initialization when `AllowCredentials=true` and origins contain `"*"` to prevent overly permissive CORS
 
+## [v3.1.4] - 2026-04-10 - Fix XSS, Symlink Traversal, and Routing Edge Cases
+
+### Added
+
+- `request_test.go`, `middleware/compression_test.go`, `middleware/cors_test.go`, `url_generation_route_definition_test.go` — new and expanded test coverage for all fixes
+
 ### Changed
 
-- `file_storage.go` — `copyAnyMap` performs recursive deep copy for nested `map[string]any` values
-- `exception/utility.go` — export `BuildCauseChain` and `BuildCauseContextChain`
-- `logging/logger.go` — remove duplicated cause chain functions; delegate to `exception.BuildCauseChain` / `exception.BuildCauseContextChain`
-- `router_utility.go` — remove implicit HEAD-to-GET match from `matchesMethod`; kernel `HeadFallbackToGet` policy is now the single control point
-- `config/configuration.go` — `RegisterRuntime` is now thread-safe via `sync.Mutex`
-- `http/static/file_server.go` — extract shared path-resolution and cache logic into `resolveAndOpen` helper; `Serve` and `serveForStreaming` both delegate to it
-
-## [v3.1.4] - 2026-04-10 - Fix XSS, Symlink Traversal, and Routing Edge Cases
+- `kernel.go` — remove dead nil checks on `MatchResult` (router `Match()` always returns non-nil)
+- `request.go` — log warning when `ParseForm` fails (previously silent)
+- `url_generation_route_definition.go` — `Defaults()` and `Requirements()` now return defensive copies
+- Rename `security/security_test.go` to `security/test_helper_test.go`
+- Remove redundant comments from modified files
 
 ### Fixed
 
@@ -886,18 +909,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `middleware/cors.go` — origin matching was case-sensitive; now uses `strings.EqualFold` for case-insensitive comparison
 - `middleware/rate_limit.go` — `getClientIp` now uses `RemoteAddr` only; ignores `X-Forwarded-For` and `X-Real-IP` headers to prevent IP spoofing
 
-### Changed
-
-- `kernel.go` — remove dead nil checks on `MatchResult` (router `Match()` always returns non-nil)
-- `request.go` — log warning when `ParseForm` fails (previously silent)
-- `url_generation_route_definition.go` — `Defaults()` and `Requirements()` now return defensive copies
-- Rename `security/security_test.go` to `security/test_helper_test.go`
-- Remove redundant comments from modified files
-
-### Added
-
-- `request_test.go`, `middleware/compression_test.go`, `middleware/cors_test.go`, `url_generation_route_definition_test.go` — new and expanded test coverage for all fixes
-
 ## [v3.1.3] - 2026-03-21 - Refactor Address Colon Check in Config
 
 ### Changed
@@ -906,13 +917,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.1.2] - 2026-03-18 - Fix HTTP HEAD Handling and Update Dev Scripts
 
-### Fixed
-
-- `http/router_utility.go` — aligned HEAD handling and response contract validation; prevents incorrect responses on HEAD requests
-
 ### Changed
 
 - `internal/reflect.go` — updated type-reflection utilities
+
+### Fixed
+
+- `http/router_utility.go` — aligned HEAD handling and response contract validation; prevents incorrect responses on HEAD requests
 
 ## [v3.1.1] - 2026-03-17 - Fix JSON Logging Level Label Preservation
 

@@ -435,3 +435,160 @@ func TestRegisterRuntime_LeavesAnOrdinaryParameterUnmarked(t *testing.T) {
         t.Fatalf("expected an ordinary parameter to stay unmarked")
     }
 }
+
+/* @info a MarkSecret arriving after the boot resolve travels to the parameters whose templates read the key, exactly as the early marking does: without the retroactive scan the key was redacted while the dsn assembled from it printed in full */
+func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
+    environment := &Environment{values: map[string]string{
+        "DB_PASSWORD": "hunter2",
+    }}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("database.dsn", "postgres://app:%env(DB_PASSWORD)%@db/app")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if true == configuration.MustGet("database.dsn").IsSecret() {
+        t.Fatalf("expected the dsn to start unmarked")
+    }
+
+    if false == configuration.MarkSecret("DB_PASSWORD") {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet("DB_PASSWORD").IsSecret() {
+        t.Fatalf("expected the key itself to be marked")
+    }
+
+    if false == configuration.MustGet("database.dsn").IsSecret() {
+        t.Fatalf("expected the late marking to travel to the parameter assembled from the key")
+    }
+}
+
+/* @info a late mark covers the whole derivation chain, not the direct readers alone: the second hop used to keep printing the assembled value while the first was redacted, because the retroactive scan stopped after one step */
+func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T) {
+    environment := &Environment{values: map[string]string{
+        "G6_SECRET": "hunter2",
+        "G6_MIDDLE": "x-%env(G6_SECRET)%",
+        "G6_OUTER":  "y-%env(G6_MIDDLE)%",
+    }}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if true == configuration.MustGet("G6_OUTER").IsSecret() {
+        t.Fatalf("expected the two-hop derivation to start unmarked")
+    }
+
+    if false == configuration.MarkSecret("G6_SECRET") {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet("G6_MIDDLE").IsSecret() {
+        t.Fatalf("expected the direct reader to be marked")
+    }
+
+    if false == configuration.MustGet("G6_OUTER").IsSecret() {
+        t.Fatalf("expected the mark to follow the chain to the two-hop derivation")
+    }
+}
+
+/* @info a parameter registered after boot inherits the secret marking of the credential its template reads: the propagation marks the reader it finds by name in the parameter map, and a parameter resolved before it was published was absent at the only moment the propagation looks */
+func TestRegisterRuntime_ALateParameterInheritsTheSecretMarkOfTheEnvironmentKeyItReads(t *testing.T) {
+    configuration := newLateRegistrationConfiguration(t)
+
+    configuration.RegisterRuntime("app.dsn.late", "postgres://user:%env(DB_PASSWORD)%@db/app")
+
+    if false == configuration.MustGet("app.dsn.late").IsSecret() {
+        t.Fatalf("expected the late parameter to inherit the marking of the credential it reads")
+    }
+}
+
+func TestRegisterRuntime_ALateParameterInheritsTheSecretMarkOfTheParameterItReads(t *testing.T) {
+    configuration := newLateRegistrationConfiguration(t)
+
+    configuration.RegisterRuntime("app.dsn.viaParameter", "postgres://user:%DB_PASSWORD%@db/app")
+
+    if false == configuration.MustGet("app.dsn.viaParameter").IsSecret() {
+        t.Fatalf("expected the marking to travel through a parameter reference too")
+    }
+}
+
+func TestRegisterRuntime_ALateParameterReadingNoCredentialStaysUnmarked(t *testing.T) {
+    configuration := newLateRegistrationConfiguration(t)
+
+    configuration.RegisterRuntime("app.endpoint.late", "https://api.internal/v1")
+
+    if true == configuration.MustGet("app.endpoint.late").IsSecret() {
+        t.Fatalf("expected an ordinary late parameter to stay unmarked")
+    }
+}
+
+func newLateRegistrationConfiguration(t *testing.T) *Configuration {
+    t.Helper()
+
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{values: map[string]string{"DB_PASSWORD": "s3cr3t"}},
+        "/srv/app",
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("could not build the configuration: %v", newConfigurationErr)
+    }
+
+    if false == configuration.MarkSecret("DB_PASSWORD") {
+        t.Fatalf("expected the environment key to be registered as a parameter")
+    }
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("could not resolve: %v", resolveErr)
+    }
+
+    return configuration
+}
+
+/* @info the retroactive scan reads both placeholder grammars: a reader written as a %NAME% parameter reference is marked exactly as one written through %env(NAME)%. The negative half is what pins the comparison itself — an inverted match over-marks every parameter reference through the fixpoint, so the reader of an unrelated parameter staying unmarked is the assertion that sees it. */
+func TestMarkSecret_PropagatesThroughAParameterReference(t *testing.T) {
+    environment := &Environment{values: map[string]string{
+        "DB_PASSWORD": "hunter2",
+    }}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.host", "api.internal")
+    configuration.RegisterRuntime("app.endpoint", "https://%app.host%/v1")
+    configuration.RegisterRuntime("database.dsn", "postgres://app:%DB_PASSWORD%@db/app")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if true == configuration.MustGet("database.dsn").IsSecret() {
+        t.Fatalf("expected the dsn to start unmarked")
+    }
+
+    if false == configuration.MarkSecret("DB_PASSWORD") {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet("database.dsn").IsSecret() {
+        t.Fatalf("expected the late marking to travel through the parameter reference")
+    }
+
+    if true == configuration.MustGet("app.endpoint").IsSecret() {
+        t.Fatalf("expected the reader of an unrelated parameter to stay unmarked")
+    }
+}

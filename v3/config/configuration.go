@@ -252,7 +252,52 @@ func (instance *Configuration) MarkSecret(name string) bool {
 
     parameter.isSecret.Store(true)
 
+    /* the marking travels to every parameter whose template reads this one, exactly as it does when the marking precedes the resolution: without this, a MarkSecret arriving after the boot resolve redacted the key but left the dsn assembled from it printing in full, and the late marking reported success while covering half of what the early one covers. The scan reads the raw templates, so it reaches the same direct readers the resolution-time propagation reaches. */
+    instance.propagateSecretMarkLocked(name)
+
     return true
+}
+
+/* propagateSecretMarkLocked marks every parameter whose raw template reads the named one — through %env(NAME)%, through the default processor's fallback, or through a %NAME% reference — and follows the marking to a fixpoint: a reader of a freshly marked name is scanned in turn, so a derivation chain is covered whole however late the mark arrives. A match inside doubled-percent escaped text over-marks, which errs toward redacting more, never less. */
+func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
+    markedNames := []string{markedName}
+
+    for 0 < len(markedNames) {
+        currentName := markedNames[0]
+        markedNames = markedNames[1:]
+
+        for name, parameter := range instance.parameters {
+            if true == parameter.isSecret.Load() {
+                continue
+            }
+
+            templateValue, isString := parameter.environmentValue.(string)
+            if false == isString {
+                continue
+            }
+
+            if true == templateReadsName(templateValue, currentName) {
+                parameter.isSecret.Store(true)
+                markedNames = append(markedNames, name)
+            }
+        }
+    }
+}
+
+func templateReadsName(template string, name string) bool {
+    for _, submatches := range envPlaceholderPattern.FindAllStringSubmatch(template, -1) {
+        if name == submatches[3] || name == submatches[2] {
+            return true
+        }
+    }
+
+    for _, submatches := range parameterPlaceholderPattern.FindAllStringSubmatch(template, -1) {
+        if name == submatches[1] {
+            return true
+        }
+    }
+
+    return false
 }
 
 func (instance *Configuration) Names() []string {

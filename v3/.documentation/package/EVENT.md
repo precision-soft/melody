@@ -99,6 +99,8 @@ func dispatchProductCreated(
 - [`type EventDispatcherInspector`](../../event/contract/event_dispatcher_inspector.go)
 - [`type RegisteredEvent`](../../event/contract/event_dispatcher_inspector.go)
 - [`type RegisteredListener`](../../event/contract/event_dispatcher_inspector.go)
+- [`const RegisteredListenerSourceListener`](../../event/contract/event_dispatcher_inspector.go) (`"listener"`)
+- [`const RegisteredListenerSourceSubscriber`](../../event/contract/event_dispatcher_inspector.go) (`"subscriber"`)
 
 ### Implementations (`event`)
 
@@ -108,6 +110,13 @@ func dispatchProductCreated(
     - [`NewEventFromEvent(eventcontract.Event) *Event`](../../event/event.go)
 - [`type EventDispatcher`](../../event/event_dispatcher.go)
     - [`NewEventDispatcher(clockcontract.Clock) *EventDispatcher`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).AddListener(eventName string, listener eventcontract.EventListener, priority int) eventcontract.ListenerRegistration`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).RemoveListener(registration eventcontract.ListenerRegistration) bool`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).AddSubscriber(subscriber eventcontract.EventSubscriber)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).RemoveSubscriber(subscriber eventcontract.EventSubscriber) int`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).RegisteredEvents() []eventcontract.RegisteredEvent`](../../event/event_dispatcher.go)
     - [`MarkListenerRequired(eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)
     - [`MarkListenerMaySkipRequiredListeners(eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)
 - [`type EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)

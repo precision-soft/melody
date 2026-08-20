@@ -69,3 +69,40 @@ func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
         waiter.Wait()
     }
 }
+
+func TestStreamResponse_BodyAfterCloseReadsAsAFailureNotAsNil(t *testing.T) {
+    streamResponse := NewStreamResponse(200, http.Header{}, io.NopCloser(strings.NewReader("payload")))
+
+    if err := streamResponse.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    body := streamResponse.Body()
+    if nil == body {
+        t.Fatalf("Body must not hand back a nil reader after Close")
+    }
+
+    read, err := io.Copy(io.Discard, body)
+    if nil == err {
+        t.Fatalf("expected a read after Close to fail, %d bytes copied", read)
+    }
+    if false == strings.Contains(err.Error(), "closed") {
+        t.Fatalf("expected the failure to say the stream is closed, got %q", err.Error())
+    }
+
+    if err := body.Close(); nil != err {
+        t.Fatalf("a consumer's deferred close must stay correct: %v", err)
+    }
+}
+
+func TestStreamResponse_BodyOfAnEmptyStreamIsNotNil(t *testing.T) {
+    streamResponse := NewStreamResponse(204, http.Header{}, nil)
+
+    if nil == streamResponse.Body() {
+        t.Fatalf("Body must not hand back a nil reader")
+    }
+
+    if err := streamResponse.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+}

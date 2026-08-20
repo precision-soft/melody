@@ -692,3 +692,292 @@ func TestHttpClient_ReusesPooledConnectionsAcrossConcurrentWaves(t *testing.T) {
         )
     }
 }
+
+/* A nil *BasicAuthorizationOptions boxed through the public SetBasic passes a nil check on the interface, and reading the username off it dereferences nil on the request path — where the promise is an error, not a panic. */
+func TestHttpClient_TypedNilBasicAuthorizationDoesNotPanic(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    response, err := client.Get("/", func(options httpclientcontract.RequestOptions) {
+        options.Authorization().SetBasic((*BasicAuthorizationOptions)(nil))
+    })
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if http.StatusOK != response.StatusCode() {
+        t.Fatalf("expected status 200, got %d", response.StatusCode())
+    }
+}
+
+/* A nil AuthorizationOptions interface reaches the same guard from the other side. */
+func TestHttpClient_NilAuthorizationDoesNotPanic(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    _, err := client.Get("/", func(options httpclientcontract.RequestOptions) {
+        options.Authorization().SetBasic(nil)
+    })
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+}
+
+/* An api key spelled as the password of an empty user is the ordinary shape of curl's "-u :key". The username guard dropped the whole credential and sent the request unauthenticated with nothing to say so. */
+func TestHttpClient_BasicAuthorizationWithEmptyUsernameIsSent(t *testing.T) {
+    var receivedUsername string
+    var receivedPassword string
+    var receivedOk bool
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedUsername, receivedPassword, receivedOk = request.BasicAuth()
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    if _, err := client.Get("/", WithBasicAuth("", "api-key-as-password")); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if false == receivedOk {
+        t.Fatalf("no basic credential reached the server")
+    }
+    if "" != receivedUsername {
+        t.Fatalf("expected an empty username, got %q", receivedUsername)
+    }
+    if "api-key-as-password" != receivedPassword {
+        t.Fatalf("expected the password to travel, got %q", receivedPassword)
+    }
+}
+
+/* A bearer token and a basic credential cannot share one Authorization header; the bearer wins, and the contract says so. */
+func TestHttpClient_BearerTokenWinsOverBasicAuthorization(t *testing.T) {
+    var receivedAuthorization string
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedAuthorization = request.Header.Get("Authorization")
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    if _, err := client.Get("/", WithBearerToken("token"), WithBasicAuth("user", "password")); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "Bearer token" != receivedAuthorization {
+        t.Fatalf("expected the bearer token to win, got %q", receivedAuthorization)
+    }
+}
+
+/* The cap is caller input known before anything is dialled. Validating it after the exchange let a POST commit its side effect and then answered with an error phrased as though nothing had been sent, so a retry duplicated the operation. */
+func TestHttpClient_InvalidMaxResponseBodyBytesIsRefusedBeforeTheRequestIsSent(t *testing.T) {
+    var hits int64
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        atomic.AddInt64(&hits, 1)
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    _, err := client.Post("/side-effect", map[string]any{"quantity": 1}, WithMaxResponseBodyBytes(0))
+    if nil == err {
+        t.Fatalf("expected an error for a non-positive cap")
+    }
+
+    if 0 != atomic.LoadInt64(&hits) {
+        t.Fatalf("the request was sent before the cap was validated: the server was hit %d time(s)", atomic.LoadInt64(&hits))
+    }
+}
+
+/* The option promised a cap and the streaming path never read it: a caller who asked for ten bytes was handed everything the server sent, with nothing to say the guard did not exist there. */
+func TestHttpClient_StreamHonoursAnExplicitResponseBodyCap(t *testing.T) {
+    payload := bytes.Repeat([]byte{97}, 5000)
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write(payload)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    stream, err := client.RequestStream(http.MethodGet, "/", WithMaxResponseBodyBytes(10))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer stream.Close()
+
+    read, err := io.ReadAll(stream.Body())
+    if nil == err {
+        t.Fatalf("expected the cap to be enforced, %d bytes delivered", len(read))
+    }
+    if 10 < len(read) {
+        t.Fatalf("expected at most the cap to be delivered, got %d bytes", len(read))
+    }
+}
+
+/* The default cap binds the stream too: an unbounded body behind a bounded contract delivered whatever the server chose to send, and the caller who never named a cap is exactly the one who never audited for that. A body under the default still arrives whole. */
+func TestHttpClient_StreamWithoutAnExplicitCapIsBoundedByTheDefault(t *testing.T) {
+    payload := bytes.Repeat([]byte{97}, 5000)
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write(payload)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    stream, err := client.RequestStream(http.MethodGet, "/")
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer stream.Close()
+
+    limited, wrapped := stream.Body().(*limitedStreamBody)
+    if false == wrapped {
+        t.Fatalf("a stream the caller set no cap on must carry the inherited default cap")
+    }
+
+    if 10*1024*1024 != limited.limit {
+        t.Fatalf("expected the inherited default cap, got %d", limited.limit)
+    }
+
+    read, err := io.ReadAll(stream.Body())
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if len(payload) != len(read) {
+        t.Fatalf("expected the whole body under the default cap, got %d bytes", len(read))
+    }
+}
+
+/* the streaming path judges the cap before anything is dialled, the rule the buffered path always held and asserts by counting zero server hits: refused after the exchange, a POST that had already committed its side effect answered with an error phrased as though nothing had been sent, and a caller retrying on it duplicated the operation. */
+func TestHttpClient_StreamRefusesAnInvalidCapBeforeTheRequestIsSent(t *testing.T) {
+    serverHits := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        serverHits = serverHits + 1
+
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte("body"))
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    _, requestErr := client.RequestStream(http.MethodPost, "/", WithMaxResponseBodyBytes(0))
+    if nil == requestErr {
+        t.Fatalf("expected the invalid cap to be refused on the streaming path")
+    }
+
+    if "invalid max response body bytes" != requestErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
+    }
+
+    if 0 != serverHits {
+        t.Fatalf("expected the streaming refusal to arrive before the request is sent, got %d server hits", serverHits)
+    }
+}
+
+/* the buffered path reads one byte past the cap precisely so a body ending EXACTLY at it is delivered rather than refused; the streaming sibling carries that proof in its own suite, and an off-by-one here would have refused every response that filled its budget exactly. */
+func TestHttpClient_ABufferedBodyEndingExactlyAtTheCapIsDelivered(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte("0123456789"))
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    response, requestErr := client.Get("/", WithMaxResponseBodyBytes(10))
+    if nil != requestErr {
+        t.Fatalf("expected a body ending exactly at the cap to be delivered, got %v", requestErr)
+    }
+
+    if "0123456789" != response.String() {
+        t.Fatalf("unexpected body: %q", response.String())
+    }
+
+    _, oneOverErr := client.Get("/", WithMaxResponseBodyBytes(9))
+    if nil == oneOverErr {
+        t.Fatalf("expected a body one byte past the cap to be refused")
+    }
+
+    if "response body exceeded max size" != oneOverErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", oneOverErr.Error())
+    }
+}
+
+/* A caller computing what is left of a deadline that has already passed hands over a negative duration; the buffered path folds it into the configured timeout and the streaming path turned it into no deadline at all — an exhausted budget yielding a stream that runs forever. */
+func TestHttpClient_NegativeRequestTimeoutIsNotAnUnboundedStream(t *testing.T) {
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+
+    if 5*time.Second != client.clientForRequest(-2*time.Second).Timeout {
+        t.Fatalf("expected the buffered path to fall back to the configured timeout")
+    }
+
+    if 5*time.Second != client.streamClientForRequest(-2*time.Second).Timeout {
+        t.Fatalf(
+            "expected a negative request timeout to fall back to the configured timeout on the streaming path, got %v",
+            client.streamClientForRequest(-2*time.Second).Timeout,
+        )
+    }
+
+    if 0 != client.streamClientForRequest(0).Timeout {
+        t.Fatalf("expected an unset timeout to keep the streaming path unbounded")
+    }
+}
+
+/* The dedup of the two inline authorization blocks is only real if the streaming path actually enters the shared function: nothing else pins that the stream carries a credential at all. */
+func TestHttpClient_StreamCarriesTheRequestedAuthorization(t *testing.T) {
+    var receivedAuthorization string
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedAuthorization = request.Header.Get("Authorization")
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    stream, err := client.RequestStream(http.MethodGet, "/", WithBearerToken("token"))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer stream.Close()
+
+    if "Bearer token" != receivedAuthorization {
+        t.Fatalf("expected the stream to carry the bearer token, got %q", receivedAuthorization)
+    }
+}
+
+/* the two places a url carries a secret are the userinfo and the query values; the sanitized form keeps what makes a failure diagnosable — scheme, host, path and parameter names. */
+func TestSanitizeUrlForDiagnostics_StripsUserinfoAndQueryValues(t *testing.T) {
+    sanitized := sanitizeUrlForDiagnostics("https://user:PASSW0RD@host.example/path?api_key=SECRET")
+
+    if true == strings.Contains(sanitized, "PASSW0RD") {
+        t.Fatalf("the password reached the diagnostic url: %q", sanitized)
+    }
+    if true == strings.Contains(sanitized, "SECRET") {
+        t.Fatalf("the query secret reached the diagnostic url: %q", sanitized)
+    }
+    for _, kept := range []string{"host.example", "/path", "api_key"} {
+        if false == strings.Contains(sanitized, kept) {
+            t.Fatalf("expected %q to survive sanitization, got %q", kept, sanitized)
+        }
+    }
+}

@@ -115,6 +115,7 @@ import (
 	applicationcontract "github.com/precision-soft/melody/v3/application/contract"
 	httpcontract "github.com/precision-soft/melody/v3/http/contract"
 	kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 	"github.com/precision-soft/melody/v3/security"
 	securityconfig "github.com/precision-soft/melody/v3/security/config"
 	securitycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -123,7 +124,7 @@ import (
 type apiKeyLoginHandler struct{}
 
 func (instance *apiKeyLoginHandler) Login(
-	runtimeInstance any,
+	runtimeInstance runtimecontract.Runtime,
 	request httpcontract.Request,
 	input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -143,7 +144,7 @@ func (instance *apiKeyLoginHandler) Login(
 type apiKeyLogoutHandler struct{}
 
 func (instance *apiKeyLogoutHandler) Logout(
-	runtimeInstance any,
+	runtimeInstance runtimecontract.Runtime,
 	request httpcontract.Request,
 	input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -444,8 +445,8 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 - Matchers: [`PathPrefixMatcher`](../../security/matcher.go)
 - Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go), [`RoleHierarchyVoter`](../../security/role_hierarchy_voter.go)
 - Token source: [`ResolverTokenSource`](../../security/token_source.go)
-- Events: [`AuthorizationGrantedEvent`](../../security/authorization_granted_event.go), [`AuthorizationDeniedEvent`](../../security/authorization_denied_event.go), [`LoginSuccessEvent`](../../security/login_success_event.go), [`LoginFailureEvent`](../../security/login_failure_event.go), [`LogoutSuccessEvent`](../../security/logout_success_event.go), [`LogoutFailureEvent`](../../security/logout_failure_event.go)
-- Configuration: [`CompiledConfiguration`, `CompiledFirewall`](../../security/compiled_configuration.go)
+- Events: [`AuthorizationGrantedEvent`, `AuthorizationDeniedEvent`](../../security/authorization_granted_event.go), [`LoginSuccessEvent`](../../security/login_success_event.go), [`LoginFailureEvent`](../../security/login_failure_event.go), [`LogoutSuccessEvent`](../../security/logout_success_event.go), [`LogoutFailureEvent`](../../security/logout_failure_event.go)
+- Configuration: [`CompiledConfiguration`, `CompiledFirewall`](../../security/compiled_configuration.go), [`Source`](../../security/security_context.go), [`FirewallRegistry`](../../security/firewall_registry.go), [`FirewallManager`](../../security/firewall_manager.go)
 - Context: [`SecurityContext`](../../security/security_context.go)
 
 ### Constructors
@@ -500,6 +501,18 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 
 ### Configuration (`security/config`)
 
-- Builder: [`NewBuilder()` / `(*Builder).SetGlobal(...)` / `(*Builder).AddFirewall(...)` / `(*Builder).BuildAndCompile()`](../../security/config/security_module.go)
+- Builder:
+    - [`NewBuilder()`](../../security/config/security_module.go)
+    - [`(*Builder).SetGlobal(accessControl, roleHierarchy, accessDecisionManager, entryPoint, accessDeniedHandler)`](../../security/config/security_module.go)
+    - [`(*Builder).AddFirewall(name, matcher, rules, tokenSource, loginPath, logoutPath, loginHandler, logoutHandler, override)`](../../security/config/security_module.go)
+    - [`(*Builder).AddStatefulFirewall(name, matcher, rules, tokenSource, loginPath, logoutPath, loginHandler, logoutHandler, override)`](../../security/config/security_module.go)
+    - [`(*Builder).AddStatelessFirewall(name, matcher, rules, tokenSource, override)`](../../security/config/security_module.go)
+    - [`(*Builder).BuildAndCompile() *security.CompiledConfiguration`](../../security/config/security_module.go)
+- Firewall overrides:
+    - [`type FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`NewFirewallOverrideConfiguration()`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithStateless(stateless bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithEntryPoint(entryPoint securitycontract.EntryPoint) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithAccessDeniedHandler(accessDeniedHandler securitycontract.AccessDeniedHandler) FirewallOverrideConfiguration`](../../security/config/security_module.go)
 - Access control builder: [`NewAccessControlBuilder()` / `(*AccessControlBuilder).Require(...)` / `(*AccessControlBuilder).AllowAnonymous(...)` / `(*AccessControlBuilder).Build()`](../../security/config/access_control_builder.go)
 - Compile: [`Compile(configuration)`](../../security/config/compile.go)

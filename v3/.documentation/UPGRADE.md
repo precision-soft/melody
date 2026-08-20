@@ -314,6 +314,30 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** A consumer that deliberately overrode the key should read its value back from the suffixed key; everything else needs no change — the correlation is simply no longer forgeable from a context value.
 
+### Config: a late secret marking travels to the parameters assembled from the key
+
+**What changed.** `MarkSecret` called after the boot resolution now propagates to every parameter whose template reads the marked key, and follows the marking to a fixpoint through derivation chains — exactly what a marking arriving before the resolution has always done. The scan reads the raw templates; a match inside doubled-percent escaped text over-marks, which errs toward redacting more, never less.
+
+**Symptom.** `debug:parameters` redacts values it used to print: the dsn assembled from a password marked late now shows as secret beside the key itself. No stored value changes — the marking governs display, not storage.
+
+**Remedy.** None. A parameter that must stay visible should not read a marked credential in its template.
+
+### Httpclient: a basic credential travels whenever it was asked for
+
+**What changed.** `WithBasicAuth("", password)` now sends the credential. The username guard used to drop the whole authorization silently, so an api key spelled as the password of an empty user — the shape of curl's `-u :key`, legal under RFC 7617 — produced an unauthenticated request presented as a success. A typed-nil authorization or basic half now leaves the header unwritten instead of panicking on the request path.
+
+**Symptom.** A request built with an empty username and a non-empty password reaches the server with an `Authorization` header it never carried before.
+
+**Remedy.** None for a correct caller. A caller that relied on the empty username to mean "no credential" passes no basic authorization at all.
+
+### Httpclient: the response body cap binds the stream, the default included
+
+**What changed.** `RequestStream` enforces `MaxResponseBodyBytes` — the cap was completely inert on the streaming path — and the inherited default of ten mebibytes now binds a stream whose caller never named a cap. Reading past the cap answers "response body exceeded max size" with the cap, the method and the sanitized url in the record. An invalid cap is also refused before anything is dialled, on both paths, so a POST no longer commits its side effect before being told its options were invalid.
+
+**Symptom.** A stream that delivers more than ten mebibytes — a large download, a long-lived server-sent-event feed — errors mid-read where it used to run unbounded.
+
+**Remedy.** Name the cap the stream actually needs through `WithMaxResponseBodyBytes`; a genuinely unbounded consumer sets one sized far above its expected traffic. Callers of the buffered `Request` are unaffected — the default has always bounded them.
+
 ### Opaque tokens: a stored token with no issue instant is refused once its user is revoked
 
 **What changed.** A revocation is no longer an enumeration. [`security/contract.RevocationEpochStore`](../security/contract/token_store.go) publishes a boundary per user, and per device of a user, and [`Lookup`](../security/in_memory_token_store.go) refuses a token issued before the boundary that governs it. This closes the window [`DeleteByUser`](../../integrations/rueidis/v3/token_store.go) could never close: it walks an index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during a revocation survived it. The comparison needs an issue instant, so [`security/contract.Claims`](../security/contract/token_validator.go) carries `IssuedAt`, stamped by the store on every write.

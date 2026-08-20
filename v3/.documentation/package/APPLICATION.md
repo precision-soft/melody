@@ -158,13 +158,16 @@ package main
 import (
 	"context"
 	"io/fs"
+	nethttp "net/http"
 
 	"github.com/precision-soft/melody/v3/application"
 	applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+	melodyhttp "github.com/precision-soft/melody/v3/http"
 	httpcontract "github.com/precision-soft/melody/v3/http/contract"
 	kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 	"github.com/precision-soft/melody/v3/logging"
 	loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 type demoModule struct{}
@@ -181,11 +184,11 @@ func (instance *demoModule) RegisterConfigurations(registrar applicationcontract
 	registrar.RegisterConfiguration(
 		loggingcontract.LoggingConfigurationName,
 		logging.NewLoggingConfiguration(loggingcontract.LevelLabels{
-			loggingcontract.LevelDebug:     "100",
-			loggingcontract.LevelInfo:      "200",
-			loggingcontract.LevelWarning:   "300",
-			loggingcontract.LevelError:     "400",
-			loggingcontract.LevelEmergency: "500",
+			loggingcontract.LevelDebug:     loggingcontract.LevelLabelFromInt(100),
+			loggingcontract.LevelInfo:      loggingcontract.LevelLabelFromInt(200),
+			loggingcontract.LevelWarning:   loggingcontract.LevelLabelFromInt(300),
+			loggingcontract.LevelError:     loggingcontract.LevelLabelFromInt(400),
+			loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
 		}),
 	)
 }
@@ -214,21 +217,18 @@ func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Ker
 
 	router.HandleNamed(
 		"health",
-		httpcontract.MethodGet,
+		nethttp.MethodGet,
 		"/health",
-		func(kernelInstance kernelcontract.Kernel) httpcontract.Handler {
-			_ = kernelInstance
+		func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+			_ = runtimeInstance
+			_ = writer
+			_ = request
 
-			return func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-				_ = writer
-				_ = request
-
-				return httpcontract.NewStaticResponse(
-					"ok",
-					200,
-				), nil
-			}
-		}(kernelInstance),
+			return melodyhttp.NewResponse(
+				200,
+				[]byte("ok"),
+			), nil
+		},
 	)
 }
 
@@ -237,10 +237,11 @@ var _ applicationcontract.ParameterModule = (*demoModule)(nil)
 var _ applicationcontract.ServiceModule = (*demoModule)(nil)
 var _ applicationcontract.HttpModule = (*demoModule)(nil)
 
-func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *application.Application {
+func buildApplication(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
 	app := application.NewApplication(
+		ctx,
+		embeddedEnvFiles,
 		embeddedPublicFiles,
-		embeddedConfigFiles,
 	)
 
 	app.RegisterModule(&demoModule{})
@@ -251,15 +252,16 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 	 */
 
 	app.RegisterHttpRoute(
-		httpcontract.MethodGet,
+		nethttp.MethodGet,
 		"/ping",
-		func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+		func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+			_ = runtimeInstance
 			_ = writer
 			_ = request
 
-			return httpcontract.NewStaticResponse(
-				"pong",
+			return melodyhttp.NewResponse(
 				200,
+				[]byte("pong"),
 			), nil
 		},
 	)
@@ -267,9 +269,9 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 	return app
 }
 
-func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) {
-	app := buildApplication(embeddedPublicFiles, embeddedConfigFiles)
-	app.Run(ctx)
+func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) {
+	app := buildApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)
+	app.Run()
 }
 ```
 
@@ -325,7 +327,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 
 ### Constructors
 
-- [`NewApplication(embeddedPublicFiles, embeddedConfigFiles)`](../../application/application_new.go)
+- [`NewApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)`](../../application/application_new.go)
 - [`NewRuntimeFlags(mode)`](../../application/cli.go)
 - [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
 - [`ParseRuntimeFlagsWithRole(defaultMode, defaultRole)`](../../application/cli.go) — the form `ParseRuntimeFlags` delegates to. An explicit `--role`/`-role` wins over the configured default; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
@@ -335,7 +337,7 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 ### Application lifecycle
 
 - [`(*Application).Boot()`](../../application/application.go)
-- [`(*Application).Run(ctx)`](../../application/application.go)
+- [`(*Application).Run()`](../../application/application.go)
 - [`(*Application).Close()`](../../application/application_close.go)
 - [`(*Application).ProcessRole()`](../../application/application.go) — the role this process resolved to, the same string `ServiceProcessRole` answers
 

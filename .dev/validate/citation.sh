@@ -86,12 +86,13 @@ cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 
 BASELINE_PATH_STRING=".dev/validate/citation.baseline"
 
-# the majors this run gates. v3 is measured and printed like the rest and is not gated, for the reason the
-# parity band gives for its own pair list: it is the line still under development, its documents are the
-# next stage's work, and a lane that is red for a known reason teaches a team to ignore the lane.
+# the majors this run gates. All three are gated: v3's documents were brought to the same bar during the
+# stabilization sweep, so a finding there is as actionable as one on the published majors, and the
+# baseline holds the declared collisions for each.
 GATED_MAJOR_STRING_LIST=(
     "v1"
     "v2"
+    "v3"
 )
 
 MAJOR_FILTER_STRING=""

@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpclientcontract "github.com/precision-soft/melody/v3/httpclient/contract"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func NewDefaultHttpClient() *HttpClient {
@@ -169,6 +170,66 @@ func effectivePort(value *url.URL) string {
     return ""
 }
 
+/* sanitizeUrlForDiagnostics strips the two places a url carries a secret — the userinfo and the query values — while keeping everything that makes a failure diagnosable: the scheme, the host, the path and the parameter names. A url a caller built by hand may not parse at all, which is exactly the failure being reported, so the textual fallback cuts the same two regions without a parser. */
+func sanitizeUrlForDiagnostics(urlString string) string {
+    parsed, err := url.Parse(urlString)
+    if nil != err {
+        return sanitizeUrlTextually(urlString)
+    }
+
+    if nil != parsed.User {
+        parsed.User = url.UserPassword(redactedValue, redactedValue)
+    }
+
+    if "" != parsed.RawQuery {
+        queryValues := parsed.Query()
+        for key := range queryValues {
+            queryValues.Set(key, redactedValue)
+        }
+
+        parsed.RawQuery = queryValues.Encode()
+    }
+
+    parsed.Fragment = ""
+    parsed.RawFragment = ""
+
+    return parsed.String()
+}
+
+const redactedValue = "xxxxx"
+
+/* sanitizeUrlTextually removes the userinfo and the whole query from a url net/url refused to parse. */
+func sanitizeUrlTextually(urlString string) string {
+    sanitized := urlString
+
+    if queryStart := strings.Index(sanitized, "?"); 0 <= queryStart {
+        sanitized = sanitized[:queryStart] + "?" + redactedValue
+    }
+
+    schemeEnd := strings.Index(sanitized, "://")
+    if 0 > schemeEnd {
+        return sanitized
+    }
+
+    authorityStart := schemeEnd + len("://")
+
+    authorityEnd := strings.Index(sanitized[authorityStart:], "/")
+    if 0 > authorityEnd {
+        authorityEnd = len(sanitized)
+    } else {
+        authorityEnd += authorityStart
+    }
+
+    userinfoEnd := strings.LastIndex(sanitized[authorityStart:authorityEnd], "@")
+    if 0 > userinfoEnd {
+        return sanitized
+    }
+
+    return sanitized[:authorityStart] +
+        redactedValue + ":" + redactedValue +
+        sanitized[authorityStart+userinfoEnd:]
+}
+
 func (instance *HttpClient) Get(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
     return instance.Request(nethttp.MethodGet, urlString, options...)
 }
@@ -203,6 +264,20 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
 
     for _, applyOption := range options {
         applyOption(requestConfig)
+    }
+
+    maxResponseBodyBytes := requestConfig.MaxResponseBodyBytes()
+    if 0 >= maxResponseBodyBytes {
+        /* the cap is known before anything is dialled, and it used to be read after the exchange: a POST that had already committed its side effect answered with an error phrased as though nothing had been sent, and a caller retrying on it duplicated the operation. */
+        return nil, exception.NewError(
+            "invalid max response body bytes",
+            exceptioncontract.Context{
+                "maxResponseBodyBytes": maxResponseBodyBytes,
+                "method":               method,
+                "url":                  sanitizeUrlForDiagnostics(urlString),
+            },
+            nil,
+        )
     }
 
     fullUrl, err := instance.buildUrl(urlString, requestConfig.Query())
@@ -249,24 +324,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
         request.Header.Set("Content-Type", requestConfig.ContentType())
     }
 
-    authorization := requestConfig.Authorization()
-    if nil != authorization {
-        bearer := authorization.Bearer()
-        if "" != bearer {
-            request.Header.Set("Authorization", "Bearer "+bearer)
-        } else {
-            basicAuthorization := authorization.Basic()
-            if nil != basicAuthorization {
-                username := basicAuthorization.Username()
-                if "" != username {
-                    request.SetBasicAuth(
-                        username,
-                        basicAuthorization.Password(),
-                    )
-                }
-            }
-        }
-    }
+    applyAuthorization(request, requestConfig.Authorization())
 
     client := instance.clientForRequest(requestConfig.Timeout())
 
@@ -275,11 +333,6 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
         return nil, exception.NewError("request failed", nil, err)
     }
     defer response.Body.Close()
-
-    maxResponseBodyBytes := requestConfig.MaxResponseBodyBytes()
-    if 0 >= maxResponseBodyBytes {
-        return nil, exception.NewError("invalid max response body bytes", nil, nil)
-    }
 
     /* the +1 lets ReadAll observe one byte past the cap so an over-long body is detected; saturate instead of wrapping, because int64(math.MaxInt)+1 is negative and LimitReader would then read nothing and return an empty body with no error */
     readLimit := int64(maxResponseBodyBytes)
@@ -313,6 +366,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
     ), nil
 }
 
+/* RequestStream hands the caller a response whose body is still on the wire. The caller OWNS it and must Close it on every path, including the ones that never read it — a status it does not like, an error it returns instead — because the streaming client carries no whole-request deadline: an unclosed stream pins its connection and its descriptor for as long as the process lives. The response body cap bounds the stream exactly as it bounds a buffered body, the inherited default included; a caller streaming more than the default names its own cap through WithMaxResponseBodyBytes. */
 func (instance *HttpClient) RequestStream(
     method string,
     urlString string,
@@ -322,6 +376,19 @@ func (instance *HttpClient) RequestStream(
 
     for _, applyOption := range options {
         applyOption(requestConfig)
+    }
+
+    /* the cap is judged before anything is dialled, the rule the buffered path states: read after the exchange, a POST that had already committed its side effect answered with an error phrased as though nothing had been sent, and a caller retrying on it duplicated the operation */
+    if 0 >= requestConfig.MaxResponseBodyBytes() {
+        return nil, exception.NewError(
+            "invalid max response body bytes",
+            exceptioncontract.Context{
+                "maxResponseBodyBytes": requestConfig.MaxResponseBodyBytes(),
+                "method":               method,
+                "url":                  sanitizeUrlForDiagnostics(urlString),
+            },
+            nil,
+        )
     }
 
     fullUrl, err := instance.buildUrl(urlString, requestConfig.Query())
@@ -368,24 +435,7 @@ func (instance *HttpClient) RequestStream(
         requestInstance.Header.Set("Content-Type", requestConfig.ContentType())
     }
 
-    authorization := requestConfig.Authorization()
-    if nil != authorization {
-        bearer := authorization.Bearer()
-        if "" != bearer {
-            requestInstance.Header.Set("Authorization", "Bearer "+bearer)
-        } else {
-            basicAuthorization := authorization.Basic()
-            if nil != basicAuthorization {
-                username := basicAuthorization.Username()
-                if "" != username {
-                    requestInstance.SetBasicAuth(
-                        username,
-                        basicAuthorization.Password(),
-                    )
-                }
-            }
-        }
-    }
+    applyAuthorization(requestInstance, requestConfig.Authorization())
 
     clientInstance := instance.streamClientForRequest(requestConfig.Timeout())
 
@@ -394,11 +444,43 @@ func (instance *HttpClient) RequestStream(
         return nil, exception.NewError("request failed", nil, err)
     }
 
+    /* the cap binds every stream, the inherited default included: an unbounded body behind a bounded contract delivered whatever the server chose to send, and the caller who never named a cap is exactly the one who never audited for that. */
+    body := newLimitedStreamBody(
+        response.Body,
+        requestConfig.MaxResponseBodyBytes(),
+        method,
+        sanitizeUrlForDiagnostics(requestInstance.URL.String()),
+    )
+
     return NewStreamResponse(
         response.StatusCode,
         response.Header.Clone(),
-        response.Body,
+        body,
     ), nil
+}
+
+/* applyAuthorization writes the credential the caller asked for. A bearer token wins over a basic credential when both are set — the two cannot share one Authorization header. Basic travels whenever it was asked for, empty halves included: an api key spelled as the password of an empty user is the ordinary shape of "-u :key", and dropping it silently sent the request unauthenticated with nothing to say so. */
+func applyAuthorization(request *nethttp.Request, authorization httpclientcontract.AuthorizationOptions) {
+    if true == internal.IsNilInterface(authorization) {
+        return
+    }
+
+    bearer := authorization.Bearer()
+    if "" != bearer {
+        request.Header.Set("Authorization", "Bearer "+bearer)
+
+        return
+    }
+
+    basicAuthorization := authorization.Basic()
+    if true == internal.IsNilInterface(basicAuthorization) {
+        return
+    }
+
+    request.SetBasicAuth(
+        basicAuthorization.Username(),
+        basicAuthorization.Password(),
+    )
 }
 
 func (instance *HttpClient) SetBaseUrl(baseUrl string) {
@@ -461,6 +543,11 @@ func (instance *HttpClient) buildUrl(urlString string, query map[string]string) 
 func (instance *HttpClient) streamClientForRequest(timeout time.Duration) *nethttp.Client {
     if 0 < timeout {
         return instance.clientForRequest(timeout)
+    }
+
+    /* a negative timeout is not a request to run forever: every other guard in this package reads a non-positive duration as unset, and a caller computing what is left of a deadline that has already passed would otherwise get an unbounded stream out of an exhausted budget. */
+    if 0 > timeout {
+        return instance.clientForRequest(0)
     }
 
     return &nethttp.Client{

@@ -14,8 +14,8 @@
 # Fields are trimmed, so the columns may be aligned. The reason is mandatory: a line whose reason is empty
 # is a line nobody can review.
 #
-# v3 carries citations of its own and has no lines here. It is not gated — its documents are the next
-# stage's work — and the run reports its findings under a count rather than as failures.
+# All three majors are gated and carry lines here. The classes are the same on each; a symbol present on
+# one major's list and absent from another's reflects what each major's documents actually cite.
 #
 # ------------------------------------------------------------------------------------------------------
 # the standard library, under a name melody also uses
@@ -45,6 +45,12 @@ v2 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mec
 v2 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
 v2 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
 
+v3 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the streaming response asserts on the writer
+v3 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
+v3 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
+v3 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
+v3 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
+
 # ------------------------------------------------------------------------------------------------------
 # the third-party client, under the name of the integration that wraps it
 #
@@ -56,6 +62,11 @@ v1 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answer
 v2 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
 v1 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
 v2 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+
+v3 ~ symbol ~ amqp.DialConfig          ~ github.com/rabbitmq/amqp091-go DialConfig, named because its parse error quotes the DSN the connection redacts
+v3 ~ symbol ~ websocket.Accept         ~ github.com/coder/websocket Accept, named where the hijack takes the connection out of the server's timeouts
+v3 ~ symbol ~ websocket.Dial           ~ github.com/coder/websocket Dial, named as the in-process test's client half
+v3 ~ symbol ~ websocket.MessageBinary  ~ github.com/coder/websocket MessageBinary, named as what BinaryWrites switches the outbound frames to
 
 # ------------------------------------------------------------------------------------------------------
 # the absences the documents themselves announce
@@ -71,6 +82,8 @@ v1 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; 
 
 v2 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
 v2 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
+
+v3 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
 
 # ------------------------------------------------------------------------------------------------------
 # the umbrella README of an integration, which documents all three bindings
@@ -98,3 +111,4 @@ v1 ~ symbol ~ security.NewInMemoryTokenStore       ~ the core store the v3 token
 
 v1 ~ sample ~ integrations/bunorm/migrate/README.md block 2    ~ imports your/module/database, the placeholder the reader replaces with their own module path
 v2 ~ sample ~ integrations/bunorm/migrate/v2/README.md block 2 ~ imports your/module/database, the placeholder the reader replaces with their own module path
+v3 ~ sample ~ integrations/bunorm/migrate/v3/README.md block 2 ~ imports your/module/database, the placeholder the reader replaces with their own module path
