@@ -31,6 +31,14 @@ Optional configuration:
 * [`TimeoutConfig`](./timeout_config.go) — connect / command timeouts.
 * [`RetryConfig`](./retry_config.go) — the initial-connection retry (see below).
 
+The provider is handed the connection **values**, not the configuration keys they came from, so it knows no configuration key and names no credential of its own — this package carries no credential-marking door. Arming the framework's redaction is the application's call, through the parameter registrar's `RegisterSecretParameter` for a parameter the application declares, or `MarkParameterSecret` for one melody registered from the `.env` artifacts. The mark propagates to every parameter whose template reads the secret, so a dsn assembled from the credential is redacted with it and `debug:parameters` masks the password in a process that never dials.
+
+Every refusal the provider writes carries the deadlines that governed the attempt — the connect timeout and the dial timeout, the latter reported as the value that actually governed rather than the one configured, since a zero or negative `DialTimeout` runs under the library's own five seconds. The password is never part of that record.
+
+### Owning the client
+
+`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes what answers `Close() error` and nothing else. [`NewConnection`](./connection.go) wraps it in that shape: register the [`Connection`](./connection.go) as the service that owns the client and resolve the client through it, and the container closes the one owner, once, in dependency order. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
+
 ### Connection retry
 
 [`WithRetryConfig`](./provider.go) makes `Open` re-dial a **transient** failure — a Redis that is not accepting connections yet — with capped exponential backoff, so a cold-start race between containers does not hard-fail the boot. It is **opt-in**: without it, `Open` makes a single attempt. A non-transient error is never retried and is returned immediately.
@@ -142,6 +150,8 @@ Options:
 ## Cache backend
 
 Package: [`cache`](./cache). [`cache.NewBackend`](./cache/backend.go) wraps a `rueidis.Client` and exposes both the classic methods (`Get`, `Set`, `Delete`, `Has`, `Clear`, `ClearByPrefix`, `Many`, `SetMultiple`, `DeleteMultiple`, `Increment`, `Decrement`) and ctx-first variants (`GetCtx`, `SetCtx`, …) that propagate caller deadlines/cancellation. [`cache.NewBackendService`](./cache/backend_service.go) is a container-friendly singleton wrapper implementing the core `cache/contract.Backend`. The `rueidis.Client` is owned by the application, not the backend: `Backend.Close` does not close the client, so the same client can be shared with the locker, token store, and server-sent-event backplane without one component tearing it down for the others — close the client once during application shutdown.
+
+`Backend.Close` does end the backend: every later operation answers `cache backend is closed` rather than serving over a client whose owner already tore this backend down, and a handle minted by `BackendService.WithContext` reads its owner's flag, so the service's `Close` reaches the per-request handles too. [`WithCommandTimeout`](./cache/backend.go) bounds the half of the contract that carries no caller context — without it a request-path read against a store that accepts connections but stops answering hangs the handler; a non-positive value reads as unbounded. [`WithMaxKeyLength`](./cache/backend.go) moves the key bound the refusals are measured against. `ClearByPrefix` refuses the empty prefix rather than reading it as the whole namespace: a prefix assembled at run time that comes out empty would otherwise wipe everything, which is the one outcome a prefixed delete exists to prevent — `Clear` is the door that means the whole namespace.
 
 ## Plug-and-play registration
 

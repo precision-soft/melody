@@ -114,6 +114,38 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None. Read the block; it reports the same five fields on both dialects.
 
+### Rueidis: the boot ping is bounded even when the connect timeout is left at zero
+
+**What changed.** `Provider.Open` runs its boot ping under the connect timeout resolved through the same rule the rest of this package reads its zeros by: a non-positive `TimeoutConfig.ConnectTimeout` takes the default (3s) rather than meaning "no bound". It previously built the ping context only for a positive value and ran the ping on `context.Background()` otherwise — with no deadline at all.
+
+**Symptom.** A `TimeoutConfig` naming only the command timeout, the ordinary shape of a partial literal, put the boot ping on an unbounded context. A store that accepted the connection and then stopped answering hung the boot forever, holding a client no one could close yet. That boot now fails after the default bound with `redis connection failed`.
+
+**Remedy.** None for a wiring that meant the ping to be bounded — this is the bound it always documented. A wiring that genuinely wanted an unbounded ping must now say so by turning the ping off (`ClientConfig.PingOnStart = false`) and pinging itself; a value large enough to stand in for "unbounded" also works, and reads as the deadline it is.
+
+### Rueidis cache: `Backend.Close` ends the backend, and `ClearByPrefix` refuses the empty prefix
+
+**What changed.** Two refusals the in-memory backend behind the same contract already gave. `Backend.Close` marks the backend closed and every later operation answers `cache backend is closed`; a handle minted by `BackendService.WithContext` reads its owner's flag, so the service's `Close` reaches the per-request handles the runtime door mints. And `ClearByPrefix("")` is refused as an empty key instead of being read as the whole namespace. The shared `rueidis.Client` is still not closed by the backend: it belongs to whoever built it.
+
+**Symptom.** Code that used a backend after closing it — a teardown-ordering bug — used to keep serving through the client and now fails immediately with a named refusal. Code that passed an empty prefix to `ClearByPrefix`, deliberately or because a prefix assembled at run time came out empty, used to wipe every entry under the backend's own prefix and now gets `cache key is empty`.
+
+**Remedy.** Fix the teardown order so nothing reads through a closed backend, which is what the refusal is for. Where the whole namespace really is meant, call `Clear`, which says so. `WithCommandTimeout` is available for the other half of the same problem: it bounds the operations that carry no caller context, which is the whole ctx-less half of `cache/contract.Backend`.
+
+### Rueidis: a rate limiter store failure is recorded when no observer is wired
+
+**What changed.** With no `WithRateLimiterOnError` observer, a store failure is now recorded by the limiter itself — at error for an outage, at warning for the caller's own cancellation — and the error is marked already-logged so the http sites do not file it a second time. An observer given by the application still replaces that record rather than adding to it, and receives the error untouched and unmarked. The limiter also names the caller's cancellation apart from a store failure, and re-arms the window on a key that reached the store carrying no expiry.
+
+**Symptom.** New records appear in the journal from applications that wire no observer, where a redis outage previously refused every call and reported nowhere at all: `Allow` answers a bool and `Reset` answers nothing, so there was no channel for it to reach. A counter on a key that had lost its ttl — a `PERSIST`, an eviction, a hand-written key — used to climb past the limit and stay there, refusing every request keyed on it permanently under the fail-closed default; it now lapses.
+
+**Remedy.** None required. An application that wants the failures on its own channel and nowhere else wires `WithRateLimiterOnError`, which is what it was always for.
+
+### Rueidis cache: a negative ttl is refused, and a batch failure names one key deterministically
+
+**What changed.** `Set` and `SetMultiple` refuse a negative ttl instead of falling into the branch that writes no expiry at all, and `SetMultiple` judges the ttl before its empty-batch early return. A batch that fails part-way collects every failing key and names the sorted first, with the failed and requested counts beside it, rather than returning whichever failure the map iteration reached first. `Clear` and `ClearByPrefix` scan every node of the client rather than the one connection a single command reaches.
+
+**Symptom.** A negative ttl used to store the entry **forever** — the one value the caller meant to be short-lived was the one value stored without end. A batch that failed named a different key on every call for the same wrong batch, and hid that the entries after it failed too. Against a redis cluster, a wipe deleted one node's share of the matching keys and reported success.
+
+**Remedy.** Zero still means no expiry, as both backends document, so only a genuinely negative duration is affected — usually a subtraction that went past the present. Anything that parsed the batch failure message should read `key`, `failedKeyCount` and `requestedCount` from the error context instead.
+
 ### CLI: `--format=json` writes one document per line
 
 **What changed.** The json printer no longer indents. Every melody command's `--format=json` envelope — the framework's `debug:*` family and the core commands it contributes — is now one compact line terminated by a newline, where it used to be a block of indented lines. `--format=json-pretty` is the same document with the indentation back.

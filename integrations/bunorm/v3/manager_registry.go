@@ -10,7 +10,6 @@ import (
 
     "github.com/uptrace/bun"
 
-    configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
@@ -103,39 +102,6 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
         pendingOpenByName:             make(map[string]*managerOpen),
         migrationDatabases:            make(map[string]*bun.DB),
     }, nil
-}
-
-/* MarkSecretParameters arms the framework's redaction for the configuration parameters that hold this registry's credentials: those the caller names here, and those any definition's provider declares through SecretParameterProvider. It is a setter rather than a constructor argument because this major hands the connection values to the provider instead of the names it would read them under, so the application — the party that resolved the values — is the party that knows the keys, and because MarkSecret propagates to a parameter the configuration has already read, arming after construction redacts exactly as much as arming during it would.
-
-Marking here rather than inside an open is what covers a process that never dials: a console run, a boot that fails before the first query, a debug:parameters invocation. A nil configuration, an empty name, or a name no parameter answers to leaves the marking undone, the same way MarkSecret leaves an absent parameter alone. */
-func (instance *ManagerRegistry) MarkSecretParameters(configuration configcontract.Configuration, parameterNames ...string) {
-    if true == isNilInterface(configuration) {
-        return
-    }
-
-    for _, parameterName := range parameterNames {
-        if "" == parameterName {
-            continue
-        }
-
-        configuration.MarkSecret(parameterName)
-    }
-
-    /* the definition map is written once, by the constructor, and never again — so it is read here without the lock the opening paths take */
-    for _, providerDefinition := range instance.providerDefinitionByName {
-        secretProvider, isSecretProvider := providerDefinition.Provider.(SecretParameterProvider)
-        if false == isSecretProvider {
-            continue
-        }
-
-        for _, parameterName := range secretProvider.SecretParameterNames() {
-            if "" == parameterName {
-                continue
-            }
-
-            configuration.MarkSecret(parameterName)
-        }
-    }
 }
 
 /* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */

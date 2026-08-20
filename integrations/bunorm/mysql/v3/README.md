@@ -57,7 +57,7 @@ See the core [`LOCK.md`](../../../../v3/.documentation/package/LOCK.md) package 
 
 The same module also ships the MySQL dialect [`Provider`](./provider.go) for the core [`bunorm`](../../v3) registry. [`mysql.NewProvider`](./provider.go) takes optional [`ProviderOption`](./provider_option.go) values; connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v3/connection_parameters.go) the manager registry passes to `Open`. Pool, timeout and retry tuning lives in [`mysql.PoolConfig`](./pool_config.go), [`mysql.TimeoutConfig`](./timeout_config.go) and [`mysql.RetryConfig`](./retry_config.go), applied through the [`WithPoolConfig`](./provider_option.go) / [`WithTimeoutConfig`](./provider_option.go) / [`WithRetryConfig`](./provider_option.go) options, and [`WithPostBuildHook`](./provider_option.go) reaches driver options the typed configs do not expose, through the [`mysql.PostBuildHook`](./post_build_hook.go) signature.
 
-Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: name the parameters to [`bunorm.ManagerRegistry.MarkSecretParameters`](../../v3/manager_registry.go).
+Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or mark one melody registered from the `.env` artifacts with `MarkParameterSecret`. The mark propagates to every parameter whose template reads the secret, so the assembled dsn is redacted with it.
 
 ### Defaults
 

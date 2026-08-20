@@ -547,7 +547,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
     return false
 }
 
-/* this major hands the provider the connection values rather than the parameter names it would read them under, so the provider knows no configuration key and does not carry bunorm.SecretParameterProvider. The application names its credential parameters to ManagerRegistry.MarkSecretParameters instead. */
+/* this major hands the provider the connection values rather than the parameter names it would read them under, so the provider knows no configuration key and names no credential of its own. Marking one is the application's call, through the framework's own application/contract.ParameterRegistrar — RegisterSecretParameter for a parameter the application declares, MarkParameterSecret for one melody registered from the .env artifacts: the party that resolved the values is the party that knows the keys, and the mark propagates to every parameter whose template reads the secret, so the assembled dsn is redacted with it. */
 var (
     _ bunorm.Provider               = (*Provider)(nil)
     _ bunorm.MigrationProvider      = (*Provider)(nil)

@@ -18,11 +18,6 @@ type ContextOpener interface {
     OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
 
-/* SecretParameterProvider is the optional capability of naming the configuration parameters that hold this provider's credentials. This major hands the connection values to the provider rather than the names it would read them under, so the application is ordinarily the party that knows the keys and names them to MarkSecretParameters; a provider that does know its own — one built around parameter names of its own — declares them here and is asked by the same door. A provider without the capability is not asked and is unaffected. */
-type SecretParameterProvider interface {
-    SecretParameterNames() []string
-}
-
 /* MigrationProvider is the optional capability of opening a connection tuned for migrations: the pool a provider opens for request traffic carries driver-level read and write deadlines sized for requests, and a legitimate DDL statement that runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. A provider that implements this opens the same database with those deadlines lifted; the migration commands prefer it and fall back to the ordinary connection when the capability is absent. */
 type MigrationProvider interface {
     OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
