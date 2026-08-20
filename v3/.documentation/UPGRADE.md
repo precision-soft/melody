@@ -146,6 +146,54 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** Zero still means no expiry, as both backends document, so only a genuinely negative duration is affected — usually a subtraction that went past the present. Anything that parsed the batch failure message should read `key`, `failedKeyCount` and `requestedCount` from the error context instead.
 
+### Cron: a module with runner commands and no configuration refuses the boot
+
+**What changed.** `cron.NewModule`'s `RegisterCliCommands` panics when `RunnerCommands` are supplied without a `Configuration`/`ConfigurationFactory`, and when a factory returns nil. Until now the module silently registered nothing and the wiring error surfaced as "unknown command" at invocation.
+
+**Symptom.** A wiring that carried runner commands but never set the configuration now fails at boot naming the missing configuration.
+
+**Remedy.** Set `Configuration` (or a factory that returns one); a parameters-only module — no runner commands, no generator — keeps working without one.
+
+### Cron: an entry routed to another crontab file refuses the in-process runner
+
+**What changed.** `EntryConfig.DestinationFile` joins `Command` and `Instances` in `NewRunnerCommand`'s construction refusal: an entry routed to another crontab addresses an external scheduler, and accepted by the runner as well it executed twice whenever the generated manifests were live.
+
+**Symptom.** A boot that used to succeed panics with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
+
+**Remedy.** Keep the routed entry out of the runner's `Configuration` (schedule it only for the generator), or drop its `DestinationFile` if in-process execution is the intent.
+
+### Cron: a clean shutdown is not a job failure
+
+**What changed.** A run the runner's own shutdown cancelled is recorded at warning as `cron: scheduled command cancelled by shutdown` and excluded from the failure aggregate; the runner's failure and abandon records carry the run's `cronRunId`.
+
+**Symptom.** `melody:cron:run --once` interrupted by SIGTERM exits 0 with a warning instead of non-zero with an error record; alerting keyed on `cron runner command failed` stops firing on deploys.
+
+**Remedy.** Key deploy-time alerting on the new warning if the old signal was load-bearing; genuine failures keep the error record, now attributable by `cronRunId`.
+
+### Cron: `Configuration` hands out copies
+
+**What changed.** `Schedule` copies the entry configuration it is handed, and `Entries` copies all the way down — the list, each `*ScheduledCommand` and each `*EntryConfig` behind it, schedule included.
+
+**Symptom.** Code that reconfigured a registration by writing through its own struct after `Schedule(...)`, or through what `Entries` returned — `configuration.Entries()[0].Config.Schedule.Hour = "23"` — no longer changes anything.
+
+**Remedy.** Register the entry with the configuration it should have. `Entries` is an inspector; the registry is written through `Schedule`.
+
+### Cron: the runner writes the machine document, and a job's output goes to the journal
+
+**What changed.** `melody:cron:run` accepts the standard flag set every melody command accepts — the framework rewrites `-v`/`-vv` into `--verbosity` for every command, which used to kill the runner at parse — and under `--format=json` renders one envelope per dispatched minute (`--once` writes exactly one and exits). A scheduled command's own output no longer reaches the process stdout: it is captured and filed as one record per run that printed anything, naming the command and the run id, capped at 64 KiB.
+
+**Symptom.** `melody:cron:run --once --format=json` answers a document instead of an empty stream, and `-v` no longer fails with "flag provided but not defined". Anything tailing the stdout of `melody:cron:run` for a job's own printed output finds it in the log instead, under `cron: scheduled command output`.
+
+**Remedy.** Read the document rather than inferring the outcome from an empty stream. For a job's own output, read the journal; a job that must write to a stream of its own should open it itself rather than relying on the command writer.
+
+### Cron: a recovered panic carries its cause
+
+**What changed.** The cron runner's recovery boundary hands the panic value on as the CAUSE of the error it fabricates, and captures the stack of the goroutine that raised it. The `panicValue` context key it already wrote is unchanged; `panicStack` is added beside it.
+
+**Symptom.** `errors.Is` and `errors.As` on the run's error now reach the failure underneath, where before they stopped at the fabricated wrapper. Code that relied on those calls answering false for a panicked job will now see them answer true.
+
+**Remedy.** None for a reader that only renders the error. A caller that branches on `errors.Is` against a sentinel it also uses for non-panic failures should check whether it means to treat a panicked job the same way; the message still says the boundary was a panic.
+
 ### CLI: `--format=json` writes one document per line
 
 **What changed.** The json printer no longer indents. Every melody command's `--format=json` envelope — the framework's `debug:*` family and the core commands it contributes — is now one compact line terminated by a newline, where it used to be a block of indented lines. `--format=json-pretty` is the same document with the indentation back.

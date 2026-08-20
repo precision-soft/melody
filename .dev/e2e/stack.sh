@@ -94,7 +94,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=101
+EXPECTED_CHECK_COUNT_INTEGER=102
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -340,6 +340,18 @@ if [[ "${RUNNER_WARNING_AFTER_INTEGER:-0}" -gt "${RUNNER_WARNING_BEFORE_INTEGER:
     check_pass "the runner resolved the shared Configuration (it reported the user-carrying product:list entry, ${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0})"
 else
     check_fail "the runner did not report the user-carrying entry (${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0}), so nothing proves it parsed the Configuration"
+fi
+
+# the entry count in the envelope is deterministic whatever the wall minute: configured counts entries,
+# not dispatches, and the v3 example schedules exactly three commands — the same shape the v1 and v2
+# sections assert, which the v3 runner answered with an empty stream before it rendered the envelope
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:cron:run --once --format=json 2>/dev/null"
+RUNNER_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+
+if printf '%s' "${RUNNER_JSON_STRING}" | grep -q '"configured":3'; then
+    check_pass "the v3 runner's json envelope counts the three configured entries"
+else
+    check_fail "the v3 runner's json envelope does not count the three configured entries: ${RUNNER_JSON_STRING:-<empty>}"
 fi
 
 check_section_end "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
