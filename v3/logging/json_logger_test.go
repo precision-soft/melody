@@ -5,6 +5,7 @@ import (
     "bytes"
     "encoding/json"
     "errors"
+    "os"
     "strings"
     "sync"
     "testing"
@@ -442,3 +443,162 @@ func TestJsonLogger_WritesAreDroppedAfterClose(t *testing.T) {
         t.Fatalf("unexpected written line: %s", writer.lines[0])
     }
 }
+
+/* Closed is what the process-boundary exit handler asks before trusting this logger with the final record: a file-backed logger closed by a teardown silently drops every write. */
+func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
+    file, createErr := os.CreateTemp(t.TempDir(), "melody-json-logger-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    fileLogger := NewJsonLogger(file, loggingcontract.LevelInfo)
+
+    closedChecker, isChecker := fileLogger.(interface{ Closed() bool })
+    if false == isChecker {
+        t.Fatalf("expected the json logger to report closedness")
+    }
+
+    if true == closedChecker.Closed() {
+        t.Fatalf("expected an open logger to report not closed")
+    }
+
+    closer, isCloser := fileLogger.(interface{ Close() error })
+    if false == isCloser {
+        t.Fatalf("expected the json logger to be closable")
+    }
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == closedChecker.Closed() {
+        t.Fatalf("expected a closed file-backed logger to report closed")
+    }
+
+    consoleLogger := NewJsonLogger(os.Stderr, loggingcontract.LevelInfo)
+
+    consoleCloser := consoleLogger.(interface{ Close() error })
+    if closeErr := consoleCloser.Close(); nil != closeErr {
+        t.Fatalf("unexpected console close error: %v", closeErr)
+    }
+
+    consoleChecker := consoleLogger.(interface{ Closed() bool })
+    if true == consoleChecker.Closed() {
+        t.Fatalf("expected the console logger to stay open and report not closed")
+    }
+}
+
+
+type gatedProbeWriter struct {
+    entered chan struct{}
+    release chan struct{}
+}
+
+func (instance *gatedProbeWriter) Write(payload []byte) (int, error) {
+    close(instance.entered)
+    <-instance.release
+
+    return len(payload), nil
+}
+
+/* Closed is asked by the process-boundary exit handler; an answer serialized behind an in-flight Write into a stalled pipe used to hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
+func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
+    writer := &gatedProbeWriter{
+        entered: make(chan struct{}),
+        release: make(chan struct{}),
+    }
+
+    logger := NewJsonLogger(writer, loggingcontract.LevelInfo)
+
+    go func() {
+        logger.Info("stalled record", nil)
+    }()
+
+    <-writer.entered
+
+    answered := make(chan bool, 1)
+    go func() {
+        closedChecker := logger.(interface{ Closed() bool })
+        answered <- closedChecker.Closed()
+    }()
+
+    select {
+    case isClosed := <-answered:
+        if true == isClosed {
+            t.Fatalf("expected the stalled logger to report open")
+        }
+
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected Closed to answer while the write is in flight")
+    }
+
+    close(writer.release)
+}
+
+
+/* the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and the name check skipped the close it owed and leaked it once per boot */
+func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
+    file, openErr := os.OpenFile("/dev/stdout", os.O_WRONLY|os.O_APPEND, 0644)
+    if nil != openErr {
+        t.Skipf("cannot open /dev/stdout in this environment: %v", openErr)
+    }
+
+    logger := NewJsonLogger(file, loggingcontract.LevelInfo)
+
+    closer := logger.(interface{ Close() error })
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    closedChecker := logger.(interface{ Closed() bool })
+    if false == closedChecker.Closed() {
+        t.Fatalf("expected the opened descriptor to be really closed")
+    }
+}
+
+
+/* Close is called by the container teardown and can be called again by an owner that also holds the logger; the second call must not hand the writer to Close twice — a file descriptor closed twice is a descriptor another goroutine may already have been given by the operating system */
+func TestJsonLogger_Close_IsIdempotent(t *testing.T) {
+    file, createErr := os.CreateTemp(t.TempDir(), "melody-json-logger-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    logger := NewJsonLogger(file, loggingcontract.LevelInfo)
+
+    closer := logger.(interface{ Close() error })
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("expected the second close to be a no-op, got %v", closeErr)
+    }
+
+    if false == logger.(interface{ Closed() bool }).Closed() {
+        t.Fatalf("expected the logger to report itself closed")
+    }
+}
+
+/* a writer that cannot be closed — a buffer, a pipe half held by somebody else — is left alone and the logger keeps writing: reporting itself closed would make the exit handler refuse a logger that is perfectly alive, and the final record would be routed to the emergency logger for nothing */
+func TestJsonLogger_Close_WithANonClosableWriter_KeepsTheLoggerAlive(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    closer := logger.(interface{ Close() error })
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if true == logger.(interface{ Closed() bool }).Closed() {
+        t.Fatalf("expected a logger over a non-closable writer to stay open")
+    }
+
+    logger.Error("after the close", nil)
+
+    if false == strings.Contains(buffer.String(), "after the close") {
+        t.Fatalf("expected the record to still be written, got %q", buffer.String())
+    }
+}
+

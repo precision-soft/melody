@@ -12,6 +12,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v3/application"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/exception"
@@ -788,13 +789,17 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
         )
     }()
 
-    /* each run gets the console identity the cli entry point installs into its own scope, because the child scope is a sibling and inherits nothing: a logger derived from the run's own under the per-run id minted above, so the job's records carry the runner's processId AND the run's cronRunId, and overlapping runs of one entry stay distinguishable. The logger is the whole of the identity on this major — the cli entry point installs no process-context service to refresh — so a command reading the documented logging door sees the same surface launched by hand and under the scheduler. */
+    /* each run gets the console identity the cli entry point installs into its own scope, because the child scope is a sibling and inherits nothing: a fresh ProcessContext under the per-run id minted above — overlapping runs of one entry stay distinguishable — and a logger derived from the run's own, so the job's records carry the runner's processId AND the run's cronRunId. Without these, a command reading the documented console doors works launched by hand and fails under the scheduler. */
     if runLogger := logging.LoggerFromRuntime(runtimeInstance); nil != runLogger {
         childScope.MustOverrideProtectedInstance(
             logging.ServiceLogger,
-            logging.NewRequestLogger(runLogger, runId, "cronRunId"),
+            logging.NewProcessLogger(runLogger, runId, "cronRunId"),
         )
     }
+    childScope.MustOverrideProtectedInstance(
+        application.ServiceProcessContext,
+        application.NewProcessContext(runId, time.Now()),
+    )
 
     childRuntime := runtime.New(childContext, childScope, runtimeInstance.Container())
 

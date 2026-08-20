@@ -5,6 +5,7 @@ import (
     "errors"
     "os"
     "testing"
+    "time"
 
     urfavecli "github.com/urfave/cli/v3"
 
@@ -227,5 +228,67 @@ func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
     }
     if true == exitError.ErrorValue().AlreadyLogged() {
         t.Fatalf("expected the refusal to travel unmarked")
+    }
+}
+
+type processContextProbeCliCommand struct {
+    seenProcessId   string
+    seenStartedAt   time.Time
+    accessorAnswers bool
+}
+
+func (instance *processContextProbeCliCommand) Name() string {
+    return "probe:process-context"
+}
+
+func (instance *processContextProbeCliCommand) Description() string {
+    return "captures the process context the run scope carries"
+}
+
+func (instance *processContextProbeCliCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    processContext := ProcessContextMustFromResolver(runtimeInstance.Scope())
+
+    instance.seenProcessId = processContext.ProcessId()
+    instance.seenStartedAt = processContext.StartedAt()
+    instance.accessorAnswers = nil != ProcessContextFromResolver(runtimeInstance.Scope())
+
+    return nil
+}
+
+/* the console counterpart of the request context the http kernel installs: the run's identity is resolvable from the run scope, instead of being computed for the logger and thrown away */
+func TestRunCli_InstallsTheProcessContextIntoTheRunScope(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    probeCommand := &processContextProbeCliCommand{}
+    applicationInstance.RegisterCliCommand(probeCommand)
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:process-context"}
+    defer func() { os.Args = originalArguments }()
+
+    if runErr := applicationInstance.runCli(); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if "" == probeCommand.seenProcessId {
+        t.Fatalf("expected the run scope to carry a process context with a generated id")
+    }
+
+    if true == probeCommand.seenStartedAt.IsZero() {
+        t.Fatalf("expected the process context to carry the run's start moment")
+    }
+
+    if false == probeCommand.accessorAnswers {
+        t.Fatalf("expected the tolerant accessor to answer the installed context")
     }
 }

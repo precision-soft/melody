@@ -282,6 +282,38 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None. A command that relied on the container being closed by the time its action returned should close what it owns itself, or use the scope.
 
+### Application: a teardown failure on Run's normal return exits non-zero
+
+**What changed.** When `Run` returns without a panic, the teardown it performs turns a failure it discovered itself — a container close that errored, a flush that failed — into exit code 1. Previously the failure was logged at emergency and the process exited 0.
+
+**Symptom.** A supervisor that restarts on non-zero now sees a shutdown that lost something, where it used to record a clean stop whose only trace was one log line. A close somebody else already performed keeps reporting through its own channel and its own exit code, so nothing is reported twice.
+
+**Remedy.** None for a healthy teardown — exit 0 is unchanged. A deployment that alerted on the emergency record alone can keep doing so; the exit code is an additional signal, not a replacement.
+
+### Application: a teardown that hangs is abandoned and exits non-zero
+
+**What changed.** The normal return of `Run` closes the container through the same ten-second shield the panic path now uses, and takes exit code 1 when the budget runs out. Previously the clean path had no budget at all: one `Close` that never returned parked every service behind it and the process with them, so the healthy shutdown was the one without an emergency exit while the dying one had a way out.
+
+**Symptom.** A process whose teardown blocks for more than ten seconds now prints one line to stderr naming the abandoned step and exits 1, where it used to hang until the supervisor killed it.
+
+**Remedy.** None required — the exit is the intended outcome. A service whose `Close` legitimately takes longer than ten seconds should bound its own work: the shield abandons the step, it does not shorten it.
+
+### Logging: every fatal exit writes a certificate record at emergency level
+
+**What changed.** The process-boundary exit handler writes one record at emergency level — "process exiting after unrecovered error", with the exit code and the error in its context — through whatever logger it resolved, always. The detailed record of the failure is still written at the error's own level, which an operator threshold can silently discard; the certificate is the one record no threshold drops.
+
+**Symptom.** A log pipeline sees one new emergency record per fatal exit, beside the detailed record it may or may not have been keeping. A pipeline alerting on emergency level now fires on every fatal exit, which is what the level exists for.
+
+**Remedy.** None for most deployments — the record is the signal that was missing. A pipeline that must not see it filters on the record's message, which is stable.
+
+### Logging: the correlation id wins the context key
+
+**What changed.** The correlation decorator — `NewRequestLogger` on the request path, the new `NewProcessLogger` on the console path — writes the real id under the context key unconditionally. A non-empty string already sitting under the key used to make the decorator keep it and drop the real id. On the request path a different non-empty string claim now survives under the key suffixed `Claimed`; on the console path the caller's value survives verbatim, whatever its type, under the key suffixed `Provided`.
+
+**Symptom.** A record whose context carried its own `requestId`/`processId` value now shows the generated id under that key and the caller's value under the suffixed one. Anything grepping the log by the id melody generated now finds every record of the run, including the ones that used to escape the chain.
+
+**Remedy.** A consumer that deliberately overrode the key should read its value back from the suffixed key; everything else needs no change — the correlation is simply no longer forgeable from a context value.
+
 ### Opaque tokens: a stored token with no issue instant is refused once its user is revoked
 
 **What changed.** A revocation is no longer an enumeration. [`security/contract.RevocationEpochStore`](../security/contract/token_store.go) publishes a boundary per user, and per device of a user, and [`Lookup`](../security/in_memory_token_store.go) refuses a token issued before the boundary that governs it. This closes the window [`DeleteByUser`](../../integrations/rueidis/v3/token_store.go) could never close: it walks an index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during a revocation survived it. The comparison needs an issue instant, so [`security/contract.Claims`](../security/contract/token_validator.go) carries `IssuedAt`, stamped by the store on every write.

@@ -5,6 +5,7 @@ import (
     "io"
     "os"
     "sync"
+    "sync/atomic"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -47,7 +48,8 @@ type jsonLogger struct {
     output      io.Writer
     minLevel    loggingcontract.Level
     levelLabels loggingcontract.LevelLabels
-    closed      bool
+    /* closed is atomic so Closed() can answer without the write lock: the probe is asked by the process-boundary exit handler, and an answer serialized behind an in-flight Write into a stalled pipe would hang the one handler that must reach os.Exit. The writes to the flag still happen under writeMutex — atomicity covers the lock-free read alone. */
+    closed atomic.Bool
 }
 
 func (instance *jsonLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -82,7 +84,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 
-    if true == instance.closed {
+    if true == instance.closed.Load() {
         return
     }
 
@@ -109,21 +111,17 @@ func (instance *jsonLogger) Emergency(message string, context loggingcontract.Co
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* @important the close takes the same lock the writes take: it hands the writer to a Close that may mutate it, and a goroutine that outlives the container teardown can still be inside Write. The console is left open on purpose, so the flag is set only where the writer was really closed. */
+/* the close takes the same lock the writes take: it hands the writer to a Close that may mutate it, and a goroutine that outlives the container teardown can still be inside Write. The process console is recognized by identity — the os.Stdout and os.Stderr values themselves — and left open on purpose, so the flag is set only where the writer was really closed; the previous check compared the file name, which also matched a file the caller opened on "/dev/stdout", skipped the close it owed, and leaked that descriptor once per boot. */
 func (instance *jsonLogger) Close() error {
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 
-    if true == instance.closed {
+    if true == instance.closed.Load() {
         return nil
     }
 
-    file, isFile := instance.output.(*os.File)
-    if true == isFile && nil != file {
-        fileName := file.Name()
-        if "/dev/stdout" == fileName || "/dev/stderr" == fileName {
-            return nil
-        }
+    if os.Stdout == instance.output || os.Stderr == instance.output {
+        return nil
     }
 
     closer, isCloser := instance.output.(io.Closer)
@@ -131,9 +129,14 @@ func (instance *jsonLogger) Close() error {
         return nil
     }
 
-    instance.closed = true
+    instance.closed.Store(true)
 
     return closer.Close()
+}
+
+/* Closed reports whether Close really closed the underlying writer, after which every Log call is silently dropped. A console logger never closes its stream and never reports true. The report lets whoever owns a final record — the process-boundary exit handler — refuse a logger that would swallow it and fall back to one that still writes. The read is lock-free on purpose: the caller is the exit handler, and an answer queued behind an in-flight Write into a stalled writer would hang the exit instead of informing it. */
+func (instance *jsonLogger) Closed() bool {
+    return instance.closed.Load()
 }
 
 var _ loggingcontract.Logger = (*jsonLogger)(nil)

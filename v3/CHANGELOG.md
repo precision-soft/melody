@@ -58,6 +58,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - cli: `--format=json-pretty` renders the same envelope indented for a person reading it by hand. It exists because json is the machine format and a machine reads a stream: one document per line, so a consumer can follow a long-running command live with a line reader and hand each line to a parser whole
 - cli: `output.IsJsonFormat` answers for both json spellings, and every place that used to compare against `FormatJson` asks through it — the two differ in whitespace alone, so a site that recognised one and not the other would colour a banner into a document, or print a table where a document was asked for
 - container: `IsClosed` reports whether a `Close` already began tearing the container down. A repeated `Close` returns the first teardown's memoized error, so a caller that closes defensively could not tell a failure it had just caused from one somebody else had already discovered and reported; asking before closing is what keeps one failure from being presented as two incidents
+- application: `ProcessContext` — `ServiceProcessContext`, `NewProcessContext`, `ProcessContextMustFromResolver`, `ProcessContextFromResolver` — is the console counterpart of the http request context: the generated process id every log record of the run is correlated under, and the moment the run started.
+- logging: `NewProcessLogger` is the console sibling of `NewRequestLogger`, and the cli entry point now decorates with it.
+- logging: `RunShieldedStep` runs one step under the exit handler's own budget and answers whether it finished, so the normal return of `Run` tears down under the same shield the panic path has had since the exit-step budget was installed
+- logging: `Closed()` on the json logger reports whether `Close` really closed the underlying writer, and `NewRequestLogger`'s decorator forwards it to the logger it wraps — the question the process-boundary exit handler asks before trusting a logger with the final record, because a file-backed logger a teardown already closed silently drops every write
 
 ### Changed
 
@@ -215,6 +219,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - cli: the start and finish banners and the command-not-found header keep the promise of `--no-color`. A `--no-color` run redirected into a file carried escape codes around an output that honoured the flag, and the suggestion header printed ansi beside a table rendered colourless by its own option
 - cli: `output.NewMeta` keeps a `version.Go` the caller supplied instead of always overwriting it with the running toolchain's — the only one of the three version fields without that fallback
 - cli: `output.NormalizeOption` clamps a negative `VerbosityLevel` to zero, the way it already clamped the limit, the offset and the table width. A negative level travelled into the `Option` beside `Verbose=false`, two answers to one question
+- application: the record that explains a dying process is written through a logger that still writes, before the teardown instead of after it. `Run` deferred the teardown above the exit handler, so the teardown ran first and closed the very file logger the final record was then written through — the record of the dying error survived only as a one-line stderr echo
+- application: the final record of a process that dies without a live container logger is written to the destination the configuration names, not only to stderr.
+- application: a boot that dies after the container was built closes it between the record and the exit — `os.Exit` runs no defer, so the exit handler's before-exit hook is what tears it down, and the log file the logger service held open from that moment is released instead of leaking into the exit
+- application: a teardown failure on Run's normal return exits non-zero.
+- application: two closes racing each other report the one teardown failure once.
+- application: the process-boundary exit handler survives an application assembled without `NewApplication`.
+- application: a relative `MELODY_LOG_PATH` is anchored to the project directory — the rule `ensureRuntimeDirectories` already applies to the logs and cache directories, now through the one shared helper — and the file's parent directory is created before the open.
+- application: the logger provider reads the module configuration before it opens the log file.
+- logging: `LogOnRecoverAndExit` and `LogOnRecoverAndExitAfter` refuse an exit code outside 1..255 with a panic naming the rule — the rule `exception.NewExitError` has always enforced, applied to the code the handler itself would exit with.
+- logging: a recovered `*exception.ExitError` carrying an out-of-range code is no longer honored as an exit.
+- logging: a recovered typed-nil `*exception.ExitError` — the value someone panicked with — is normalized as a plain panic value instead of dereferencing the nil receiver inside the last handler of the process, and `LogOnRecoverAndExit` survives an exit error carrying no error value
+- logging: each step of the exit handler — the record, the before-exit teardown — is abandoned after ten seconds instead of being waited on forever.
+- logging: every step of the exit handler runs under its own shield, the resolve of the recovered value included — a recovered value whose `Error()` panics is answered with a generic record under the caller's own exit code, where its panic used to unwind into `main` and the process died with the Go runtime's exit code 2: no record, no certificate, no stderr echo, no before-exit teardown
+- logging: the exit handler writes one certificate record at emergency level — "process exiting after unrecovered error", with the exit code and the error in its context — through whatever logger it resolved, always.
+- logging: `LogOnRecover` logs the exit wrapper that carries no error value as the anomaly it is.
+- logging: an error logged by `LogOnRecover` is marked as logged whether or not it panics again.
+- logging: the recover helpers capture the stack of the panic still in flight.
+- logging: the correlation decorator writes the real id under the context key unconditionally — a non-empty string already under the key made the decorator keep it and drop the id, so whatever wrote that value forged the correlation of every later record; a different string claim now survives beside the real id under the key suffixed `Claimed`
+- logging: `jsonLogger.Close` recognizes the process console by identity — the `os.Stdout` and `os.Stderr` values themselves — instead of by file name.
+- exception: `NewExitError` refuses an exit code outside `[1, 255]`.
+- exception: the exit error's accessors answer the nil receiver instead of dereferencing it — `errors.As` matches the type on a typed-nil link and reports success with a nil pointer, which the callers that decide how the process ends read the code straight off
 
 ## [v3.13.0] - 2026-07-24 - Faithful OpenAPI Mirror, Wiring Codegen Guards and Contained Teardown Panics
 

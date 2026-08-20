@@ -41,3 +41,12 @@ func (instance *captureLogger) Emergency(message string, context loggingcontract
 
 var _ loggingcontract.Logger = (*captureLogger)(nil)
 var _ = exception.NewError
+
+/* the probe stands in for a third-party error type someone panics a typed nil of: it satisfies the error interface while its Error() dereferences the nil receiver, which is exactly what the recover helpers must never do */
+type typedNilProbeError struct {
+    message string
+}
+
+func (instance *typedNilProbeError) Error() string {
+    return instance.message
+}

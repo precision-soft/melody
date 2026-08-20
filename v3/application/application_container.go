@@ -3,6 +3,7 @@ package application
 import (
     "errors"
     "os"
+    "path/filepath"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/cache"
@@ -153,34 +154,11 @@ func (instance *Application) bootContainer() {
     instance.RegisterService(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            writer := os.Stdout
-
-            logPath := configuration.Kernel().LogPath()
-
-            if "" != logPath {
-                file, openFileErr := os.OpenFile(
-                    logPath,
-                    os.O_CREATE|os.O_APPEND|os.O_WRONLY,
-                    0o644,
-                )
-                if nil != openFileErr {
-                    exception.Panic(
-                        exception.NewError(
-                            "failed to open log file",
-                            exceptioncontract.Context{
-                                "path": logPath,
-                            },
-                            openFileErr,
-                        ),
-                    )
-                }
-
-                writer = file
-            }
-
-            loggingConfigurationInstance := logging.LoggingConfigurationFromModules(instance.moduleConfigurations)
-
-            return logging.NewJsonLoggerWithLabels(writer, configuration.Kernel().LogLevel(), loggingConfigurationInstance.LevelLabels()), nil
+            return newContainerLogger(
+                resolveRuntimePath(configuration.Kernel().ProjectDir(), configuration.Kernel().LogPath()),
+                configuration.Kernel().LogLevel(),
+                instance.moduleConfigurations,
+            ), nil
         },
     )
 
@@ -260,6 +238,54 @@ func (instance *Application) bootContainer() {
     if nil != httpSecurityErr {
         exception.Panic(exception.FromError(httpSecurityErr))
     }
+}
+
+/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is acquired, because it panics on a configuration registered under the supported name with a type that does not implement the interface: a file opened above that would be left with no owner at all — the container stores only what a provider returned, so nothing would ever close it, and a creation failure is not memoized, so each later resolution opens another one. */
+func newContainerLogger(
+    logPath string,
+    logLevel loggingcontract.Level,
+    moduleConfigurations map[string]any,
+) loggingcontract.Logger {
+    loggingConfigurationInstance := logging.LoggingConfigurationFromModules(moduleConfigurations)
+
+    writer := os.Stdout
+
+    if "" != logPath {
+        /* the directory is guaranteed the way ensureRuntimeDirectories guarantees the logs directory: only the default log path lives inside it, and an operator-supplied MELODY_LOG_PATH pointing anywhere else had no owner to create its parent */
+        mkdirErr := os.MkdirAll(filepath.Dir(logPath), 0o755)
+        if nil != mkdirErr {
+            exception.Panic(
+                exception.NewError(
+                    "failed to create the log directory",
+                    exceptioncontract.Context{
+                        "path": logPath,
+                    },
+                    mkdirErr,
+                ),
+            )
+        }
+
+        file, openFileErr := os.OpenFile(
+            logPath,
+            os.O_CREATE|os.O_APPEND|os.O_WRONLY,
+            0o644,
+        )
+        if nil != openFileErr {
+            exception.Panic(
+                exception.NewError(
+                    "failed to open log file",
+                    exceptioncontract.Context{
+                        "path": logPath,
+                    },
+                    openFileErr,
+                ),
+            )
+        }
+
+        writer = file
+    }
+
+    return logging.NewJsonLoggerWithLabels(writer, logLevel, loggingConfigurationInstance.LevelLabels())
 }
 
 func (instance *Application) registerCache() {

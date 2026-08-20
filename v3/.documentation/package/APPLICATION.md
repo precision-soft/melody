@@ -298,6 +298,8 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
 - [`EventModule`](../../application/contract/event_module.go)
+- [`ProcessContext`](../../application/contract/process_context.go)  
+  The console counterpart of the http request context: the identity of one cli run — the generated process id every log record of the run is correlated under, and the moment the run started. It lives on the run's scope, installed by the cli entry point, so a scoped service resolves it exactly the way a request-scoped service resolves the request context; the root container never carries it, and an http process carries the request context instead.
 
 ### Types
 
@@ -317,6 +319,9 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
     - [`ProcessRoleMustFromContainer(serviceContainer)`](../../application/service_resolver.go)
     - [`ProcessRoleMustFromResolver(resolver)`](../../application/service_resolver.go)
+- [`ServiceProcessContext`](../../application/service_resolver.go) — resolves to the console run's `ProcessContext`. The cli entry point installs it into the run's scope, so it takes a resolver rather than the container
+    - [`ProcessContextMustFromResolver(resolver)`](../../application/service_resolver.go)
+    - [`ProcessContextFromResolver(resolver)`](../../application/service_resolver.go) — the error-tolerant form, for code that runs on both process shapes: absence — an http process, the root container — answers nil
 
 ### Constructors
 

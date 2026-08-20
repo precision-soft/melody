@@ -101,7 +101,7 @@ func runWithScopedLogger(
 	)
 
 	processId := logging.GenerateProcessId()
-	loggerWithProcessId := logging.NewRequestLogger(
+	loggerWithProcessId := logging.NewProcessLogger(
 		baseLogger,
 		processId,
 		"processId",
@@ -173,6 +173,7 @@ Implemented in:
 - [`NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels)`](../../logging/default_logger.go)
 - [`NewNopLogger()`](../../logging/nop_logger.go)
 - [`NewRequestLogger(logger loggingcontract.Logger, requestId string, contextKey string)`](../../logging/request_logger.go)
+- [`NewProcessLogger(logger loggingcontract.Logger, processId string, contextKey string)`](../../logging/request_logger.go) — the console path's correlation rule, for a trusted caller: the generated id wins the context key, and a caller's own value — any type — is preserved verbatim under the key suffixed `Provided`
 - [`NewStandardErrorLogger(logger loggingcontract.Logger, message string) *log.Logger`](../../logging/standard_logger.go) — the adapter net/http's `Server.ErrorLog` wants: one record per line at warning, the line carried in the context under `line`, the message left as the one groupable string a query can key on. A nil logger is inert and an empty line writes nothing
 - [`NewLoggingConfiguration(labels loggingcontract.LevelLabels)`](../../logging/logging_config.go)
 
@@ -187,6 +188,8 @@ Implemented in:
 
 - [`LogOnRecover(logger loggingcontract.Logger, panicAgain bool)`](../../logging/recover.go)
 - [`LogOnRecoverAndExit(logger loggingcontract.Logger, recovered any, exitCode int)`](../../logging/recover.go)
+- [`LogOnRecoverAndExitAfter(logger loggingcontract.Logger, recovered any, exitCode int, beforeExit func())`](../../logging/recover.go)
+- [`RunShieldedStep(stepName string, step func()) bool`](../../logging/recover.go) — the exit handler's own shield, offered to the one other caller that stands between a process and its end: it contains a panic inside the step and bounds how long the step may take, answering whether it finished. An abandoned step keeps running on its goroutine, so nothing it writes may be read by a caller that was told it did not finish
 
 #### Emergency logger
 

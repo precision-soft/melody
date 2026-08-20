@@ -14,6 +14,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/application"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/container"
@@ -2136,7 +2137,9 @@ func TestRunnerCommand_DestinationFileEntryPanicsAtConstruction(t *testing.T) {
 }
 
 type identityProbeCommand struct {
-    commandName string
+    commandName     string
+    observedRunId   string
+    processResolved bool
 }
 
 func (instance *identityProbeCommand) Name() string {
@@ -2154,10 +2157,16 @@ func (instance *identityProbeCommand) Flags() []clicontract.Flag {
 func (instance *identityProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     logging.LoggerFromRuntime(runtimeInstance).Info("job line", nil)
 
+    processContext := application.ProcessContextFromResolver(runtimeInstance.Scope())
+    if nil != processContext {
+        instance.processResolved = true
+        instance.observedRunId = processContext.ProcessId()
+    }
+
     return nil
 }
 
-/* the child scope carries the console identity the cli entry point installs into its own: a logger that keeps the runner's processId while adding the run's cronRunId. On this major the logger IS the whole identity — melody/v3 installs no process-context service at its cli entry point — so both halves are asserted on the record the job writes. */
+/* the child scope carries the console identity the cli entry point installs into its own: a fresh per-run ProcessContext and a logger that keeps the runner's processId while adding the run's cronRunId. */
 func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     job := &identityProbeCommand{commandName: "job:identity"}
 
@@ -2181,13 +2190,25 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     }()
     parentScope.MustOverrideProtectedInstance(
         logging.ServiceLogger,
-        logging.NewRequestLogger(captured, "proc-1", "processId"),
+        logging.NewProcessLogger(captured, "proc-1", "processId"),
+    )
+    parentScope.MustOverrideProtectedInstance(
+        application.ServiceProcessContext,
+        application.NewProcessContext("proc-1", time.Now()),
     )
 
     runtimeInstance := runtime.New(context.Background(), parentScope, serviceContainer)
 
     if _, invokeErr := runner.invoke(runtimeInstance, runner.entries[0]); nil != invokeErr {
         t.Fatalf("invoke: %v", invokeErr)
+    }
+
+    if false == job.processResolved {
+        t.Fatal("expected the job to resolve a ProcessContext through the documented console door")
+    }
+
+    if "proc-1" == job.observedRunId || "" == job.observedRunId {
+        t.Fatalf("expected a fresh per-run id, got %q", job.observedRunId)
     }
 
     record, found := captured.recordByMessageProbe("job line")
@@ -2199,9 +2220,8 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
         t.Fatalf("expected the job's record to keep the runner's processId, got %v", record.context["processId"])
     }
 
-    cronRunId, isString := record.context["cronRunId"].(string)
-    if false == isString || "" == cronRunId || "proc-1" == cronRunId {
-        t.Fatalf("expected the job's record to carry a fresh per-run id, got %v", record.context["cronRunId"])
+    if job.observedRunId != record.context["cronRunId"] {
+        t.Fatalf("expected the job's record to carry the run's id, got %v", record.context["cronRunId"])
     }
 }
 

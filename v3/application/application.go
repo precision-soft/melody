@@ -5,6 +5,7 @@ import (
     "errors"
     "io/fs"
     "os"
+    "sync/atomic"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -13,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -43,6 +45,8 @@ type Application struct {
     unboundedDefaultCacheBackend bool
     /* set when the framework had to supply the session storage itself; paired with an unbounded session ttl it is the same unbounded growth, reached from the request path rather than from anything the application wrote */
     defaultInMemorySessionStorage bool
+    /* claimed by the one close that performs the teardown: the container's own closedness cannot answer "was it me", because two concurrent closes both probe it open before either enters Close, and both would then report the single failure as their own incident */
+    closePerformerClaimed atomic.Bool
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -215,9 +219,17 @@ func (instance *Application) Run() {
     /* boot is the last moment a parameter can still change anything: from here the wiring is done and the process is serving requests or executing a command, both against services that already read what they needed. Telling the configuration so is what turns a late Resolve into an error instead of a silent rewrite under those readers. */
     markConfigurationServing(instance.configuration)
 
-    defer instance.logOnRecoverAndExit()
+    /* one handler owns both the teardown and the exit, because neither of two separate defers can be ordered correctly: the exit helper ends in os.Exit, so a Close deferred below it would never run, and a Close deferred above it runs first and closes the very logger the final record is written through — a file-backed logger dropped every later write and the record of the dying error survived only as a one-line stderr echo. The record is therefore written first, through a logger the teardown has not touched, and the teardown runs between the record and the exit. */
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            instance.closeAndExitOnFailure()
 
-    defer instance.Close()
+            return
+        }
+
+        logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.Close)
+    }()
 
     if config.ModeCli == instance.runtimeFlags.Mode() {
         stripRuntimeFlagsFromOsArgs()
@@ -308,16 +320,84 @@ func (instance *Application) logOnRecoverAndExit() {
         return
     }
 
+    /* the teardown hook mirrors the one Run passes: a boot that dies after the container was built — the logger service holds the log file open from that moment — used to exit with the container never closed, because os.Exit runs no defer. The record is written first, through a logger the teardown has not touched, and the close runs between the record and the exit. That close is unconditional; the IsClosed probe it takes first only decides whether a teardown failure is reported as this call's discovery, and what makes a boot that died before the kernel existed cost nothing is the nil-kernel check close starts with. */
+    logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.Close)
+}
+
+/* resolveExitLogger picks the logger the final fatal record is written through: the configured container logger while it still writes, a last-resort logger opened on the configured destination when the container cannot answer — a boot that died before the logger service existed, a teardown that already closed it — and the emergency logger when even that destination is unusable. The container keeps serving built instances after Close, so liveness has to be asked of the logger itself — a file-backed logger a teardown already closed silently drops every write, and preferring it would lose the one record that explains the exit. The kernel guard covers an Application assembled without NewApplication: the one handler that must not panic answers with the emergency logger instead of dereferencing nil. */
+func (instance *Application) resolveExitLogger() loggingcontract.Logger {
     logger := logging.EmergencyLogger()
 
-    serviceContainer := instance.kernel.ServiceContainer()
-
-    containerLogger, loggerErr := logging.LoggerFromContainer(serviceContainer)
-    if nil == loggerErr && nil != containerLogger {
-        logger = containerLogger
+    /* read through the interface, like the logger clause below: this resolver is evaluated as an argument, so it runs before the exit handler's own per-step shield begins, and a nil receiver here would replace the panic being reported with a bare traceback that runs neither the teardown nor os.Exit */
+    if true == internal.IsNilInterface(instance.kernel) {
+        return instance.exitFileLogger(logger)
     }
 
-    logging.LogOnRecoverAndExit(logger, recoveredValue, 1)
+    containerLogger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
+    if nil != loggerErr || nil == containerLogger || true == internal.IsNilInterface(containerLogger) {
+        /* the typed-nil clause is latent defense: the container refuses a provider-returned or overridden typed nil with an error today, but one that did slip through a future resolution path would pass the plain comparison and answer the Closed probe below with a nil receiver — a panic in the one handler that must not panic, in place of the emergency fallback this resolver exists to provide */
+        return instance.exitFileLogger(logger)
+    }
+
+    closedChecker, isChecker := containerLogger.(interface{ Closed() bool })
+    if true == isChecker && true == closedChecker.Closed() {
+        return instance.exitFileLogger(logger)
+    }
+
+    return containerLogger
+}
+
+/* exitFileLogger builds the last-resort logger for a process that is dying without a live container logger, on the destination the configuration names, so a deployment that reads var/log sees why the process ended instead of a boot failure that left no trace outside stderr. It is best-effort by construction: it runs as an argument to the exit handler, before the per-step shield begins, so any failure on the way — a configuration never built, an unopenable path, a module configuration that panics — answers the emergency logger instead of raising. The kernel view is built with the configuration itself, so the destination is readable for every failure after construction, resolved and created the way the container provider resolves and creates it. The descriptor is deliberately surrendered to os.Exit: the process ends before anything could close it. */
+func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logger) (logger loggingcontract.Logger) {
+    logger = emergencyLogger
+
+    defer func() {
+        _ = recover()
+    }()
+
+    if nil == instance.configuration {
+        return logger
+    }
+
+    kernelView := instance.configuration.Kernel()
+    if nil == kernelView {
+        return logger
+    }
+
+    return newContainerLogger(
+        resolveRuntimePath(kernelView.ProjectDir(), kernelView.LogPath()),
+        kernelView.LogLevel(),
+        instance.moduleConfigurations,
+    )
+}
+
+/* applicationExit terminates the process when the teardown of a normally-returning Run reports a failure; tests replace it to observe the exit code without stopping the test binary */
+var applicationExit = os.Exit
+
+/* shieldedCloseStep is the door the clean-shutdown teardown runs through; tests replace it to drive the abandoned branch without waiting out the real budget, the way they replace applicationExit to observe an exit code */
+var shieldedCloseStep = logging.RunShieldedStep
+
+/* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call itself discovered turns into a non-zero exit, so a supervisor sees a shutdown that lost something — a failed flush, a close that errored — instead of recording a clean exit 0 whose only trace was one stderr line. A close somebody else already performed reported its failure through its own channel and keeps its own exit code.
+
+The teardown runs under the same shield the panic path has had since the exit-step budget was installed, and for the same reason: the loop is strictly sequential with no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone, a session file on a vanished mount — parks every service behind it and the process with them. The healthy shutdown was the one without an escape while the dying one had ten seconds. An abandoned teardown exits non-zero, because a process that could not release what it held did not shut down cleanly however quiet it was; and the error the step was writing is deliberately not read on that branch, since the step is still running on its own goroutine. */
+func (instance *Application) closeAndExitOnFailure() {
+    var closeErr error
+
+    completed := shieldedCloseStep("closing the application", func() {
+        closeErr = instance.close()
+    })
+
+    if false == completed {
+        applicationExit(1)
+
+        return
+    }
+
+    if nil == closeErr {
+        return
+    }
+
+    applicationExit(1)
 }
 
 /* servingMarker is the part of a configuration that can be told the wiring phase is over. It is asked for rather than demanded: only the application emits the signal, so requiring every configcontract.Configuration — every test double included — to carry the method would cost more than it buys. */
