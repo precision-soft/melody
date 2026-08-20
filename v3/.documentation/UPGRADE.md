@@ -351,6 +351,38 @@ Nothing breaks at compile time. The new methods live on their own interface, com
 Two consequences worth knowing before wiring it up. A token whose issue was in flight across a revocation is refused — the instant is stamped before the write reaches the store, so a token stamped just before the boundary and written just after it is treated as predating it. That is over-strict rather than under-strict, and deliberate. And the instants come from application clocks, so a node whose clock runs ahead of the node a revocation is issued from stamps tokens that read as later than the boundary and survive it: the window is exactly the skew between the two, and a single node whose clock steps backwards — an NTP correction, a restored snapshot, a resumed virtual machine — produces the same thing without any second node. `WithTokenStoreMaximumClockSkew` on the redis store, and `JwtConfig.RevocationEpochSkew` on the json web token path, bound that window: they widen the boundary by the stated amount and, on the store, additionally refuse a stamp further ahead of the verifying
 node than the same amount. Both default to zero, which leaves the behaviour of this release unchanged; set them to the worst skew the fleet can carry. The cost is symmetrical and deliberate: a token issued within that window AFTER a revocation is refused too. `WithRevocationEpochRetention` is unrelated to any of this — it floors how long a boundary is kept when there is no index deadline to adopt, and does not affect the comparison.
 
+### Messagebus: an unhandled consumed message fails the dispatch
+
+**What changed.** A message whose type has no registered handler used to pass through the handle middleware with a warning and nil error; the consume command then Acked it. The default now refuses the dispatch, and the opt-in is `HandleOptions.AllowMissingHandler`, which replaces `RequireHandler` (the same switch, inverted, so the zero value is the safe cell).
+
+**Symptom.** On the consume path, a forgotten `RegisterHandler` line — or a handler registered for `T` while the transport decodes `*T` — used to drain the queue one warning at a time: every message Acked and destroyed, the retry, dead-letter and failure-transport machinery never engaging because the pipeline was told the message was handled. The same mistake now nacks into exactly that machinery and is impossible to miss.
+
+**Remedy.** Code that set `RequireHandler: true` deletes the field — that is the default now. A bus that genuinely wants pass-through (a tap that observes some types and forwards the rest) sets `AllowMissingHandler: true` and keeps the old behaviour, warning included.
+
+### Mailer: configured smtp credentials fail closed when the server does not advertise AUTH
+
+**What changed.** With a username configured, a server whose EHLO response does not advertise `AUTH` is refused — whatever `RequireAuth` says. `RequireAuth` keeps its other half: it still refuses the configuration in which authentication is required but no username is set.
+
+**Symptom.** The old default skipped the whole auth branch and delivered the message as anonymous submission while reporting success, so the configured identity went quietly unused — most commonly against a relay that only advertises `AUTH` after `STARTTLS`, on a session where tls was not negotiated. Deployments in that shape now get an error naming the unapplied credentials instead of silent unauthenticated delivery.
+
+**Remedy.** For a relay that genuinely takes unauthenticated submission, remove the credentials from the configuration — they were doing nothing. For a relay that advertises `AUTH` only after `STARTTLS`, set `RequireTls` so the session upgrade is guaranteed before the auth branch is reached.
+
+### Translation: an absent parameter stays visible, and a misnamed catalog file refuses the load
+
+**What changed.** A plain placeholder whose parameter is absent renders as the visible placeholder itself (`Hello, {name}!`) instead of as an empty string; a parameter present with an explicit nil still renders empty. And `JsonDirectoryLoader.Load` answers a hard error naming any `.json` file that does not parse as `<domain>.<locale>.json`, instead of skipping it.
+
+**Symptom.** Rendered empty, a renamed parameter key shipped every message quietly missing its amount, name or count, with nothing anywhere to learn it from; a golden test that asserted the empty rendering sees the placeholder now. A translations directory in the natural-but-unsupported `en.json` layout used to load zero catalogs successfully, with the runtime symptom — raw message ids in production — pointing nowhere near the mis-named files; that directory now fails the boot with the file named.
+
+**Remedy.** Fix the parameter key, or pass the parameter with an explicit nil where the empty rendering was genuinely wanted. Rename catalog files to `<domain>.<locale>.json` — `messages.en.json` for the default domain — and delete stray `.json` files from the translations directory.
+
+### Compile-level: `messagebus/contract.Transport`'s `Close` lost its runtime parameter
+
+**What changed.** The contract method is `Close() error`; the former `Close(runtimeInstance runtimecontract.Runtime) error` is gone, and `RegisterTransports` now registers a `TransportsCloser` the container's ordered teardown reaches.
+
+**Symptom.** A userland transport fails to compile against the interface until the parameter is deleted. The old signature was structurally dead: the teardown recognizes `Close() error` and nothing else, nothing in the framework or any production wiring ever called a transport's `Close`, so every broker connection lived exactly as long as the process and every deploy tore it down abruptly.
+
+**Remedy.** Delete the parameter from the implementation. A transport that used the runtime for a deadline owns its bound now — the builtin amqp transport already carried its own join timeout and ignored the runtime entirely, which is what made the removal free.
+
 ### Compile-level: `container/contract.ScopeManager` and `container/contract.Scope` gained `RegisterScoped`
 
 **What changed.** A scope is now a registrar of its own. [`container/contract.ScopeManager`](../container/contract/scope.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. [`container/contract.Scope`](../container/contract/scope.go) declares the same two verbs through [`ScopedRegistrar`](../container/contract/scoped_registrar.go), for adding a service to one live scope.

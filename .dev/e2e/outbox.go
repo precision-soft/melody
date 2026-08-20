@@ -78,7 +78,7 @@ func (instance *recordingTransport) Nack(_ runtimecontract.Runtime, _ messagebus
     return nil
 }
 
-func (instance *recordingTransport) Close(_ runtimecontract.Runtime) error {
+func (instance *recordingTransport) Close() error {
     return nil
 }
 

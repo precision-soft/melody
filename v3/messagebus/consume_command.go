@@ -132,16 +132,15 @@ func (instance *ConsumeCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    if true == instance.resolveFromContainer {
-        instance.hydrateFromContainer(runtimeInstance)
-    }
+    /* the collaborators are resolved into run-local state rather than back into the command's own fields: the command is a container-registered singleton, and the in-process cron runner overlaps a run with itself whenever an entry outruns its interval — a run-time write to a shared field would race every worker goroutine of the run already in flight. */
+    session := instance.newConsumeSession(runtimeInstance)
 
     transportName := commandContext.String("transport")
     if "" == transportName {
         return exception.NewError("a transport name is required", nil, nil)
     }
 
-    transport, exists := instance.transports[transportName]
+    transport, exists := session.transports[transportName]
     if false == exists {
         return exception.NewError(
             "unknown transport",
@@ -155,21 +154,42 @@ func (instance *ConsumeCommand) Run(
         concurrency = 1
     }
 
-    return instance.consumeFrom(runtimeInstance, transport, int64(commandContext.Int("limit")), concurrency)
+    return session.consumeFrom(runtimeInstance, transport, int64(commandContext.Int("limit")), concurrency)
 }
 
-func (instance *ConsumeCommand) hydrateFromContainer(runtimeInstance runtimecontract.Runtime) {
+/* consumeSession is the run-local view of one Run's collaborators, so a second overlapping Run of the same command instance shares nothing mutable with the first. */
+type consumeSession struct {
+    bus           messagebuscontract.Bus
+    transports    map[string]messagebuscontract.Transport
+    retryPolicy   RetryPolicy
+    shutdownGrace time.Duration
+}
+
+func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontract.Runtime) *consumeSession {
+    session := &consumeSession{
+        bus:           instance.bus,
+        transports:    instance.transports,
+        retryPolicy:   instance.retryPolicy,
+        shutdownGrace: instance.shutdownGrace,
+    }
+
+    if false == instance.resolveFromContainer {
+        return session
+    }
+
     serviceContainer := runtimeInstance.Container()
 
-    instance.bus = ConsumeBusFromResolver(serviceContainer)
-    instance.transports = TransportsMustFromResolver(serviceContainer)
+    session.bus = ConsumeBusFromResolver(serviceContainer)
+    session.transports = TransportsMustFromResolver(serviceContainer)
 
     if resolvedPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer); true == hasPolicy {
-        instance.retryPolicy = normalizeRetryPolicy(resolvedPolicy)
+        session.retryPolicy = normalizeRetryPolicy(resolvedPolicy)
     }
+
+    return session
 }
 
-func (instance *ConsumeCommand) consumeFrom(
+func (instance *consumeSession) consumeFrom(
     runtimeInstance runtimecontract.Runtime,
     transport messagebuscontract.Transport,
     limit int64,
@@ -257,7 +277,7 @@ func (instance *ConsumeCommand) consumeFrom(
 }
 
 /* consumeRecovered runs consume behind a panic barrier so a panic raised OUTSIDE the handler dispatch — in per-message scope setup, the transport Ack/Nack, or scope teardown — is logged and the worker goroutine survives to process the next delivery, instead of dying and silently shrinking the worker pool until the consumer stalls with no error surfaced. A handler panic is already converted into the retry/dead-letter pipeline inside dispatchSafely; this is the backstop for everything else on the per-message path. The in-flight delivery is left unacked, so the broker redelivers it. */
-func (instance *ConsumeCommand) consumeRecovered(
+func (instance *consumeSession) consumeRecovered(
     runtimeInstance runtimecontract.Runtime,
     transport messagebuscontract.Transport,
     envelopeInstance messagebuscontract.Envelope,
@@ -287,7 +307,7 @@ func (instance *ConsumeCommand) consumeRecovered(
     instance.consume(runtimeInstance, transport, envelopeInstance)
 }
 
-func (instance *ConsumeCommand) consume(
+func (instance *consumeSession) consume(
     runtimeInstance runtimecontract.Runtime,
     transport messagebuscontract.Transport,
     envelopeInstance messagebuscontract.Envelope,
@@ -369,7 +389,7 @@ func (instance *ConsumeCommand) consume(
 }
 
 /* messageRuntime gives each delivery its own container scope and a message-scoped logger (keyed by MessageIdStamp), mirroring the http kernel's scope-per-request idiom so ambient scope state cannot leak between in-flight messages and every log line is correlatable. The parent context is kept as-is; without a resolvable container the shared runtime is returned untouched. */
-func (instance *ConsumeCommand) messageRuntime(
+func (instance *consumeSession) messageRuntime(
     runtimeInstance runtimecontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) (runtimecontract.Runtime, func()) {
@@ -414,7 +434,7 @@ func (instance *ConsumeCommand) messageRuntime(
     return runtime.New(runtimeInstance.Context(), messageScope, serviceContainer), closeScope
 }
 
-func (instance *ConsumeCommand) dispatchSafely(
+func (instance *consumeSession) dispatchSafely(
     runtimeInstance runtimecontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) (dispatchErr error) {
@@ -453,14 +473,15 @@ func (instance *ConsumeCommand) dispatchSafely(
     return err
 }
 
-func (instance *ConsumeCommand) retryDelay(attempt int) time.Duration {
+func (instance *consumeSession) retryDelay(attempt int) time.Duration {
     if 0 >= instance.retryPolicy.BaseDelay || 0 >= attempt {
         return 0
     }
 
     maxDelay := instance.retryPolicy.MaxDelay
 
-    if attempt > int(maxDelay/instance.retryPolicy.BaseDelay) {
+    /* the quotient stays int64: truncating it to int wraps on a 32-bit build once BaseDelay is small enough (a microsecond-scale delay against the one-hour default cap), and the wrapped negative turns the very first retry into a full MaxDelay wait */
+    if int64(attempt) > int64(maxDelay/instance.retryPolicy.BaseDelay) {
         return maxDelay
     }
 
@@ -472,7 +493,7 @@ func (instance *ConsumeCommand) retryDelay(attempt int) time.Duration {
     return delay
 }
 
-func (instance *ConsumeCommand) failureRequeueDelay() time.Duration {
+func (instance *consumeSession) failureRequeueDelay() time.Duration {
     delay := instance.retryDelay(instance.retryPolicy.MaxRetries + 1)
     if 0 >= delay {
         return instance.retryPolicy.FailureRequeueDelay
@@ -481,14 +502,15 @@ func (instance *ConsumeCommand) failureRequeueDelay() time.Duration {
     return delay
 }
 
-func (instance *ConsumeCommand) logError(
+func (instance *consumeSession) logError(
     runtimeInstance runtimecontract.Runtime,
     message string,
     err error,
 ) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
-        return
+        /* these records include the only trace of a recovered panic outside the handler — a runtime that resolves no logger must not make them evaporate */
+        logger = logging.EmergencyLogger()
     }
 
     logger.Error(message, exception.LogContext(err))

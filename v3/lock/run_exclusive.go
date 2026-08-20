@@ -2,6 +2,7 @@ package lock
 
 import (
     "context"
+    "errors"
     "sync"
     "time"
 
@@ -9,6 +10,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
+    "github.com/precision-soft/melody/v3/logging"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -51,6 +53,9 @@ func RunExclusive(
 
     lock := locker.CreateLock(name, ttl)
 
+    /* the lease is dated from the instant the acquire is ISSUED, not from when it answers: the store starts the lease somewhere inside the call, and dating it from the later instant would claim time the lease does not have — the same judgement enterTerm applies on the leader gate. */
+    acquireIssuedAt := time.Now()
+
     acquired, acquireErr := lock.Acquire(runtimeInstance)
     if nil != acquireErr {
         /* a shutdown cancels the very context the backend was called with, so an Acquire in flight fails with the cancellation: that is the stop itself, and reporting it would turn a graceful stop into an error a cron fleet reads as a failed run */
@@ -66,7 +71,7 @@ func RunExclusive(
         return false, nil
     }
 
-    defer releaseDetached(runtimeInstance, lock)
+    defer releaseDetached(runtimeInstance, lock, name)
 
     childContext, cancel := context.WithCancel(runtimeInstance.Context())
     defer cancel()
@@ -81,7 +86,19 @@ func RunExclusive(
     go func() {
         defer waitGroup.Done()
 
-        refreshFailure = refreshWhileHeld(childRuntime, lock, ttl, refreshDone)
+        /* a panicking backend Refresh would otherwise unwind a bare goroutine and kill the process with the lock still held; recovered, it is the same demotion signal a returned error is */
+        defer func() {
+            if recoveredValue := recover(); nil != recoveredValue {
+                refreshFailure = exception.NewError(
+                    "lock refresh panicked",
+                    exceptioncontract.Context{"name": name, "recoveredValue": recoveredValue},
+                    nil,
+                )
+                cancel()
+            }
+        }()
+
+        refreshFailure = refreshWhileHeld(childRuntime, lock, ttl, acquireIssuedAt, refreshDone)
         if nil != refreshFailure {
             /* the lease could not be extended (lost to another holder or a backend error); stop callback rather than let it keep working alongside whoever may hold the lock now */
             cancel()
@@ -96,13 +113,14 @@ func RunExclusive(
     waitGroup.Wait()
 
     if nil != refreshFailure {
+        /* the callback's own error joins the cause chain rather than being flattened to a string: a genuinely independent callback failure keeps its identity for errors.Is/errors.As at the process boundary, while the usual case — the callback failing with the cancellation the lost lease caused — adds nothing to the join. */
         return true, exception.NewError(
             "exclusive run lost the lock lease while running",
             exceptioncontract.Context{
                 "name":     name,
                 "runError": errorMessageOrEmpty(runErr),
             },
-            refreshFailure,
+            errors.Join(refreshFailure, runErr),
         )
     }
 
@@ -116,6 +134,7 @@ func refreshWhileHeld(
     runtimeInstance runtimecontract.Runtime,
     lock lockcontract.Lock,
     ttl time.Duration,
+    acquireIssuedAt time.Time,
     done <-chan struct{},
 ) error {
     refreshInterval, refreshTtl := resolveRefreshSchedule(ttl)
@@ -124,8 +143,8 @@ func refreshWhileHeld(
     ticker := time.NewTicker(refreshInterval)
     defer ticker.Stop()
 
-    /* the lock was acquired immediately before this goroutine started, so the lease it wrote runs from now */
-    leaseExpiry := time.Now().Add(refreshTtl)
+    /* the lease runs from the instant the acquire was ISSUED, not from when this goroutine started: the store took the write somewhere inside the acquire call, and a slow answer would otherwise let the believed lease outlive the real one by the response latency — exactly the degraded-store window in which failed renewals and a second acquirer coincide. Same dating rule as the leader gate's enterTerm. */
+    leaseExpiry := acquireIssuedAt.Add(refreshTtl)
 
     for {
         select {
@@ -134,9 +153,11 @@ func refreshWhileHeld(
         case <-runtimeInstance.Context().Done():
             return nil
         case <-ticker.C:
+            refreshIssuedAt := time.Now()
+
             refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, refreshTimeout)
             if nil == refreshErr {
-                leaseExpiry = time.Now().Add(refreshTtl)
+                leaseExpiry = refreshIssuedAt.Add(refreshTtl)
 
                 continue
             }
@@ -216,14 +237,27 @@ func refreshOnce(
     return lock.Refresh(refreshRuntime, ttl)
 }
 
-/* releaseDetached releases the lock on a runtime detached from the caller's context: by release time that context may already be cancelled, and a release that silently fails because of it would keep the lock held until the ttl lapses. */
-func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) {
+/* releaseDetached releases the lock on a runtime detached from the caller's context: by release time that context may already be cancelled, and a release that silently fails because of it would keep the lock held until the ttl lapses. A release that fails anyway is logged: the lock then stays held for up to a full ttl, every peer's next tick skips, and without this record the operator has no way to tell that from a crash — the ttl is documented as crash-safety, so a stranded lock must at least name itself. */
+func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, name string) {
     releaseContext, releaseCancel := context.WithTimeout(context.Background(), defaultReleaseTimeout)
     defer releaseCancel()
 
     releaseRuntime := runtime.New(releaseContext, runtimeInstance.Scope(), runtimeInstance.Container())
 
-    _ = lock.Release(releaseRuntime)
+    releaseErr := lock.Release(releaseRuntime)
+    if nil == releaseErr {
+        return
+    }
+
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        logger = logging.EmergencyLogger()
+    }
+
+    logger.Warning(
+        "lock release failed; the lock stays held until the ttl lapses",
+        exception.LogContext(releaseErr, exceptioncontract.Context{"name": name}),
+    )
 }
 
 func errorMessageOrEmpty(err error) string {

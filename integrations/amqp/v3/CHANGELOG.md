@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `Transport.Close` takes no runtime and answers only the error — `Close() error`. **Breaking** at compile time for a caller that passed one, and the fix is deleting the argument: the messagebus `Transport` contract changed shape so a transport can join the container's ordered teardown, which recognizes `Close() error` and nothing else, and this transport never read its runtime parameter to begin with — its close is bounded by its own join timeout. With the framework's `RegisterTransports` now registering a closer beside the transports map, the broker connection is finally closed on shutdown instead of living exactly as long as the process
+
 ### Fixed
 
 - a delivery whose re-publish fails is dead-lettered instead of being requeued without its counters. The fallback returned the original delivery to the broker, so the incremented redelivery and dead-letter attempt counts — which live only in the envelope being discarded — never reached the headers the consumer reads, and the message retried forever without backoff and never reached the dead-letter exchange. The re-publish is now attempted a bounded number of times with the updated headers, and a delivery that still cannot carry them is rejected without requeue

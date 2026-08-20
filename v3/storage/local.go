@@ -72,7 +72,8 @@ func (instance *LocalStorage) Put(
     if nil != copyErr {
         _ = file.Close()
         _ = root.Remove(tempKey)
-        return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
+        /* "copy", not "write": io.Copy answers one error for both sides, and the likelier one on an upload streamed from a request body is the READER dying with the client — a message that blames the storage write sends the operator at the disk when the source connection failed; the cause names the side */
+        return exception.NewError("could not copy the payload into the storage object", map[string]any{"key": key}, copyErr)
     }
 
     if 0 <= size && written != size {
@@ -97,7 +98,63 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
     }
 
+    sweepStaleTempObjects(root, relativeKey)
+
     return nil
+}
+
+/* storageTempStaleAge is how old a leftover temp object must be before a later Put sweeps it. The in-process error paths already clean their own temp; what they cannot clean is a crash mid-write (kill -9, oom), whose temp would otherwise sit in the data directory forever — no sweeper, no List to even notice it through, unbounded growth under a crash-looping uploader. An hour is safely beyond any live writer: an in-flight Put refreshes its temp's mtime with every write, so only a file nothing has touched for the whole hour is provably abandoned. */
+const storageTempStaleAge = 1 * time.Hour
+
+/* sweepStaleTempObjects removes abandoned temp objects for this key, opportunistically, after a successful Put. Best-effort by design: the Put already succeeded, the sweep changes nothing the caller observes, and a failure here will be retried by the next Put of the same key — while a hard error would fail a store that worked. */
+func sweepStaleTempObjects(root *os.Root, relativeKey string) {
+    directory := filepath.Dir(relativeKey)
+    prefix := filepath.Base(relativeKey) + ".tmp-"
+
+    directoryFile, openErr := root.Open(directory)
+    if nil != openErr {
+        return
+    }
+    defer directoryFile.Close()
+
+    names, readErr := directoryFile.Readdirnames(-1)
+    if nil != readErr {
+        return
+    }
+
+    for _, name := range names {
+        if false == strings.HasPrefix(name, prefix) || false == isStorageTempSuffix(name[len(prefix):]) {
+            continue
+        }
+
+        candidate := filepath.Join(directory, name)
+
+        info, statErr := root.Lstat(candidate)
+        if nil != statErr || false == info.Mode().IsRegular() {
+            continue
+        }
+
+        if storageTempStaleAge > time.Since(info.ModTime()) {
+            continue
+        }
+
+        _ = root.Remove(candidate)
+    }
+}
+
+/* isStorageTempSuffix matches exactly the sixteen lowercase hex characters createStorageTempFile appends, so a user object that merely resembles a temp name is never swept. */
+func isStorageTempSuffix(suffix string) bool {
+    if 16 != len(suffix) {
+        return false
+    }
+
+    for _, character := range suffix {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return true
 }
 
 /* @important allocate a uniquely named temporary object in the same directory as the target so the final rename stays within the pinned root and on the same filesystem; O_EXCL guarantees we never clobber a concurrent writer's temp or the live key */

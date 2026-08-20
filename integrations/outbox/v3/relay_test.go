@@ -155,7 +155,7 @@ func (instance *fakeTransport) Nack(_ runtimecontract.Runtime, _ messagebuscontr
     return nil
 }
 
-func (instance *fakeTransport) Close(_ runtimecontract.Runtime) error {
+func (instance *fakeTransport) Close() error {
     return nil
 }
 

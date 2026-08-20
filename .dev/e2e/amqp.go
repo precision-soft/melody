@@ -31,7 +31,7 @@ func runAmqpCheck(dsn string) {
         Queue:    queueName,
         Registry: registry,
     })
-    defer transport.Close(runtimeInstance)
+    defer transport.Close()
 
     /* publish two orders, each under a stable producer-assigned message id */
     sent := map[int]string{1: "widget", 2: "gadget"}

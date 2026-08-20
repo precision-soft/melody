@@ -72,14 +72,14 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string, po
     trimmedName := strings.TrimSpace(string(name))
 
     if false == hasType {
-        return stringifyParameter(parameters[trimmedName])
+        return stringifyArgument(trimmedName, parameters)
     }
 
     argType, style, hasStyle := splitFirstComma(remainder)
     trimmedType := strings.TrimSpace(string(argType))
 
     if false == hasStyle {
-        return stringifyParameter(parameters[trimmedName])
+        return stringifyArgument(trimmedName, parameters)
     }
 
     switch trimmedType {
@@ -88,8 +88,18 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string, po
     case "select":
         return evaluateSelect(trimmedName, style, parameters, locale, pound, inPlural, depth)
     default:
-        return stringifyParameter(parameters[trimmedName])
+        return stringifyArgument(trimmedName, parameters)
     }
+}
+
+/* stringifyArgument renders a plain placeholder, keeping an ABSENT parameter visible as the placeholder itself: rendering it as an empty string — what a nil map lookup stringifies to — deletes the value from the message with no channel through which anyone learns of it, so a renamed parameter key ships every message quietly missing its amount, name or count. The visible {name} is the most observable of the options (icu errors, symfony leaves the placeholder), without turning every render into an error. A parameter present with a nil value still renders empty: the caller said so explicitly. */
+func stringifyArgument(name string, parameters map[string]any) string {
+    value, exists := parameters[name]
+    if false == exists {
+        return "{" + name + "}"
+    }
+
+    return stringifyParameter(value)
 }
 
 func evaluateSelect(name string, style []rune, parameters map[string]any, locale string, pound string, inPlural bool, depth int) string {

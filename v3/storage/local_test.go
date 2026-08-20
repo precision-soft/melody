@@ -8,6 +8,7 @@ import (
     "path/filepath"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/runtime"
@@ -227,6 +228,11 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
         t.Fatalf("expected put to fail when the source reader errors mid-stream")
     }
 
+    /* "copy", not "write": io.Copy answers one error for both sides, and on an upload streamed from a request body the likelier one is the READER dying with the client — a message blaming the storage write sends the operator at the disk when the source connection failed */
+    if false == strings.Contains(putErr.Error(), "could not copy the payload") {
+        t.Fatalf("expected the failure to name the copy, got %v", putErr)
+    }
+
     exists, existsErr := local.Exists(runtimeInstance, key)
     if nil != existsErr {
         t.Fatalf("exists: %v", existsErr)
@@ -358,5 +364,70 @@ func TestLocalStorage_RejectsAbsoluteKeyEscape(t *testing.T) {
 
     if _, getErr := local.Get(testRuntime(), "/etc/passwd"); nil == getErr {
         t.Fatalf("expected an absolute-path key to be confined and rejected")
+    }
+}
+
+func TestLocalStorage_NegativeSizeMeansUnknownAndSkipsTheLengthCheck(t *testing.T) {
+    storage := NewLocalStorage(t.TempDir())
+    runtimeInstance := testRuntime()
+
+    /* the contract's documented convention: a negative size is "length unknown" (the io convention http.Request.ContentLength uses), so the backend stores whatever the reader yields — while a non-negative declaration is verified strictly */
+    if putErr := storage.Put(runtimeInstance, "unknown-size.txt", strings.NewReader("payload"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("expected the unknown-size put to succeed, got %v", putErr)
+    }
+
+    if putErr := storage.Put(runtimeInstance, "declared-size.txt", strings.NewReader("payload"), 3, storagecontract.PutOptions{}); nil == putErr {
+        t.Fatalf("expected the mismatched declared size to be refused")
+    }
+}
+
+func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
+    baseDirectory := t.TempDir()
+    storage := NewLocalStorage(baseDirectory)
+    runtimeInstance := testRuntime()
+
+    if putErr := storage.Put(runtimeInstance, "report.txt", strings.NewReader("first"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("unexpected put error: %v", putErr)
+    }
+
+    /* a crash mid-write leaves exactly this shape behind: a temp object no error path could clean; nothing sweeps it but a later Put of the same key */
+    staleTemp := filepath.Join(baseDirectory, "report.txt.tmp-00112233445566aa")
+    if writeErr := os.WriteFile(staleTemp, []byte("orphan"), 0o640); nil != writeErr {
+        t.Fatalf("could not plant the stale temp: %v", writeErr)
+    }
+    staleInstant := time.Now().Add(-2 * time.Hour)
+    if touchErr := os.Chtimes(staleTemp, staleInstant, staleInstant); nil != touchErr {
+        t.Fatalf("could not age the stale temp: %v", touchErr)
+    }
+
+    /* a FRESH temp is a concurrent writer still at work — its mtime is recent, so the sweep must leave it alone */
+    freshTemp := filepath.Join(baseDirectory, "report.txt.tmp-ffeeddccbbaa9988")
+    if writeErr := os.WriteFile(freshTemp, []byte("in flight"), 0o640); nil != writeErr {
+        t.Fatalf("could not plant the fresh temp: %v", writeErr)
+    }
+
+    /* an operator's own file that merely resembles a temp name — wrong suffix shape — is never the sweep's to touch */
+    unowned := filepath.Join(baseDirectory, "report.txt.tmp-notahexsuffix!!")
+    if writeErr := os.WriteFile(unowned, []byte("operator data"), 0o640); nil != writeErr {
+        t.Fatalf("could not plant the unowned file: %v", writeErr)
+    }
+    if touchErr := os.Chtimes(unowned, staleInstant, staleInstant); nil != touchErr {
+        t.Fatalf("could not age the unowned file: %v", touchErr)
+    }
+
+    if putErr := storage.Put(runtimeInstance, "report.txt", strings.NewReader("second"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("unexpected put error: %v", putErr)
+    }
+
+    if _, statErr := os.Stat(staleTemp); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected the stale temp to be swept, stat answered %v", statErr)
+    }
+
+    if _, statErr := os.Stat(freshTemp); nil != statErr {
+        t.Fatalf("expected the fresh temp to survive the sweep: %v", statErr)
+    }
+
+    if _, statErr := os.Stat(unowned); nil != statErr {
+        t.Fatalf("expected the operator's own file to survive the sweep: %v", statErr)
     }
 }

@@ -3,6 +3,8 @@ package translation
 import (
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func newTestManager() *Manager {
@@ -171,4 +173,11 @@ func TestHasMessage(t *testing.T) {
     if true == manager.HasMessage("nope", "messages", "en") {
         t.Fatalf("did not expect nope to exist")
     }
+}
+
+func TestNewManager_RefusesANilCatalog(t *testing.T) {
+    /* skipped silently — the old behavior — a nil catalog built a translator answering raw message ids for a whole locale with nothing pointing at the wiring hole */
+    testhelper.AssertPanicsWithError(t, func() {
+        NewManager("en", nil, nil)
+    }, "translation catalog is nil")
 }

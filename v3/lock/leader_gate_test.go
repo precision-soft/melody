@@ -2,6 +2,7 @@ package lock
 
 import (
     "context"
+    "strings"
     "sync"
     "sync/atomic"
     "testing"
@@ -900,4 +901,213 @@ func TestLeaderGate_ScatteredFailuresNeverAccumulateIntoADemotion(t *testing.T) 
 
     cancel()
     <-done
+}
+
+/* @info In session mode there is no lease and no lease clock: the lock lives as long as the backend session does. Before the guard, enterTerm dated a "lease" from the acquire instant with a non-positive ttl — a deadline already in the past — so the FIRST failed liveness probe of every term found it beyond recovery and demoted immediately, overriding the documented three-failure tolerance the option promises. */
+func TestLeaderGate_SessionModeToleratesTransientProbeFailures(t *testing.T) {
+    failing := &countedFailureLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), failureCount: 1}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    var lostCount atomic.Int64
+    elected := make(chan struct{}, 16)
+
+    gate := NewLeaderGateWithOptions(failing, "worker:session-blip", 0, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 20 * time.Millisecond,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            elected <- struct{}{}
+        },
+        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+            lostCount.Add(1)
+        },
+    })
+
+    go gate.Run(testRuntimeWithContext(runContext))
+
+    select {
+    case <-elected:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the gate was never elected")
+    }
+
+    /* wait long enough for the single failing probe and several healthy ones to land */
+    waitUntil(t, 2*time.Second, func() bool { return 3 <= failing.attempts.Load() }, "expected several probes to land")
+
+    if 0 != lostCount.Load() {
+        t.Fatalf("expected a single failed probe not to cost a session-mode term, got %d losses", lostCount.Load())
+    }
+
+    if false == gate.IsLeader() {
+        t.Fatalf("expected the gate to still lead after a transient probe failure")
+    }
+}
+
+func TestLeaderGate_SessionModePersistentProbeFailuresEndTheTerm(t *testing.T) {
+    failing := &countedFailureLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), failureCount: 1 << 30}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    lost := make(chan struct{}, 16)
+
+    gate := NewLeaderGateWithOptions(failing, "worker:session-gone", 0, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+            lost <- struct{}{}
+        },
+    })
+
+    go gate.Run(testRuntimeWithContext(runContext))
+
+    /* with no lease clock in session mode, the consecutive-failure threshold is the only demotion signal — a store that is plainly gone must still end the term */
+    select {
+    case <-lost:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the default threshold to end a session-mode term against a store that is gone")
+    }
+}
+
+func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    runContext, cancel := context.WithCancel(context.Background())
+
+    runtimeInstance, logger := runtimeWithRecordingLogger(runContext)
+
+    gate := NewLeaderGateWithOptions(locker, "worker:hook-panics", time.Minute, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(electedRuntime runtimecontract.Runtime) {
+            panic(exception.NewError("hook exploded", nil, nil))
+        },
+    })
+
+    runDone := make(chan struct{})
+    go func() {
+        _ = gate.Run(runtimeInstance)
+        close(runDone)
+    }()
+
+    /* the panic is recovered and recorded; the gate keeps its term — a hook failure is not a lost lease — and above all the process survives, where the unshielded form killed it with the lock held for the rest of its ttl on every peer */
+    waitUntil(t, 2*time.Second, func() bool { return logger.hasMessageContaining("leader gate hook panicked") }, "expected the hook panic to be logged")
+
+    if false == gate.IsLeader() {
+        t.Fatalf("expected the gate to keep leading after a recovered hook panic")
+    }
+
+    cancel()
+
+    select {
+    case <-runDone:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the gate did not shut down cleanly after the recovered panic")
+    }
+
+    /* the shutdown released the lock: a fresh campaign must win it immediately */
+    acquired, acquireErr := locker.CreateLock("worker:hook-panics", time.Minute).Acquire(testRuntimeWithContext(context.Background()))
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the lock to be released on shutdown, got acquired=%v err=%v", acquired, acquireErr)
+    }
+}
+
+func TestLeaderGate_CampaignErrorIsLoggedWhenNoHookIsWired(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance, logger := runtimeWithRecordingLogger(runContext)
+
+    gate := NewLeaderGateWithOptions(&acquireFailingLocker{}, "worker:no-hook", time.Minute, fastGateOptions())
+
+    go gate.Run(runtimeInstance)
+
+    /* without the record a store outage and a permanent misconfiguration both look exactly like a deployment that quietly elects no leader and does no work */
+    waitUntil(t, 2*time.Second, func() bool { return logger.hasMessageContaining("leader gate campaign failed") }, "expected the failed campaign to be logged")
+}
+
+func TestLeaderGate_CampaignErrorHookReplacesTheDefaultRecord(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance, logger := runtimeWithRecordingLogger(runContext)
+
+    hookCalls := make(chan error, 16)
+
+    options := fastGateOptions()
+    options.OnCampaignError = func(hookRuntime runtimecontract.Runtime, cause error) {
+        hookCalls <- cause
+    }
+
+    gate := NewLeaderGateWithOptions(&acquireFailingLocker{}, "worker:with-hook", time.Minute, options)
+
+    go gate.Run(runtimeInstance)
+
+    select {
+    case cause := <-hookCalls:
+        if nil == cause {
+            t.Fatalf("expected the hook to receive the campaign error")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the campaign error hook was never called")
+    }
+
+    if true == logger.hasMessageContaining("leader gate campaign failed") {
+        t.Fatalf("expected the wired hook to replace the default record, not add to it")
+    }
+}
+
+func TestLeaderGate_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    lost := make(chan error, 16)
+
+    gate := NewLeaderGateWithOptions(&panickingRefreshLocker{}, "worker:refresh-panics", time.Minute, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+            lost <- cause
+        },
+    })
+
+    go gate.Run(testRuntimeWithContext(runContext))
+
+    /* a panicking backend Refresh unwinds a bare goroutine with no recover of the caller's; recovered, it is the same demotion signal a returned error is — the process survives and the gate re-campaigns */
+    select {
+    case cause := <-lost:
+        if nil == cause || false == strings.Contains(cause.Error(), "leader gate refresh panicked") {
+            t.Fatalf("expected the recovered refresh panic as the lost cause, got %v", cause)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the panicking refresh to demote the term")
+    }
+}
+
+func TestLeaderGate_IsLeaderAnswersFromTheAcquireLeaseBeforeAnyRenewal(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    leaderAtElection := make(chan bool, 1)
+
+    /* the refresh cadence is left at its default — half a one-minute ttl — so no renewal can land before the assertion: what answers inside OnElected is the lease enterTerm dated from the acquire, the only lease that exists in the window between election and the first renewal. A gate that fails to store it reports a leader the fleet cannot see. */
+    var gate *LeaderGate
+    gate = NewLeaderGateWithOptions(NewInMemoryLocker(clock.NewSystemClock()), "worker:first-window", time.Minute, LeaderGateOptions{
+        RetryInterval: 5 * time.Millisecond,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            leaderAtElection <- gate.IsLeader()
+        },
+    })
+
+    go gate.Run(testRuntimeWithContext(runContext))
+
+    select {
+    case isLeader := <-leaderAtElection:
+        if false == isLeader {
+            t.Fatalf("expected IsLeader to answer from the acquire-dated lease before any renewal")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the gate was never elected")
+    }
 }

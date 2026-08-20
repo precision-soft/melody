@@ -234,7 +234,7 @@ func (instance *Transport) Nack(
 /* @important closeJoinTimeout bounds how long Close waits for the consume goroutine. The loop observes closeSignal at every blocking point, so a healthy join costs microseconds; the one stretch it cannot observe it is inside the caller-supplied dialer, and connect rechecks closing the moment that dial returns — so the wait is one dial attempt, not an open-ended one. The window is sized to a full amqp handshake so the join completes for every dialer that carries a timeout; a dialer with none would otherwise hang teardown for good, which is why the wait is bounded at all rather than open. */
 const closeJoinTimeout = 30 * time.Second
 
-func (instance *Transport) Close(runtimeInstance runtimecontract.Runtime) error {
+func (instance *Transport) Close() error {
     instance.mutex.Lock()
     instance.closing = true
     instance.closeOnce.Do(func() {

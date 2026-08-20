@@ -239,7 +239,7 @@ func TestTransport_SendReceiveAck(t *testing.T) {
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close(runtimeInstance)
+    defer transport.Close()
 
     sent := []testMessage{
         {Id: 1, Name: "one"},
@@ -315,7 +315,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close(runtimeInstance)
+    defer transport.Close()
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "retry"})); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
@@ -378,7 +378,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close(runtimeInstance)
+    defer transport.Close()
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "delay"})); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
@@ -449,7 +449,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close(runtimeInstance)
+    defer transport.Close()
 
     queue, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
@@ -471,7 +471,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
         Queue:      queueName,
         Registry:   registry,
     })
-    defer publisher.Close(runtimeInstance)
+    defer publisher.Close()
 
     if sendErr := publisher.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "after-reconnect"})); nil != sendErr {
         t.Fatalf("send after drop: %v", sendErr)
@@ -1124,7 +1124,7 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
 
     time.Sleep(50 * time.Millisecond)
 
-    transport.Close(runtimeInstance)
+    transport.Close()
 
     select {
     case reason := <-done:
@@ -1159,7 +1159,7 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
 
     time.Sleep(50 * time.Millisecond)
 
-    transport.Close(runtimeInstance)
+    transport.Close()
 
     select {
     case reopenErr := <-done:
@@ -1211,7 +1211,7 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
 
     closed := make(chan struct{})
     go func() {
-        instance.Close(runtimeInstance)
+        instance.Close()
 
         close(closed)
     }()
@@ -1287,7 +1287,7 @@ func TestClose_WaitsForALoopStuckInTheDialer(t *testing.T) {
     }()
 
     start := time.Now()
-    instance.Close(runtimeInstance)
+    instance.Close()
     elapsed := time.Since(start)
 
     if elapsed < dialDuration {
@@ -1350,7 +1350,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
 
     closed := make(chan struct{})
     go func() {
-        transport.Close(runtimeInstance)
+        transport.Close()
 
         close(closed)
     }()
@@ -1419,7 +1419,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close(runtimeInstance)
+    defer transport.Close()
 
     firstErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "routable"}))
     if nil != firstErr {
@@ -1754,7 +1754,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close(runtimeInstance)
+    defer transport.Close()
 
     queue, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
@@ -1840,7 +1840,7 @@ func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
 
     runtimeInstance := newReconnectRuntime(context.Background())
 
-    if closeErr := instance.Close(runtimeInstance); nil != closeErr {
+    if closeErr := instance.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -1953,7 +1953,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close(runtimeInstance)
+    defer transport.Close()
 
     /* the queues survive the run, so anything an earlier one parked in them would be read as this run's result */
     purgeQueue(t, connection, queueName)

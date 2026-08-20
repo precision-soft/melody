@@ -1037,3 +1037,194 @@ func TestSmtpTransport_CancelledContextAbortsDial(t *testing.T) {
         t.Fatal("send ignored the cancelled context and stalled in the dial")
     }
 }
+
+func TestSmtpTransport_ConfiguredCredentialsFailClosedWhenAuthIsNotAdvertised(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    go serveAuthlessSmtp(listener)
+
+    /* RequireAuth deliberately left false — the zero-value default: before the guard, this exact configuration skipped the whole auth branch and delivered the message as anonymous submission while reporting success, the operator's configured identity quietly unused; configured credentials that cannot be applied must refuse, not degrade */
+    transport := NewSmtpTransport(SmtpConfig{
+        Address:  listener.Addr().String(),
+        Username: "user",
+        Password: "pass",
+    })
+
+    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+    })
+    if nil == sendErr {
+        t.Fatalf("expected configured credentials to fail closed when the server does not advertise AUTH")
+    }
+
+    if false == strings.Contains(sendErr.Error(), "while credentials are configured") {
+        t.Fatalf("expected the refusal to name the unapplied credentials, got %v", sendErr)
+    }
+}
+
+func TestSmtpTransport_SendWithTypedNilRuntimeReturnsError(t *testing.T) {
+    transport := NewSmtpTransport(SmtpConfig{Address: "127.0.0.1:0"})
+
+    /* a typed-nil runtime walks straight through a plain == nil comparison and dereferences at the dial; the IsNilInterface guard must answer the same clean refusal the untyped nil gets */
+    var typedNil *nilRuntime
+
+    sendErr := transport.Send(typedNil, mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+    })
+    if nil == sendErr || false == strings.Contains(sendErr.Error(), "runtime may not be nil") {
+        t.Fatalf("expected the typed-nil runtime to be refused, got %v", sendErr)
+    }
+}
+
+/* serveMailRejectingSmtp greets, takes the hello, and answers 550 to MAIL FROM — a relay refusing the sender. */
+func serveMailRejectingSmtp(listener net.Listener) {
+    connection, acceptErr := listener.Accept()
+    if nil != acceptErr {
+        return
+    }
+    defer connection.Close()
+
+    reader := bufio.NewReader(connection)
+    writeLine := func(line string) {
+        connection.Write([]byte(line + "\r\n"))
+    }
+
+    writeLine("220 fake ESMTP")
+
+    for {
+        line, readErr := reader.ReadString('\n')
+        if nil != readErr {
+            return
+        }
+
+        command := strings.ToUpper(strings.TrimSpace(line))
+        switch {
+        case strings.HasPrefix(command, "EHLO") || strings.HasPrefix(command, "HELO"):
+            writeLine("250-fake greets you")
+            writeLine("250 SIZE 35882577")
+        case strings.HasPrefix(command, "MAIL"):
+            writeLine("550 sender refused")
+        case strings.HasPrefix(command, "QUIT"):
+            writeLine("221 bye")
+            return
+        default:
+            writeLine("250 ok")
+        }
+    }
+}
+
+func TestSmtpTransport_MailCommandFailureNamesTheCommandNotAVerdict(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    go serveMailRejectingSmtp(listener)
+
+    transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+
+    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+    })
+    if nil == sendErr {
+        t.Fatalf("expected the refused sender to fail the send")
+    }
+
+    /* "failed", not "rejected": the same error path fires on a deadline expiry and on the cancellation watcher closing the connection, where asserting a server verdict sends the operator investigating a policy decision that never happened — the 550, when there was one, is in the cause */
+    if false == strings.Contains(sendErr.Error(), "smtp mail command failed") {
+        t.Fatalf("expected the failure to name the command, got %v", sendErr)
+    }
+}
+
+/* serveThenBreakQuitSmtp accepts a full delivery — hello, envelope, DATA with its 354 and closing 250 — and then breaks the connection on QUIT instead of answering 221. */
+func serveThenBreakQuitSmtp(listener net.Listener) {
+    connection, acceptErr := listener.Accept()
+    if nil != acceptErr {
+        return
+    }
+    defer connection.Close()
+
+    reader := bufio.NewReader(connection)
+    writeLine := func(line string) {
+        connection.Write([]byte(line + "\r\n"))
+    }
+
+    writeLine("220 fake ESMTP")
+
+    inData := false
+    for {
+        line, readErr := reader.ReadString('\n')
+        if nil != readErr {
+            return
+        }
+
+        if true == inData {
+            if "." == strings.TrimSpace(line) {
+                inData = false
+                writeLine("250 queued")
+            }
+            continue
+        }
+
+        command := strings.ToUpper(strings.TrimSpace(line))
+        switch {
+        case strings.HasPrefix(command, "EHLO") || strings.HasPrefix(command, "HELO"):
+            writeLine("250-fake greets you")
+            writeLine("250 SIZE 35882577")
+        case strings.HasPrefix(command, "DATA"):
+            inData = true
+            writeLine("354 go ahead")
+        case strings.HasPrefix(command, "QUIT"):
+            /* the abrupt close is the failure under test: the message is already queued, so the client's Quit errors after acceptance */
+            return
+        default:
+            writeLine("250 ok")
+        }
+    }
+}
+
+func TestSmtpTransport_QuitFailureWarningCarriesTheCause(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    go serveThenBreakQuitSmtp(listener)
+
+    runtimeInstance, logger := testRuntimeWithRecordingLogger()
+
+    transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+
+    sendErr := transport.Send(runtimeInstance, mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+    })
+    if nil != sendErr {
+        t.Fatalf("a quit failure after acceptance must not fail the send: %v", sendErr)
+    }
+
+    warningContext, found := logger.contextOfMessage("smtp quit failed after the message was accepted")
+    if false == found {
+        t.Fatalf("expected the quit failure to be warned")
+    }
+
+    /* with only the address beside it, a recurring quit failure cannot be told apart from a timeout, a protocol error or a closed socket — the record must carry the cause */
+    if _, hasCause := warningContext["error"]; false == hasCause {
+        t.Fatalf("expected the quit warning to carry its cause, got context %v", warningContext)
+    }
+}

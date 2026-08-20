@@ -1,6 +1,7 @@
 package translation
 
 import (
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     translationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
@@ -12,8 +13,9 @@ func NewManager(
 ) *Manager {
     catalogsByLocale := make(map[string]translationcontract.Catalog)
     for _, catalog := range catalogs {
+        /* refused, not skipped: a nil catalog is a wiring mistake, and dropping it silently builds a translator that answers raw message ids for a whole locale with nothing pointing at the hole — the same judgement every sibling constructor applies to a nil collaborator */
         if true == internal.IsNilInterface(catalog) {
-            continue
+            exception.Panic(exception.NewError("translation catalog is nil", nil, nil))
         }
 
         catalogsByLocale[catalog.Locale()] = catalog
