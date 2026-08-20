@@ -31,9 +31,10 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
 
 [`Generate`](../../openapi/generator.go) walks the router's `RouteDefinition` list. For each route it:
 
-- converts the Melody pattern to an OpenAPI path — `:id` and `{id}` segments become `{id}` path parameters;
-- maps each HTTP method to an `Operation` keyed by the route name as `operationId`;
-- enriches the operation from the [`Registry`](../../openapi/registry.go) when a [`Descriptor`](../../openapi/registry.go) is registered for the route name (summary, tags, request body, responses).
+- converts the Melody pattern to an OpenAPI path — `:id` and `{id}` segments become `{id}` path parameters; a catch-all (`*rest...`, or a trailing `*rest`) becomes `{rest}` and **ends the documented path**, because the router's registration discards every segment written after a catch-all and never matches it — a mid-pattern `*name` without the dots is a single-segment wildcard and keeps its tail;
+- maps each HTTP method to an `Operation` keyed by the route name as `operationId`. A route registered with **no** method list answers every verb, so it is documented on all eight path item verbs, each with its own operationId; a verb the format cannot model (the router registers any string) is named in the path item's `description` instead of being dropped without a trace;
+- enriches the operation from the [`Registry`](../../openapi/registry.go) when a [`Descriptor`](../../openapi/registry.go) is registered for the route name (summary, tags, request body, responses). The responses are visited in status order, so component naming — and with it the whole document — is byte-stable across runs;
+- never overwrites an operation another route already wrote: where two patterns converge on one converted path, the earlier registration wins, exactly as it does in the router's match order.
 
 ### A trailing optional parameter becomes two path items
 
@@ -133,11 +134,17 @@ app melody:openapi:generate            # prints to stdout
 app melody:openapi:generate --out openapi.json
 ```
 
+A relative `--out` is anchored at the project directory (`kernel.project_dir`), exactly as the wiring command anchors its own, with the parent directories created on the way; the write lands through a temp file and a rename, and an existing file that does not hold a JSON document — someone's source a mistyped `--out` points at — is refused rather than replaced. The command is auto-registered by the application when the container carries `ServiceOpenApiRegistry`; [`NewGenerateCommandFromContainer`](../../openapi/generate_command.go) is the constructor that resolves the `Info` and the `Registry` at run time, and it says on its writer when no `ServiceOpenApiInfo` is registered, since the tolerant [`InfoFromResolver`](../../openapi/service_resolver.go) then answers an empty `Info` and the document's required title and version are empty strings.
+
 The example application registers a registry (`config/openapi.go`) and the command, describing the product-create and i18n-greeting routes.
 
 ## Footguns & caveats
 
 - Generation is opt-in and userland-wired; routes without a registered descriptor still appear (path, method, path parameters) but with a single `default` response and no body.
+- **The document enumerates every route the router carries** — internal, administrative and authentication routes included, with their methods and path-parameter names. There is no per-route opt-out. An application that mounts [`SpecHandler`](../../openapi/spec_handler.go) decides who can read that enumeration with the same firewall rules as any other route; mounting it public, as the example does, publishes the whole route table deliberately.
+- [`Registry.Describe`](../../openapi/registry.go) belongs to **boot** — module construction, before the application serves. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so a `Describe` issued while requests are in flight is a concurrent map write, which Go answers by killing the process.
+- [`SpecHandler`](../../openapi/spec_handler.go) regenerates the whole document on every request — the full reflection walk included. The document only changes at boot, so a deployment that expects the route to be hammered should cache the response in front of it (a reverse-proxy cache, or a handler of its own that generates once).
+- A `regex` pattern is validated with Go's RE2 and emitted verbatim, while OpenAPI 3.0 prescribes the ECMA-262 dialect for `pattern`; keep to the common subset (no `(?i)` inline flags, no `\p{...}` classes) or the produced document fails downstream validators.
 - The router normalizes trailing slashes, so generated path keys have no trailing slash even when the route pattern does.
 - `validate` tag parsing splits on commas; a `regex` pattern containing a comma is not supported by the schema mapping.
 - Reused named struct types are emitted once into `components/schemas` and referenced by `$ref` (see "How generation works"); an unnamed (anonymous) cyclic struct falls back to a generic `object` to avoid infinite recursion.
@@ -160,5 +167,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`DescribeTyped[Req, Resp any](registry *Registry, routeName string, status int, options ...DescribeOption)`](../../openapi/describe_typed.go) with `WithSummary`, `WithDescription`, `WithTags`, `WithResponse[T any](status int)`
 - [`Generate(info Info, routeDefinitions []httpcontract.RouteDefinition, registry *Registry) *Document`](../../openapi/generator.go)
 - [`NewGenerateCommand(info Info, registry *Registry) *GenerateCommand`](../../openapi/generate_command.go)
+- [`NewGenerateCommandFromContainer() *GenerateCommand`](../../openapi/generate_command.go) — the auto-registered form, resolving the `Info` and the `Registry` from the container at run time
 - [`SpecHandler(info Info, registry *Registry) httpcontract.Handler`](../../openapi/spec_handler.go)
 - [`RegistryMustFromContainer(...)`, `RegistryMustFromResolver(...)`](../../openapi/service_resolver.go) — resolve the registry registered under `ServiceOpenApiRegistry`
+- [`InfoFromResolver(resolver containercontract.Resolver) Info`](../../openapi/service_resolver.go) — the tolerant reader of `ServiceOpenApiInfo`, answering an empty `Info` when none is registered

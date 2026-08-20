@@ -55,7 +55,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
         },
         &clicontract.BoolFlag{
             Name:  "strict",
-            Usage: "fail when a declared bind matched no constructor argument or a constructor was skipped",
+            Usage: "fail when a declared bind or exclude matched no constructor, or a constructor was skipped",
         },
         &clicontract.BoolFlag{
             Name:  "report-vendor",
@@ -109,15 +109,16 @@ func (instance *GenerateCommand) Run(
 
     instance.writeReport(commandContext, report)
 
+    /* every strict violation is carried in one refusal: the run is inspected through its exit and its error record, and an error naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary */
     if true == commandContext.Bool("strict") {
+        strictContext := make(map[string]any)
+
         if 0 < len(report.UnusedBinds) {
-            return exception.NewError(
-                "declared binds matched no constructor argument",
-                map[string]any{
-                    "binds": strings.Join(report.UnusedBinds, ", "),
-                },
-                nil,
-            )
+            strictContext["binds"] = strings.Join(report.UnusedBinds, ", ")
+        }
+
+        if 0 < len(report.UnusedExcludes) {
+            strictContext["excludes"] = strings.Join(report.UnusedExcludes, ", ")
         }
 
         /* a skipped constructor is coverage the wiring silently lost; strict exists so a loss has to be acknowledged, which is what //melody:ignore is for */
@@ -127,11 +128,13 @@ func (instance *GenerateCommand) Run(
                 skippedNames = append(skippedNames, skipped.Name)
             }
 
+            strictContext["constructors"] = strings.Join(skippedNames, ", ")
+        }
+
+        if 0 < len(strictContext) {
             return exception.NewError(
-                "constructors were skipped",
-                map[string]any{
-                    "constructors": strings.Join(skippedNames, ", "),
-                },
+                "declared binds or excludes matched no constructor, or constructors were skipped",
+                strictContext,
                 nil,
             )
         }
@@ -148,10 +151,66 @@ func (instance *GenerateCommand) Run(
         outputPath = filepath.Join(projectDirectory, outputPath)
     }
 
-    makeDirectoryErr := os.MkdirAll(filepath.Dir(outputPath), 0o755)
+    /* a generated file inside a scanned directory is read back by the next scan — with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out; the constructor's own contract says the output package must not be a scanned one, and this is where it is enforceable */
+    for _, packageBinding := range instance.bindSet.Packages() {
+        scannedDirectory := packageBinding.Directory()
+        if false == filepath.IsAbs(scannedDirectory) {
+            scannedDirectory = filepath.Join(projectDirectory, scannedDirectory)
+        }
+
+        relativePath, relativeErr := filepath.Rel(scannedDirectory, outputPath)
+        if nil == relativeErr && false == strings.HasPrefix(relativePath, "..") {
+            return exception.NewError(
+                "the output path lies inside a scanned package directory",
+                map[string]any{
+                    "out":        outputPath,
+                    "importPath": packageBinding.ImportPath(),
+                    "directory":  scannedDirectory,
+                },
+                nil,
+            )
+        }
+    }
+
+    /* an existing file that does not open with the generated marker is someone's source, and the write below truncates before it writes; a mistyped --out must not be how a hand-written file dies */
+    existingContent, readErr := os.ReadFile(outputPath)
+    if nil != readErr && false == os.IsNotExist(readErr) {
+        return exception.NewError(
+            "could not inspect the existing output file",
+            map[string]any{
+                "out": outputPath,
+            },
+            readErr,
+        )
+    }
+    if nil == readErr && 0 < len(existingContent) && false == strings.HasPrefix(string(existingContent), generatedFileNote) {
+        return exception.NewError(
+            "the output file exists and is not a generated wiring file; remove it or choose another path",
+            map[string]any{
+                "out": outputPath,
+            },
+            nil,
+        )
+    }
+
+    writeErr := writeGeneratedFileAtomically(outputPath, source)
+    if nil != writeErr {
+        return writeErr
+    }
+
+    fmt.Fprintf(commandContext.Writer, "wiring written to %s\n", outputPath)
+
+    return nil
+}
+
+/* writeGeneratedFileAtomically lands the generated source through a temp file and a rename, so a write that dies partway — a full disk, a killed process — leaves the previous file intact instead of a truncated Go source the compiler and the committed-file diff then read as the generator's output. */
+func writeGeneratedFileAtomically(outputPath string, content string) error {
+    directoryPath := filepath.Dir(outputPath)
+
+    makeDirectoryErr := os.MkdirAll(directoryPath, 0o755)
     if nil != makeDirectoryErr {
         return exception.NewError(
-            "could not create the output directory of the generated wiring",
+            "could not create the output directory of the generated file",
             map[string]any{
                 "out": outputPath,
             },
@@ -159,10 +218,26 @@ func (instance *GenerateCommand) Run(
         )
     }
 
-    writeErr := os.WriteFile(outputPath, []byte(source), 0o644)
-    if nil != writeErr {
+    tempFile, tempErr := os.CreateTemp(directoryPath, filepath.Base(outputPath)+".*.tmp")
+    if nil != tempErr {
         return exception.NewError(
-            "could not write the generated wiring",
+            "could not create the temp file of the generated file",
+            map[string]any{
+                "out": outputPath,
+            },
+            tempErr,
+        )
+    }
+
+    tempPath := tempFile.Name()
+
+    _, writeErr := tempFile.WriteString(content)
+    if nil != writeErr {
+        _ = tempFile.Close()
+        _ = os.Remove(tempPath)
+
+        return exception.NewError(
+            "could not write the generated file",
             map[string]any{
                 "out": outputPath,
             },
@@ -170,7 +245,45 @@ func (instance *GenerateCommand) Run(
         )
     }
 
-    fmt.Fprintf(commandContext.Writer, "wiring written to %s\n", outputPath)
+    closeErr := tempFile.Close()
+    if nil != closeErr {
+        _ = os.Remove(tempPath)
+
+        return exception.NewError(
+            "could not close the temp file of the generated file",
+            map[string]any{
+                "out": outputPath,
+            },
+            closeErr,
+        )
+    }
+
+    /* the temp file is born 0600; the artifact keeps the mode a direct write would have given it */
+    chmodErr := os.Chmod(tempPath, 0o644)
+    if nil != chmodErr {
+        _ = os.Remove(tempPath)
+
+        return exception.NewError(
+            "could not set the mode of the generated file",
+            map[string]any{
+                "out": outputPath,
+            },
+            chmodErr,
+        )
+    }
+
+    renameErr := os.Rename(tempPath, outputPath)
+    if nil != renameErr {
+        _ = os.Remove(tempPath)
+
+        return exception.NewError(
+            "could not replace the output file with the generated file",
+            map[string]any{
+                "out": outputPath,
+            },
+            renameErr,
+        )
+    }
 
     return nil
 }
@@ -213,6 +326,15 @@ func (instance *GenerateCommand) writeReport(
 
     for _, unused := range report.UnusedBinds {
         fmt.Fprintf(commandContext.Writer, "bind %s matched no constructor argument\n", unused)
+    }
+
+    for _, unused := range report.UnusedExcludes {
+        fmt.Fprintf(commandContext.Writer, "exclude %s matched no constructor\n", unused)
+    }
+
+    /* the generator's contract is to say when it could not check the bind targets; the command always hands over the running configuration, so this line names the degenerate case where that configuration declares nothing */
+    if true == report.BindTargetsUnchecked {
+        fmt.Fprint(commandContext.Writer, "bind targets were not checked: the application declares no parameters\n")
     }
 
     reachedNames := make([]string, 0, len(report.GlobalBindReach))

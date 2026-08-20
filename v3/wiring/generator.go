@@ -3,6 +3,8 @@ package wiring
 import (
     "go/token"
     "sort"
+    "strconv"
+    "strings"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -47,6 +49,10 @@ type GenerateReport struct {
     ExcludedFiles   []string
     UnusedBinds     []string
     GlobalBindReach map[string][]string
+    /* UnusedExcludes names the exclude patterns that matched no constructor, each prefixed with its package's import path. An exclusion that stopped matching silently registers the constructor it was declared to keep out, so strict fails on it the way it fails on an unused bind. */
+    UnusedExcludes []string
+    /* BindTargetsUnchecked reports that a bind resolved while DeclaredParameters was empty, so its target could not be checked against anything. The generator promises to say so rather than silently assume the target exists; the command never trips this — it always hands over the running configuration — but a direct Generate caller can. */
+    BindTargetsUnchecked bool
 }
 
 /* Generate scans every declared package and renders the registration source. It fails on the first constructor whose scalar argument no bind covers: an unfilled scalar has no safe default, and letting it through would move the failure to a runtime far from its cause. */
@@ -71,6 +77,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         ExcludedFiles:            make([]string, 0),
         UnusedBinds:              make([]string, 0),
         GlobalBindReach:          make(map[string][]string),
+        UnusedExcludes:           make([]string, 0),
     }
 
     usedBinds := make(map[string]bool)
@@ -163,7 +170,22 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     scopedProviderBlocks := make([]string, 0)
     unusedDirectiveBinds := make([]string, 0)
 
+    /* two constructors that register under one container key panic at the first boot of the generated file, far from the generation that reported success; the collision is keyed here exactly as the emitted registration keys it — by the returned type for a type registration, by the named constant for a named one — so it fails at generation, naming both sites. A name constant's VALUE is not read from the source, so a type registration and a name registration that happen to spell the same service name, or two distinct constants holding one value, stay out of reach of this check. */
+    registrationSites := make(map[string]*Constructor)
+
     for _, packageBinding := range request.BindSet.Packages() {
+        /* both halves land in the generated file and in the walk: an empty import path renders an import of "", and an empty directory joins to the project root and silently scans the whole tree as one package */
+        if "" == packageBinding.ImportPath() || "" == packageBinding.Directory() {
+            return "", nil, exception.NewError(
+                "a package binding must declare both an import path and a directory",
+                map[string]any{
+                    "importPath": packageBinding.ImportPath(),
+                    "directory":  packageBinding.Directory(),
+                },
+                nil,
+            )
+        }
+
         scanResult, scanErr := Scan(request.ProjectDirectory, packageBinding, request.BuildTags)
         if nil != scanErr {
             return "", nil, scanErr
@@ -173,7 +195,23 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         report.SkippedVendorDirectories = append(report.SkippedVendorDirectories, scanResult.SkippedVendorDirectories...)
         report.ExcludedFiles = append(report.ExcludedFiles, scanResult.ExcludedFiles...)
 
+        for _, pattern := range scanResult.UnusedExcludes {
+            report.UnusedExcludes = append(report.UnusedExcludes, packageBinding.ImportPath()+"."+pattern)
+        }
+
         for _, constructor := range scanResult.Constructors {
+            registrationKey := registrationKeyFor(constructor)
+            if existing, taken := registrationSites[registrationKey]; true == taken {
+                return "", nil, exception.NewError(
+                    "two constructors register the same service",
+                    map[string]any{
+                        "first":  existing.Name + " (" + existing.File + ":" + strconv.Itoa(existing.Line) + ")",
+                        "second": constructor.Name + " (" + constructor.File + ":" + strconv.Itoa(constructor.Line) + ")",
+                    },
+                    nil,
+                )
+            }
+            registrationSites[registrationKey] = constructor
             resolvedArguments, constructorUnusedDirectiveBinds, resolveErr := resolveArguments(
                 constructor,
                 packageBinding,
@@ -221,6 +259,32 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     return source, report, nil
 }
 
+/* registrationKeyFor derives the key the emitted registration will claim in the container, so two constructors claiming one key fail at generation instead of at boot. A type registration is keyed by the returned type — import path and bare type name, with the pointer stars kept, since the container derives different names for T and *T — and a named registration by the constant that names it. The two lifetimes register through different registrars and do not collide with each other: a scoped registration of a type is what deliberately shadows the container one inside a scope. */
+func registrationKeyFor(constructor *Constructor) string {
+    lifetime := "container"
+    if true == constructor.IsScoped {
+        lifetime = "scoped"
+    }
+
+    if "" != constructor.ServiceNameIdentifier {
+        return lifetime + " name " + constructor.ImportPath + "." + constructor.ServiceNameIdentifier
+    }
+
+    typeName := constructor.ReturnType.Expression
+
+    stars := ""
+    for true == strings.HasPrefix(typeName, "*") {
+        stars = stars + "*"
+        typeName = strings.TrimPrefix(typeName, "*")
+    }
+
+    if separatorIndex := strings.Index(typeName, "."); 0 <= separatorIndex {
+        typeName = typeName[separatorIndex+1:]
+    }
+
+    return lifetime + " type " + stars + constructor.ReturnType.ImportPath + "." + typeName
+}
+
 type resolvedArgument struct {
     argument      *Argument
     parameterName string
@@ -262,6 +326,11 @@ func resolveArguments(
                 },
                 nil,
             )
+        }
+
+        /* an empty declared-parameter set disables this check, and the field's contract is to say so rather than silently assume every target exists; the flag is raised only when a bind actually went unchecked, so a set with no scalar arguments reports nothing */
+        if 0 == len(request.DeclaredParameters) {
+            report.BindTargetsUnchecked = true
         }
 
         if 0 < len(request.DeclaredParameters) && false == request.DeclaredParameters[parameterName] {

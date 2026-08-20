@@ -737,6 +737,30 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 * **`websocket` keepalive.** A received pong refreshes the connection's liveness mark, and a keepalive ping that could not be written because a data frame was in flight is no longer read as a dead peer ([`handler.go`](../../integrations/websocket/v3/handler.go)). *Symptom:* a configuration with `IdleTimeout` below `WriteTimeout` no longer turns transient write contention into a disconnect — a frame in flight excuses a timed-out ping until one interval past the configured write timeout. *Remedy:* none; a receive-only client bridged onto a broadcast hub stops being disconnected for never sending a data frame.
 * **`outbox` relay lease.** The distributed lease is released on a context detached from the run and bounded by five seconds, and a release failure is logged rather than discarded ([`relay.go`](../../integrations/outbox/v3/relay.go)). *Symptom:* a graceful restart no longer stalls outbox delivery for a whole `LockTtl`. *Remedy:* none.
 
+### Wiring: the generator refuses what it used to drop silently
+
+**What changed.** `melody:wiring:generate` fails, naming the site, on the inputs it used to read as "nothing": an unknown `//melody:` directive (a mistyped `scoped` demoted a request-lifetime service to a never-closed singleton; a mistyped `ignore` registered the constructor it acknowledged), a `//melody:bind` assignment without the equals sign or with an empty half (the override beside the constructor silently fell back to a broader bind), a malformed exclude pattern (`path.Match`'s `ErrBadPattern` was read as "does not match", so the exclusion excluded nothing), an empty import path or directory on a package binding (an empty directory scanned the whole project tree as one package), and two constructors that would register the same container key (the generated file panicked at first boot while the generation had reported success). `//melody:ignore` now accepts a trailing reason, which is the spelling the refusal of unknown directives makes mandatory to honour. An exclude that matched no constructor is reported like an unused bind, `--strict` fails on it, and a strict refusal carries every violation — binds, excludes, skipped constructors — in one error instead of the first found.
+
+**Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red.
+
+**Remedy.** Correct the named site: fix the directive spelling, add the equals sign, terminate the character class, split the two constructors or route one through `//melody:ignore`. Every refusal is a defect the generated file would otherwise carry into boot — none of them is a new rule about correct input.
+
+### Wiring and openapi: the `--out` contract hardens, and the openapi anchor moves
+
+**What changed.** Both generate commands write through a temp file and a rename, so an interrupted write leaves the previous artifact intact instead of a torn one; both refuse to replace a file that is not theirs — wiring by the `DO NOT EDIT` marker, openapi by the target not holding a JSON document; wiring refuses an `--out` inside a scanned package directory, which its own documentation always forbade; and a relative `--out` on `melody:openapi:generate` is now anchored at the project directory, exactly as the wiring command has always anchored its own, with the parent directories created on the way.
+
+**Symptom.** `melody:openapi:generate --out openapi.json` run from a working directory other than the project root — a systemd unit, a Makefile in a subdirectory — now writes into the project instead of into that directory; a pipeline that relied on the old CWD anchoring reads the file from the wrong place. A mistyped `--out` pointing at a hand-written file fails instead of destroying it.
+
+**Remedy.** Pass an absolute `--out` to pin any other destination; delete a foreign file deliberately if its path really is the intended output. Nothing changes for the documented invocations run from the project root.
+
+### Openapi: the document's shape becomes faithful to the router, and stable
+
+**What changed.** A route registered with no method list — which the router answers on every verb — is documented on all eight path item verbs instead of as an operation-less `{}`; a verb the format cannot model (`PURGE`) is named in the path item's new `description` instead of vanishing; a catch-all pattern stops the documented path at the catch-all segment, because the router discards everything after it; converging routes no longer overwrite each other's operations (the earlier registration wins, as in the router's match order); and response types are visited in status order, so component names and every `$ref` to them stop depending on map iteration and the generated file is byte-stable across runs.
+
+**Symptom.** A committed `openapi.json` regenerated after this change may differ once — method-less routes gain operations, catch-all paths shorten, colliding component names settle onto the lower status — and then stays byte-identical run over run, which is the property the diff-based pipelines were missing.
+
+**Remedy.** Regenerate the committed document once and review the diff; it is the document moving onto what the router actually serves. Declare explicit method lists on routes that should not advertise all eight verbs.
+
 ## v3.0.0
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version. The entry below is the one rewrite that does not compile afterwards: v1 and v2 keep the identifiers, v3 has never carried them.

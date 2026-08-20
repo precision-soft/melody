@@ -756,3 +756,161 @@ func TestGenerate_MirroredPathDoesNotDisplaceARouteRegisteredThere(t *testing.T)
         }
     }
 }
+
+/* @info the range over descriptor.Responses is the one unordered driver of first-touch component naming: iterated directly, whichever type a run visits first takes the bare name and the other takes the numbered sibling, so two runs over one registry disagree on every $ref to a colliding name — the statuses are visited sorted, and thirty-two fresh generations pin the order because a surviving inversion would have to win a coin flip every time. */
+func TestGenerate_ResponsesAreVisitedInStatusOrder(t *testing.T) {
+    for iteration := 0; iteration < 32; iteration++ {
+        registry := NewRegistry()
+        registry.Describe("pages.read", Descriptor{
+            Responses: map[int]reflect.Type{
+                200: TypeOf[genericPage[genericPageUser]](),
+                409: TypeOf[genericPage[*genericPageUser]](),
+            },
+        })
+
+        routes := []httpcontract.RouteDefinition{
+            fakeRoute{name: "pages.read", pattern: "/pages/", methods: []string{"GET"}},
+        }
+
+        document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+        operation := document.Paths["/pages/"].Get
+        if nil == operation {
+            t.Fatalf("expected the GET operation")
+        }
+
+        okRef := operation.Responses["200"].Content["application/json"].Schema.Ref
+        conflictRef := operation.Responses["409"].Content["application/json"].Schema.Ref
+
+        if okRef+"2" != conflictRef {
+            t.Fatalf("iteration %d: expected status 200 to name the component first, got %q and %q", iteration, okRef, conflictRef)
+        }
+    }
+}
+
+/* @info the router treats an empty method list as answering every verb, so an operation-less path item would read as an endpoint answering nothing while the server answers everything — the document spells the eight path item verbs out, each with its own operationId. */
+func TestGenerate_ARouteWithoutMethodsDocumentsEveryPathItemVerb(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "webhook.catch", pattern: "/webhook/", methods: nil},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    pathItem := document.Paths["/webhook/"]
+
+    operations := []*Operation{
+        pathItem.Get, pathItem.Post, pathItem.Put, pathItem.Patch,
+        pathItem.Delete, pathItem.Options, pathItem.Head, pathItem.Trace,
+    }
+
+    for _, operation := range operations {
+        if nil == operation {
+            t.Fatalf("expected every path item verb to carry an operation, got %+v", pathItem)
+        }
+    }
+
+    if "webhook.catch.get" != pathItem.Get.OperationId || "webhook.catch.trace" != pathItem.Trace.OperationId {
+        t.Fatalf("expected per-verb operationIds, got %q and %q", pathItem.Get.OperationId, pathItem.Trace.OperationId)
+    }
+}
+
+/* @info a verb outside the eight the format models has no slot in a path item; the operation used to be built and dropped without a trace, an endpoint answering in production and absent from the spec — the route now stays in the document with the undescribed verb named. */
+func TestGenerate_ANonStandardVerbIsNamedOnThePathItem(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "cache.purge", pattern: "/cache/", methods: []string{"PURGE", "GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    pathItem := document.Paths["/cache/"]
+
+    if nil == pathItem.Get {
+        t.Fatalf("expected the representable verb to keep its operation")
+    }
+
+    if false == strings.Contains(pathItem.Description, "PURGE") {
+        t.Fatalf("expected the undescribed verb named on the path item, got %q", pathItem.Description)
+    }
+}
+
+/* @info the router reads the "..." suffix as a catch-all and its registration RETURNS there: every segment written after it is discarded and never matched, so the converted path mirrors that instead of advertising a template no request the route answers can ever spell; a mid-pattern "*name" without the dots is a single-segment wildcard and keeps its tail. */
+func TestGenerate_ACatchAllPatternDropsTheSegmentsTheRouterDrops(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "assets.read", pattern: "/assets/*rest.../thumbnail", methods: []string{"GET"}},
+        fakeRoute{name: "mirrors.read", pattern: "/mirrors/*host/status", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    if _, exists := document.Paths["/assets/{rest}"]; false == exists {
+        t.Fatalf("expected the catch-all path truncated at the catch-all, got %v", keysOf(document.Paths))
+    }
+
+    if _, exists := document.Paths["/assets/{rest}/thumbnail"]; true == exists {
+        t.Fatalf("expected no path for the segments the router discards")
+    }
+
+    if _, exists := document.Paths["/mirrors/{host}/status"]; false == exists {
+        t.Fatalf("expected the single-segment wildcard to keep its tail, got %v", keysOf(document.Paths))
+    }
+}
+
+/* @info two routes whose patterns converge on one converted path — a placeholder against a brace literal — must not silently replace each other's operations: the earlier registration wins, exactly as it does in the router's match order. */
+func TestGenerate_ALaterRouteDoesNotDisplaceAnEarlierRoutesOperation(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "users.read", pattern: "/users/:id", methods: []string{"GET"}},
+        fakeRoute{name: "users.read.literal", pattern: "/users/{id}", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    operation := document.Paths["/users/{id}"].Get
+    if nil == operation || "users.read" != operation.OperationId {
+        t.Fatalf("expected the earlier route to keep the slot, got %+v", operation)
+    }
+}
+
+/* @info a status outside the registered table answers an empty status text, and the response description is required by the format — an empty string is a spec violation most tooling rejects. */
+func TestGenerate_AnUnregisteredStatusCodeKeepsADescription(t *testing.T) {
+    registry := NewRegistry()
+    registry.Describe("things.read", Descriptor{
+        Responses: map[int]reflect.Type{
+            599: TypeOf[productResponse](),
+        },
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "things.read", pattern: "/things/", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    response := document.Paths["/things/"].Get.Responses["599"]
+    if "response" != response.Description {
+        t.Fatalf("expected a non-empty description for the unregistered status, got %q", response.Description)
+    }
+}
+
+/* @info the descriptor arrives by value but its Tags slice shares the registry's backing array; a document that aliases it hands every post-processing write through into the boot-time registry and every later generation. */
+func TestGenerate_TheDocumentDoesNotAliasTheRegistryTags(t *testing.T) {
+    registry := NewRegistry()
+    registry.Describe("products.read", Descriptor{
+        Tags: []string{"products"},
+        Responses: map[int]reflect.Type{
+            200: TypeOf[productResponse](),
+        },
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "products.read", pattern: "/products/", methods: []string{"GET"}},
+    }
+
+    first := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+    first.Paths["/products/"].Get.Tags[0] = "mutated"
+
+    second := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    if "products" != second.Paths["/products/"].Get.Tags[0] {
+        t.Fatalf("expected the registry tags untouched by a document write, got %q", second.Paths["/products/"].Get.Tags[0])
+    }
+}

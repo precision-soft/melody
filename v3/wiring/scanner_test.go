@@ -1,6 +1,7 @@
 package wiring
 
 import (
+    "errors"
     "go/parser"
     "go/token"
     "os"
@@ -184,8 +185,14 @@ func TestIsExcluded_MatchesTheReturnedTypeName(t *testing.T) {
     }
 
     for _, testCase := range cases {
-        if testCase.expected != isExcluded(testCase.typeExpression, []string{testCase.pattern}) {
+        matchedExcludes := make(map[string]bool)
+
+        if testCase.expected != isExcluded(testCase.typeExpression, []string{testCase.pattern}, matchedExcludes) {
             t.Fatalf("unexpected exclusion of %q by %q", testCase.typeExpression, testCase.pattern)
+        }
+
+        if testCase.expected != matchedExcludes[testCase.pattern] {
+            t.Fatalf("expected the matched-excludes record of %q to be %v", testCase.pattern, testCase.expected)
         }
     }
 }
@@ -198,7 +205,7 @@ func TestScan_ReportsAMissingDirectory(t *testing.T) {
         t.Fatalf("expected a missing directory to be reported")
     }
 
-    if false == strings.Contains(scanErr.Error(), "could not scan the package directory") {
+    if false == strings.Contains(scanErr.Error(), "could not resolve the package directory") {
         t.Fatalf("unexpected error: %v", scanErr)
     }
 }
@@ -449,14 +456,146 @@ func TestScan_RecordsTheScopedDirective(t *testing.T) {
     }
 }
 
-/* @info a plain prefix match would claim a longer word — //melody:scopedLater — and silently move a process singleton to a per-request lifetime on the strength of a comment that says something else. */
-func TestScan_ScopedDirectiveDoesNotMatchALongerWord(t *testing.T) {
-    nearly := constructorByName(scanScopedFixture(t), "NewNearlyScoped")
-    if nil == nearly {
-        t.Fatalf("expected the constructor to be found")
+/* @info a plain prefix match would claim a longer word — //melody:scopedLater — and silently move a process singleton to a per-request lifetime on the strength of a comment that says something else; and reading it as no directive at all is the other silent cell, a constructor registered under the lifetime the comment says it does not have. The longer word is therefore refused as an unknown directive, naming where it was written. */
+func TestScan_ScopedDirectiveDoesNotMatchALongerWordAndRefusesIt(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+//melody:scopedLater
+func NewNearlyScoped() *NearlyScoped {
+    return &NearlyScoped{}
+}
+
+type NearlyScoped struct {
+}
+`)
+
+    _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
+    if nil == scanErr {
+        t.Fatalf("expected the unknown directive to be refused")
     }
 
-    if true == nearly.IsScoped {
-        t.Fatalf("expected a longer word not to be read as the scoped directive")
+    /* the refusal travels as the cause of the walk wrapper, and Error() renders only its own message */
+    directiveErr := errors.Unwrap(scanErr)
+    if nil == directiveErr || false == strings.Contains(directiveErr.Error(), "an unknown melody directive is not one of bind, ignore, service or scoped") {
+        t.Fatalf("unexpected error: %v (cause %v)", scanErr, directiveErr)
+    }
+}
+
+/* @info path.Match answers ErrBadPattern for a malformed pattern on every name, so the exclusion the operator declared would match nothing and the constructor it names would be registered anyway, with no trace; the pattern is refused before anything is walked. */
+func TestScan_RefusesAMalformedExcludePattern(t *testing.T) {
+    bindSet := NewBindSet()
+    binding := bindSet.Package(fixtureImportPath, "wiring/internal/fixture/domain").Exclude("[Fixture")
+
+    _, scanErr := Scan(fixtureProjectDir, binding, nil)
+    if nil == scanErr {
+        t.Fatalf("expected the malformed pattern to be refused")
+    }
+
+    if false == strings.Contains(scanErr.Error(), "an exclude pattern is malformed") {
+        t.Fatalf("unexpected error: %v", scanErr)
+    }
+}
+
+/* @info an exclusion that stopped matching — a renamed type, a typo — silently registers the constructor it was declared to keep out; the pattern that matched nothing is reported, and the one that matched is not. */
+func TestScan_ReportsAnExcludeThatMatchedNothing(t *testing.T) {
+    bindSet := NewBindSet()
+    binding := bindSet.Package(fixtureImportPath, "wiring/internal/fixture/domain").
+        Exclude("*Fixture").
+        Exclude("*Respository")
+
+    scanResult, scanErr := Scan(fixtureProjectDir, binding, nil)
+    if nil != scanErr {
+        t.Fatalf("scan: %v", scanErr)
+    }
+
+    if 1 != len(scanResult.UnusedExcludes) || "*Respository" != scanResult.UnusedExcludes[0] {
+        t.Fatalf("expected only the unmatched pattern to be reported, got %v", scanResult.UnusedExcludes)
+    }
+}
+
+/* @info a bind spelled without the equals sign, or with an empty half, would fall back to a broader bind — or to none — and the override written right beside the constructor would silently not be the one in effect. */
+func TestScan_RefusesAMalformedBindDirective(t *testing.T) {
+    for _, malformed := range []string{"//melody:bind dsn app.dsn", "//melody:bind dsn="} {
+        projectDirectory := t.TempDir()
+
+        writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+`+malformed+`
+func NewRepository(dsn string) *Repository {
+    return &Repository{}
+}
+
+type Repository struct {
+}
+`)
+
+        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
+        if nil == scanErr {
+            t.Fatalf("expected the malformed bind %q to be refused", malformed)
+        }
+
+        bindErr := errors.Unwrap(scanErr)
+        if nil == bindErr || false == strings.Contains(bindErr.Error(), "a bind directive assignment must be spelled argument=parameter") {
+            t.Fatalf("unexpected error for %q: %v (cause %v)", malformed, scanErr, bindErr)
+        }
+    }
+}
+
+/* @info //melody:ignore kept as a test double is the natural spelling of an acknowledgement; demanding the bare form would silently register the constructor the comment says to leave out. */
+func TestScan_IgnoreDirectiveAcceptsAReason(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+//melody:ignore kept as a test double
+func NewDouble() *Double {
+    return &Double{}
+}
+
+type Double struct {
+}
+`)
+
+    scanResult, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
+    if nil != scanErr {
+        t.Fatalf("scan: %v", scanErr)
+    }
+
+    if nil != constructorByName(scanResult, "NewDouble") {
+        t.Fatalf("expected the acknowledged constructor to be left out")
+    }
+
+    if 0 != len(scanResult.Skipped) {
+        t.Fatalf("expected an ignored constructor not to be reported as skipped, got %v", scanResult.Skipped)
+    }
+}
+
+/* @info the walk does not follow symlinks, so a symlinked root would be read as an empty package — no constructors, no error, nothing to report — and every service under it would silently leave the generated wiring; the root is resolved before the walk instead. */
+func TestScan_ResolvesASymlinkedRootDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "real/service.go", `package real
+
+func NewThing() *Thing {
+    return &Thing{}
+}
+
+type Thing struct {
+}
+`)
+
+    if symlinkErr := os.Symlink(filepath.Join(projectDirectory, "real"), filepath.Join(projectDirectory, "domain")); nil != symlinkErr {
+        t.Fatalf("symlink: %v", symlinkErr)
+    }
+
+    scanResult, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/real", "domain"), nil)
+    if nil != scanErr {
+        t.Fatalf("scan: %v", scanErr)
+    }
+
+    if nil == constructorByName(scanResult, "NewThing") {
+        t.Fatalf("expected the constructor behind the symlinked root to be scanned")
     }
 }

@@ -995,9 +995,11 @@ func fixedArrayNotEmptyIsUnsatisfiable(field reflect.StructField) bool {
     return false
 }
 
-/* fixedArrayNotEmptyIsVacuous reports whether a field is a non-pointer fixed-length array carrying notEmpty, for which the validator's length check can never fail — the property is neither required nor floored, so the spec matches the server that accepts any array length (a longer payload truncates, a shorter one zero-fills). */
+/* fixedArrayNotEmptyIsVacuous reports whether a field is a fixed-length array carrying notEmpty, for which the validator's length check can never fail — len([N]T) is N whatever the payload spelled, a longer one truncates and a shorter one zero-fills, so the minItems floor advertises a rejection the server never issues. The field type is dereferenced exactly as the unsatisfiable sibling dereferences it: behind a pointer the length check is the same vacuous measurement once the nil was admitted, and only the requiredness differs — the validator does reject the nil pointer, which isRequired keeps by reading the raw kind. */
 func fixedArrayNotEmptyIsVacuous(field reflect.StructField) bool {
-    if reflect.Array != field.Type.Kind() || 1 > field.Type.Len() {
+    fieldType := dereferencedType(field.Type)
+
+    if reflect.Array != fieldType.Kind() || 1 > fieldType.Len() {
         return false
     }
 

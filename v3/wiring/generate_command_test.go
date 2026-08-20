@@ -3,6 +3,7 @@ package wiring
 import (
     "bytes"
     "context"
+    "errors"
     "os"
     "path/filepath"
     "strings"
@@ -13,6 +14,7 @@ import (
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -359,5 +361,158 @@ func TestSplitBuildTags_EmptyInputYieldsNoTags(t *testing.T) {
 
     if nil != buildTags {
         t.Fatalf("expected an empty tag list to yield no tags, got %v", buildTags)
+    }
+}
+
+/* @info the run is inspected through its exit and its error record; a refusal naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary — strict carries every violation in one refusal. */
+func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    bindSet := NewBindSet()
+    bindSet.Name("ghostArgument", "app.ghost")
+    bindSet.Package(commandFixtureBrokenImportPath, "broken").Exclude("*Ghost")
+
+    _, strictErr := runGenerateCommand(t, projectDirectory, bindSet, "--strict")
+    if nil == strictErr {
+        t.Fatalf("expected strict to fail")
+    }
+
+    var refusal *exception.Error
+    if false == errors.As(strictErr, &refusal) {
+        t.Fatalf("expected an exception error, got %T", strictErr)
+    }
+
+    refusalContext := refusal.Context()
+
+    binds, _ := refusalContext["binds"].(string)
+    if false == strings.Contains(binds, "ghostArgument") {
+        t.Fatalf("expected the unused bind in the refusal, got %v", refusalContext)
+    }
+
+    excludes, _ := refusalContext["excludes"].(string)
+    if false == strings.Contains(excludes, "*Ghost") {
+        t.Fatalf("expected the unused exclude in the refusal, got %v", refusalContext)
+    }
+
+    skipped, _ := refusalContext["constructors"].(string)
+    if false == strings.Contains(skipped, "NewBroken") {
+        t.Fatalf("expected the skipped constructor in the refusal, got %v", refusalContext)
+    }
+}
+
+/* @info a generated file inside a scanned directory is read back by the next scan with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out. */
+func TestGenerateCommand_RefusesAnOutPathInsideAScannedDirectory(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    _, runErr := runGenerateCommand(
+        t,
+        projectDirectory,
+        appBindSet(),
+        "--out",
+        filepath.Join("app", "wiring_gen.go"),
+    )
+    if nil == runErr {
+        t.Fatalf("expected the out path inside the scanned directory to be refused")
+    }
+
+    if false == strings.Contains(runErr.Error(), "the output path lies inside a scanned package directory") {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+}
+
+/* @info the write truncates before it writes, so a mistyped --out pointing at a hand-written file must be refused: only a file opening with the generated marker — or an absent or empty one — is this command's to replace. */
+func TestGenerateCommand_RefusesToOverwriteAFileWithoutTheGeneratedMarker(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    writeCommandFixtureFile(t, projectDirectory, "config/module.go", "package config\n\nfunc Wire() {}\n")
+
+    _, runErr := runGenerateCommand(
+        t,
+        projectDirectory,
+        appBindSet(),
+        "--out",
+        filepath.Join("config", "module.go"),
+    )
+    if nil == runErr {
+        t.Fatalf("expected the foreign file to be protected")
+    }
+
+    if false == strings.Contains(runErr.Error(), "is not a generated wiring file") {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+
+    preserved, readErr := os.ReadFile(filepath.Join(projectDirectory, "config", "module.go"))
+    if nil != readErr || false == strings.Contains(string(preserved), "func Wire()") {
+        t.Fatalf("expected the foreign file preserved, got %q (%v)", string(preserved), readErr)
+    }
+}
+
+/* @info a file carrying the marker is a previous output of this command and is replaced in place, which is what every regeneration does. */
+func TestGenerateCommand_ReplacesAPreviousGeneratedFile(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    outArgument := filepath.Join("internal", "generated", "wiring_gen.go")
+
+    for run := 0; run < 2; run++ {
+        _, runErr := runGenerateCommand(t, projectDirectory, appBindSet(), "--out", outArgument)
+        if nil != runErr {
+            t.Fatalf("run %d: %v", run, runErr)
+        }
+    }
+
+    written, readErr := os.ReadFile(filepath.Join(projectDirectory, outArgument))
+    if nil != readErr || false == strings.Contains(string(written), "NewThing") {
+        t.Fatalf("expected the regenerated file, got %v", readErr)
+    }
+}
+
+/* @info the atomic write lands through a temp file and a rename: the artifact keeps the 0644 mode a direct write gave it, and no temp file survives a successful run beside it. */
+func TestGenerateCommand_AtomicWriteLeavesTheModeAndNoResidue(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    outArgument := filepath.Join("internal", "generated", "wiring_gen.go")
+
+    _, runErr := runGenerateCommand(t, projectDirectory, appBindSet(), "--out", outArgument)
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    outputPath := filepath.Join(projectDirectory, outArgument)
+
+    fileInfo, statErr := os.Stat(outputPath)
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+
+    if 0o644 != fileInfo.Mode().Perm() {
+        t.Fatalf("expected mode 0644, got %v", fileInfo.Mode().Perm())
+    }
+
+    entries, readDirErr := os.ReadDir(filepath.Dir(outputPath))
+    if nil != readDirErr {
+        t.Fatalf("read dir: %v", readDirErr)
+    }
+
+    for _, entry := range entries {
+        if true == strings.HasSuffix(entry.Name(), ".tmp") {
+            t.Fatalf("expected no temp residue, found %s", entry.Name())
+        }
+    }
+}
+
+/* @info without strict an unused exclude is not fatal, but it is named on the writer the way an unused bind is — the silent alternative registers the very constructor the pattern was declared to keep out. */
+func TestGenerateCommand_ReportsAnUnusedExcludeOnTheWriter(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    bindSet := NewBindSet()
+    bindSet.Package(commandFixtureImportPath, "app").Exclude("*Ghost")
+
+    output, runErr := runGenerateCommand(t, projectDirectory, bindSet)
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if false == strings.Contains(output, "exclude "+commandFixtureImportPath+".*Ghost matched no constructor") {
+        t.Fatalf("expected the unused exclude named on the writer, got:\n%s", output)
     }
 }

@@ -413,8 +413,8 @@ func TestGenerate_MatchesTheCommittedScopedFixtureOutput(t *testing.T) {
         t.Fatalf("expected the scoped fixture to generate, got %v", generateErr)
     }
 
-    if 2 != report.ConstructorCount {
-        t.Fatalf("expected two container constructors, got %d", report.ConstructorCount)
+    if 1 != report.ConstructorCount {
+        t.Fatalf("expected one container constructor, got %d", report.ConstructorCount)
     }
 
     if 2 != report.ScopedConstructorCount {
@@ -494,5 +494,197 @@ func TestGenerate_RefusesAScopedFunctionNameTheGeneratedFileCannotCarry(t *testi
 
     if "the generated scoped function name cannot be declared and referenced in the generated file" != generateErr.Error() {
         t.Fatalf("unexpected refusal message: %q", generateErr.Error())
+    }
+}
+
+/* @info two constructors that claim one container key panic at the first boot of the generated file, far from the generation that reported success; the collision fails here, naming both sites. */
+func TestGenerate_RefusesTwoConstructorsRegisteringOneType(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+func NewUserRepository() *UserRepository {
+    return &UserRepository{}
+}
+
+func NewCachedUserRepository() *UserRepository {
+    return &UserRepository{}
+}
+
+type UserRepository struct {
+}
+`)
+
+    _, _, generateErr := Generate(&GenerateRequest{
+        ProjectDirectory: projectDirectory,
+        PackageName:      "config",
+        BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+    })
+    if nil == generateErr {
+        t.Fatalf("expected the colliding registrations to be refused")
+    }
+
+    message := generateErr.Error()
+    if false == strings.Contains(message, "two constructors register the same service") {
+        t.Fatalf("unexpected error: %v", generateErr)
+    }
+}
+
+/* @info the same key rule holds for named registrations: two constructors naming one exported constant register under one service name. */
+func TestGenerate_RefusesTwoConstructorsNamingOneServiceConstant(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+const ServiceMailer = "app.mailer"
+
+//melody:service ServiceMailer
+func NewMailer() *Mailer {
+    return &Mailer{}
+}
+
+//melody:service ServiceMailer
+func NewBackupMailer() *BackupMailer {
+    return &BackupMailer{}
+}
+
+type Mailer struct {
+}
+
+type BackupMailer struct {
+}
+`)
+
+    _, _, generateErr := Generate(&GenerateRequest{
+        ProjectDirectory: projectDirectory,
+        PackageName:      "config",
+        BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+    })
+    if nil == generateErr {
+        t.Fatalf("expected the colliding named registrations to be refused")
+    }
+
+    if false == strings.Contains(generateErr.Error(), "two constructors register the same service") {
+        t.Fatalf("unexpected error: %v", generateErr)
+    }
+}
+
+/* @info the two lifetimes register through different registrars, and a scoped registration of a type is what deliberately shadows the container one inside a scope — one type across the two lifetimes is not a collision. */
+func TestGenerate_AllowsOneTypeAcrossTheTwoLifetimes(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+func NewClock() *Clock {
+    return &Clock{}
+}
+
+//melody:scoped
+func NewRequestClock() *Clock {
+    return &Clock{}
+}
+
+type Clock struct {
+}
+`)
+
+    _, report, generateErr := Generate(&GenerateRequest{
+        ProjectDirectory: projectDirectory,
+        PackageName:      "config",
+        BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+    })
+    if nil != generateErr {
+        t.Fatalf("expected the two lifetimes to coexist, got %v", generateErr)
+    }
+
+    if 1 != report.ConstructorCount || 1 != report.ScopedConstructorCount {
+        t.Fatalf("expected one constructor per lifetime, got %d and %d", report.ConstructorCount, report.ScopedConstructorCount)
+    }
+}
+
+/* @info an empty import path renders an import of "", and an empty directory joins to the project root and silently scans the whole tree as one package. */
+func TestGenerate_RefusesAPackageBindingWithAnEmptyHalf(t *testing.T) {
+    for _, testCase := range []struct {
+        importPath string
+        directory  string
+    }{
+        {"", "domain"},
+        {"github.com/acme/app/domain", ""},
+    } {
+        _, _, generateErr := Generate(&GenerateRequest{
+            ProjectDirectory: t.TempDir(),
+            PackageName:      "config",
+            BindSet:          bindSetWithPackage(testCase.importPath, testCase.directory),
+        })
+        if nil == generateErr {
+            t.Fatalf("expected the binding %q/%q to be refused", testCase.importPath, testCase.directory)
+        }
+
+        if false == strings.Contains(generateErr.Error(), "a package binding must declare both an import path and a directory") {
+            t.Fatalf("unexpected error: %v", generateErr)
+        }
+    }
+}
+
+/* @info the generator's contract is to say when it could not check the bind targets rather than silently assume every target exists; the flag is raised only when a bind actually went unchecked. */
+func TestGenerate_ReportsUncheckedBindTargets(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+func NewRepository(dsn string) *Repository {
+    return &Repository{}
+}
+
+type Repository struct {
+}
+`)
+
+    bindSet := NewBindSet().Name("dsn", "app.dsn")
+    bindSet.Package("github.com/acme/app/domain", "domain")
+
+    request := &GenerateRequest{
+        ProjectDirectory: projectDirectory,
+        PackageName:      "config",
+        BindSet:          bindSet,
+    }
+
+    _, report, generateErr := Generate(request)
+    if nil != generateErr {
+        t.Fatalf("generate: %v", generateErr)
+    }
+
+    if false == report.BindTargetsUnchecked {
+        t.Fatalf("expected the unchecked bind targets to be reported")
+    }
+
+    request.DeclaredParameters = map[string]bool{"app.dsn": true}
+
+    _, report, generateErr = Generate(request)
+    if nil != generateErr {
+        t.Fatalf("generate with declared parameters: %v", generateErr)
+    }
+
+    if true == report.BindTargetsUnchecked {
+        t.Fatalf("expected a checked bind not to raise the flag")
+    }
+}
+
+/* @info an unused exclude reaches the report carrying its package's import path, the way an unused bind does, so the strict refusal names where the dead pattern was declared. */
+func TestGenerate_ReportsAnUnusedExcludeWithItsImportPath(t *testing.T) {
+    bindSet := newFixtureBindSet()
+    bindSet.Packages()[0].Exclude("*Respository")
+
+    _, report, generateErr := Generate(&GenerateRequest{
+        ProjectDirectory: fixtureProjectDir,
+        PackageName:      "config",
+        BindSet:          bindSet,
+    })
+    if nil != generateErr {
+        t.Fatalf("generate: %v", generateErr)
+    }
+
+    if 1 != len(report.UnusedExcludes) || fixtureImportPath+".*Respository" != report.UnusedExcludes[0] {
+        t.Fatalf("unexpected unused excludes: %v", report.UnusedExcludes)
     }
 }

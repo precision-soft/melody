@@ -25,11 +25,13 @@ A bind maps an argument name to a parameter name, declared in one of three scope
 2. on the scanned package, with `PackageBinding.Name(argumentName, parameterName)`;
 3. across every scanned package, with `BindSet.Name(argumentName, parameterName)`.
 
-`//melody:ignore` skips a constructor entirely. `//melody:service SomeConstant` additionally registers the service under the name the package already exports (referencing the constant, not copying its value), so the name-based lookups a package exposes keep resolving once its registration moves to the generator.
+`//melody:ignore` skips a constructor entirely, and accepts a trailing reason — `//melody:ignore kept as a test double`. `//melody:service SomeConstant` additionally registers the service under the name the package already exports (referencing the constant, not copying its value), so the name-based lookups a package exposes keep resolving once its registration moves to the generator.
 
 `//melody:scoped` marks a constructor as request-lifetime: it is emitted into a second generated function, `<function>Scoped(registrar containercontract.ScopedRegistrar)`, through `MustRegisterScoped` / `MustRegisterScopedType`. Two functions rather than one, because the two registrars arrive at two different module hooks and neither satisfies the other — call the first from `RegisterServices` and the second from `RegisterScopedServices` (see [APPLICATION](APPLICATION.md) and [CONTAINER](CONTAINER.md)). The scoped function is emitted only when a constructor carries the directive, so a project that declares nothing scoped regenerates the file it already had.
 
-Generation **fails** when a scalar argument no bind covers, and — when run through the command, which executes inside the booted application — when a bind points at a parameter the running configuration does not declare. A constructor the generator cannot wire (generic, variadic, returning more than a value and an error, returning only an `error`, `any` or a bare scalar) is reported with its location and reason rather than dropped silently, as is every declared bind that matched no argument. `--strict` turns those losses into a failure.
+Generation **fails** when a scalar argument no bind covers, and — when run through the command, which executes inside the booted application — when a bind points at a parameter the running configuration does not declare. A constructor the generator cannot wire (generic, variadic, returning more than a value and an error, returning only an `error`, `any` or a bare scalar) is reported with its location and reason rather than dropped silently, as is every declared bind — and every declared exclude — that matched nothing. `--strict` turns those losses into a single failure carrying all of them.
+
+Generation also fails, at the site, on what would otherwise fail open: an unknown `//melody:` directive (every directive fails open when it is dropped — a mistyped `scoped` demotes a request-lifetime service to a never-closed singleton), a malformed `//melody:bind` assignment (the override beside the constructor would silently fall back to a broader bind), a malformed exclude pattern (`path.Match`'s error would be read as "matches nothing"), an empty half on a package binding (an empty directory would scan the whole project tree as one package), and two constructors that would register the same container key — two `New*` returning one type, or two naming one service constant — which the generated file would otherwise turn into a boot panic naming only the type. The collision check reads the type, not a name constant's value, so a type registration and a named one that spell the same service name still meet at boot.
 
 ## The command
 
@@ -80,9 +82,12 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 ## Footguns & caveats
 
 - The scan is directory-relative to the **project directory** the running application reports (`kernel.project_dir`), the same directory `--out` writes into; the declared directories are plain paths joined onto it.
-- The scanned directories must not include the package the generated file is written into, or the generated file would import its own package.
+- The scanned directories must not include the package the generated file is written into, or the generated file would import its own package — the command refuses an `--out` inside a scanned directory for exactly this reason.
 - A constructor whose scalar argument narrows the accessor's widest type (a `uint8`, a `byte`) is range-guarded in the generated provider, so an out-of-range parameter is an error naming the parameter rather than a silent wrap.
-- The generated file opens with the `// Code generated ... DO NOT EDIT.` marker Go tooling recognizes; edit the constructors and regenerate, never the generated file.
+- The generated file opens with the `// Code generated ... DO NOT EDIT.` marker Go tooling recognizes; edit the constructors and regenerate, never the generated file. The command replaces only a file opening with that marker (or an absent or empty one) — a mistyped `--out` pointing at a hand-written file is refused — and the write lands through a temp file and a rename, so an interrupted run leaves the previous file intact.
+- A symlink standing where a declared directory should be is resolved before the walk; a symlinked **sub**directory stays out of the scan, exactly as the go tool leaves it out of a build.
+- The scan evaluates build constraints for the **host** platform (`go/build`'s defaults for `GOOS`, `GOARCH` and cgo, with `--tags` layered on), so a constructor in a `service_darwin.go` is scanned on a mac and skipped on linux. Generate on the platform the binary targets, or keep constructors out of platform-suffixed files.
+- `Generate` called as a library with an empty `GenerateRequest.DeclaredParameters` cannot check the bind targets; it says so through `GenerateReport.BindTargetsUnchecked` instead of assuming every target exists. The command always hands over the running configuration.
 
 ## Userland API
 

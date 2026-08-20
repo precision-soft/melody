@@ -26,6 +26,7 @@ type Registry struct {
     descriptorsByRoute map[string]Descriptor
 }
 
+/* Describe records the descriptor of a route. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so it belongs to boot — module construction, before the application serves — exactly like the routes it describes; a Describe issued while requests are in flight is a concurrent map write, which Go answers by killing the process. */
 func (instance *Registry) Describe(routeName string, descriptor Descriptor) *Registry {
     instance.descriptorsByRoute[routeName] = descriptor
     return instance

@@ -278,6 +278,11 @@ func TestBuildSchema_NotEmptyOnFixedArrayIsVacuous(t *testing.T) {
     if false == maybeRequired {
         t.Fatalf("expected a pointer-to-fixed-array under notEmpty to stay required")
     }
+
+    /* but its floor is the same vacuous measurement: once the nil was admitted, len(*[N]T) is N whatever the payload spelled — [] decodes zero-filled and passes — so minItems 1 would advertise a rejection the server never issues */
+    if maybePair := schema.Properties["maybe_pair"]; nil != maybePair.MinItems {
+        t.Fatalf("expected notEmpty behind a pointer to a fixed-length array to advertise no minItems, got %v", maybePair.MinItems)
+    }
 }
 
 /* @info the vacuity of notEmpty on a fixed-length array must not dismantle the unsatisfiable marking another rule placed: dropping minItems 1 beside a maxItems 0 would leave the empty array advertised as valid while the validator rejects every payload */
