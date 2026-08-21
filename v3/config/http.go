@@ -45,15 +45,15 @@ func newHttpConfiguration(
     }
 
     httpConfigurationInstance := &httpConfiguration{
-        address:             address,
-        defaultLocale:       defaultLocale,
-        publicDir:           publicDir,
-        staticIndexFile:     staticIndexFile,
-        maxRequestBodyBytes: maxRequestBodyBytes,
-        staticEnableCache:   staticEnableCache,
-        staticCacheMaxAge:   staticCacheMaxAge,
-        staticExcludedPaths: copiedStaticExcludedPaths,
-        sessionTtl:          sessionTtl,
+        address:                   address,
+        defaultLocale:             defaultLocale,
+        publicDir:                 publicDir,
+        staticIndexFile:           staticIndexFile,
+        maxRequestBodyBytes:       maxRequestBodyBytes,
+        staticEnableCache:         staticEnableCache,
+        staticCacheMaxAge:         staticCacheMaxAge,
+        staticExcludedPaths:       copiedStaticExcludedPaths,
+        sessionTtl:                sessionTtl,
     }
 
     validateErr := httpConfigurationInstance.validate()
@@ -65,15 +65,15 @@ func newHttpConfiguration(
 }
 
 type httpConfiguration struct {
-    address             string
-    defaultLocale       string
-    publicDir           string
-    staticIndexFile     string
-    maxRequestBodyBytes int
-    staticEnableCache   bool
-    staticCacheMaxAge   int
-    staticExcludedPaths []string
-    sessionTtl          time.Duration
+    address                   string
+    defaultLocale             string
+    publicDir                 string
+    staticIndexFile           string
+    maxRequestBodyBytes       int
+    staticEnableCache         bool
+    staticCacheMaxAge         int
+    staticExcludedPaths       []string
+    sessionTtl                time.Duration
 }
 
 func (instance *httpConfiguration) Address() string {

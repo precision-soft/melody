@@ -38,9 +38,11 @@ The typed helpers distinguish three situations:
 
 - **Key missing**: the bag does not contain the key. Helpers return `exists == false` and no error.
 - **Key present, value is nil**: the bag contains the key, but its stored value is `nil`.
-    - `String` / `StringStrict` treat this as present and return `""` with `exists == true`.
+    - All string accessors (`String`, `StringStrict`, `StringSlice`, `StringSliceStrict`) report this as absent and return the zero value with `exists == false`.
     - `Int` / `Bool` / `Float64` / `Duration` treat this as no typed value and return the zero value with `exists == false`.
-- **Key present, value cannot be converted**: helpers return a typed parse error and `exists == true`.
+- **Key present, value cannot be converted**: the two families answer differently, because only one of them has an error to return.
+    - `Int` / `Bool` / `Float64` / `Duration` return the zero value, `exists == true` and a typed parse error.
+    - `String` / `StringSlice` have **no error return** at all: they answer `("", true)` and `(nil, true)` respectively, so an unconvertible value is indistinguishable from a genuinely empty one. Use the `Strict` variants where that distinction matters.
 
 Notes:
 
@@ -115,7 +117,7 @@ func readRequestParameters(
 
 - `String` returns `""` for non-string scalar stored types — a `[]string` value panics naming the key, and is read with `StringSlice`; use `StringStrict` to detect type mismatches.
 - `StringSlice` and `StringSliceStrict` accept both `[]string` and `string` (single value), returning a slice in both cases.
-- A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) still report it as present with a zero value.
+- A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) report it as absent as well.
 - `ParameterBag.All()` returns a copy of the internal map, deep for the shapes the bag's own writers produce (`[]string`, `map[string]string`); other value types come back as stored.
 - `bag.AppendString` appends inside one critical section when handed the concrete `*ParameterBag`; over a foreign implementation of the contract it falls back to Get and Set, whose window between two locks can lose a concurrent append.
 - `ParameterBag{}` — the zero value of the exported type — accepts a write: `Set` and `AppendString` allocate the map rather than panicking inside the assignment.

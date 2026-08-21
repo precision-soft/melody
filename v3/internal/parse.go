@@ -17,10 +17,14 @@ func Duration(value any, name string) (time.Duration, bool, error) {
     switch typedValue := value.(type) {
     case time.Duration:
         return typedValue, true, nil
-    case int64:
-        return time.Duration(typedValue), true, nil
-    case int:
-        return time.Duration(typedValue), true, nil
+    case int64, int:
+        /* a bare integer carries no unit, and reading it as nanoseconds — the Go-native interpretation — is almost never what the caller meant: the same value spelled as a string is refused by time.ParseDuration for missing its unit, so the numeric spelling is refused the same way instead of becoming a timeout that fires instantly */
+        return 0, true, ParseError(
+            name,
+            "duration",
+            value,
+            exception.NewError("a bare integer carries no unit", map[string]any{"hint": "pass a time.Duration or a string with a unit, for example \"30s\""}, nil),
+        )
     case string:
         trimmedValue := strings.TrimSpace(typedValue)
         parsedValue, err := time.ParseDuration(trimmedValue)
@@ -45,13 +49,18 @@ func Int(value any, name string) (int64, bool, error) {
     case int64:
         return typedValue, true, nil
     case float64:
+        /* the three refusals carry three distinct causes: collapsed into one "is not a 'int'" they blamed the type, which was never the problem — the same branch accepts 2.0 — and the operator could not tell whether to change the encoding, the value or the magnitude */
+        if true == math.IsNaN(typedValue) || true == math.IsInf(typedValue, 0) {
+            return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is not finite", nil, nil))
+        }
+
         if typedValue != math.Trunc(typedValue) {
-            return 0, true, ParseError(name, "int", typedValue, nil)
+            return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is not an integral number", nil, nil))
         }
 
         /* a float64 outside the int64 range converts to the "indefinite" value (-9223372036854775808) with no signal at all, so range-check before the conversion; the upper bound is written as a float because math.MaxInt64 is not representable as one */
         if typedValue < math.MinInt64 || typedValue >= 9223372036854775808.0 {
-            return 0, true, ParseError(name, "int", typedValue, nil)
+            return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is outside the int64 range", nil, nil))
         }
 
         return int64(typedValue), true, nil
@@ -108,9 +117,9 @@ func Float64(value any, name string) (float64, bool, error) {
 
     switch typedValue := value.(type) {
     case float64:
-        return typedValue, true, nil
+        return refuseNonFinite(typedValue, name)
     case float32:
-        return float64(typedValue), true, nil
+        return refuseNonFinite(float64(typedValue), name)
     case int:
         return float64(typedValue), true, nil
     case int64:
@@ -121,10 +130,19 @@ func Float64(value any, name string) (float64, bool, error) {
             return 0, true, ParseError(name, "float64", typedValue, err)
         }
 
-        return parsedValue, true, nil
+        return refuseNonFinite(parsedValue, name)
     default:
         return 0, true, ParseError(name, "float64", value, nil)
     }
+}
+
+/* refuseNonFinite rejects NaN and the infinities on every branch of Float64: strconv.ParseFloat parses "NaN", "Inf" and "Infinity" without an error, and a NaN that slips through disarms every threshold written the normal way — each ordered comparison against it is false — so a guard like `ratio < 0 || ratio > 1` silently stops guarding. The sibling Int refuses the same shapes explicitly. */
+func refuseNonFinite(value float64, name string) (float64, bool, error) {
+    if true == math.IsNaN(value) || true == math.IsInf(value, 0) {
+        return 0, true, ParseError(name, "float64", value, exception.NewError("value is not finite", nil, nil))
+    }
+
+    return value, true, nil
 }
 
 func MapStringString(value any, name string) (map[string]string, bool, error) {
@@ -134,6 +152,11 @@ func MapStringString(value any, name string) (map[string]string, bool, error) {
 
     switch typedValue := value.(type) {
     case map[string]string:
+        /* a typed-nil map reads as the absence it is: reported as present it came back as an empty non-nil map, so a caller branching on the presence flag to apply a default silently got the empty map instead — the strict accessors beside this one already answer absent for a nil value */
+        if nil == typedValue {
+            return nil, false, nil
+        }
+
         return CopyStringMap[string](typedValue), true, nil
     default:
         return nil, true, ParseError(name, "map[string]string", value, nil)

@@ -142,7 +142,7 @@ The value is a comma-separated list whose entries are trimmed of surrounding whi
 
 ### Typed accessors
 
-[`Parameter`](../../config/parameter.go) reads its value through `MustString`, `Bool`, `Int`, `Float` and `Duration`, converting from the native type or from the string an environment value always arrives as. Each fallible accessor reports an unset or non-convertible value as an error identified by environment key alone, keeping an inline credential out of the exception context.
+[`Parameter`](../../config/parameter.go) reads its value through `MustString`, `Bool`, `Int`, `Float` and `Duration`, converting from the native type or from the string an environment value always arrives as. `Int`, `Float` and `Duration` read through the shared parser, so a whole number registered at runtime as an `int64` — or as an integral `float64` — converts through `Int` and `Float`; `Duration` **refuses the bare integer**, because it carries no unit, and wants a `time.Duration` or a string such as `"30s"`. `Float` refuses NaN and the infinities, which `strconv.ParseFloat` parses from `"NaN"`, `"Inf"` and `"Infinity"` without an error and which disarm every threshold written the normal way, each ordered comparison against NaN being false. Each fallible accessor reports an unset or non-convertible value as an error identified by the environment key where there is one and by the registration name otherwise, keeping an inline credential out of the exception context; a **secret** parameter additionally withholds the parse failure underneath, because strconv quotes the value it refused.
 
 ## Container integration
 
@@ -265,7 +265,7 @@ func example() configcontract.Configuration {
     - [`NewEnvironmentSource(fs.FS, string) *EnvironmentSource`](../../config/environment_source.go)
 - [`type Parameter`](../../config/parameter.go), [`type ParameterMap`](../../config/parameter.go)
     - [`NewParameter(environmentKey string, environmentValue any, value any, isDefault bool) *Parameter`](../../config/parameter.go)
-- [`IntWithDefault(configParameter configcontract.Parameter, defaultValue int) int`](../../config/utility.go) — answers the default for a parameter that is absent **and** for one whose value does not parse as an integer
+- [`IntWithDefault(configParameter configcontract.Parameter, defaultValue int) int`](../../config/utility.go) — answers the default only for a parameter that is **absent**: one that exists and does not parse panics, because a mistyped value that quietly becomes a number nobody wrote is a misconfiguration running in disguise
 
 ### Container helpers (`config`)
 

@@ -5,7 +5,6 @@ import (
     "time"
 )
 
-/* @info an application that never names a session ttl still gets a bounded one, because melody mints a session for every cookie-less request and the default storage keeps whatever it is handed for the life of the process */
 func TestConfigurationHttpSessionTtlDefaultsToABoundedLifetime(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
@@ -24,7 +23,6 @@ func TestConfigurationHttpSessionTtlDefaultsToABoundedLifetime(t *testing.T) {
     }
 }
 
-/* @info no expiry stays reachable, but only by asking for it: the value zero keeps its meaning and is not what an application gets by staying silent */
 func TestConfigurationHttpSessionTtlKeepsZeroAsAnExplicitChoice(t *testing.T) {
     source := &testEnvironmentSource{
         values: map[string]string{
@@ -87,7 +85,6 @@ func TestConfigurationHttpSessionTtlRejectsANegativeValue(t *testing.T) {
     }
 }
 
-/* @info Validation rejected only a negative ttl, so "1ns" parsed and was accepted. FileStorage.Save purges every lapsed entry on the very write that stores the new one — the boundary measured between 1µs and 10µs — so the caller was told the save succeeded and nothing was persisted: a login that reports success and stores no session. */
 func TestConfigurationHttpSessionTtlRejectsAValueBelowTheFloor(t *testing.T) {
     cases := []string{"1ns", "1us", "500ms", "999ms"}
 
@@ -110,7 +107,6 @@ func TestConfigurationHttpSessionTtlRejectsAValueBelowTheFloor(t *testing.T) {
     }
 }
 
-/* @info The floor is one second, and one second itself is accepted; zero keeps its own meaning of no expiry. */
 func TestConfigurationHttpSessionTtlAcceptsTheFloorAndZero(t *testing.T) {
     cases := map[string]time.Duration{
         "1s":  time.Second,
@@ -286,5 +282,177 @@ func TestConfigurationHttpStaticExcludedPathsAcceptAWhitespaceOnlyValueAsNoList(
 
     if 0 != len(configuration.Http().StaticExcludedPaths()) {
         t.Fatalf("expected a blank value to exclude nothing, got %v", configuration.Http().StaticExcludedPaths())
+    }
+}
+
+func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
+    cases := []struct {
+        name                string
+        address             string
+        defaultLocale       string
+        publicDir           string
+        staticIndexFile     string
+        maxRequestBodyBytes int
+        staticCacheMaxAge   int
+        staticExcludedPaths []string
+        sessionTtl          time.Duration
+        expectedMessage     string
+    }{
+        {
+            name:            "an address with no port at all",
+            address:         ":",
+            expectedMessage: "http port is invalid",
+        },
+        {
+            name:            "an address whose port is not a number",
+            address:         "localhost:http",
+            expectedMessage: "http port is invalid",
+        },
+        {
+            name:            "a port above the range",
+            address:         ":65536",
+            expectedMessage: "http port is out of range",
+        },
+        {
+            name:            "a port below the range",
+            address:         ":0",
+            expectedMessage: "http port is out of range",
+        },
+        {
+            name:            "an address that is not host and port",
+            address:         "localhost:8080:9090",
+            expectedMessage: "http address is invalid",
+        },
+        {
+            name:            "an empty locale",
+            address:         ":8080",
+            defaultLocale:   "",
+            expectedMessage: "default locale may not be empty",
+        },
+        {
+            name:            "a locale that is not a language tag",
+            address:         ":8080",
+            defaultLocale:   "english",
+            expectedMessage: "default locale is invalid",
+        },
+        {
+            name:            "an empty public directory",
+            address:         ":8080",
+            defaultLocale:   "en",
+            publicDir:       "",
+            expectedMessage: "public directory may not be empty",
+        },
+        {
+            name:            "a public directory that climbs out of the project",
+            address:         ":8080",
+            defaultLocale:   "en",
+            publicDir:       "public/../..",
+            expectedMessage: "public directory is invalid",
+        },
+        {
+            name:            "an empty index file",
+            address:         ":8080",
+            defaultLocale:   "en",
+            publicDir:       "public",
+            staticIndexFile: "",
+            expectedMessage: "static index file may not be empty",
+        },
+        {
+            name:            "an index file that carries a path",
+            address:         ":8080",
+            defaultLocale:   "en",
+            publicDir:       "public",
+            staticIndexFile: "html/index.html",
+            expectedMessage: "static index file is invalid",
+        },
+        {
+            name:                "an unbounded request body limit",
+            address:             ":8080",
+            defaultLocale:       "en",
+            publicDir:           "public",
+            staticIndexFile:     "index.html",
+            maxRequestBodyBytes: 0,
+            expectedMessage:     "invalid http max request body bytes",
+        },
+        {
+            name:                "a negative cache max age",
+            address:             ":8080",
+            defaultLocale:       "en",
+            publicDir:           "public",
+            staticIndexFile:     "index.html",
+            maxRequestBodyBytes: 1024,
+            staticCacheMaxAge:   -1,
+            expectedMessage:     "static cache max age must be zero or positive",
+        },
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            httpConfigurationInstance, httpErr := newHttpConfiguration(
+                testCase.address,
+                testCase.defaultLocale,
+                testCase.publicDir,
+                testCase.staticIndexFile,
+                testCase.maxRequestBodyBytes,
+                false,
+                testCase.staticCacheMaxAge,
+                testCase.staticExcludedPaths,
+                testCase.sessionTtl,
+            )
+
+            if nil == httpErr {
+                t.Fatalf("expected the value to be refused")
+            }
+
+            if nil != httpConfigurationInstance {
+                t.Fatalf("expected no configuration over a refused value")
+            }
+
+            if testCase.expectedMessage != httpErr.Error() {
+                t.Fatalf("expected %q, got %q", testCase.expectedMessage, httpErr.Error())
+            }
+        })
+    }
+}
+
+func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *testing.T) {
+    httpConfigurationInstance, httpErr := newHttpConfiguration(
+        "8080",
+        "en-GB",
+        "public",
+        "index.html",
+        2048,
+        true,
+        3600,
+        []string{"/internal"},
+        time.Minute,
+    )
+    if nil != httpErr {
+        t.Fatalf("unexpected error: %v", httpErr)
+    }
+
+    if ":8080" != httpConfigurationInstance.Address() {
+        t.Fatalf("expected a bare port to be completed, got %q", httpConfigurationInstance.Address())
+    }
+    if "en-GB" != httpConfigurationInstance.DefaultLocale() {
+        t.Fatalf("unexpected locale: %q", httpConfigurationInstance.DefaultLocale())
+    }
+    if "public" != httpConfigurationInstance.PublicDir() {
+        t.Fatalf("unexpected public directory: %q", httpConfigurationInstance.PublicDir())
+    }
+    if "index.html" != httpConfigurationInstance.StaticIndexFile() {
+        t.Fatalf("unexpected index file: %q", httpConfigurationInstance.StaticIndexFile())
+    }
+    if 2048 != httpConfigurationInstance.MaxRequestBodyBytes() {
+        t.Fatalf("unexpected body limit: %d", httpConfigurationInstance.MaxRequestBodyBytes())
+    }
+    if false == httpConfigurationInstance.StaticEnableCache() {
+        t.Fatalf("expected the static cache to be enabled")
+    }
+    if 3600 != httpConfigurationInstance.StaticCacheMaxAge() {
+        t.Fatalf("unexpected cache max age: %d", httpConfigurationInstance.StaticCacheMaxAge())
+    }
+    if time.Minute != httpConfigurationInstance.SessionTtl() {
+        t.Fatalf("unexpected session ttl: %s", httpConfigurationInstance.SessionTtl())
     }
 }

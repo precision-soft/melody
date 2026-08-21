@@ -962,6 +962,38 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **Remedy.** Regenerate the committed document once and review the diff; it is the document moving onto what the router actually serves. Declare explicit method lists on routes that should not advertise all eight verbs.
 
+### Configuration: the shared parsers refuse the values that used to disarm a guard
+
+**What changed.** Three shapes that used to pass through the typed accessors are now refused. A bare integer read as a duration — `RegisterRuntime("ttl", 30)` followed by `Parameter.Duration()` — was interpreted as nanoseconds and produced a timeout that expires instantly with no error anywhere, while the same value spelled `"30"` was already refused for its missing unit; it is now refused the same way. `Float64` refuses NaN and the infinities, which `strconv.ParseFloat` parses from `"NaN"`, `"Inf"` and `"Infinity"` without complaint and which silently disarm every threshold written the normal way, since each ordered comparison against NaN is false. And a typed-nil `map[string]string` reads as absent rather than as an empty present map, so a caller branching on the presence flag to apply a default gets the default.
+
+**Symptom.** A parameter or bag entry carrying one of the three shapes now produces an error where it used to produce a value. In every case the value it used to produce was wrong: an instant timeout, a threshold that stopped guarding, a default that never applied.
+
+**Remedy.** Spell a duration with its unit — `"30s"` or a `time.Duration` — and give a ratio a finite value. A caller that genuinely wants an empty map for a nil one applies that default itself, which is now possible because the absence is reported.
+
+### Configuration: `IntWithDefault` panics on a parameter that exists but does not parse
+
+**What changed.** The helper answers the default only for a parameter that is ABSENT. A parameter that exists and does not parse as an int now panics, naming the failure, instead of silently becoming the default.
+
+**Symptom.** A boot that used to run with a default now fails, naming the parameter whose value could not be read.
+
+**Remedy.** Correct the value, or remove the parameter to fall back to the default deliberately. A mistyped value that quietly turns into a number nobody wrote is a misconfiguration running in disguise, and the panic is what makes it visible at boot rather than in production behaviour nobody can explain.
+
+### Configuration: the `.env` grammar matches godotenv's, and a malformed reference fails the boot
+
+**What changed.** A `.env` line is preprocessed byte by byte rather than through runes, so a file saved as anything other than UTF-8 keeps its bytes — a rune round-trip re-encoded them, rewriting values, a password among them, where godotenv alone passes a quoted value through untouched. The comment cut now matches godotenv's own: a `#` opening before the key separator comments the whole line out, while a `#` after it stays in the produced line and godotenv's countback decides where the value ends, which stops the double cut that read `hello # world # x` as `hello` where godotenv reads `hello # world`. And a `${...}` reference whose closing brace arrived over a name outside the key grammar is refused rather than surviving as literal text — nobody types `${...}` into a password by accident — while an unclosed brace stays data, like the bare dollar it is.
+
+**Symptom.** A value carrying a hash after the separator keeps more of itself than it used to; a non-UTF-8 file stops being rewritten; a `.env` holding a malformed `${...}` fails the boot naming the enclosing key, where it used to load the braces as text.
+
+**Remedy.** Correct the malformed reference, or escape a literal dollar as `\$`. For the comment cut and the encoding there is nothing to do: both moves take the reading onto what godotenv itself does, which is what the surrounding contract always promised.
+
+### Configuration: an unterminated `%env(` and an unclosed `%name%` fail the boot
+
+**What changed.** A `%env(` that never closes with `)%`, and a name-shaped run opened by a percent that nothing closes, are both refused at boot instead of surviving as literal template text. The contract already demanded that a literal percent be written doubled, so a `%app-name%` that reaches a service verbatim is a typo, not data. A percent standing in front of a character no name may start with — `growth of 50% overall` — is still data and still resolves untouched. `RegisterRuntime` additionally refuses a blank name and one carrying leading or trailing whitespace, which used to register a parameter nobody could look up under the name they wrote.
+
+**Symptom.** A boot that used to succeed over a template holding one of these now fails, naming the parameter and the offending reference; a registration with a padded name fails where it used to be accepted.
+
+**Remedy.** Close the placeholder, double the literal percent, or trim the name. Every refusal replaces a template fragment that was being handed to a consuming service as though it were the value.
+
 ## v3.0.0
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version. The entry below is the one rewrite that does not compile afterwards: v1 and v2 keep the identifiers, v3 has never carried them.
