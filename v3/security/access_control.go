@@ -1,6 +1,7 @@
 package security
 
 import (
+    stdpath "path"
     "regexp"
     "strings"
 
@@ -41,7 +42,46 @@ func normalizeAccessControlAttributes(attributes []string) []string {
     return normalizedAttributes
 }
 
+/* NewAccessControlRule builds a rule bounded to a path SEGMENT: pathPrefix matches the path itself and any descendant under a "/" boundary, never a path that merely begins with the same letters — "/admin" governs "/admin" and "/admin/panel" but not "/administrator". This is the rule a caller reaches for by default, so the plain name is the bounded one; a rule that must reach across segment boundaries is the explicit exception, NewAccessControlRawPrefixRule. An empty prefix is refused rather than made a catch-all, and PUBLIC_ACCESS is allowed here because a segment-bounded public rule cannot shadow a bounded denial the way a raw one can. */
 func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
+    normalizedPrefix := normalizePathPrefix(pathPrefix)
+
+    /* reject an empty prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so a rule declared for one section would silently govern every unmatched path. A genuinely global rule declares an explicit "/" prefix. */
+    if "" == normalizedPrefix {
+        exception.Panic(
+            exception.NewError("access control segment prefix may not be empty", nil, nil),
+        )
+    }
+
+    if "/" != normalizedPrefix && true == strings.HasSuffix(normalizedPrefix, "/") {
+        normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
+    }
+
+    normalizedAttributes := normalizeAccessControlAttributes(attributes)
+
+    return AccessControlRule{
+        pathPrefix:      normalizedPrefix,
+        attributes:      normalizedAttributes,
+        isExact:         false,
+        isRegex:         false,
+        isSegmentPrefix: true,
+    }
+}
+
+/* NewAccessControlRawPrefixRule builds a rule that matches across segment boundaries: pathPrefix matches every path that begins with it, so "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". It is the sharp tool, kept behind an explicit name because, being the longest match, a raw rule shadows a correctly bounded rule that would have denied — which is why PUBLIC_ACCESS is refused on it: a raw public rule opens every path that merely begins with the prefix. Reach for NewAccessControlRule unless a cross-segment reach is exactly what the rule means. */
+func NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string) AccessControlRule {
+    for _, attribute := range attributes {
+        if securitycontract.AttributePublicAccess == strings.TrimSpace(attribute) {
+            exception.Panic(
+                exception.NewError("access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule", nil, nil),
+            )
+        }
+    }
+
+    return newAccessControlPrefixRule(pathPrefix, attributes)
+}
+
+func newAccessControlPrefixRule(pathPrefix string, attributes []string) AccessControlRule {
     normalizedPrefix := normalizePathPrefix(pathPrefix)
 
     normalizedAttributes := normalizeAccessControlAttributes(attributes)
@@ -67,7 +107,7 @@ func NewAccessControlExactRule(path string, attributes ...string) AccessControlR
         normalizedPath = strings.TrimSuffix(normalizedPath, "/")
     }
 
-    rule := NewAccessControlRule("", attributes...)
+    rule := newAccessControlPrefixRule("", attributes)
     rule.pathPrefix = normalizedPath
     rule.isExact = true
 
@@ -95,7 +135,7 @@ func NewAccessControlRegexRule(pattern string, attributes ...string) AccessContr
         )
     }
 
-    rule := NewAccessControlRule("", attributes...)
+    rule := newAccessControlPrefixRule("", attributes)
     rule.regexPattern = normalizedPattern
     rule.regexCompiled = compiled
     rule.isRegex = true
@@ -103,29 +143,9 @@ func NewAccessControlRegexRule(pattern string, attributes ...string) AccessContr
     return rule
 }
 
+/* Deprecated: use NewAccessControlRule, which now builds the segment-prefix rule this constructor always built. Kept as an alias so existing callers continue to compile. */
 func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string) AccessControlRule {
-    normalizedPrefix := normalizePathPrefix(pathPrefix)
-
-    /* @important reject an empty segment prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so AllowAnonymous("") would silently open every unmatched path to anonymous access. A genuinely public service declares an explicit "/" prefix. */
-    if "" == normalizedPrefix {
-        exception.Panic(
-            exception.NewError("access control segment prefix may not be empty", nil, nil),
-        )
-    }
-
-    if "/" != normalizedPrefix && true == strings.HasSuffix(normalizedPrefix, "/") {
-        normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
-    }
-
-    normalizedAttributes := normalizeAccessControlAttributes(attributes)
-
-    return AccessControlRule{
-        pathPrefix:      normalizedPrefix,
-        attributes:      normalizedAttributes,
-        isExact:         false,
-        isRegex:         false,
-        isSegmentPrefix: true,
-    }
+    return NewAccessControlRule(pathPrefix, attributes...)
 }
 
 type AccessControlRule struct {
@@ -156,14 +176,14 @@ func NewAccessControl(rules ...AccessControlRule) *AccessControl {
         if true == rule.isSegmentPrefix {
             normalizedRules = append(
                 normalizedRules,
-                NewAccessControlRuleWithSegmentPrefix(rule.pathPrefix, rule.attributes...),
+                NewAccessControlRule(rule.pathPrefix, rule.attributes...),
             )
             continue
         }
 
         normalizedRules = append(
             normalizedRules,
-            NewAccessControlRule(rule.pathPrefix, rule.attributes...),
+            NewAccessControlRawPrefixRule(rule.pathPrefix, rule.attributes...),
         )
     }
 
@@ -180,6 +200,7 @@ func (instance *AccessControl) Rules() []AccessControlRule {
     return append([]AccessControlRule{}, instance.rules...)
 }
 
+/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one regardless of registration order, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did. Position in the rule list — what the merge strategies order — breaks only the ties inside a category: equal-length prefixes, regexes, exact duplicates and fallbacks each resolve to the first registered. */
 func (instance *AccessControl) Match(path string) ([]string, bool) {
     matchedIndex, matched := instance.matchRuleIndex(path)
     if false == matched {
@@ -189,18 +210,40 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
     return append([]string{}, instance.rules[matchedIndex].attributes...), true
 }
 
-func (instance *AccessControl) matchRuleIndex(path string) (int, bool) {
-    normalizedPath := strings.TrimSpace(path)
-    if "" == normalizedPath {
-        normalizedPath = "/"
+/* canonicalizeAccessControlPath folds the spellings that reach the same resource into the one the rules are
+written in. net/http hands the path through unfolded, so "//admin/panel" and "/open/../admin/panel" are
+matched by no rule that names "/admin" — and no rule matched is granted, with the token never consulted.
+
+Folding is NOT sufficient on its own, and the http kernel does not rely on it: because the router matches
+the path as sent and does not fold "..", a request routed to a protected handler under a folded spelling
+would be authorized here against the folded spelling's rule — a different, possibly more permissive one, or
+none. The kernel closes that by refusing a non-canonical request path before it is routed or authorized
+(http.requestPathIsCanonical), so every path this sees is already the one spelling. The fold remains as the
+matcher's own defence for a caller that consults AccessControl without that guard, and it can only make a
+rule match a request it did not match before — it never opens what a rule had closed for the same spelling.
+
+The surrounding whitespace is trimmed before the fold rather than left alone: the trim makes the matcher
+answer for one spelling more than the router accepts, which refuses more than intended and never less. */
+func canonicalizeAccessControlPath(requestPath string) string {
+    canonicalPath := strings.TrimSpace(requestPath)
+    if "" == canonicalPath {
+        return "/"
     }
 
-    if "/" != normalizedPath {
-        normalizedPath = strings.TrimRight(normalizedPath, "/")
-        if "" == normalizedPath {
-            normalizedPath = "/"
-        }
+    if false == strings.HasPrefix(canonicalPath, "/") {
+        canonicalPath = "/" + canonicalPath
     }
+
+    canonicalPath = stdpath.Clean(canonicalPath)
+    if "." == canonicalPath || "" == canonicalPath {
+        return "/"
+    }
+
+    return canonicalPath
+}
+
+func (instance *AccessControl) matchRuleIndex(path string) (int, bool) {
+    normalizedPath := canonicalizeAccessControlPath(path)
 
     for index, rule := range instance.rules {
         if true == rule.isExact {

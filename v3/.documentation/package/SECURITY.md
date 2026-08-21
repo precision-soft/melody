@@ -85,11 +85,11 @@ Userland code must treat `token.IsAuthenticated()` as the canonical guard for ac
 `AccessControl.Match(path)` selects attributes based on the following priority:
 
 1. **Exact match** (`NewAccessControlExactRule`)
-2. **Prefix match** (`NewAccessControlRule` / `NewAccessControlRuleWithSegmentPrefix`) with **longest prefix wins**
+2. **Prefix match** with **longest prefix wins**: `NewAccessControlRule` is bounded to a path SEGMENT — `/admin` governs `/admin` and `/admin/panel` but not `/administrator` — and is the rule to reach for by default; `NewAccessControlRuleWithSegmentPrefix` is a deprecated alias for it. `NewAccessControlRawPrefixRule` is the cross-segment form that matches every path beginning with the prefix, kept behind its own name because a raw rule shadows a correctly bounded denial, and it refuses `PUBLIC_ACCESS` for that reason
 3. **Regex match** (`NewAccessControlRegexRule`) with **first match wins** (declaration order)
-4. **Fallback** rule with an empty prefix (if present)
+4. **Fallback** rule with an empty prefix (only `NewAccessControlRawPrefixRule("")` builds one; `NewAccessControlRule` refuses an empty prefix)
 
-This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).
+The matcher folds the request path (`//admin`, `/x/../admin`) to its canonical spelling before matching, so a rule cannot be evaded by an alternate spelling of the same resource. This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).
 
 ### Role checks
 
@@ -453,6 +453,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 
 - [`NewAccessControl(rules...)`](../../security/access_control.go)
 - [`NewAccessControlRule(pathPrefix string, attributes ...string)`](../../security/access_control.go)
+- [`NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string)`](../../security/access_control.go)
 - [`NewAccessControlExactRule(path string, attributes ...string)`](../../security/access_control.go)
 - [`NewAccessControlRegexRule(pattern string, attributes ...string)`](../../security/access_control.go)
 - [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go)
@@ -512,7 +513,12 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
     - [`type FirewallOverrideConfiguration`](../../security/config/security_module.go)
     - [`NewFirewallOverrideConfiguration()`](../../security/config/security_module.go)
     - [`(FirewallOverrideConfiguration).WithStateless(stateless bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithAccessControl(accessControl *security.AccessControl) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithRoleHierarchy(roleHierarchy *security.RoleHierarchy) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithAccessDecisionManager(accessDecisionManager securitycontract.AccessDecisionManager) FirewallOverrideConfiguration`](../../security/config/security_module.go)
     - [`(FirewallOverrideConfiguration).WithEntryPoint(entryPoint securitycontract.EntryPoint) FirewallOverrideConfiguration`](../../security/config/security_module.go)
     - [`(FirewallOverrideConfiguration).WithAccessDeniedHandler(accessDeniedHandler securitycontract.AccessDeniedHandler) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithMergeStrategy(mergeStrategy AccessControlMergeStrategy) FirewallOverrideConfiguration`](../../security/config/security_module.go)
+    - [`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl(inheritGlobalAccessControl bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
 - Access control builder: [`NewAccessControlBuilder()` / `(*AccessControlBuilder).Require(...)` / `(*AccessControlBuilder).AllowAnonymous(...)` / `(*AccessControlBuilder).Build()`](../../security/config/access_control_builder.go)
 - Compile: [`Compile(configuration)`](../../security/config/compile.go)

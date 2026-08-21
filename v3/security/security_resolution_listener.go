@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -56,7 +57,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                         return dispatchErr
                     }
 
-                    requestEvent.SetResponse(exceptionEvent.Response())
+                    requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                     return nil
                 }
             }
@@ -81,11 +82,12 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                     return dispatchErr
                 }
 
-                requestEvent.SetResponse(exceptionEvent.Response())
+                requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                 return nil
             }
 
-            if nil == token {
+            /* the token source is the application's, so the same reading the recovery above already applies to the source applies to what it hands back: a typed nil is the nil it means, and taking it for a live token publishes it into the security context every voter then reads */
+            if true == internal.IsNilInterface(token) {
                 token = NewAnonymousToken()
             }
 
@@ -112,6 +114,8 @@ func resolveTokenSourceSafely(
     runtimeInstance runtimecontract.Runtime,
     requestEvent *http.KernelRequestEvent,
 ) (token securitycontract.Token, resolveErr error) {
+    tokenSource := firewall.TokenSource()
+
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -123,11 +127,17 @@ func resolveTokenSourceSafely(
             recoveredErr = err
         }
 
+        /* the recovered value may itself be a nil token source panicking on Resolve: read its name only when it is present, or the deferred function panics a second time after recover and the original diagnostic escapes unrecovered */
+        tokenSourceName := ""
+        if false == internal.IsNilInterface(tokenSource) {
+            tokenSourceName = tokenSource.Name()
+        }
+
         resolveErr = exception.NewError(
             "security token source panicked during resolution",
             exceptioncontract.Context{
                 "firewallName":    firewall.Name(),
-                "tokenSourceName": firewall.TokenSource().Name(),
+                "tokenSourceName": tokenSourceName,
                 "panicType":       fmt.Sprintf("%T", recoveredValue),
                 "panicValue":      fmt.Sprintf("%v", recoveredValue),
                 "panicStack":      string(debug.Stack()),
@@ -136,7 +146,7 @@ func resolveTokenSourceSafely(
         )
     }()
 
-    token, resolveErr = firewall.TokenSource().Resolve(runtimeInstance, requestEvent.Request())
+    token, resolveErr = tokenSource.Resolve(runtimeInstance, requestEvent.Request())
 
     return token, resolveErr
 }

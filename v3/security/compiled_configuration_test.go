@@ -163,3 +163,50 @@ func TestCompiledConfiguration_Firewalls_ReturnsCopy(t *testing.T) {
         t.Fatalf("expected internal firewalls list to be immutable from returned slice")
     }
 }
+
+type compiledFirewallNilResultLogoutHandler struct{}
+
+func (instance *compiledFirewallNilResultLogoutHandler) Logout(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LogoutInput,
+) (*securitycontract.LogoutResult, error) {
+    return nil, nil
+}
+
+var _ securitycontract.LogoutHandler = (*compiledFirewallNilResultLogoutHandler)(nil)
+
+func TestCompiledFirewall_Logout_NilResultWithoutErrorFailsClosed(t *testing.T) {
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "matcher",
+        []securitycontract.Rule{},
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        &compiledFirewallNilResultLogoutHandler{},
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    result, logoutErr := firewall.Logout(runtimeInstance, nil, securitycontract.LogoutInput{})
+    if nil == logoutErr {
+        t.Fatalf("expected error when logout handler returns nil result without error")
+    }
+    if nil != result {
+        t.Fatalf("expected nil result, got %v", result)
+    }
+}

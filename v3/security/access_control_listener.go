@@ -5,10 +5,22 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
+
+/* exceptionResponseOrFailClosed returns the response the kernel.exception dispatch produced, or a generic fail-closed response when no listener produced one: a nil response written back to the request event is read by the kernel as "no decision" and the request would reach the handler despite being refused. */
+func exceptionResponseOrFailClosed(exceptionEvent *http.KernelExceptionEvent) httpcontract.Response {
+    response := exceptionEvent.Response()
+    if nil == response {
+        return http.JsonErrorResponse(500, "internal_server_error")
+    }
+
+    return response
+}
 
 func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, registry *FirewallRegistry) {
     if nil == registry {
@@ -184,12 +196,15 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                             return eventSecurityAuthorizationDeniedErr
                         }
 
-                        requestEvent.SetResponse(exceptionEvent.Response())
+                        requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                         return nil
                     }
 
-                    requestEvent.SetResponse(response)
-                    return nil
+                    /* an entry point that produced no response must not let the request through: fall through to the fail-closed 401 rather than writing a nil response the kernel reads as "no decision" */
+                    if nil != response {
+                        requestEvent.SetResponse(response)
+                        return nil
+                    }
                 }
 
                 requestEvent.SetResponse(
@@ -202,7 +217,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            if nil == accessDecisionManager {
+            if true == internal.IsNilInterface(accessDecisionManager) {
                 exceptionEvent := http.NewKernelExceptionEvent(
                     runtimeInstance,
                     requestEvent.Request(),
@@ -214,7 +229,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                     return eventKernelExceptionErr
                 }
 
-                requestEvent.SetResponse(exceptionEvent.Response())
+                requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
 
                 return nil
             }
@@ -251,7 +266,15 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 }
 
                 if nil != handlerErr {
-                    decisionErr = handlerErr
+                    /* keep the authorization decision as the cause so the exception listener still resolves the denial status through the cause chain: replacing it with the handler error turns a 403 into whatever the handler failure maps to, usually a 500, and drops the refused attributes */
+                    decisionErr = exception.NewError(
+                        "access denied handler failed",
+                        exceptioncontract.Context{
+                            "reason":       "access_denied_handler_failed",
+                            "handlerError": handlerErr.Error(),
+                        },
+                        decisionErr,
+                    )
                 }
             }
 
@@ -275,7 +298,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return eventKernelExceptionErr
             }
 
-            requestEvent.SetResponse(exceptionEvent.Response())
+            requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
 
             return nil
         },

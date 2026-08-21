@@ -18,6 +18,30 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Security: `NewAccessControlRule` is now segment-bounded, and the cross-segment form has its own name
+
+**What changed.** `NewAccessControlRule` built a rule that matched every path merely beginning with the prefix — `/admin` governed `/administrator` as readily as `/admin/panel`. It now builds a rule bounded to a path SEGMENT: `/admin` governs `/admin` and `/admin/panel` but not `/administrator`. The cross-segment behaviour moves to the explicit `NewAccessControlRawPrefixRule`, on which `PUBLIC_ACCESS` is refused because a raw public rule, being the longest match, shadows a correctly bounded denial. An empty prefix is now refused rather than made a catch-all fallback, and `NewAccessControlRuleWithSegmentPrefix` becomes a deprecated alias for the plain name.
+
+**Symptom.** An existing rule matches fewer requests than before — only its own segment and descendants under a `/` boundary — which can only refuse a request the old raw form would have granted, never grant one it would have refused. A rule that genuinely meant to reach across segment boundaries (a rule for `/admin` that was relied on to also govern `/admin-tools`) stops governing the sibling. A `NewAccessControlRule("")` used as a catch-all fallback now panics at construction.
+
+**Remedy.** For a rule that must reach across the segment boundary, call `NewAccessControlRawPrefixRule`. For a catch-all fallback, declare an explicit `"/"` prefix, or use `NewAccessControlRawPrefixRule("")`. Most rules want the bounded form and need no change.
+
+### Security: a global access control without a firewall now enforces, and a zero-value override inherits it
+
+**What changed.** A `SetGlobal` access control declared without any firewall was silently dropped — `BuildAndCompile` returned nil the moment no firewall was registered — so the global rules enforced nothing. They now enforce: the compiled configuration carries the global control and the listeners fall back to it. Separately, a zero-value `FirewallOverrideConfiguration{}` now inherits the global access control the way `NewFirewallOverrideConfiguration()` does; it previously carried `inheritGlobalAccessControl=false` and compiled an empty control that opened every route behind the firewall.
+
+**Symptom.** A deployment that declared global rules while every firewall sat behind a turned-off feature flag now has those rules apply — requests that used to reach handlers unauthenticated are refused. A firewall built with a bare `FirewallOverrideConfiguration{}` (rather than the constructor) now inherits and applies the global policy instead of leaving its routes open. `WithMergeStrategy` refuses an unrecognised strategy by name where it used to fall back to `localFirst` silently.
+
+**Remedy.** None if the enforcement is what you meant; this closes a fail-open. A firewall that genuinely wants no global inheritance calls `WithInheritGlobalAccessControl(false)` paired with `WithAccessControl`. Correct any merge strategy string the boot now rejects.
+
+### Security: the role voters and `DecideAll` refuse where they used to grant
+
+**What changed.** `RoleVoter` and `RoleHierarchyVoter` granted a token that carried the role even when it answered `IsAuthenticated()` false; they now deny it, matching the access control listener, which had always checked authentication first. `AccessDecisionManager.DecideAll` over an empty attribute list now refuses instead of granting vacuously, matching `DecideAny`.
+
+**Symptom.** A handler-level `IsGranted` check on an unauthenticated token that carries roles — a "remembered" or half-logged-in token — now returns false where it used to return true. A direct `DecideAll(token, nil, subject)` caller now receives a refusal.
+
+**Remedy.** None if you relied on authentication being required, which is the safe reading. A caller that intentionally passed an empty attribute list to `DecideAll` expecting a grant must pass the attributes it means to check.
+
 ### Bunorm: the registry refuses new callers while a pool is still closing
 
 **What changed.** `ManagerRegistry.Close` marked the registry closed and then held the registry lock for the whole teardown, closing every manager and every migration database inside the critical section. It now publishes the flag under the lock, takes a snapshot of the two maps, releases the lock, and closes the pools outside it.
