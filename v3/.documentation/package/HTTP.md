@@ -47,6 +47,7 @@ This package covers the HTTP runtime behavior inside Melody:
 * Kernel orchestration:
     * [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
     * Kernel options via [`KernelOptions`](../../http/kernel.go) / [`DefaultKernelOptions`](../../http/kernel.go)
+    * The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract; both halves default to on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` starts from `DefaultKernelOptions().MethodPolicy` and turns the half it means off.
     * Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
 
 * Container resolver helpers:
@@ -79,11 +80,16 @@ Implementation detail: see [`wrapControllerWithContainer`](../../http/router_uti
 
 ## Request body limits
 
-The HTTP kernel wraps `request.Body` with `http.MaxBytesReader` when `Http().MaxRequestBodyBytes()` is set to a positive value in the configuration (see [`kernel.go`](../../http/kernel.go)). A read past that limit fails, and net/http answers `413 Request Entity Too Large` and closes the connection, so an oversized body is never fully delivered to a controller.
+The HTTP kernel wraps `request.Body` with `http.MaxBytesReader` when `Http().MaxRequestBodyBytes()` is set to a positive value in the configuration (see [`kernel.go`](../../http/kernel.go)). A read past that limit fails with `*http.MaxBytesError` and net/http closes the connection, so an oversized body is never fully delivered to a controller. The `413 Request Entity Too Large` is Melody's answer on all three paths an overrun surfaces through. Two of them are the ones where Melody itself reads the body before the handler runs: the kernel's automatic form parsing and [`BindJson`](../../http/request_body.go) both recognize the overrun and answer `413` with `payload too large`. The third is the handler's own return: a `*http.MaxBytesError` a controller surfaces by returning it unhandled — `ParseMultipartForm` on an oversized upload is the case, multipart being the one body path the kernel does not pre-read — is mapped onto the same `413` at the chain's exit and filed at warning, rather
+than rendering as a generic `500` at error. A controller that reads the raw body itself and answers for the error on its own keeps whatever answer it chose.
 
 ## Form parsing
 
 [`NewRequest`](../../http/request.go) only auto-parses the request body as form data when the method is `POST`, `PUT`, or `PATCH` and the `Content-Type` media type is `application/x-www-form-urlencoded` or `multipart/form-data`. JSON, XML, and other content types are left intact so handlers can read the raw body. For explicit reparsing, use [`ParseFormBody`](../../http/request.go).
+
+A urlencoded body is buffered before `ParseForm` drains it, so a later reader — the HMAC body-hash check above all — still sees the raw bytes. When that read **fails**, or when the body **does not parse** (an invalid percent escape), the kernel refuses the request instead of dispatching it: `413` when the request-body ceiling stopped the read, `400` otherwise, negotiated between html and json like every other kernel refusal. The handler is never reached, because either failure leaves a request whose form is indistinguishable from an empty submission — a real submission would otherwise be processed as a blank one. A multipart body is left untouched (`ParseForm` does not read it), so the disk spooling for large uploads is preserved.
+
+`Request.Input` reads post, then query, then the route parameters, and delivers the single value a key carries; on a genuinely repeated key it answers the **first** value, because the caller asked by name and cannot act on a panic. The request bags keep the single and the repeated key apart by type: a key that appeared once is the string it is, while a repeated key (`?a=1&a=2`) is a slice, and reading the bag itself with `bag.String` panics naming the key — read it through `bag.StringSlice` over `Request.Query()`/`Request.Post()`.
 
 ## CORS
 
@@ -125,7 +131,7 @@ router.HandleWithOptions(
 router.HandleNamed("product.show", nethttp.MethodGet, "/products/:id?", showProductHandler)
 ```
 
-Two routes may also share one **pattern** under two different names. Only names are checked for collisions — a duplicate name panics at registration with `route name already exists` ([`registerRoute`](../../http/route_registry.go)) — so a duplicated pattern is accepted silently, the earlier registration serves every request, and the later one is unreachable while [`UrlGenerator`](../../http/url_generator.go) still resolves its name and mints its path. Links generated for the second route run the first route's handler.
+Two routes may share one **pattern** as long as the matcher can tell them apart. Collisions are checked twice at registration ([`registerRoute`](../../http/route_registry.go)): a duplicate name, and a route identical to a registered one in everything the matcher discriminates on — pattern, methods, host, schemes, locales, requirements and priority — because the later one could never be dispatched and would be shadowed silently. Either collision panics at the registration site, with `route name already exists` or with the refusal naming the identical discriminators; an application that prefers one aggregated report over dying at the first duplicate arms [`RouteRegistry.SetBootCollisionRecorder`](../../http/route_registry.go) for its boot window, under which the first registration wins — and on a name collision the route itself stays registered and dispatchable, only the name keeps pointing at the first claimant. The name and the defaults are not part of the dispatch identity: neither participates in matching, so two differently named but otherwise identical routes are still refused. Routes sharing a pattern under different methods, hosts, requirements or priorities are legitimately distinct and stay accepted; at equal specificity the higher priority wins and, at equal priority, the first registered.
 
 ### Locale-restricted routes
 
@@ -159,7 +165,7 @@ A requirement declared on a parameter is validated against the value that is act
 
 ## Middleware ordering
 
-The chain is ordered by [`orderDefinitions`](../../http/middleware/pipeline/builder.go) and applied by [`wrapWithMiddlewares`](../../http/router_utility.go), which wraps from the last element inwards — so the **first** element of the built chain is the **outermost** one. The contract that follows:
+The chain is ordered by [`orderDefinitions`](../../http/middleware/pipeline/builder.go) and applied by [`wrapWithMiddlewaresRecording`](../../http/router_utility.go), which wraps from the last element inwards — so the **first** element of the built chain is the **outermost** one. The contract that follows:
 
 * A **lower** priority value sits **further out**: it wraps everything after it, so it runs earlier on the way in and sees the response last on the way out. [`Use`](../../application/http_middleware.go) registers at `MiddlewarePriorityDefault` (`0`); [`UseWithPriority`](../../application/http_middleware.go) states the value.
 * Middlewares registered at **equal priority** run in **registration order**, the first registered being the outer one. The tie-break is the registration rank, not the definition's name.
@@ -352,6 +358,8 @@ const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /user
 
 ## Session cookie
 
+A session write the storage could not take answers **500** rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering `302 /dashboard` with the identity never stored — and the client cannot otherwise tell the difference from a line in the server log. The session cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. The **delete** path is deliberately different: a failed logout still expires the browser cookie and serves the handler's response, because clearing a cookie can only end a session and never resurrect one. See [`writeResponse`](../../http/router_utility.go). A response that carries the session cookie is also marked `Cache-Control: private` unless it already says `private` or `no-store`, so a shared cache cannot replay one client's session id to the next, and the session-persistence records in the log carry a one-way SHA-256 reference to the session id rather than the credential itself.
+
 The kernel loads a session from the incoming cookie, publishes it on the request as [`RequestAttributeSession`](../../http/request.go), and on the way out saves a modified session and emits its `Set-Cookie`. [`Kernel.SetSessionCookiePolicy`](../../http/contract/kernel.go) shapes that cookie through a [`SessionCookiePolicy`](../../http/contract/kernel.go):
 
 | Field      | Type                                                         | Default when unset               |
@@ -417,6 +425,8 @@ The reason is that two parties read one request differently. A rule written on `
 
 The spellings that fold onto the **root** are the exception and still answer with the configured index file — `/`, `//`, `/.` and `/./` all serve it — because that page is what a browser asks for by visiting the site, and the index file is named by configuration and never by the request, so no spelling can aim that resolution at another file.
 
+The kernel enforces the same rule for the application's own routes: a request path that folds to a different spelling is refused with a `400` before it is routed, authorized or handled, so the router, the firewall matchers and the access control never disagree about which resource a request names. A trailing slash is not a fold and is served; a target that does not begin with `/` — the asterisk-form of `OPTIONS`, an authority-form `CONNECT` — is left to the router.
+
 ### Dot-prefixed paths
 
 The file server refuses every request path carrying an element that begins with a dot. `.env`, `.git` and `.htpasswd` are what a deployment keeps beside its files and never means to publish, and the embedded mode packs them into the binary on purpose, because the embed directive spells `all:public` to keep the packed tree faithful to the directory — so both modes need the refusal. One allowance stands: the **first** element may name a dot-prefixed directory that appears in the file server's allowed-prefix list, which carries [`DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) alone out of the box. RFC 8615 publishes the ACME http-01 challenge, `security.txt` and `assetlinks.json` there, and a deployment that renews its certificate through the application would otherwise lose the renewal to the refusal. The allowance never reaches past that first element, so `.well-known/.env` is refused exactly like `/.env`. See [
@@ -471,7 +481,7 @@ Where the list itself comes from is the application's business — a constant as
 * Server-Sent Events handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.
 * [`ServerSentEventHub.Broadcast`](../../http/server_sent_event_hub.go) is non-blocking and drops events for subscribers whose buffer is full; delivery is **at-most-once**. Size the subscribe buffer for the expected burst, or treat the stream as best-effort. [`ServerSentEventHub.DroppedEventCount`](../../http/server_sent_event_hub.go) returns the cumulative number of dropped events so the loss can be surfaced as a metric.
 * Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
-* An optional route parameter (`:param?`) is only legal as the **last** segment of a pattern. An omitted optional is dropped wherever it sits, while a match only ever ends early at the tail, so `/blog/:locale?/posts` would let [`UrlGenerator`](../../http/url_generator.go) mint `/blog/posts` — a path this router answers with a `404`. Registering such a pattern panics at the definition site; move the optional to the end, or register the two patterns separately.
+* An optional route parameter (`:param?`) is only legal as the **last** segment of a pattern, unless it carries a **non-empty default** — the default is always substituted, so the segment never drops. An omitted optional without one is dropped wherever it sits, while a match only ever ends early at the tail, so `/blog/:locale?/posts` would let [`UrlGenerator`](../../http/url_generator.go) mint `/blog/posts` — a path this router answers with a `404`. Registering the defaultless shape panics at the definition site; move the optional to the end, give it a non-empty default, or register the two patterns separately.
 * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
 * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when no [`SetKeyExtractor`](../../http/middleware/rate_limit.go) is given, so `SimpleRateLimit(n)` is a budget of `n` requests per minute per IP **across the whole service**, not per route. Set an explicit key extractor for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) to [`SetClientIpResolver`](../../http/middleware/rate_limit.go) — it walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted. `SimpleRateLimit`, `IpRateLimit` and `UserRateLimit` build their config internally and return only the middleware, so there is nothing left to call `SetClientIpResolver` on: behind a proxy reach instead for [
   `SimpleRateLimitWithResolver`](../../http/middleware/rate_limit.go), [`IpRateLimitWithResolver`](../../http/middleware/rate_limit.go) or [`UserRateLimitWithResolver`](../../http/middleware/rate_limit.go), which take the resolver as their last argument — in the `User` variant it decides the anonymous fallback key alone, since a request carrying a user id is keyed on that id. The three plain helpers stay correct wherever the direct peer *is* the client.
@@ -507,6 +517,7 @@ Where the list itself comes from is the application's business — a constant as
 * [`type SessionCookiePolicy`](../../http/contract/kernel.go)
 * [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
 * [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go)
+* [`type MethodPolicy`](../../http/contract/kernel.go) — the policy the section above calls "the `MethodPolicy` of the contract", declared beside the two policies listed here
 * [`type Middleware`](../../http/contract/middleware.go)
 * [`type RateLimiter`](../../http/contract/middleware.go), [`type RuntimeRateLimiter`](../../http/contract/middleware.go) — what a userland limiter implements, the second when it needs the runtime of the request it is deciding on
 * [`type MatchResult`](../../http/contract/router.go) — what the router answers a match with
@@ -544,15 +555,15 @@ Where the list itself comes from is the application's business — a constant as
     * [`HtmlResponse`](../../http/response.go)
     * [`TextResponse`](../../http/response.go)
     * [`EmptyResponse`](../../http/response.go)
-    * [`FileResponse`](../../http/response.go)
-    * [`AttachmentResponse`](../../http/response.go)
+    * [`FileResponse`](../../http/response.go) — opens the path as given, with no containment check; never hand it a path built from client input without confining the name to a known directory first (see the GoDoc)
+    * [`AttachmentResponse`](../../http/response.go) — `FileResponse` plus a `Content-Disposition`; the same path-safety caveat applies
     * [`BuildContentDisposition`](../../http/response.go)
     * [`RedirectResponse`](../../http/response.go)
     * [`RedirectFound`](../../http/response.go)
     * [`RedirectMovedPermanently`](../../http/response.go)
 
 * Cookies:
-    * [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name with a panic
+    * [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name with a panic and creating the header map when the response carries none
     * [`DeleteCookie(response httpcontract.Response, name string, path string) `](../../http/cookie.go) — the expiring counterpart; an empty path is read as `/`
 
 * Session:
@@ -566,6 +577,7 @@ Where the list itself comes from is the application's business — a constant as
     * [`RouteRegistryMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
     * [`UrlGeneratorMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
     * [`RouterMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
+    * [`RequestContextMustFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) / [`RequestContextFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope and so takes a resolver rather than the container; the second answers nil where the first panics
 
 ### CORS (`http/cors`)
 

@@ -356,6 +356,8 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`(*Application).RegisterHttpHandlerDecorator(decorator)`](../../application/application_http.go) — see [Handler decorators](#handler-decorators)
 - [`(*Application).OnHttpShutdown(hook)`](../../application/application_http.go) — runs the moment the http server begins shutting down, before it waits for connections to drain, which is how a Server-Sent Events stream or a websocket is released instead of blocking the whole shutdown timeout
 
+**The shutdown budget covers the request scopes as well as the connections.** `net/http`'s own `Shutdown` drains the connections the server still owns — and a **hijacked** connection is not one of them: a handler that upgrades to a websocket or takes the socket for any other reason removes it from the server's accounting, so `Shutdown` returns immediately and reports success while that handler is still running. Melody counts the request scopes the http kernel opened ([`Kernel.OpenRequestScopes`](../../http/kernel.go)) and waits for them under the *same* budget after `Shutdown` returns and the shutdown hooks were joined. A drain that finishes leaves the exit exactly as it was; one that does not is recorded as `http shutdown left request scopes open`, carrying the count, and the process exits non-zero — the same signal an overrun `Shutdown` gives, for the same reason. The `OnHttpShutdown` hooks are what release the long-lived handlers so the drain has something to succeed at; without one, the budget is what bounds the wait.
+
 ### Middleware helpers
 
 - [`(*HttpMiddleware).Use(middlewares...)`](../../application/http_middleware.go)

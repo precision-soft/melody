@@ -18,6 +18,38 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Http: a request path that folds to a different spelling is refused with a 400 before the handler
+
+**What changed.** The kernel refuses any request path that `path.Clean` would fold to another spelling — `//admin/panel`, `/open/../admin/panel`, `/a/./b` — before the security dispatch and before the handler, with a 400 and a warning naming the method and path. A trailing slash is not a fold and is served as before; a target that does not begin with `/` (the asterisk-form of OPTIONS, an authority-form CONNECT) is left to the router.
+
+**Symptom.** A client that spelled a working url with a doubled slash or a dot segment — some crawlers, hand-built paths concatenated with a stray `/` — starts receiving 400 where the route used to answer. Every such request was previously routed under its sent spelling but authorized against the folded spelling's rule, which is the authorization bypass the refusal closes.
+
+**Remedy.** Fix the client to emit the canonical spelling; the refusal is deliberately not a redirect, so nothing teaches the client the working spelling while sidestepping a firewall rule. There is no opt-out.
+
+### Http: a urlencoded body that failed to read or parse is refused, and a session save outage answers 500
+
+**What changed.** A `application/x-www-form-urlencoded` body whose read failed answers 413 when the size limit stopped it and 400 when the client broke it, before the handler — it used to be a warning beside an empty form, with the handler running and often answering 200. A multipart upload past `MaxRequestBodyBytes` surfacing from `ParseMultipartForm` is answered 413 instead of a 500 at error level. Separately, a session-storage outage on the save path replaces the handler's response with an empty 500 and suppresses the session cookie; the handler's success used to be delivered with the session write silently lost.
+
+**Symptom.** Endpoints that previously "accepted" oversized or truncated form submissions as empty forms now refuse them; a login or counter endpoint in front of a down session backend answers 500 instead of a success whose session never landed.
+
+**Remedy.** None for the refusals — they surface failures that were being mis-answered. A handler that must serve degraded responses during a session-backend outage stops writing to the session on that path.
+
+### Http: repeated request parameters are typed, and reading one as a single string refuses loudly
+
+**What changed.** A request parameter that appeared once is stored in the bags as a string; a genuinely repeated key (`?tag=a&tag=b`) stays a `[]string`, and `bag.String`/`bag.StringOrDefault` on it panic toward `StringSlice`/`StringAt` instead of guessing. `Request.Input` answers the first value of a repeated key.
+
+**Symptom.** Handlers that read single-occurrence query or post parameters through `Input`, `bag.String` or `StringOrDefault` start seeing the real values — they used to receive the empty string for every present parameter. Code that read a repeated key through `bag.String` now panics with a message naming the parameter, where it used to receive `("", true)`.
+
+**Remedy.** Read repeated keys with `bag.StringSlice` or `bag.StringAt`; nothing else changes for well-typed readers.
+
+### Http: the kernel contract gains `SetMethodPolicy`, and duplicate routes are refused at registration
+
+**What changed.** `http/contract.Kernel` declares `SetMethodPolicy(MethodPolicy)` and the policy type moves onto the contract — a compile-time addition for out-of-tree implementations of the interface. The route registry refuses a second route identical on everything the matcher discriminates (pattern, methods, host, schemes, locales, requirements, priority), because the later one could never be dispatched and was silently shadowed.
+
+**Symptom.** An out-of-tree `Kernel` implementation stops compiling until it adds the method. A boot that registered the same route twice — usually a module wired twice, or a copy-pasted registration — now panics naming the pattern, the methods and the route name.
+
+**Remedy.** Add the one method to the custom kernel. Remove the duplicate registration; a route that must coexist differs in at least one discriminator. An application aggregating boot collisions arms `RouteRegistry.SetBootCollisionRecorder` for the boot window.
+
 ### Security: `NewAccessControlRule` is now segment-bounded, and the cross-segment form has its own name
 
 **What changed.** `NewAccessControlRule` built a rule that matched every path merely beginning with the prefix — `/admin` governed `/administrator` as readily as `/admin/panel`. It now builds a rule bounded to a path SEGMENT: `/admin` governs `/admin` and `/admin/panel` but not `/administrator`. The cross-segment behaviour moves to the explicit `NewAccessControlRawPrefixRule`, on which `PUBLIC_ACCESS` is refused because a raw public rule, being the longest match, shadows a correctly bounded denial. An empty prefix is now refused rather than made a catch-all fallback, and `NewAccessControlRuleWithSegmentPrefix` becomes a deprecated alias for the plain name.

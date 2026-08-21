@@ -1,10 +1,14 @@
 package http
 
 import (
+    "errors"
     "io"
+    nethttp "net/http"
     "net/http/httptest"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/bag"
 )
 
 func TestNewRequest_ValidHttpRequest(t *testing.T) {
@@ -36,16 +40,17 @@ func TestNewRequest_ValidHttpRequest(t *testing.T) {
         t.Fatalf("expected query param 'foo' to exist")
     }
 
+    /* a key that appeared once is stored as the string it really is; only a repeated key stays a string slice */
     fooRaw, fooExists := queryBag.Get("foo")
     if false == fooExists {
         t.Fatalf("expected query param 'foo' to exist in bag")
     }
-    fooValues, ok := fooRaw.([]string)
-    if false == ok || 0 == len(fooValues) {
-        t.Fatalf("expected query param 'foo' to be []string with values")
+    fooValue, ok := fooRaw.(string)
+    if false == ok {
+        t.Fatalf("expected single-occurrence query param 'foo' to be stored as a string, got: %T", fooRaw)
     }
-    if "bar" != fooValues[0] {
-        t.Fatalf("expected query param 'foo' to be 'bar', got: %s", fooValues[0])
+    if "bar" != fooValue {
+        t.Fatalf("expected query param 'foo' to be 'bar', got: %s", fooValue)
     }
 }
 
@@ -357,5 +362,176 @@ func TestNewRequest_ParseFormError_NilRuntime_NoPanic(t *testing.T) {
 
     if nil == request {
         t.Fatalf("expected non-nil request even when form parsing fails with nil runtime")
+    }
+}
+
+/* Input delivers the query and post values it silently lost: the request bags stored every value as a list and the lax string accessor answered ("", true) for a list, so a provided parameter read as an empty field */
+func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
+    queryRequest := httptest.NewRequest("GET", "/search?term=melody", nil)
+    request := NewRequest(queryRequest, nil, nil, nil)
+
+    if "melody" != request.Input("term") {
+        t.Fatalf("expected the query value, got %q", request.Input("term"))
+    }
+
+    formBody := strings.NewReader("field=abc")
+    postRequest := httptest.NewRequest("POST", "/submit", formBody)
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    postingRequest := NewRequest(postRequest, nil, nil, nil)
+
+    if "abc" != postingRequest.Input("field") {
+        t.Fatalf("expected the post value, got %q", postingRequest.Input("field"))
+    }
+}
+
+/* The shape of a request parameter is the client's to choose, so repeating one is not a programming error
+to refuse loudly: the refusal was a 500 with a full stack record that any client could raise at will. The
+whole array is still reachable, through bag.StringSlice. */
+func TestRequest_Input_AnswersTheFirstValueOfARepeatedKey(t *testing.T) {
+    repeatedRequest := httptest.NewRequest("GET", "/search?a=1&a=2", nil)
+    request := NewRequest(repeatedRequest, nil, nil, nil)
+
+    if "1" != request.Input("a") {
+        t.Fatalf("expected the first value of the repeated key, got %q", request.Input("a"))
+    }
+
+    values, exists := bag.StringSlice(request.Query(), "a")
+    if false == exists || 2 != len(values) || "1" != values[0] || "2" != values[1] {
+        t.Fatalf("expected the repeated key to stay readable whole, got %v", values)
+    }
+}
+
+func TestRequest_Input_AnswersTheFirstValueOfARepeatedFormKey(t *testing.T) {
+    formBody := strings.NewReader("a=1&a=2")
+    postRequest := httptest.NewRequest("POST", "/submit", formBody)
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    if "1" != request.Input("a") {
+        t.Fatalf("expected the first value of the repeated form key, got %q", request.Input("a"))
+    }
+}
+
+/* a form that does not parse is refused the way a body that does not read is: a warning that let the request continue handed the handler an empty form for a real submission */
+func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
+    formBody := strings.NewReader("a=%zz&csrf=token")
+    postRequest := httptest.NewRequest("POST", "/submit", formBody)
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    if nil == request.bodyReadErr {
+        t.Fatalf("expected the unparsable form to be recorded for the kernel's refusal")
+    }
+
+    if true == request.Post().Has("csrf") {
+        t.Fatalf("expected no half-parsed form to reach the handler")
+    }
+}
+
+/* the read error is recorded ITSELF, not re-discovered through a second symptom: with the guard removed, ParseForm reads the poisoned body and reports its own failure, which the parse branch wraps — the refusal still fires, but the record blames the parse of a body that in truth never arrived. Identity is the observable that tells the two paths apart. */
+func TestNewRequest_ARawBodyReadFailureIsRecordedItself(t *testing.T) {
+    readErr := errors.New("the client vanished mid-upload")
+
+    postRequest := httptest.NewRequest("POST", "/submit", &failingBodyReader{err: readErr})
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    if readErr != request.bodyReadErr {
+        t.Fatalf("expected the read error to travel unwrapped, got %v", request.bodyReadErr)
+    }
+}
+
+type failingBodyReader struct {
+    err error
+}
+
+func (instance *failingBodyReader) Read(buffer []byte) (int, error) {
+    return 0, instance.err
+}
+
+/* the cookie accessors, the locale, the route pattern and the two error constructors were all at zero coverage. The cookie pair is the one an authentication middleware reads, and an accessor reading the wrong header would report every client as carrying no session at all. */
+
+func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
+    httpRequest.AddCookie(&nethttp.Cookie{Name: "session", Value: "abc"})
+    httpRequest.AddCookie(&nethttp.Cookie{Name: "locale", Value: "de"})
+
+    request := NewRequest(httpRequest, nil, nil, nil)
+
+    sessionCookie, cookieErr := request.Cookie("session")
+    if nil != cookieErr {
+        t.Fatalf("unexpected error reading a cookie the client sent: %v", cookieErr)
+    }
+
+    if "abc" != sessionCookie.Value {
+        t.Fatalf("unexpected cookie value: %q", sessionCookie.Value)
+    }
+
+    if 2 != len(request.Cookies()) {
+        t.Fatalf("expected both cookies, got: %d", len(request.Cookies()))
+    }
+
+    if _, missingErr := request.Cookie("nothing-here"); nil == missingErr {
+        t.Fatalf("expected a cookie the client did not send to be reported missing")
+    }
+}
+
+/* the locale and the route pattern are read off the route attributes the router published, not off the url — the pattern is what an application groups metrics and audit records by, and reading the concrete path instead would make every identifier its own route. */
+
+func TestRequest_LocaleAndRoutePatternComeFromTheRouteAttributes(t *testing.T) {
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil), nil, nil, nil)
+
+    if "" != request.Locale() {
+        t.Fatalf("expected no locale before the router publishes one, got: %q", request.Locale())
+    }
+
+    if "" != request.RoutePattern() {
+        t.Fatalf("expected no route pattern before the router publishes one, got: %q", request.RoutePattern())
+    }
+
+    request.Attributes().Set(RouteAttributeLocale, "de")
+    request.Attributes().Set(RouteAttributePattern, "/articles/:id")
+    request.Attributes().Set(RouteAttributeName, "article.show")
+
+    if "de" != request.Locale() {
+        t.Fatalf("unexpected locale: %q", request.Locale())
+    }
+
+    if "/articles/:id" != request.RoutePattern() {
+        t.Fatalf("unexpected route pattern: %q", request.RoutePattern())
+    }
+
+    if "article.show" != request.RouteName() {
+        t.Fatalf("unexpected route name: %q", request.RouteName())
+    }
+
+    if request.RoutePattern() == request.Path() {
+        t.Fatalf("the pattern must not collapse onto the concrete path")
+    }
+}
+
+/* the two error constructors are public sentinels an application compares against; each has to carry its own message, because two errors sharing one would make a content-type refusal indistinguishable from a trailing-data refusal in every log that renders them. */
+
+func TestRequestErrors_CarryDistinctMessages(t *testing.T) {
+    unsupportedContentType := ErrorUnsupportedContentType()
+    extraData := ErrorJsonBodyHasExtraData()
+
+    if nil == unsupportedContentType || nil == extraData {
+        t.Fatalf("expected both error constructors to produce an error")
+    }
+
+    if "unsupported content type" != unsupportedContentType.Error() {
+        t.Fatalf("unexpected message: %q", unsupportedContentType.Error())
+    }
+
+    if "json body has extra data" != extraData.Error() {
+        t.Fatalf("unexpected message: %q", extraData.Error())
+    }
+
+    if unsupportedContentType.Error() == extraData.Error() {
+        t.Fatalf("the two refusals must not share a message")
     }
 }

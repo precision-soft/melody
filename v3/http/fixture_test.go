@@ -1,3 +1,8 @@
+/* The shared test material of this package: the doubles every test file of it reaches for, the helpers
+that build them, and — where a contract spans every source rather than any one of them — the test that
+asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to
+exist without a matching source, which is what keeps every other one honest. A test provable from a
+single source belongs in that source's own mirror, not here. */
 package http
 
 import (
@@ -8,19 +13,13 @@ import (
     nethttp "net/http"
     "time"
 
-    "github.com/precision-soft/melody/v3/clock"
-    "github.com/precision-soft/melody/v3/config"
-    configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
-    "github.com/precision-soft/melody/v3/event"
-    eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    "github.com/precision-soft/melody/v3/session"
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
@@ -31,103 +30,6 @@ func newTestRuntime() runtimecontract.Runtime {
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger())
 
     return runtime.New(context.Background(), scope, serviceContainer)
-}
-
-type testEnvironmentSource struct {
-    values map[string]string
-}
-
-func (instance *testEnvironmentSource) Load() (map[string]string, error) {
-    copied := make(map[string]string, len(instance.values))
-    for key, value := range instance.values {
-        copied[key] = value
-    }
-
-    return copied, nil
-}
-
-func newHttpTestContainer() containercontract.Container {
-    return newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
-}
-
-func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) containercontract.Container {
-    serviceContainer := container.NewContainer()
-
-    serviceContainer.MustRegister(
-        logging.ServiceLogger,
-        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return logging.NewNopLogger(), nil
-        },
-    )
-
-    serviceContainer.MustRegister(
-        config.ServiceConfig,
-        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
-            environment, err := config.NewEnvironment(
-                &testEnvironmentSource{
-                    values: map[string]string{
-                        config.EnvKey: config.EnvDevelopment,
-                    },
-                },
-            )
-            if nil != err {
-                return nil, err
-            }
-
-            return config.NewConfiguration(environment, "/tmp/melody")
-        },
-    )
-
-    serviceContainer.MustRegister(
-        session.ServiceSessionManager,
-        func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return session.NewManager(storage, 30*time.Minute), nil
-        },
-    )
-
-    serviceContainer.MustRegister(
-        event.ServiceEventDispatcher,
-        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
-            return event.NewEventDispatcher(clock.NewSystemClock()), nil
-        },
-    )
-
-    return serviceContainer
-}
-
-type closeRecordingScope struct {
-    containercontract.Scope
-    failOverride bool
-    closed       bool
-}
-
-func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName string, value any) error {
-    if true == instance.failOverride {
-        return exception.NewError("forced override failure", nil, nil)
-    }
-
-    return instance.Scope.OverrideProtectedInstance(serviceName, value)
-}
-
-func (instance *closeRecordingScope) Close() error {
-    instance.closed = true
-
-    return instance.Scope.Close()
-}
-
-type scopeRecordingContainer struct {
-    containercontract.Container
-    failOverride bool
-    scope        *closeRecordingScope
-}
-
-func (instance *scopeRecordingContainer) NewScope() containercontract.Scope {
-    instance.scope = &closeRecordingScope{
-        Scope:        instance.Container.NewScope(),
-        failOverride: instance.failOverride,
-    }
-
-    return instance.scope
 }
 
 type writeHeaderCountingResponseWriter struct {
@@ -210,6 +112,49 @@ func (instance *closeRecordingReadCloser) Close() error {
     return nil
 }
 
+type closeRecordingScope struct {
+    containercontract.Scope
+    failOverride bool
+    closed       bool
+    /* onClose runs at the moment the scope-close defer runs. That defer is registered first, so it runs last: whatever a test reads here has already been decided by every defer above it, which is how the ordering between the early recovery guard and the scope close is asserted rather than assumed. */
+    onClose func()
+}
+
+func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName string, value any) error {
+    if true == instance.failOverride {
+        return exception.NewError("forced override failure", nil, nil)
+    }
+
+    return instance.Scope.OverrideProtectedInstance(serviceName, value)
+}
+
+func (instance *closeRecordingScope) Close() error {
+    instance.closed = true
+
+    if nil != instance.onClose {
+        instance.onClose()
+    }
+
+    return instance.Scope.Close()
+}
+
+type scopeRecordingContainer struct {
+    containercontract.Container
+    failOverride bool
+    onClose      func()
+    scope        *closeRecordingScope
+}
+
+func (instance *scopeRecordingContainer) NewScope() containercontract.Scope {
+    instance.scope = &closeRecordingScope{
+        Scope:        instance.Container.NewScope(),
+        failOverride: instance.failOverride,
+        onClose:      instance.onClose,
+    }
+
+    return instance.scope
+}
+
 type writeFailingResponseWriter struct {
     header     nethttp.Header
     statusCode int
@@ -240,4 +185,55 @@ func (instance *countingSessionStorage) Save(sessionId string, data map[string]a
     instance.saveCount = instance.saveCount + 1
 
     return instance.Storage.Save(sessionId, data, ttl)
+}
+
+type exceptionListenerCaptureLogger struct {
+    errorCalls       int
+    warningCalls     int
+    lastMessage      string
+    lastContext      map[string]any
+    lastErrorContext map[string]any
+}
+
+func (instance *exceptionListenerCaptureLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    if loggingcontract.LevelError == level {
+        instance.errorCalls++
+        instance.lastErrorContext = context
+    }
+    if loggingcontract.LevelWarning == level {
+        instance.warningCalls++
+    }
+    instance.lastMessage = message
+    instance.lastContext = context
+}
+
+func (instance *exceptionListenerCaptureLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *exceptionListenerCaptureLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *exceptionListenerCaptureLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *exceptionListenerCaptureLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *exceptionListenerCaptureLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+var _ loggingcontract.Logger = (*exceptionListenerCaptureLogger)(nil)
+
+func newExceptionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+
+    return runtime.New(context.Background(), scope, serviceContainer)
 }
