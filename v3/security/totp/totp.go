@@ -69,7 +69,7 @@ func GenerateSecret() (string, error) {
     return base32NoPadding.EncodeToString(raw), nil
 }
 
-/* Verify reports whether code is a valid TOTP for secret at the current time, accepting codes within the configured step skew on either side. */
+/* Verify reports whether code is a valid TOTP for secret at the current time, accepting codes within the configured step skew on either side. It reads the system clock by design — a convenience door for direct callers; a caller under an injected clock (the framework's TotpSecondFactorAuthenticator among them) verifies through VerifyAt with its own clock's instant. */
 func Verify(secret string, code string, config Config) (bool, error) {
     return VerifyAt(secret, code, time.Now(), config)
 }

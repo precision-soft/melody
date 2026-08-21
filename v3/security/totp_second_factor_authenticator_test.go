@@ -5,6 +5,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -282,5 +283,45 @@ func TestTotpSecondFactor_AnonymousPrimaryPassesThrough(t *testing.T) {
 
     if _, isPending := PendingUserFromToken(token); true == isPending {
         t.Fatal("expected no two-factor challenge when primary authentication did not succeed")
+    }
+}
+
+/* the frozen instant sits decades from the real clock, so a code generated FOR that instant authenticates only if the authenticator verifies on the injected clock — and stops authenticating once that clock alone leaves the skew window. */
+func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("secret: %v", secretErr)
+    }
+
+    frozen := clock.NewFrozenClock(time.Unix(1_000_000, 0))
+    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Enrollments: &fixedEnrollmentStore{secret: secret, enrolled: true},
+        Clock:       frozen,
+    })
+
+    code, codeErr := totp.GenerateCodeAt(secret, frozen.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("code: %v", codeErr)
+    }
+
+    token, authenticateErr := authenticator.Authenticate(totpRequest(code))
+    if nil != authenticateErr {
+        t.Fatalf("authenticate: %v", authenticateErr)
+    }
+
+    if false == token.IsAuthenticated() {
+        t.Fatal("a code minted for the injected clock's instant was refused, so the authenticator read some other clock")
+    }
+
+    frozen.Advance(10 * time.Minute)
+
+    lateToken, lateErr := authenticator.Authenticate(totpRequest(code))
+    if nil != lateErr {
+        t.Fatalf("authenticate: %v", lateErr)
+    }
+
+    if true == lateToken.IsAuthenticated() {
+        t.Fatal("the injected clock left the skew window and the code still authenticated, so the authenticator read some other clock")
     }
 }

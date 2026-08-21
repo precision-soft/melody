@@ -960,3 +960,47 @@ func TestRedisTokenStore_ClockSkewBoundWidensTheBoundaryItself(t *testing.T) {
         t.Fatalf("the stamp sits inside the verifying node's own tolerance, so only widening the boundary can refuse it — and it was honoured")
     }
 }
+
+func TestRedisTokenStore_PutWithTtlRefusesANonPositiveTtl(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:nonpositivettl"))
+
+    for name, ttl := range map[string]time.Duration{
+        "zero":     0,
+        "negative": -time.Second,
+    } {
+        func() {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("a %s ttl fell through to the store-forever spelling — the exact inversion of what an elapsed remaining lifetime asked for", name)
+                }
+            }()
+
+            store.PutWithTtl("token-bad-ttl", securitycontract.Claims{UserIdentifier: "alice"}, ttl)
+        }()
+    }
+}
+
+func TestRedisTokenStore_NegativeMaximumClockSkewIsRefusedNotIgnored(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    defer func() {
+        if nil == recover() {
+            t.Fatal("a negative skew was silently ignored: the operator believes a tighter policy is in force while the default runs")
+        }
+    }()
+
+    NewTokenStore(client, WithTokenStoreMaximumClockSkew(-time.Second))
+}
+
+func TestRedisTokenStore_NegativeEpochRetentionIsRefusedNotIgnored(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    defer func() {
+        if nil == recover() {
+            t.Fatal("a negative retention was silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass")
+        }
+    }()
+
+    NewTokenStore(client, WithRevocationEpochRetention(-time.Second))
+}

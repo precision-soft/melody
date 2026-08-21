@@ -7,7 +7,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -410,7 +412,8 @@ func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryWhileATokenRemains(t *te
     }
 }
 
-func TestInMemoryTokenStore_PurgeExpiredDropsBoundariesOfUsersWithNoTokens(t *testing.T) {
+/* the boundary of a user with NO stored tokens must survive the purge: stateless JWTs are validated against these boundaries without ever being stored, so a token-linked eviction would let the first purge after a RevokeBefore silently un-revoke every outstanding JWT of that user. */
+func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryOfAUserWithNoStoredTokens(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     store := NewInMemoryTokenStoreWithClock(frozen)
     rt := tokenStoreRuntime()
@@ -420,6 +423,7 @@ func TestInMemoryTokenStore_PurgeExpiredDropsBoundariesOfUsersWithNoTokens(t *te
     frozen.Advance(time.Minute)
     store.RevokeBefore("u1", "", frozen.Now())
 
+    frozen.Advance(time.Minute)
     store.PurgeExpired()
 
     published, err := store.RevocationEpoch(rt, "u1", "")
@@ -427,9 +431,109 @@ func TestInMemoryTokenStore_PurgeExpiredDropsBoundariesOfUsersWithNoTokens(t *te
         t.Fatalf("revocation epoch: %v", err)
     }
 
-    if false == published.IsZero() {
-        t.Fatalf("expected the boundary of a user holding no token to be dropped, got %v", published)
+    if true == published.IsZero() {
+        t.Fatal("the purge dropped the boundary of a user holding no stored tokens, so every outstanding stateless JWT of that user was silently un-revoked")
     }
+}
+
+func TestInMemoryTokenStore_PurgeExpiredHonorsTheRevocationEpochRetentionWindow(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := NewInMemoryTokenStoreWithClock(frozen).WithRevocationEpochRetention(time.Hour)
+    rt := tokenStoreRuntime()
+
+    store.RevokeBefore("u1", "", frozen.Now())
+
+    frozen.Advance(30 * time.Minute)
+    store.RevokeBefore("u1", "phone", frozen.Now())
+
+    frozen.Advance(45 * time.Minute)
+    store.PurgeExpired()
+
+    userBoundary, userErr := store.RevocationEpoch(rt, "u1", "")
+    if nil != userErr {
+        t.Fatalf("revocation epoch: %v", userErr)
+    }
+
+    if false == userBoundary.IsZero() {
+        t.Fatalf("expected the user boundary published beyond the retention window to be purged, got %v", userBoundary)
+    }
+
+    deviceBoundary, deviceErr := store.RevocationEpoch(rt, "u1", "phone")
+    if nil != deviceErr {
+        t.Fatalf("revocation epoch: %v", deviceErr)
+    }
+
+    if true == deviceBoundary.IsZero() {
+        t.Fatal("the purge dropped a device boundary still inside the retention window")
+    }
+}
+
+func TestInMemoryTokenStore_WithRevocationEpochRetentionRefusesANegativeWindow(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewInMemoryTokenStore().WithRevocationEpochRetention(-time.Second)
+    }, "token store revocation epoch retention may not be negative")
+}
+
+func TestInMemoryTokenStore_PutWithTtlRefusesANonPositiveTtl(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewInMemoryTokenStore().PutWithTtl("tok", securitycontract.Claims{UserIdentifier: "u1"}, 0)
+    }, "token store ttl must be positive")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        NewInMemoryTokenStore().PutWithTtl("tok", securitycontract.Claims{UserIdentifier: "u1"}, -time.Second)
+    }, "token store ttl must be positive")
+}
+
+/* gateClock hands out the inner clock's instants but blocks on the FIRST Now() until released, holding open the critical section that reads it so the test below can prove what may not interleave with it. */
+type gateClock struct {
+    inner    clockcontract.Clock
+    entered  chan struct{}
+    release  chan struct{}
+    gateOnce sync.Once
+}
+
+func (instance *gateClock) Now() time.Time {
+    instance.gateOnce.Do(func() {
+        close(instance.entered)
+        <-instance.release
+    })
+
+    return instance.inner.Now()
+}
+
+func (instance *gateClock) NewTicker(interval time.Duration) clockcontract.Ticker {
+    return instance.inner.NewTicker(interval)
+}
+
+/* the IssuedAt stamp and the insert must share one critical section: with the stamp read outside the lock, a RevokeBefore published between the stamp and the insert left the fresh token born already revoked. The gate holds put() open at its clock read; a RevokeBefore attempted in that window completing is the defect. */
+func TestInMemoryTokenStore_PutStampsAndInsertsAtomicallyAgainstRevokeBefore(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    gate := &gateClock{inner: frozen, entered: make(chan struct{}), release: make(chan struct{})}
+    store := NewInMemoryTokenStoreWithClock(gate)
+
+    putDone := make(chan struct{})
+    go func() {
+        store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"})
+        close(putDone)
+    }()
+
+    <-gate.entered
+
+    revokeDone := make(chan struct{})
+    go func() {
+        store.RevokeBefore("u1", "", frozen.Now().Add(time.Second))
+        close(revokeDone)
+    }()
+
+    select {
+    case <-revokeDone:
+        t.Fatal("RevokeBefore completed while put held its clock read, so a boundary could still be published between the stamp and the insert")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    close(gate.release)
+    <-putDone
+    <-revokeDone
 }
 
 func TestInMemoryTokenStore_ConcurrentRevokeAndLookupIsRaceFree(t *testing.T) {

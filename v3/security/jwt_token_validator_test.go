@@ -5,10 +5,13 @@ import (
     "crypto/sha256"
     "encoding/base64"
     "encoding/json"
+    "errors"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -629,5 +632,125 @@ func TestJwtTokenValidator_RevocationEpochSkewCoversAnAheadIssuer(t *testing.T) 
     })
     if _, err := bounded.Validate(testRuntime(), beyond); nil != err {
         t.Fatalf("a token issued well beyond the skew allowance was refused: %v", err)
+    }
+}
+
+func signJwtWithHeader(secret []byte, header map[string]any, claims map[string]any) string {
+    headerJson, _ := json.Marshal(header)
+    payloadJson, _ := json.Marshal(claims)
+
+    signingInput := base64.RawURLEncoding.EncodeToString(headerJson) + "." + base64.RawURLEncoding.EncodeToString(payloadJson)
+
+    mac := hmac.New(sha256.New, secret)
+    mac.Write([]byte(signingInput))
+
+    return signingInput + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func TestNewJwtTokenValidator_RefusesANegativeRevocationEpochSkew(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret"), RevocationEpochSkew: -time.Second})
+    }, "jwt revocation epoch skew may not be negative")
+}
+
+/* the validator must keep its own copy of the secret: retained by reference, the caller's slice stays mutable under every later signature check, so zeroing or rotating it in place silently changes what the validator verifies against. */
+func TestJwtTokenValidator_CopiesTheSecret(t *testing.T) {
+    secret := []byte("copy-me-before-i-change")
+    tokenString := signJwtHs256(append([]byte{}, secret...), map[string]any{
+        "sub": "user-1",
+        "exp": time.Now().Add(time.Hour).Unix(),
+    })
+
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
+
+    for index := range secret {
+        secret[index] = 0
+    }
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
+        t.Fatalf("mutating the caller's secret slice changed what the validator verifies against: %v", validateErr)
+    }
+}
+
+/* domain separation: the internal-auth envelope signs under its own typ through the same HS256 primitive, so under a shared or reused secret it must be refused HERE by type, not merely by which claims it happens to carry. */
+func TestJwtTokenValidator_RefusesTheInternalAuthEnvelopeType(t *testing.T) {
+    secret := []byte("shared-secret")
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, SubjectClaim: "app", AllowWithoutExpiry: true})
+
+    envelopeShaped := signJwtWithHeader(
+        secret,
+        map[string]any{"alg": "HS256", "typ": "melody-internal", "kid": "key-1"},
+        map[string]any{"app": "wms-service", "exp": time.Now().Add(time.Hour).Unix()},
+    )
+
+    _, validateErr := validator.Validate(testRuntime(), envelopeShaped)
+    if nil == validateErr {
+        t.Fatal("an internal-auth envelope verified as a jwt: the typ must refuse it whatever the claims spell")
+    }
+}
+
+func TestJwtTokenValidator_AcceptsAbsentAndLowerCaseJwtType(t *testing.T) {
+    secret := []byte("secret")
+
+    withoutType := signJwtWithHeader(
+        secret,
+        map[string]any{"alg": "HS256"},
+        map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()},
+    )
+
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
+    if _, validateErr := validator.Validate(testRuntime(), withoutType); nil != validateErr {
+        t.Fatalf("RFC 7519 makes typ optional, so an absent typ must verify: %v", validateErr)
+    }
+
+    lowerCase := signJwtWithHeader(
+        secret,
+        map[string]any{"alg": "HS256", "typ": "jwt"},
+        map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()},
+    )
+
+    if _, validateErr := validator.Validate(testRuntime(), lowerCase); nil != validateErr {
+        t.Fatalf("typ compares case-insensitively per RFC 7519 §5.1, so \"jwt\" must verify: %v", validateErr)
+    }
+}
+
+/* the frozen instant sits decades away from the real clock, so a token expiring shortly after it verifies ONLY if the validator reads the injected clock — and stops verifying when that clock alone advances. */
+func TestJwtTokenValidator_VerifiesTimeClaimsAgainstTheInjectedClock(t *testing.T) {
+    secret := []byte("secret")
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: frozen})
+
+    tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": int64(2000)})
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
+        t.Fatalf("a token unexpired on the injected clock was refused, so the validator read some other clock: %v", validateErr)
+    }
+
+    frozen.Advance(30 * time.Minute)
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
+        t.Fatal("the injected clock passed the expiry and the token still verified, so the validator read some other clock")
+    }
+}
+
+func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T) {
+    secret := []byte("secret")
+    store := &revocationEpochStoreStub{failure: errors.New("redis is down")}
+
+    validator := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, store)
+
+    tokenString := signJwtHs256(secret, map[string]any{
+        "sub": "alice",
+        "iat": time.Now().Add(-time.Minute).Unix(),
+        "exp": time.Now().Add(time.Hour).Unix(),
+    })
+
+    _, validateErr := validator.Validate(testRuntime(), tokenString)
+    if nil == validateErr {
+        t.Fatal("an unanswerable epoch store must fail the validation closed")
+    }
+
+    if false == isInfrastructureFailure(validateErr) {
+        t.Fatal("the epoch store failing to answer is the platform's failure and must carry the infrastructure mark")
     }
 }

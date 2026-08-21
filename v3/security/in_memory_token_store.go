@@ -30,11 +30,30 @@ func NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock) *InMemory
 }
 
 type InMemoryTokenStore struct {
-    clock          clockcontract.Clock
-    mutex          sync.RWMutex
-    entriesByToken map[string]tokenEntry
-    tokensByUser   map[string]map[string]struct{}
-    epochsByUser   map[string]map[string]time.Time
+    clock                    clockcontract.Clock
+    mutex                    sync.RWMutex
+    entriesByToken           map[string]tokenEntry
+    tokensByUser             map[string]map[string]struct{}
+    epochsByUser             map[string]map[string]time.Time
+    revocationEpochRetention time.Duration
+}
+
+/* WithRevocationEpochRetention bounds how long PurgeExpired keeps a published revocation boundary after its instant, mirroring the rueidis store's option of the same name. Zero — the default — keeps boundaries forever: a boundary is what refuses every token issued before it, stateless JWTs above all, so its life may not depend on anything else the store holds. A negative retention is refused rather than silently ignored, because a boundary dropped early is a revocation bypass. Chainable; call it at boot, before the store is shared. */
+func (instance *InMemoryTokenStore) WithRevocationEpochRetention(retention time.Duration) *InMemoryTokenStore {
+    if 0 > retention {
+        exception.Panic(exception.NewError(
+            "token store revocation epoch retention may not be negative",
+            map[string]any{"retention": retention.String()},
+            nil,
+        ))
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.revocationEpochRetention = retention
+
+    return instance
 }
 
 const (
@@ -57,16 +76,20 @@ type tokenEntry struct {
 }
 
 func (instance *InMemoryTokenStore) Put(tokenString string, claims securitycontract.Claims) {
-    instance.put(tokenString, claims, time.Time{})
+    instance.put(tokenString, claims, 0)
 }
 
 func (instance *InMemoryTokenStore) PutWithTtl(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
-    expiresAt := time.Time{}
-    if 0 < ttl {
-        expiresAt = instance.clock.Now().Add(ttl)
+    /* @important a non-positive ttl is refused instead of falling through to the never-expires sentinel: the likeliest caller of a ttl <= 0 computed a remaining lifetime that had already elapsed, and storing that token FOREVER is the exact inversion of what was asked. The token string never joins the context — it is the credential. */
+    if 0 >= ttl {
+        exception.Panic(exception.NewError(
+            "token store ttl must be positive",
+            map[string]any{"ttl": ttl.String(), "user": claims.UserIdentifier},
+            nil,
+        ))
     }
 
-    instance.put(tokenString, claims, expiresAt)
+    instance.put(tokenString, claims, ttl)
 }
 
 func (instance *InMemoryTokenStore) Delete(tokenString string) {
@@ -114,9 +137,19 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
         }
     }
 
-    for userIdentifier := range instance.epochsByUser {
-        if _, holdsTokens := instance.tokensByUser[userIdentifier]; false == holdsTokens {
-            delete(instance.epochsByUser, userIdentifier)
+    /* @important a revocation boundary's life is bound to the configured retention window ALONE, never to whether the user still holds stored tokens: stateless JWTs are validated against these boundaries without ever being stored, so the previous token-linked eviction meant the first purge after a RevokeBefore silently un-revoked every outstanding JWT of a user with no stored tokens. With the default zero retention boundaries are kept forever. */
+    if 0 < instance.revocationEpochRetention {
+        horizon := now.Add(-instance.revocationEpochRetention)
+        for userIdentifier, boundaries := range instance.epochsByUser {
+            for field, instant := range boundaries {
+                if true == instant.Before(horizon) {
+                    delete(boundaries, field)
+                }
+            }
+
+            if 0 == len(boundaries) {
+                delete(instance.epochsByUser, userIdentifier)
+            }
         }
     }
 
@@ -266,11 +299,19 @@ func (instance *InMemoryTokenStore) isRevokedLocked(claims securitycontract.Clai
     return false == claims.IssuedAt.After(epoch)
 }
 
-func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontract.Claims, expiresAt time.Time) {
-    claims.IssuedAt = instance.clock.Now()
-
+func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    /* @important the IssuedAt stamp is read under the same critical section that inserts the entry, so a RevokeBefore can no longer be published between the stamp and the insert: without this, a token stamped before a concurrent revocation but inserted after it was born already revoked, and a "revoke everything, then log in again" sequence bounced the fresh login. The ttl-derived expiry reads the same instant for the same reason. */
+    now := instance.clock.Now()
+
+    claims.IssuedAt = now
+
+    expiresAt := time.Time{}
+    if 0 < ttl {
+        expiresAt = now.Add(ttl)
+    }
 
     if existing, found := instance.entriesByToken[tokenString]; true == found && existing.claims.UserIdentifier != claims.UserIdentifier {
         instance.unindexLocked(existing.claims.UserIdentifier, tokenString)

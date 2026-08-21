@@ -4,9 +4,12 @@ import (
     "bytes"
     "io"
     nethttp "net/http"
+    "net/url"
     "strconv"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -36,6 +39,9 @@ type HmacTokenSourceConfig struct {
 
     /* VerifyBodyBeforeNonce selects the default order of the body and nonce checks. When false (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When true the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. A per-request override (route attribute HmacVerifyBodyBeforeNonceAttribute, or SetHmacVerifyBodyBeforeNonce) takes precedence for routes/calls that need the opposite trade-off. */
     VerifyBodyBeforeNonce bool
+
+    /* Clock is the clock the envelope's time window and the nonce ttl are measured against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
+    Clock clockcontract.Clock
 }
 
 func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
@@ -52,9 +58,14 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         headerName = DefaultHmacHeaderName
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
     var nonceGuard securitycontract.NonceGuard = config.NonceGuard
     if true == internal.IsNilInterface(nonceGuard) {
-        nonceGuard = NewMemoryNonceGuard()
+        nonceGuard = NewMemoryNonceGuardWithClock(clockInstance)
     }
 
     return &HmacTokenSource{
@@ -66,6 +77,7 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         maxFutureExpiry:       config.MaxFutureExpiry,
         verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,
         serviceIdentity:       config.ServiceIdentity,
+        clock:                 clockInstance,
     }
 }
 
@@ -83,6 +95,7 @@ type HmacTokenSource struct {
     maxFutureExpiry       time.Duration
     verifyBodyBeforeNonce bool
     serviceIdentity       string
+    clock                 clockcontract.Clock
 }
 
 func (instance *HmacTokenSource) Name() string {
@@ -132,7 +145,7 @@ func (instance *HmacTokenSource) Resolve(
         return instance.reject(runtimeInstance, bindErr)
     }
 
-    if timeErr := instance.verifyTimeWindow(envelope, time.Now()); nil != timeErr {
+    if timeErr := instance.verifyTimeWindow(envelope, instance.clock.Now()); nil != timeErr {
         return instance.reject(runtimeInstance, timeErr)
     }
 
@@ -193,9 +206,13 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
     }
 
     if envelope.Query != httpRequest.URL.RawQuery {
+        /* the two query strings carry whatever the caller put in the url — `?token=`, `?api_key=` — and this context lands in the log through reject, so only the parameter NAMES survive into it: they are what makes the mismatch diagnosable, the values are what must not be journaled. */
         return exception.NewError(
             "internal-auth query does not match the request",
-            map[string]any{"signed": envelope.Query, "request": httpRequest.URL.RawQuery},
+            map[string]any{
+                "signed":  sanitizeQueryValuesForDiagnostics(envelope.Query),
+                "request": sanitizeQueryValuesForDiagnostics(httpRequest.URL.RawQuery),
+            },
             nil,
         )
     }
@@ -253,7 +270,7 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
         return exception.NewError("internal-auth envelope is missing a nonce", nil, nil)
     }
 
-    ttl := time.Until(time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway))
+    ttl := time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway).Sub(instance.clock.Now())
     if 0 >= ttl {
         /* the nonce guard does not record a non-positive ttl, so an envelope at the very edge of the acceptance window would be admitted without ever being remembered — and thus replayable. verifyTimeWindow treats that edge as still valid, so reject it here to keep the recorded window exactly as wide as the accepted one. */
         return exception.NewError("internal-auth envelope is too close to expiry to guard against replay", nil, nil)
@@ -261,7 +278,8 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
 
     seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, hmacNonceGuardKey(keyId, envelope.Nonce), ttl)
     if nil != rememberErr {
-        return exception.NewError("internal-auth nonce guard failed", nil, rememberErr)
+        /* the guard failing to answer is the platform's failure, not the envelope's: the mark is what makes reject log it as the incident it is — a shared guard down degrades every internal caller to anonymous at once — instead of the routine Info a forged envelope earns. */
+        return exception.NewError("internal-auth nonce guard failed", nil, markInfrastructureFailure(rememberErr))
     }
 
     if true == seen {
@@ -315,11 +333,36 @@ func (instance *HmacTokenSource) reject(
 ) (securitycontract.Token, error) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil != logger {
-        logger.Info("internal-auth envelope rejected", exception.LogContext(cause))
+        /* every rejection fails closed to anonymous, but the two kinds must not share a severity: a bad envelope at Info is routine noise, while an infrastructure failure — the shared nonce guard down — silently degrades every internal caller to anonymous at once, and this record is the only place that incident surfaces. */
+        if true == isInfrastructureFailure(cause) {
+            logger.Error("internal-auth verification infrastructure failed", exception.LogContext(cause))
+        } else {
+            logger.Info("internal-auth envelope rejected", exception.LogContext(cause))
+        }
     }
 
     return NewAnonymousToken(), nil
 }
+
+/* sanitizeQueryValuesForDiagnostics keeps the parameter names of a raw query string and redacts every value, the same judgement the http client's url sanitizer applies; a query that does not parse is redacted whole, because an unparseable query cannot have its secret half told apart from its diagnosable half. */
+func sanitizeQueryValuesForDiagnostics(rawQuery string) string {
+    if "" == rawQuery {
+        return ""
+    }
+
+    queryValues, parseErr := url.ParseQuery(rawQuery)
+    if nil != parseErr {
+        return redactedQueryValue
+    }
+
+    for key := range queryValues {
+        queryValues.Set(key, redactedQueryValue)
+    }
+
+    return queryValues.Encode()
+}
+
+const redactedQueryValue = "xxxxx"
 
 /* readAndRestoreBody reads the full request body so it can be hashed, then replaces the consumed body (and GetBody) with a fresh reader so the downstream handler still sees it. Reading happens only after the envelope signature has already been verified, so an unauthenticated caller can never make the server buffer a body. */
 func readAndRestoreBody(httpRequest *nethttp.Request) ([]byte, error) {

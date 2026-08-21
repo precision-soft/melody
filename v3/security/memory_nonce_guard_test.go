@@ -3,6 +3,9 @@ package security
 import (
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v3/clock"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func TestMemoryNonceGuard_DetectsReplayWithinWindow(t *testing.T) {
@@ -58,4 +61,30 @@ func TestMemoryNonceGuard_PurgeIsAmortizedWithinInterval(t *testing.T) {
     if guard.lastPurge != firstPurge {
         t.Fatal("expected no second purge within the amortization interval")
     }
+}
+
+/* the frozen instant sits decades from the real clock: expiry driven by Advance alone proves the guard reads the injected clock, not the system one. */
+func TestMemoryNonceGuard_ExpiryRunsOnTheInjectedClock(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    guard := NewMemoryNonceGuardWithClock(frozen)
+
+    if seen, _ := guard.Remember(nil, "n1", 30*time.Second); true == seen {
+        t.Fatal("expected the first use of a nonce to be unseen")
+    }
+
+    if seen, _ := guard.Remember(nil, "n1", 30*time.Second); false == seen {
+        t.Fatal("expected the nonce to read as a replay while its window is open on the injected clock")
+    }
+
+    frozen.Advance(31 * time.Second)
+
+    if seen, _ := guard.Remember(nil, "n1", 30*time.Second); true == seen {
+        t.Fatal("the injected clock passed the expiry and the nonce still read as a replay, so the guard read some other clock")
+    }
+}
+
+func TestNewMemoryNonceGuardWithClock_RefusesANilClock(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewMemoryNonceGuardWithClock(nil)
+    }, "nonce guard clock is nil")
 }

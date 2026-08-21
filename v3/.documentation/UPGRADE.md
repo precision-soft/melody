@@ -42,6 +42,30 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None if you relied on authentication being required, which is the safe reading. A caller that intentionally passed an empty attribute list to `DecideAll` expecting a grant must pass the attributes it means to check.
 
+### Security: the internal-auth envelope carries its own `typ`, and the JWT validator refuses it
+
+**What changed.** The internal-auth envelope and the JSON web token were both HS256 over the same signing primitive in a byte-identical three-part shape, with nothing but secret disjointness — which nothing enforces — telling them apart. The envelope now signs under `typ: "melody-internal"`, the decoder REQUIRES that type, and the JWT validator refuses any `typ` that is not absent or `JWT` (case-insensitive).
+
+**Symptom.** An envelope minted by an earlier build of the signer is rejected by an upgraded verifier ("internal-auth type is not accepted" in the journal at Info). With the default thirty-second envelope ttl, the exposure is one rolling-deploy window in a fleet where signers and verifiers upgrade at different moments. A JWT minted with an exotic `typ` (anything other than absent or `JWT`) is now refused.
+
+**Remedy.** Upgrade verifiers and signers within the envelope ttl of one another, or tolerate the one-window rejections — they fail closed to anonymous, exactly as an expired envelope does. A JWT issuer that stamps a non-standard `typ` must mint with `JWT` or drop the field.
+
+### Security: both token stores refuse a non-positive ttl on `PutWithTtl`
+
+**What changed.** `InMemoryTokenStore.PutWithTtl` and `RedisTokenStore.PutWithTtl` stored the token with NO expiry when the ttl was zero or negative. Both now panic on `ttl <= 0`, naming the value; the contract sentence on `RevocableTokenStore` says so.
+
+**Symptom.** A caller computing a token's remaining lifetime that has already elapsed — the likeliest source of a non-positive ttl — used to leave a permanent entry; it now fails loudly at the call site.
+
+**Remedy.** A caller that genuinely means "no expiry" calls `Put`, which is that contract's name. A caller passing a computed remainder guards the sign and treats an elapsed lifetime as the expired token it is.
+
+### Security: the in-memory store keeps revocation boundaries until their retention passes
+
+**What changed.** `InMemoryTokenStore.PurgeExpired` dropped every revocation boundary of a user who held no stored tokens; stateless JWTs are never stored, so a JWT-only deployment lost its boundaries on the first purge. Boundaries are now kept forever by default, and the new `WithRevocationEpochRetention` bounds their life the way the rueidis store's option of the same name does. Separately, a negative `JwtConfig.RevocationEpochSkew` and negative values passed to the rueidis `WithTokenStoreMaximumClockSkew`/`WithRevocationEpochRetention` options are refused at construction instead of narrowing a revocation or being silently ignored.
+
+**Symptom.** A long-lived process using the in-memory store as its epoch store retains one entry per revoked user indefinitely unless a retention is configured. A boot passing a negative skew or retention now fails at construction where it used to run a different policy in silence.
+
+**Remedy.** Configure `WithRevocationEpochRetention` to at least the longest token lifetime you mint — a boundary outliving every token it can refuse changes nothing thereafter. Fix any negative duration the boot now rejects; the sign was never doing what its author meant.
+
 ### Bunorm: the registry refuses new callers while a pool is still closing
 
 **What changed.** `ManagerRegistry.Close` marked the registry closed and then held the registry lock for the whole teardown, closing every manager and every migration database inside the critical section. It now publishes the flag under the lock, takes a snapshot of the two maps, releases the lock, and closes the pools outside it.

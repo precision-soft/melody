@@ -21,9 +21,73 @@ import (
     "github.com/precision-soft/melody/v3/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
+
+type recordedLogRecord struct {
+    level   loggingcontract.Level
+    message string
+    context loggingcontract.Context
+}
+
+/* recordingLogger captures every record with its level, so a test can assert the SEVERITY a path logged at, not only that it logged. */
+type recordingLogger struct {
+    mutex   sync.Mutex
+    records []recordedLogRecord
+}
+
+func (instance *recordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, recordedLogRecord{level: level, message: message, context: context})
+}
+
+func (instance *recordingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *recordingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *recordingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *recordingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *recordingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func (instance *recordingLogger) recordsAtLevel(level loggingcontract.Level) []recordedLogRecord {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    matched := []recordedLogRecord{}
+    for _, record := range instance.records {
+        if level == record.level {
+            matched = append(matched, record)
+        }
+    }
+
+    return matched
+}
+
+func runtimeWithRecordingLogger() (runtimecontract.Runtime, *recordingLogger) {
+    logger := &recordingLogger{}
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+
+    return runtime.New(context.Background(), scope, serviceContainer), logger
+}
 
 type securityTestRequestContext struct {
     requestIdValue string

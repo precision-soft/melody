@@ -257,8 +257,13 @@ func WithTokenStoreClock(clockInstance clockcontract.Clock) TokenStoreOption {
 
 func WithTokenStoreMaximumClockSkew(skew time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
+        /* @important a negative skew is refused rather than silently ignored: ignored, the operator who configured it believes a tighter policy is in force while the default runs — and had the value been carried instead, it would have NARROWED every revocation boundary, a bypass. */
         if 0 > skew {
-            return
+            exception.Panic(exception.NewError(
+                "redis token store maximum clock skew may not be negative",
+                map[string]any{"skew": skew.String()},
+                nil,
+            ))
         }
 
         store.maximumClockSkew = skew
@@ -267,7 +272,16 @@ func WithTokenStoreMaximumClockSkew(skew time.Duration) TokenStoreOption {
 
 func WithRevocationEpochRetention(retention time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
-        if 0 >= retention {
+        /* @important a negative retention is refused rather than silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass, and the silent fallback told the operator nothing. A zero keeps the default retention, the "no override" spelling. */
+        if 0 > retention {
+            exception.Panic(exception.NewError(
+                "redis token store revocation epoch retention may not be negative",
+                map[string]any{"retention": retention.String()},
+                nil,
+            ))
+        }
+
+        if 0 == retention {
             return
         }
 
@@ -290,6 +304,15 @@ func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract
 }
 
 func (instance *RedisTokenStore) PutWithTtl(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
+    /* @important a non-positive ttl is refused instead of falling through to the store-forever spelling: the likeliest caller of a ttl <= 0 computed a remaining lifetime that had already elapsed, and storing that token with no expiry is the exact inversion of what was asked. The token string never joins the context — it is the credential. */
+    if 0 >= ttl {
+        exception.Panic(exception.NewError(
+            "redis token store ttl must be positive",
+            map[string]any{"ttl": ttl.String(), "user": claims.UserIdentifier},
+            nil,
+        ))
+    }
+
     instance.put(tokenString, claims, ttl)
 }
 
@@ -612,6 +635,7 @@ func (instance *RedisTokenStore) tokenIsRevoked(issuedAt time.Time, epochValues 
 }
 
 func (instance *RedisTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
+    /* the IssuedAt stamp is read client-side, one round trip before the script lands, BY DESIGN: this store's stamps come from the injected clock (WithTokenStoreClock), and a server-side stamp would swap the clock authority for redis's own. The window a RevokeBefore can slip into is one marshal plus one round trip, it fails CLOSED (the fresh token reads as pre-boundary and is refused, never the reverse), and in a fleet the same interleaving exists between instances regardless — WithTokenStoreMaximumClockSkew is the knob that absorbs it. */
     claims.IssuedAt = instance.clock.Now()
 
     payload, marshalErr := json.Marshal(claims)

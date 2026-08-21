@@ -2,15 +2,22 @@ package security
 
 import (
     "bytes"
+    "encoding/base64"
+    "encoding/json"
+    "errors"
+    "fmt"
     "io"
     "net/http/httptest"
     "strings"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -670,5 +677,168 @@ func TestHmacNonceGuardKey_ColonExtensionKeyIdsCannotCollide(t *testing.T) {
     secondSeen, secondErr := guard.Remember(testRuntime(), hmacNonceGuardKey("a:b", "nonce"), time.Minute)
     if nil != secondErr || true == secondSeen {
         t.Fatalf("expected key a:b's nonce to stay unburned, got seen=%t err=%v", secondSeen, secondErr)
+    }
+}
+
+/* the pre-typ wire format: a header carrying alg and kid alone, signed correctly. The decoder must refuse it — requiring the envelope's own typ is the structural half of the domain separation from every other HS256 credential. */
+func TestHmacTokenSource_RejectsAnEnvelopeWithoutTheInternalAuthType(t *testing.T) {
+    secret := []byte("current-shared-secret-value-0001")
+    now := time.Now()
+
+    payloadBytes, _ := json.Marshal(hmacEnvelope{
+        App:       "wms-service",
+        Method:    "GET",
+        Path:      "/internal/ping",
+        IssuedAt:  now.Unix(),
+        ExpiresAt: now.Add(30 * time.Second).Unix(),
+        Nonce:     "nonce-1",
+        BodyHash:  hashBody(nil),
+    })
+
+    headerBytes, _ := json.Marshal(map[string]string{"alg": "HS256", "kid": "key-current"})
+
+    part0 := base64.RawURLEncoding.EncodeToString(headerBytes)
+    part1 := base64.RawURLEncoding.EncodeToString(payloadBytes)
+    signature := signHmacSha256(part0+"."+part1, secret)
+    headerValue := part0 + "." + part1 + "." + base64.RawURLEncoding.EncodeToString(signature)
+
+    source := hmacTestSource(NewMemoryNonceGuard())
+    token, resolveErr := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, DefaultHmacHeaderName, headerValue))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if true == token.IsAuthenticated() {
+        t.Fatal("a correctly signed envelope without the internal-auth typ authenticated: nothing separates the envelope from any other HS256 credential")
+    }
+}
+
+/* failingNonceGuard models the shared guard's backend being down. */
+type failingNonceGuard struct {
+    failure error
+}
+
+func (instance *failingNonceGuard) Remember(_ runtimecontract.Runtime, _ string, _ time.Duration) (bool, error) {
+    return false, instance.failure
+}
+
+func TestHmacTokenSource_NonceGuardFailureLogsAtErrorAndFailsClosed(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    headerValue, signErr := signer.Sign("GET", "/internal/ping", nil, nil)
+    if nil != signErr {
+        t.Fatalf("sign: %v", signErr)
+    }
+
+    source := hmacTestSource(&failingNonceGuard{failure: errors.New("redis is down")})
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(runtimeInstance, hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if true == token.IsAuthenticated() {
+        t.Fatal("an unanswerable nonce guard must fail closed to anonymous")
+    }
+
+    errorRecords := logger.recordsAtLevel(loggingcontract.LevelError)
+    if 1 != len(errorRecords) {
+        t.Fatalf("the guard's backend being down degrades every internal caller to anonymous at once and must be filed at Error, got %d error records", len(errorRecords))
+    }
+
+    if 0 != len(logger.recordsAtLevel(loggingcontract.LevelInfo)) {
+        t.Fatal("the infrastructure failure must not additionally be filed as a routine Info rejection")
+    }
+}
+
+func TestHmacTokenSource_ForgedEnvelopeStaysAtInfo(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    headerValue, _ := signer.Sign("GET", "/internal/ping", nil, nil)
+
+    source := hmacTestSource(NewMemoryNonceGuard())
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(runtimeInstance, hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), tamperHmacPayload(headerValue)))
+    if nil != resolveErr || true == token.IsAuthenticated() {
+        t.Fatalf("a tampered envelope must resolve anonymous without error: authenticated=%v err=%v", token.IsAuthenticated(), resolveErr)
+    }
+
+    if 0 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatal("a forged envelope is routine noise and must not be filed at Error")
+    }
+
+    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelInfo)) {
+        t.Fatal("a forged envelope must be filed at Info")
+    }
+}
+
+/* both query strings carry whatever the caller put in the url; only the parameter NAMES may reach the journal. */
+func TestHmacTokenSource_QueryMismatchContextCarriesNamesButNoValues(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    headerValue, signErr := signer.Sign("GET", "/internal/ping?api_key=SIGNEDSECRETVALUE", nil, nil)
+    if nil != signErr {
+        t.Fatalf("sign: %v", signErr)
+    }
+
+    source := hmacTestSource(NewMemoryNonceGuard())
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(
+        runtimeInstance,
+        hmacRequest("GET", "/internal/ping?api_key=PRESENTEDSECRETVALUE", nil, signer.HeaderName(), headerValue),
+    )
+    if nil != resolveErr || true == token.IsAuthenticated() {
+        t.Fatalf("a query mismatch must resolve anonymous without error: authenticated=%v err=%v", token.IsAuthenticated(), resolveErr)
+    }
+
+    infoRecords := logger.recordsAtLevel(loggingcontract.LevelInfo)
+    if 1 != len(infoRecords) {
+        t.Fatalf("expected the rejection to be filed once at Info, got %d records", len(infoRecords))
+    }
+
+    rendered := fmt.Sprintf("%v", infoRecords[0].context)
+    if true == strings.Contains(rendered, "SIGNEDSECRETVALUE") || true == strings.Contains(rendered, "PRESENTEDSECRETVALUE") {
+        t.Fatalf("a query VALUE reached the journal: %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "api_key") {
+        t.Fatalf("the parameter name is what makes the mismatch diagnosable and must survive the redaction: %s", rendered)
+    }
+}
+
+/* the frozen instant sits decades from the real clock, so the envelope verifies ONLY if the signer stamps and the source measures on the injected clocks — and stops verifying when that clock alone advances past the window. */
+func TestHmacTokenSource_TimeWindowRunsOnTheInjectedClock(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets(), Clock: frozen})
+    headerValue, signErr := signer.Sign("GET", "/internal/ping", nil, nil)
+    if nil != signErr {
+        t.Fatalf("sign: %v", signErr)
+    }
+
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets: hmacTestSecrets(),
+        Apps:    hmacTestApps(),
+        Clock:   frozen,
+    })
+
+    token, resolveErr := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if false == token.IsAuthenticated() {
+        t.Fatal("an envelope inside its window on the injected clock was refused, so signer or source read some other clock")
+    }
+
+    frozen.Advance(time.Hour)
+
+    lateToken, lateErr := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+    if nil != lateErr {
+        t.Fatalf("resolve: %v", lateErr)
+    }
+
+    if true == lateToken.IsAuthenticated() {
+        t.Fatal("the injected clock passed the expiry and the envelope still verified, so the source read some other clock")
     }
 }

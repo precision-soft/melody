@@ -4,6 +4,8 @@ import (
     "math"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -37,6 +39,9 @@ type TotpSecondFactorAuthenticatorConfig struct {
 
     /* ReplayGuard enforces single use of an accepted code within its validity window (the same NonceGuard contract the HMAC source uses). Optional: defaults to an in-process guard, so supply a shared one for multi-instance deployments. */
     ReplayGuard securitycontract.NonceGuard
+
+    /* Clock is the clock the code is verified against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
+    Clock clockcontract.Clock
 }
 
 func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig) *TotpSecondFactorAuthenticator {
@@ -58,10 +63,15 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
         recoveryHeaderName = DefaultTotpRecoveryHeaderName
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
     /* default to an in-process replay guard (as the HMAC source does) so an accepted code cannot be replayed within its validity window out of the box; multi-instance deployments supply a shared guard. */
     var replayGuard securitycontract.NonceGuard = config.ReplayGuard
     if true == internal.IsNilInterface(replayGuard) {
-        replayGuard = NewMemoryNonceGuard()
+        replayGuard = NewMemoryNonceGuardWithClock(clockInstance)
     }
 
     return &TotpSecondFactorAuthenticator{
@@ -71,6 +81,7 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
         recoveryHeaderName: recoveryHeaderName,
         totpConfig:         config.Totp,
         replayGuard:        replayGuard,
+        clock:              clockInstance,
     }
 }
 
@@ -81,6 +92,7 @@ type TotpSecondFactorAuthenticator struct {
     recoveryHeaderName string
     totpConfig         totp.Config
     replayGuard        securitycontract.NonceGuard
+    clock              clockcontract.Clock
 }
 
 func (instance *TotpSecondFactorAuthenticator) Supports(request httpcontract.Request) bool {
@@ -130,7 +142,7 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     secret string,
     code string,
 ) (securitycontract.Token, error) {
-    verified, verifyErr := totp.Verify(secret, code, instance.totpConfig)
+    verified, verifyErr := totp.VerifyAt(secret, code, instance.clock.Now(), instance.totpConfig)
     if nil != verifyErr {
         return nil, exception.NewError("could not verify the two-factor code", nil, verifyErr)
     }
