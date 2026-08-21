@@ -10,15 +10,24 @@ import (
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/precision-soft/melody/v3/validation"
 )
 
 func (instance *Request) BindJson(target any) error {
+    return bindJsonBody(instance, target)
+}
+
+/* bindJsonBody is the one json-reading half of the framework: the request method above and the typed
+   JsonHandler both answer through it, so the configured body limit with its 413, the decoder's own
+   diagnosis kept as the refusal's cause and the empty-body refusal are read once rather than written
+   twice and drifted apart. */
+func bindJsonBody(instance httpcontract.Request, target any) error {
     if nil == target {
         return exception.NewError("bind target is nil", map[string]any{}, nil)
     }
 
-    if nil == instance.httpRequest.Body {
+    if nil == instance.HttpRequest() || nil == instance.HttpRequest().Body {
         return exception.NewHttpException(400, "invalid request body")
     }
 
@@ -30,7 +39,7 @@ func (instance *Request) BindJson(target any) error {
         overLimitAllowance++
     }
 
-    limitedReader := io.LimitReader(instance.httpRequest.Body, overLimitAllowance)
+    limitedReader := io.LimitReader(instance.HttpRequest().Body, overLimitAllowance)
     bodyBytes, err := io.ReadAll(limitedReader)
     if nil != err {
         var maxBytesError *nethttp.MaxBytesError
@@ -65,7 +74,17 @@ func (instance *Request) BindJsonAndValidate(target any) error {
         return bindJsonErr
     }
 
-    validatorInstance := validation.ValidatorMustFromContainer(instance.runtimeInstance.Container())
+    return validateBoundBody(instance.runtimeInstance, target)
+}
+
+/* validateBoundBody is the one validation half every json-binding door answers through — the request
+   method above and the typed JsonHandler alike. Held in two places it drifted: the typed handler
+   flattened the collection into the exception's message, so its client read a joined sentence where
+   the binding method's client read the validationErrors array, and the listener's rule-wiring
+   classification — which reads exactly that context key — never fired for it, leaving a route broken
+   by a struct-tag typo recorded at warning among the users who mistyped their address. */
+func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) error {
+    validatorInstance := validation.ValidatorMustFromContainer(runtimeInstance.Container())
 
     validationError := validatorInstance.Validate(target)
     if nil == validationError {

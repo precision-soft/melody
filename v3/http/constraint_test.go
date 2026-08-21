@@ -4,6 +4,8 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func TestNewRequirement_CarriesBothHalvesOfTheConstraint(t *testing.T) {
@@ -20,8 +22,8 @@ func TestNewRequirement_CarriesBothHalvesOfTheConstraint(t *testing.T) {
 
 func TestNewRequirements_MapsEveryCompleteRequirement(t *testing.T) {
     requirements := NewRequirements(
-        *NewRequirement("id", ConstraintNumeric),
-        *NewRequirement("slug", ConstraintAlphaLowercase),
+        NewRequirement("id", ConstraintNumeric),
+        NewRequirement("slug", ConstraintAlphaLowercase),
     )
 
     if 2 != len(requirements) {
@@ -37,27 +39,63 @@ func TestNewRequirements_MapsEveryCompleteRequirement(t *testing.T) {
     }
 }
 
-func TestNewRequirements_DropsARequirementMissingEitherHalf(t *testing.T) {
+func TestNewRequirements_RefusesARequirementWithNoParameterName(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewRequirements(NewRequirement("", ConstraintNumeric))
+        },
+        "route requirement parameter name may not be empty",
+    )
+}
+
+func TestNewRequirements_RefusesARequirementWithNoPattern(t *testing.T) {
+    /* the drop this replaces failed OPEN: the parameter kept no constraint at all, so a segment the
+       developer declared numeric matched anything */
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewRequirements(NewRequirement("slug", ""))
+        },
+        "route requirement pattern may not be empty",
+    )
+}
+
+func TestNewRequirements_RefusesANilRequirement(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewRequirements(nil)
+        },
+        "route requirement may not be nil",
+    )
+}
+
+func TestNewRequirements_RefusesOneParameterDeclaredTwice(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewRequirements(
+                RequireNumeric("id"),
+                RequireAlpha("id"),
+            )
+        },
+        "route requirement declared twice for one parameter",
+    )
+}
+
+func TestNewRequirements_KeepsEveryCompleteRequirementBesideTheRefusals(t *testing.T) {
     requirements := NewRequirements(
-        *NewRequirement("", ConstraintNumeric),
-        *NewRequirement("slug", ""),
-        *NewRequirement("id", ConstraintNumeric),
+        NewRequirement("id", ConstraintNumeric),
+        NewRequirement("slug", ConstraintAlphaLowercase),
     )
 
-    if 1 != len(requirements) {
-        t.Fatalf("expected only the complete requirement to survive, got: %v", requirements)
-    }
-
-    if _, present := requirements[""]; true == present {
-        t.Fatalf("a requirement with no parameter name was stored under an empty key")
-    }
-
-    if _, present := requirements["slug"]; true == present {
-        t.Fatalf("a requirement with no pattern was stored")
+    if 2 != len(requirements) {
+        t.Fatalf("expected both requirements to survive, got: %v", requirements)
     }
 
     if ConstraintNumeric != requirements["id"] {
-        t.Fatalf("expected the complete requirement to survive, got: %v", requirements)
+        t.Fatalf("unexpected pattern for id: %v", requirements)
     }
 }
 
@@ -106,7 +144,7 @@ func TestRequireShorthands_AreEnforcedByTheRouter(t *testing.T) {
         routeRegistryTestHandler(),
         &RouteOptions{
             methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(*RequireNumeric("id")),
+            requirements: NewRequirements(RequireNumeric("id")),
         },
     )
 
@@ -135,7 +173,7 @@ func TestRequireAlphaLowercase_RefusesAnUppercaseSpelling(t *testing.T) {
         routeRegistryTestHandler(),
         &RouteOptions{
             methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(*RequireAlphaLowercase("slug")),
+            requirements: NewRequirements(RequireAlphaLowercase("slug")),
         },
     )
 
@@ -164,7 +202,7 @@ func TestRequirement_IsAnchoredToTheWholeParameterValue(t *testing.T) {
         routeRegistryTestHandler(),
         &RouteOptions{
             methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(*NewRequirement("locale", "en|de|fr")),
+            requirements: NewRequirements(NewRequirement("locale", "en|de|fr")),
         },
     )
 

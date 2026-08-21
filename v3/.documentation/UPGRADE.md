@@ -18,6 +18,46 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Http: `NewRequirements` takes pointers and refuses an incomplete or duplicated declaration
+
+**What changed.** `http.NewRequirements` moves from `...Requirement` to `...*Requirement` — what the `RequireAlpha`/`RequireNumeric`/`RequireAlphaLowercase`/`RequireAlphaNumeric` helpers have always returned — and refuses three declarations it used to drop in silence: an empty parameter name, an empty pattern, and one parameter named twice.
+
+**Symptom.** A call site written as `NewRequirements(*RequireNumeric("id"))` no longer compiles; and a boot that used to succeed now panics by name if any declared requirement is incomplete or duplicated.
+
+**Remedy.** Drop the `*`: `NewRequirements(RequireNumeric("id"))`. If the boot refuses, the refusal names the parameter and the index — an empty pattern is almost always a constant that was never filled in or a configured pattern that resolved to `""`, and until now it left that route parameter with **no constraint at all**, so a segment declared numeric matched anything.
+
+### Http: `JsonHandlerErrorResponder` receives the failure beside the status and the message
+
+**What changed.** The responder signature gains a trailing `cause error`. `JsonHandler` also binds through the same door `Request.BindJson` uses, so its refusals now carry the decoder's diagnosis as a cause, answer 413 for an oversized body instead of 400, and serve validation detail under the standardized `validationErrors` key.
+
+**Symptom.** A responder passed to `WithJsonHandlerErrorResponder` no longer compiles. Clients of a `JsonHandler` route see a 413 where they saw a 400 for an oversized upload, and the error body for a validation failure changes shape: `error.message` becomes `"validation failed"` and the per-field detail arrives in the `validationErrors` array, exactly as it already did for `BindJsonAndValidate` routes.
+
+**Remedy.** Add the parameter — `func(runtimeInstance, request, status int, message string, cause error)` — and ignore it if you do not need it. A client parsing the flattened message must read `validationErrors` instead; that array carries `field`, `message` and `code` per entry rather than a joined sentence. Note that a responder returning `(nil, nil)` no longer suppresses the refusal: previously that answered the client an empty **204** for a rejected request.
+
+### Http: a route pattern, a route zone and a trusted-proxy entry are refused when they are wrong
+
+**What changed.** Four boot-time refusals replace four silent drops. A pattern naming one parameter twice (`/orgs/:id/members/:id`) or carrying a nameless `:` is refused at registration. A zone that is not one of the `RouteZone*` values is refused, at `ExposedRouteAttributes` and at registration, as are an exposed route with no name, an expose attribute that is not a bool and a zone attribute that is not a string. A trusted-proxy entry that parses as neither a CIDR prefix nor an address is refused by `Kernel.SetForwardedHeadersPolicy` and by `NewForwardedClientIpResolver`.
+
+**Symptom.** A boot that used to succeed now panics, naming the pattern, the zone or the offending entry.
+
+**Remedy.** Each refusal names what to fix. The duplicate parameter was unreadable by the handler anyway — only one of the two values survived extraction, and which one was not the handler's to choose. The misspelled zone produced an artifact no filter could select: `melody:routes:manifest --zone <typo>` wrote an empty manifest over the good one and exited zero. The malformed proxy entry narrowed the trusted list, so `X-Forwarded-For` from that hop stopped being believed and every client behind it shared one rate-limit bucket. An unnamed catch-all (`*...`) is untouched, and an empty trusted-proxy entry is still skipped so a list split from an environment variable keeps working.
+
+### Http: the route manifest carries the host, schemes, locales and priority
+
+**What changed.** `RouteManifestEntry` gains `host`, `schemes`, `locales` and `priority`, all `omitempty`. Requirements are now published as the caller DECLARED them rather than as the anchored, non-capturing form the router compiles. Entries with equal names are ordered by pattern, so the document is stable. `FilterRouteManifestByZone` is exported so an in-process projection can apply the zone gate the cli command applies.
+
+**Symptom.** A consumer that parsed the manifest sees new fields and a changed `requirements` spelling: `en|de` where it previously read `^(?:en|de)$`.
+
+**Remedy.** A consumer applying the requirement as a regular expression should keep anchoring it itself; the published form is the developer's declaration, which is what a browser regular-expression engine can actually compile — the wrapped form leaked RE2-only syntax into ECMA-262 contexts. The three new fields are what a generated url needs to match on the way back in: a route bound to a host, restricted to a scheme, or restricted to a locale set was advertised with nothing saying so, and the url the consumer built was refused by the router that advertised it.
+
+### Http: the server-sent-event writer refuses what it used to emit, and the hub closes what it owns
+
+**What changed.** `NewServerSentEventWriter` refuses an already-committed response and a connection that cannot really flush (the probe now reads through the kernel's response-writer wrapper instead of at it). `Send` refuses an event carrying a name and no data, an id or name that would collapse to empty once its control bytes are removed, and a negative retry; a frame that failed partway poisons the writer, so every later frame is refused rather than appended onto torn bytes. The writer serializes its own frames, so a handler and a keepalive ticker may share it. `ServerSentEventHub` closes the backplane it owns on `Shutdown`, refuses to install one over a live one or into a hub that has already shut down, reads a typed nil as nothing, gains `Close() error` so the container's teardown can see it, and takes a logger through `SetLogger`.
+
+**Symptom.** A `Send` call that used to return nil may now return an error — most often `ServerSentEvent{Event: "x"}` with no `Data`, which the event-stream grammar discards without dispatching anything, so the listener that named `x` never fired. A composition root that installed a second backplane over a live hub now gets a refusal naming the situation, where the first one used to be orphaned in silence. An application that resolved the hub from the container will now have it closed by the ordered teardown.
+
+**Remedy.** Clear the hub and close what you took out before installing a replacement. Give every named event a `Data` payload, or send a comment instead. Handle the error `Send` returns — a stream whose write failed is finished, and the writer says so. If a hub was being kept alive past the container teardown deliberately, do not register it as a service.
+
 ### Http: a request path that folds to a different spelling is refused with a 400 before the handler
 
 **What changed.** The kernel refuses any request path that `path.Clean` would fold to another spelling — `//admin/panel`, `/open/../admin/panel`, `/a/./b` — before the security dispatch and before the handler, with a 400 and a warning naming the method and path. A trailing slash is not a fold and is served as before; a target that does not begin with `/` (the asterisk-form of OPTIONS, an authority-form CONNECT) is left to the router.

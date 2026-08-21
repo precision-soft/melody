@@ -105,7 +105,12 @@ func (instance *Kernel) HasErrorHandler() bool {
 }
 
 /* SetForwardedHeadersPolicy copies the trusted proxy list instead of retaining the caller's slice: every request's proxy-trust decision — whether X-Forwarded-Proto is believed, which sets the session cookie's Secure attribute — reads this list, and a caller reusing its slice after the call would rewrite the trust decision mid-serving, as an unsynchronized write racing every request goroutine. Every sibling configuration door copies its caller lists for the same reason. */
+/* SetForwardedHeadersPolicy installs the policy every forwarded-header reader consults. A trusted-proxy entry that parses as neither a CIDR prefix nor an address is refused by name: both readers of the list skipped such an entry, so a typo narrowed the trust silently — the hop it named stopped being believed and every client behind it collapsed onto the direct peer, with no record anywhere. The list is copied so a caller reusing its slice cannot rewrite the trust decision under the requests already being served. */
 func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
+    if validationErr := internal.ValidateTrustedProxyList(policy.TrustedProxyList); nil != validationErr {
+        exception.Panic(validationErr)
+    }
+
     policy.TrustedProxyList = copyStringList(policy.TrustedProxyList)
     instance.options.ForwardedHeadersPolicy = policy
 }

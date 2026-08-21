@@ -113,6 +113,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     }
 
     requirements := make(map[string]*regexp.Regexp)
+    requirementSources := map[string]string{}
     for key, value := range options.Requirements() {
         if "" == key {
             continue
@@ -140,6 +141,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         }
 
         requirements[key] = requiredRegex
+        requirementSources[key] = value
     }
 
     defaults := map[string]string{}
@@ -152,6 +154,8 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     }
 
     rejectNonTrailingOptionalParameter(parts, normalizedPattern, defaults)
+    rejectDuplicateParameterName(parts, normalizedPattern)
+    rejectMalformedExposureAttributes(options.Attributes(), options.Name(), normalizedPattern)
 
     attributes := map[string]any{}
     for key, value := range options.Attributes() {
@@ -181,18 +185,19 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
 
     instance.routeRegistry.registerRoute(
         route{
-            name:         options.Name(),
-            pattern:      normalizedPattern,
-            parts:        parts,
-            handler:      handler,
-            methods:      append([]string{}, options.Methods()...),
-            host:         options.Host(),
-            schemes:      append([]string{}, options.Schemes()...),
-            requirements: requirements,
-            defaults:     defaults,
-            locales:      append([]string{}, options.Locales()...),
-            priority:     options.Priority(),
-            attributes:   attributes,
+            name:               options.Name(),
+            pattern:            normalizedPattern,
+            parts:              parts,
+            handler:            handler,
+            methods:            append([]string{}, options.Methods()...),
+            host:               options.Host(),
+            schemes:            append([]string{}, options.Schemes()...),
+            requirements:       requirements,
+            requirementSources: requirementSources,
+            defaults:           defaults,
+            locales:            append([]string{}, options.Locales()...),
+            priority:           options.Priority(),
+            attributes:         attributes,
         },
     )
 
@@ -211,6 +216,134 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
 }
 
 /* an omitted optional parameter is dropped wherever it sits in the pattern, while a match only ever ends early at the tail: a pattern like "/blog/:locale?/posts" therefore lets the url generator mint "/blog/posts", which this router answers with a 404. Only a trailing optional keeps the two sides in agreement, so anything else is refused at the definition site instead of shipping links nothing serves. */
+/* rejectDuplicateParameterName refuses a pattern that names one parameter twice — /orgs/:id/members/:id.
+   The extraction writes both segments under one map key, so the handler can only ever read one of the
+   two values and cannot tell which; the route is ambiguous by construction and the openapi document
+   emitted for it is spec-invalid on duplicate path parameters. A parameter with no name at all —
+   a bare ":" or ":?" — is refused here too rather than treated as an anonymous wildcard: it binds
+   nothing, so the segment it occupies is matched and then discarded in silence. */
+func rejectDuplicateParameterName(parts []string, normalizedPattern string) {
+    seenParameterNames := map[string]struct{}{}
+
+    for _, part := range parts {
+        parameterName := ""
+
+        if true == strings.HasPrefix(part, ":") {
+            parameterName = strings.TrimSuffix(strings.TrimPrefix(part, ":"), "?")
+        } else if true == strings.HasPrefix(part, "*") {
+            parameterName = strings.TrimSuffix(strings.TrimPrefix(part, "*"), "...")
+        } else {
+            continue
+        }
+
+        if "" == parameterName {
+            if true == strings.HasPrefix(part, "*") {
+                /* an unnamed catch-all is the deliberate spelling of "swallow the rest and bind nothing" */
+                continue
+            }
+
+            exception.Panic(
+                exception.NewError(
+                    "route parameter must be named",
+                    map[string]any{
+                        "pattern": normalizedPattern,
+                        "segment": part,
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        if _, exists := seenParameterNames[parameterName]; true == exists {
+            exception.Panic(
+                exception.NewError(
+                    "route parameter name is declared twice in one pattern",
+                    map[string]any{
+                        "pattern":       normalizedPattern,
+                        "parameterName": parameterName,
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        seenParameterNames[parameterName] = struct{}{}
+    }
+}
+
+/* rejectMalformedExposureAttributes refuses the three shapes that made a route silently absent from
+   the manifest it was deliberately opted into: an exposure attribute that is not a bool and a zone
+   that is not a string both fail the projection's type assertion and drop the route with no
+   diagnostic, and an exposed route with no name cannot be referenced by the consumer at all. Each was
+   a developer stating an intention the artifact then contradicted in silence. */
+func rejectMalformedExposureAttributes(attributes map[string]any, routeName string, normalizedPattern string) {
+    exposeValue, hasExpose := attributes[RouteAttributeExpose]
+    if false == hasExpose {
+        return
+    }
+
+    exposed, isBool := exposeValue.(bool)
+    if false == isBool {
+        exception.Panic(
+            exception.NewError(
+                "route expose attribute must be a bool",
+                map[string]any{
+                    "pattern": normalizedPattern,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if false == exposed {
+        return
+    }
+
+    if "" == routeName {
+        exception.Panic(
+            exception.NewError(
+                "an exposed route must be named, since the manifest references it by name",
+                map[string]any{
+                    "pattern": normalizedPattern,
+                },
+                nil,
+            ),
+        )
+    }
+
+    zoneValue, hasZone := attributes[RouteAttributeZone]
+    if false == hasZone {
+        return
+    }
+
+    zone, isString := zoneValue.(string)
+    if false == isString {
+        exception.Panic(
+            exception.NewError(
+                "route zone attribute must be a string",
+                map[string]any{
+                    "pattern": normalizedPattern,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if "" != zone && false == IsRouteZone(zone) {
+        exception.Panic(
+            exception.NewError(
+                "route zone is not one of the declared zones",
+                map[string]any{
+                    "pattern":       normalizedPattern,
+                    "zone":          zone,
+                    "declaredZones": RouteZones(),
+                },
+                nil,
+            ),
+        )
+    }
+}
+
 func rejectNonTrailingOptionalParameter(parts []string, normalizedPattern string, defaults map[string]string) {
     for index, part := range parts {
         if false == strings.HasPrefix(part, ":") {

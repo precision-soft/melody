@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -2640,4 +2641,21 @@ func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
     if nil != normalizeBodyLimitError(nil) {
         t.Fatalf("expected nil to stay nil")
     }
+}
+
+/* a typo in a trusted-proxy entry used to narrow the trust in silence: both readers of the list
+   skipped what they could not parse, so the hop it named stopped being believed, X-Forwarded-For from
+   it was no longer read, and every client behind that proxy collapsed onto the direct peer's single
+   rate-limit bucket with no record anywhere. */
+func TestKernel_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewKernel(NewRouter()).SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
+                TrustForwardedHeaders: true,
+                TrustedProxyList:      []string{"10.0.0.0/8", "10.0.0"},
+            })
+        },
+        "trusted proxy entry is neither a CIDR prefix nor an address",
+    )
 }

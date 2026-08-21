@@ -2,7 +2,6 @@ package http
 
 import (
     "encoding/json"
-    "regexp"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
@@ -195,17 +194,21 @@ func (instance *Router) RouteDefinition(routeName string) (httpcontract.RouteDef
 }
 
 func mapRouteToDefinition(routeValue route) *RouteDefinition {
+    /* the caller's own declaration is published, not the compiled form the registration wrapped and
+       anchored: a consumer reading this field sees the pattern the developer wrote, it survives a
+       round trip through NewRequirements unchanged, and an RE2-only construct is not handed to an
+       engine that cannot parse it wearing a wrapper the developer never asked for. */
     requirements := map[string]string{}
-    for key, regexValue := range routeValue.requirements {
+    for key, sourceValue := range routeValue.requirementSources {
         if "" == key {
             continue
         }
 
-        if nil == regexValue {
+        if "" == sourceValue {
             continue
         }
 
-        requirements[key] = regexValue.String()
+        requirements[key] = sourceValue
     }
 
     defaults := map[string]string{}
@@ -239,5 +242,3 @@ func mapRouteToDefinition(routeValue route) *RouteDefinition {
         attributes,
     )
 }
-
-var _ = regexp.Regexp{}

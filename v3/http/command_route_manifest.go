@@ -3,10 +3,13 @@ package http
 import (
     "encoding/json"
     "fmt"
-    "os"
+    "path/filepath"
+    "strings"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -39,54 +42,72 @@ func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
     }
 }
 
+/* Run emits the manifest. It mirrors the openapi generate command in the four places that decide
+   whether the artifact is trustworthy, none of which it used to: a relative --out is anchored at the
+   project directory rather than at whatever directory the process happened to start in, a target that
+   is not a JSON document is refused rather than destroyed, the write lands through a temp file and a
+   rename so an interrupted run leaves the previous manifest intact, and the output travels through
+   the command writer rather than process stdout — the cli layer redirects that writer, and in json
+   mode a raw print splices the document into the machine-readable stream. */
 func (instance *RouteManifestCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
+    zone := strings.TrimSpace(commandContext.String("zone"))
+    if "" != zone && false == IsRouteZone(zone) {
+        /* an unrecognised zone matched no entry, so the command wrote an empty manifest over the good
+           one and reported success; the frontend then failed to resolve every route it asked for, at
+           runtime, with the build green */
+        return exception.NewError(
+            "route zone is not one of the declared zones",
+            map[string]any{
+                "zone":          zone,
+                "declaredZones": RouteZones(),
+            },
+            nil,
+        )
+    }
+
     router := RouterMustFromContainer(runtimeInstance.Container())
 
     manifest := BuildRouteManifest(router.RouteDefinitions())
 
-    zone := commandContext.String("zone")
     if "" != zone {
-        manifest = filterManifestByZone(manifest, zone)
+        manifest = FilterRouteManifestByZone(manifest, zone)
     }
 
     payload, marshalErr := json.MarshalIndent(manifest, "", "  ")
     if nil != marshalErr {
-        return marshalErr
+        return exception.NewError(
+            "could not marshal the route manifest",
+            map[string]any{"zone": zone},
+            marshalErr,
+        )
     }
 
     out := commandContext.String("out")
     if "" == out {
-        fmt.Println(string(payload))
+        fmt.Fprintln(commandContext.Writer, string(payload))
 
         return nil
     }
 
-    writeErr := os.WriteFile(out, payload, 0o644)
-    if nil != writeErr {
-        return exception.NewError(
-            "could not write the route manifest",
-            map[string]any{"out": out},
-            writeErr,
-        )
+    if false == filepath.IsAbs(out) {
+        applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Container())
+        out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDir).MustString(), out)
     }
 
-    fmt.Println("wrote route manifest to", out)
+    if refusalErr := internal.RefuseNonJsonOutputTarget(out, "route manifest"); nil != refusalErr {
+        return refusalErr
+    }
+
+    if writeErr := internal.WriteFileAtomically(out, payload, "route manifest"); nil != writeErr {
+        return writeErr
+    }
+
+    fmt.Fprintln(commandContext.Writer, "wrote route manifest to", out)
 
     return nil
-}
-
-func filterManifestByZone(manifest RouteManifest, zone string) RouteManifest {
-    filtered := make([]RouteManifestEntry, 0, len(manifest.Routes))
-    for _, entry := range manifest.Routes {
-        if zone == entry.Zone {
-            filtered = append(filtered, entry)
-        }
-    }
-
-    return RouteManifest{Routes: filtered}
 }
 
 var _ clicontract.Command = (*RouteManifestCommand)(nil)

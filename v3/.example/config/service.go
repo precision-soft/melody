@@ -12,6 +12,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     melodymailer "github.com/precision-soft/melody/v3/mailer"
     melodymailercontract "github.com/precision-soft/melody/v3/mailer/contract"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
@@ -39,6 +40,16 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     registrar.RegisterService(
         subscriber.ServiceCatalogNotificationHub,
         func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+            /* @info the hub files its own failures — a backplane whose publish fails, a subscriber whose
+               buffer overflows — and without a journal those are counted into an atomic nobody reads:
+               a redis outage would silence cross-node delivery with no record anywhere */
+            logger, loggerErr := melodylogging.LoggerFromResolver(resolver)
+            if nil != loggerErr {
+                return nil, loggerErr
+            }
+
+            serverSentEventHub.SetLogger(logger)
+
             return serverSentEventHub, nil
         },
     )

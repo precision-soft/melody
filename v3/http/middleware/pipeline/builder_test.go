@@ -368,3 +368,80 @@ func TestBuilderDescribe_MirrorsTheNilFactoryRefusalOfBuild(t *testing.T) {
         t.Fatalf("expected the description to refuse the definition the build refuses, got %v", describeErr)
     }
 }
+
+func TestBuilder_KeepsTheReportWhenAFactoryFails(t *testing.T) {
+    builder := NewBuilder(
+        NewHttpMiddlewareDefinition(
+            "failing",
+            10,
+            nil,
+            nil,
+            nil,
+            nil,
+            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+                return nil, fmt.Errorf("factory exploded")
+            },
+            false,
+            false,
+        ),
+    )
+
+    _, report, buildErr := builder.Build(&gatingTestKernel{environment: "dev"}, "")
+    if nil == buildErr {
+        t.Fatalf("expected the factory failure to surface")
+    }
+
+    /* dropped for the refusal, the caller reporting the failure had the name of the offending
+       middleware and nothing about the selection, the gating or the cycle detection around it —
+       while Describe, the same selection without the factories, has always returned it */
+    if nil == report {
+        t.Fatalf("expected the report to travel with the refusal")
+    }
+}
+
+func TestBuilder_RecordsAMiddlewareItsFactoryDeclinedToBuildAsInactive(t *testing.T) {
+    builder := NewBuilder(
+        NewHttpMiddlewareDefinition(
+            "declined",
+            10,
+            nil,
+            nil,
+            nil,
+            nil,
+            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+                return nil, nil
+            },
+            false,
+            false,
+        ),
+    )
+
+    middlewares, report, buildErr := builder.Build(&gatingTestKernel{environment: "dev"}, "")
+    if nil != buildErr {
+        t.Fatalf("build: %v", buildErr)
+    }
+
+    if 0 != len(middlewares) {
+        t.Fatalf("expected no middleware in the chain, got %d", len(middlewares))
+    }
+
+    /* requested, selected and ordered, then vanished from the chain without appearing in the selected
+       names OR in the inactive list — the operator reading the report saw a pipeline that simply never
+       mentioned it */
+    found := false
+    for _, inactive := range report.Inactive() {
+        if "declined" == inactive.Name() {
+            found = true
+        }
+    }
+
+    if false == found {
+        t.Fatalf("expected the declined middleware to be reported inactive, got %+v", report.Inactive())
+    }
+
+    for _, selectedName := range report.SelectedNames() {
+        if "declined" == selectedName {
+            t.Fatalf("a middleware that was never built must not be reported as selected")
+        }
+    }
+}

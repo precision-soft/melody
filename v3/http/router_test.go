@@ -17,6 +17,7 @@ import (
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -832,5 +833,57 @@ func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
 
     if _, exists := secondResult.RouteAttributes["injected"]; true == exists {
         t.Fatalf("expected the registry map to be untouched by the caller's mutation")
+    }
+}
+
+/* a pattern that names one parameter twice is ambiguous by construction: the extraction writes both
+   segments under one map key, so the handler can only ever read one of the two values and cannot tell
+   which, and the openapi document emitted for it is spec-invalid on duplicate path parameters. */
+func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewRouter().Handle(
+                nethttp.MethodGet,
+                "/orgs/:id/members/:id",
+                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                    return nil, nil
+                },
+            )
+        },
+        "route parameter name is declared twice in one pattern",
+    )
+}
+
+/* a bare ":" binds nothing, so the segment it occupies was matched and then discarded in silence */
+func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewRouter().Handle(
+                nethttp.MethodGet,
+                "/orgs/:",
+                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                    return nil, nil
+                },
+            )
+        },
+        "route parameter must be named",
+    )
+}
+
+/* an unnamed catch-all is the deliberate spelling of "swallow the rest and bind nothing" */
+func TestRouterRegistration_AcceptsAnUnnamedCatchAll(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/files/*...",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    if _, matched := router.Match(nethttp.MethodGet, "/files/a/b", "", "http"); false == matched {
+        t.Fatalf("expected the unnamed catch-all to match")
     }
 }

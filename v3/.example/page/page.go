@@ -33,14 +33,12 @@ func Load(fileName string) (string, error) {
 }
 
 func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, statusCode int, fileName string) melodyhttpcontract.Response {
-    _ = request
-
     htmlString, err := Load(fileName)
     if nil != err {
         return melodyhttp.JsonErrorResponse(nethttp.StatusInternalServerError, "failed to load page")
     }
 
-    routesJson, routesJsonErr := exampleurl.RoutesJsonFromContainer(runtimeInstance.Container())
+    routesJson, routesJsonErr := exampleurl.RoutesJsonFromRuntime(runtimeInstance)
     if nil != routesJsonErr {
         routesJson = `{"routes":[]}`
     }

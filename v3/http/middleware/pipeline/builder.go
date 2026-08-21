@@ -44,8 +44,9 @@ func (instance *Builder) Build(
             continue
         }
 
+        /* the report travels with the refusal rather than being dropped for it: the selection, the gating and the cycle detection it carries are exactly what a boot needs to explain WHY the pipeline it asked for could not be built, and Describe — the same selection without the factories — has always returned it. Returned nil, the caller reporting the failure had the name of the offending middleware and nothing about the ten around it. */
         if nil == definition.factory {
-            return nil, nil, exception.NewError(
+            return nil, report, exception.NewError(
                 "middleware factory is nil",
                 exceptioncontract.Context{
                     "middlewareName": definition.name,
@@ -56,7 +57,7 @@ func (instance *Builder) Build(
 
         middlewareValue, factoryErr := definition.factory(kernelInstance)
         if nil != factoryErr {
-            return nil, nil, exception.NewError(
+            return nil, report, exception.NewError(
                 "could not build middleware",
                 exceptioncontract.Context{
                     "middlewareName": definition.name,
@@ -65,7 +66,15 @@ func (instance *Builder) Build(
             )
         }
 
+        /* a factory that succeeds and hands back nothing is the one outcome the report used to lose entirely: the middleware was requested, selected and ordered, then vanished from the chain without appearing in the selected names OR in the inactive list, so the operator reading the report saw a pipeline that simply never mentioned it. It is recorded as inactive under the reason it is inactive for. */
         if nil == middlewareValue {
+            report.SetInactive(
+                append(
+                    report.Inactive(),
+                    NewInactiveMiddleware(definition.name, "factory returned no middleware"),
+                ),
+            )
+
             continue
         }
 

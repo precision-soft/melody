@@ -49,8 +49,11 @@ func TestRouteDefinition_ReportsEveryFacetOfTheRoute(t *testing.T) {
         t.Fatalf("unexpected schemes: %v", definition.Schemes())
     }
 
-    /* the listing carries the COMPILED requirement, which addRoute wrapped and anchored — "^(?:^[0-9]+$)$" for a caller who wrote "^[0-9]+$". It is the pattern the router actually enforces rather than the one the caller typed, so a consumer rendering it (an openapi schema, a route listing) shows the wrapped spelling. Pinned as it stands. */
-    if "^(?:"+ConstraintNumeric+")$" != definition.Requirements()["id"] {
+    /* the listing carries the requirement the caller DECLARED, not the anchored non-capturing form the
+       registration compiles: the wrapped spelling is not the developer's, it re-wraps on every round
+       trip, and it hands RE2-only syntax to consumers — the manifest's browser generator, an openapi
+       schema's ECMA-262 pattern field — whose engines cannot parse it */
+    if ConstraintNumeric != definition.Requirements()["id"] {
         t.Fatalf("unexpected requirements: %v", definition.Requirements())
     }
 
@@ -80,7 +83,7 @@ func TestRouteDefinition_AccessorsHandOutCopies(t *testing.T) {
     definition.Schemes()[0] = "rewritten"
     definition.Locales()[0] = "rewritten"
 
-    if "^(?:"+ConstraintNumeric+")$" != definition.Requirements()["id"] {
+    if ConstraintNumeric != definition.Requirements()["id"] {
         t.Fatalf("expected Requirements to hand out a copy")
     }
 
