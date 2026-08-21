@@ -106,6 +106,12 @@ type committedStatusRecorder interface {
 }
 
 /* recordingResponseWriter tracks whether the response headers were already committed, so the kernel can tell a handler that streamed its own response (for example a hand-rolled streaming or download handler) apart from one that returned no response and expects the default 204. */
+/* recordingResponseWriter records what the delegate committed so the kernel can tell a response it still
+owns from one already on the wire. Its fields are written and read on the SERVING goroutine only — the
+kernel's recovery defer runs there too — so they carry no lock. A handler that hands the raw writer to
+a second goroutine, which is the documented shape of a stream, is outside that guarantee: the
+server-sent-event writer serializes its own frames under its own mutex, and it is the only writer of
+that connection while it runs. */
 type recordingResponseWriter struct {
     nethttp.ResponseWriter
     wroteHeader      bool

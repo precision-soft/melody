@@ -237,7 +237,9 @@ func (instance *Request) FormValue(key string) string {
     return instance.httpRequest.FormValue(key)
 }
 
-/* Input answers the first value of a repeated key, as FormValue beside it and url.Values.Get already do.
+/* Input answers a request parameter by name, reading the POST body first, then the query string, then the route parameters — the first source that HAS the key answers, so a body field shadows a query parameter of the same name and both shadow a route parameter. A handler that must have the value the router bound reads Params rather than Input, because the route parameter is the only one of the three the server itself chose.
+
+Input answers the first value of a repeated key, as FormValue beside it and url.Values.Get already do.
 The request bags keep a single key and a repeated one apart by type and bag.String refuses a slice with a
 panic — right where the key is the programmer's, wrong here, because the shape of a request parameter is
 the client's to choose: "?tag=a&tag=b" turned every handler reading a parameter by name into a 500 with a

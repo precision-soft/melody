@@ -2789,3 +2789,59 @@ func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
         t.Fatalf("expected nil to stay nil")
     }
 }
+
+/* the abort sentinel suppresses the response, not the ownership of what it holds: the branch re-raised
+it ten lines before the in-flight response was captured and seventy before either close, so a deliberate
+abort over a file-backed response leaked the descriptor. invokeErrorHandlerSafely already refuses to
+honour the sentinel for exactly this reason, which is the contradiction this closes. */
+func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
+    bodyReader := &closeTrackingReader{}
+
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/file",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            response := &Response{}
+            response.SetStatusCode(nethttp.StatusOK)
+            response.SetHeaders(make(nethttp.Header))
+            response.SetBodyReader(bodyReader)
+
+            return response, nil
+        },
+    )
+
+    kernel := NewKernel(router)
+
+    /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the
+       response the chain produced is held only by the recording shim */
+    kernel.Use(func(next httpcontract.Handler) httpcontract.Handler {
+        return func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            _, _ = next(runtimeInstance, writer, request)
+
+            panic(nethttp.ErrAbortHandler)
+        }
+    })
+
+    handler := kernel.ServeHttp(newHttpTestContainer())
+
+    func() {
+        defer func() {
+            recovered := recover()
+            if nethttp.ErrAbortHandler != recovered {
+                t.Fatalf("expected the abort sentinel to keep travelling, got %v", recovered)
+            }
+        }()
+
+        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/file", nil))
+    }()
+
+    if false == bodyReader.closed.Load() {
+        t.Fatal("the file-backed response in flight was never closed on the abort path: one descriptor leaks per aborted request")
+    }
+}

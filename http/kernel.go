@@ -327,7 +327,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         loggingcontract.Context{
                             "method":         request.Method,
                             "path":           request.URL.Path,
-                            "query":          request.URL.RawQuery,
+                            "query":          internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                             "scheme":         scheme,
                             "host":           request.Host,
                             "allowedMethods": allowedMethods,
@@ -339,7 +339,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         loggingcontract.Context{
                             "method": request.Method,
                             "path":   request.URL.Path,
-                            "query":  request.URL.RawQuery,
+                            "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                             "scheme": scheme,
                             "host":   request.Host,
                         },
@@ -351,7 +351,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     loggingcontract.Context{
                         "method": request.Method,
                         "path":   request.URL.Path,
-                        "query":  request.URL.RawQuery,
+                        "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                         "scheme": scheme,
                         "host":   request.Host,
                     },
@@ -386,6 +386,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             /* net/http documents this sentinel as "abort the connection and suppress the log", and only a panic reaching its own serve loop closes the connection without a response; converted into an error it would answer an aborted upload with a 500 and an error line. The identity check matches net/http's own, so an application error merely wrapping the sentinel is unaffected. */
             if nethttp.ErrAbortHandler == recoveredValue {
+                /* the abort suppresses the response, not the ownership of what it holds: a response in flight may own an open file (FileResponse/ServeReader) and loses its only reference as this panic unwinds past the kernel, so both the assigned response and the one the chain shim still holds are closed before the sentinel is re-raised. Below, the same two closes run on every other panic path; invokeErrorHandlerSafely refuses to honour the sentinel at all for exactly this leak, and honouring it here without closing would be the leak that refusal names. */
+                closeDiscardedResponseBody(finalResponse, requestLogger)
+
+                if chainResponse != finalResponse {
+                    closeDiscardedResponseBody(chainResponse, requestLogger)
+                }
+
                 panic(recoveredValue)
             }
 

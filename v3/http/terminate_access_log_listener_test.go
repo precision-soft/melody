@@ -5,6 +5,7 @@ import (
     "crypto/tls"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
     "sync"
     "testing"
 
@@ -75,7 +76,7 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsTheRequestItCompleted(t
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
-    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/articles?draft=1", nil)
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/articles?draft=1&token=super-secret", nil)
     httpRequest.Host = "api.example.com"
     httpRequest.RemoteAddr = "203.0.113.7:5555"
     httpRequest.Header.Set("User-Agent", "melody-test")
@@ -102,7 +103,7 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsTheRequestItCompleted(t
     for key, expected := range map[string]any{
         "method":     nethttp.MethodPost,
         "path":       "/articles",
-        "query":      "draft=1",
+        "query":      "draft=xxxxx&token=xxxxx",
         "host":       "api.example.com",
         "remoteAddr": "203.0.113.7:5555",
         "userAgent":  "melody-test",
@@ -270,5 +271,47 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsAZeroStatusWithoutAResp
 
     if 0 != loggedContext["statusCode"] {
         t.Fatalf("expected a zero status without a response, got: %v", loggedContext["statusCode"])
+    }
+}
+
+func TestRegisterKernelTerminateAccessLogListener_RedactsEveryQueryValue(t *testing.T) {
+    recordingLogger := &accessLogRecordingLogger{}
+    runtimeInstance := newAccessLogRuntime(recordingLogger)
+
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    RegisterKernelTerminateAccessLogListener(dispatcher)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/reset?apiKey=live-credential&next=/home", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(httpRequest)
+
+    terminateEvent := NewKernelTerminateEvent(
+        runtimeInstance,
+        melodyRequest,
+        NewResponse(nethttp.StatusOK, []byte("ok")),
+    )
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelTerminate, terminateEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    loggedContext, logged := recordingLogger.accessLogContext()
+    if false == logged {
+        t.Fatalf("expected the access log record to be written, got messages: %v", recordingLogger.infoMessages)
+    }
+
+    queryValue, isString := loggedContext["query"].(string)
+    if false == isString {
+        t.Fatalf("expected the record to carry the query as a string, got %T", loggedContext["query"])
+    }
+
+    if true == strings.Contains(queryValue, "live-credential") {
+        t.Fatalf("the credential reached the access log record: %q", queryValue)
+    }
+
+    for _, parameterName := range []string{"apiKey", "next"} {
+        if false == strings.Contains(queryValue, parameterName) {
+            t.Fatalf("expected the parameter name %q to survive redaction, got %q", parameterName, queryValue)
+        }
     }
 }

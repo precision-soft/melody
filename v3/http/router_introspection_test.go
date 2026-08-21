@@ -12,7 +12,7 @@ func newIntrospectedRouter(t *testing.T) *Router {
     router := NewRouter()
 
     router.HandleWithOptions(
-        "/articles/:id",
+        "/:_locale/articles/:id",
         routeRegistryTestHandler(),
         NewRouteOptions(
             "article.show",

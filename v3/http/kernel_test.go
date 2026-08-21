@@ -2659,3 +2659,226 @@ func TestKernel_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
         "trusted proxy entry is neither a CIDR prefix nor an address",
     )
 }
+
+func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) {
+    for _, testCase := range []struct {
+        door   string
+        mutate func(kernel *Kernel)
+    }{
+        {"Use", func(kernel *Kernel) {
+            kernel.Use(func(next httpcontract.Handler) httpcontract.Handler { return next })
+        }},
+        {"SetNotFoundHandler", func(kernel *Kernel) { kernel.SetNotFoundHandler(nil) }},
+        {"SetErrorHandler", func(kernel *Kernel) { kernel.SetErrorHandler(nil) }},
+        {"SetForwardedHeadersPolicy", func(kernel *Kernel) {
+            kernel.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{})
+        }},
+        {"SetSessionCookiePolicy", func(kernel *Kernel) {
+            kernel.SetSessionCookiePolicy(httpcontract.SessionCookiePolicy{})
+        }},
+        {"SetMethodPolicy", func(kernel *Kernel) { kernel.SetMethodPolicy(httpcontract.MethodPolicy{}) }},
+    } {
+        kernel := NewKernel(NewRouter())
+
+        /* configuring BEFORE the handler is built stays legal, which is the half that proves the guard
+           discriminates rather than refusing everything */
+        testCase.mutate(kernel)
+
+        _ = kernel.ServeHttp(newHttpTestContainer())
+
+        testhelper.AssertPanicsWithError(t, func() {
+            testCase.mutate(kernel)
+        }, "may not configure the http kernel after it started serving")
+    }
+}
+
+func TestKernel_RefusesARouteRegisteredAfterItStartedServing(t *testing.T) {
+    router := NewRouter()
+    kernel := NewKernel(router)
+
+    router.Handle(nethttp.MethodGet, "/before", routeRegistryTestHandler())
+
+    _ = kernel.ServeHttp(newHttpTestContainer())
+
+    testhelper.AssertPanicsWithError(t, func() {
+        router.Handle(nethttp.MethodGet, "/after", routeRegistryTestHandler())
+    }, "may not register a route after the http kernel started serving")
+}
+
+func TestKernel_LeavesTheRouteTableReadableAfterItStartedServing(t *testing.T) {
+    router := NewRouter()
+    kernel := NewKernel(router)
+
+    router.HandleNamed("article.show", nethttp.MethodGet, "/articles/:id", routeRegistryTestHandler())
+
+    _ = kernel.ServeHttp(newHttpTestContainer())
+
+    /* the openapi document and the route manifest are served FROM a handler, so freezing the reading
+       doors alongside the writing ones would break the very routes that publish the table */
+    if 1 != len(router.RouteDefinitions()) {
+        t.Fatalf("expected the route table to stay readable while serving")
+    }
+
+    if _, found := router.RouteDefinition("article.show"); false == found {
+        t.Fatalf("expected a named route to stay resolvable while serving")
+    }
+}
+
+func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, "/slow", func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        return NewResponse(nethttp.StatusOK, []byte("ok")), nil
+    })
+
+    kernel := NewKernel(router)
+    handler := kernel.ServeHttp(newHttpTestContainer())
+
+    /* a request is held open across the refusal, so the guard is exercised against a kernel that really
+       is serving rather than one that merely built a handler; under -race this is the shape that would
+       report the write the refusal prevents */
+    started := make(chan struct{})
+    finished := make(chan struct{})
+
+    go func() {
+        defer close(finished)
+        close(started)
+
+        for index := 0; index < 50; index++ {
+            recorder := httptest.NewRecorder()
+            handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/slow", nil))
+        }
+    }()
+
+    <-started
+
+    for index := 0; index < 50; index++ {
+        func() {
+            defer func() {
+                if nil == recover() {
+                    t.Errorf("expected the configuration door to refuse while requests are in flight")
+                }
+            }()
+
+            kernel.Use(func(next httpcontract.Handler) httpcontract.Handler { return next })
+        }()
+    }
+
+    <-finished
+}
+
+/* the abort sentinel suppresses the response, not the ownership of what it holds: the branch re-raised
+it ten lines before the in-flight response was captured and seventy before either close, so a deliberate
+abort over a file-backed response leaked the descriptor. invokeErrorHandlerSafely already refuses to
+honour the sentinel for exactly this reason, which is the contradiction this closes. */
+func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
+    bodyReader := &closeTrackingReader{}
+
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/file",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            response := &Response{}
+            response.SetStatusCode(nethttp.StatusOK)
+            response.SetHeaders(make(nethttp.Header))
+            response.SetBodyReader(bodyReader)
+
+            return response, nil
+        },
+    )
+
+    kernel := NewKernel(router)
+
+    /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the
+       response the chain produced is held only by the recording shim */
+    kernel.Use(func(next httpcontract.Handler) httpcontract.Handler {
+        return func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            _, _ = next(runtimeInstance, writer, request)
+
+            panic(nethttp.ErrAbortHandler)
+        }
+    })
+
+    handler := kernel.ServeHttp(newHttpTestContainer())
+
+    func() {
+        defer func() {
+            recovered := recover()
+            if nethttp.ErrAbortHandler != recovered {
+                t.Fatalf("expected the abort sentinel to keep travelling, got %v", recovered)
+            }
+        }()
+
+        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/file", nil))
+    }()
+
+    if false == bodyReader.closed.Load() {
+        t.Fatal("the file-backed response in flight was never closed on the abort path: one descriptor leaks per aborted request")
+    }
+}
+
+/* the route is matched on the path as the client SPELLED it: net/http decodes "%2F" into a separator,
+so "/admin%2Fusers" — one segment naming a resource called "admin/users" — became two segments and
+reached the "/admin/users" handler, while a proxy rule written against the raw request line matched
+neither spelling. */
+func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
+    reached := ""
+
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, "/admin/users", func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        reached = "two-segment"
+
+        return NewResponse(nethttp.StatusOK, []byte("ok")), nil
+    })
+    router.Handle(nethttp.MethodGet, "/:name", func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        reached = "one-segment:" + request.Params()["name"]
+
+        return NewResponse(nethttp.StatusOK, []byte("ok")), nil
+    })
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/admin%2Fusers", nil)
+    handler.ServeHTTP(httptest.NewRecorder(), httpRequest)
+
+    if "one-segment:admin/users" != reached {
+        t.Fatalf("the encoded separator was read as a path separator: reached %q", reached)
+    }
+}
+
+/* the tie-break is registration order, deliberately, and specificity is not a factor. The rule is
+written on the RouteHandler contract; this pins it so a future change to the selection has to be a
+decision rather than an accident. */
+func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleNamed("first", nethttp.MethodGet, "/users/:id", routeRegistryTestHandler())
+    router.HandleNamed("second", nethttp.MethodGet, "/users/new", routeRegistryTestHandler())
+
+    _, params, attributes := router.match(nethttp.MethodGet, "/users/new", "", "https")
+
+    if "new" != params["id"] {
+        t.Fatalf("expected the first registration to win the tie, got params %v", params)
+    }
+
+    if "first" != attributes[RouteAttributeName] {
+        t.Fatalf("expected the first registration to win the tie, got route %v", attributes[RouteAttributeName])
+    }
+}

@@ -72,6 +72,8 @@ type Kernel struct {
     options         KernelOptions
     /* the number of request scopes opened and not yet closed, which is the only thing a shutdown can measure about a hijacked connection: Shutdown does not wait for one — the connection stopped being the server's the moment the handler took it — so a websocket still being served left the process reporting a clean stop it had not obtained. Atomic because it is written by every serving goroutine and read by the shutdown one. */
     openRequestScopes atomic.Int64
+    /* raised when ServeHttp builds the handler, which is the moment the configuration stops being editable and starts being read by request goroutines. Atomic because the doors that read it may be called from any goroutine, and because a mutator racing the very first request is exactly what it exists to catch. */
+    serving atomic.Bool
 }
 
 /* OpenRequestScopes reports how many request scopes are open right now: one per request being served, hijacked connections included, because the scope belongs to ServeHttp rather than to the connection. A shutdown reads it to tell a drained server from one that still has work inside it — net/http's own Shutdown cannot answer for a connection it has handed away. */
@@ -79,12 +81,46 @@ func (instance *Kernel) OpenRequestScopes() int64 {
     return instance.openRequestScopes.Load()
 }
 
+/* the kernel's configuration doors are BOOT-ONLY, and after the handler is built they refuse rather
+than corrupt. Every mutator below writes a field that each request goroutine reads without
+synchronization — the middleware chain, the forwarded-headers policy whose four words decide whether a
+session cookie is marked Secure, the method policy, the not-found and error handlers — so a call made
+while requests are in flight is a data race, and the route tree's maps are worse: a concurrent write
+there is an unrecoverable fatal error, not a torn read.
+
+Configuration is compiled once and then serves; it is not reconfigured under load. The refusal makes
+that contract enforceable rather than merely written, and it is raised on the calling goroutine, at the
+door, naming the door — where a race would instead surface as a corrupted read somewhere else entirely,
+or not at all. The application's own boot registrar refuses on the same principle once it has booted.
+
+The reading doors stay open: RouteDefinitions, RouteDefinition, RouteRegistry and the introspection
+surface are read from inside handlers — the openapi document is served that way — and freezing them
+would break the very route that publishes the table. */
+func (instance *Kernel) refuseMutationWhileServing(door string) {
+    if false == instance.serving.Load() {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "may not configure the http kernel after it started serving",
+            map[string]any{
+                "door": door,
+            },
+            nil,
+        ),
+    )
+}
 /* Use appends middlewares to the chain the kernel builds around the matched handler. The chain decorates the handler path only: a response produced by an event listener — a security refusal, an error page — is dispatched through kernel.response and written before the chain is built, so cross-cutting response decoration belongs to kernel.response listeners; the cors package pairs its two doors that way. */
 func (instance *Kernel) Use(middlewares ...httpcontract.Middleware) {
+    instance.refuseMutationWhileServing("Use")
+
     instance.middlewares = append(instance.middlewares, middlewares...)
 }
 
 func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
+    instance.refuseMutationWhileServing("SetNotFoundHandler")
+
     instance.notFoundHandler = handler
 }
 
@@ -95,6 +131,8 @@ never run. An installed handler therefore takes over what the listener did — n
 request-id header, the validation errors payload — and when it returns nil the kernel's own default
 rendering answers instead. */
 func (instance *Kernel) SetErrorHandler(handler httpcontract.ErrorHandler) {
+    instance.refuseMutationWhileServing("SetErrorHandler")
+
     instance.errorHandler = handler
 }
 
@@ -104,9 +142,10 @@ func (instance *Kernel) HasErrorHandler() bool {
     return nil != instance.errorHandler
 }
 
-/* SetForwardedHeadersPolicy copies the trusted proxy list instead of retaining the caller's slice: every request's proxy-trust decision — whether X-Forwarded-Proto is believed, which sets the session cookie's Secure attribute — reads this list, and a caller reusing its slice after the call would rewrite the trust decision mid-serving, as an unsynchronized write racing every request goroutine. Every sibling configuration door copies its caller lists for the same reason. */
-/* SetForwardedHeadersPolicy installs the policy every forwarded-header reader consults. A trusted-proxy entry that parses as neither a CIDR prefix nor an address is refused by name: both readers of the list skipped such an entry, so a typo narrowed the trust silently — the hop it named stopped being believed and every client behind it collapsed onto the direct peer, with no record anywhere. The list is copied so a caller reusing its slice cannot rewrite the trust decision under the requests already being served. */
+/* SetForwardedHeadersPolicy installs the policy every forwarded-header reader consults, and it is boot-only like every door above it. A trusted-proxy entry that parses as neither a CIDR prefix nor an address is refused by name: both readers of the list skipped such an entry, so a typo narrowed the trust silently — the hop it named stopped being believed and every client behind it collapsed onto the direct peer, with no record anywhere. The list is copied rather than retained, because every request's proxy-trust decision reads it — whether X-Forwarded-Proto is believed, which is what sets the session cookie's Secure attribute — so a caller reusing its slice would rewrite that decision under the requests already being served. Every sibling configuration door copies its caller lists for the same reason. */
 func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
+    instance.refuseMutationWhileServing("SetForwardedHeadersPolicy")
+
     if validationErr := internal.ValidateTrustedProxyList(policy.TrustedProxyList); nil != validationErr {
         exception.Panic(validationErr)
     }
@@ -116,11 +155,15 @@ func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedH
 }
 
 func (instance *Kernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
+    instance.refuseMutationWhileServing("SetSessionCookiePolicy")
+
     instance.options.SessionCookiePolicy = policy
 }
 
 /* SetMethodPolicy installs the method policy the kernel reads on every request — whether HEAD falls back to the GET route, whether an unrouted OPTIONS is answered with the computed Allow header. Without this door the policy was a documented type with nowhere to hand it: DefaultKernelOptions built one, the kernel read one on every request, and no application could reach the field between them, so an api that had to answer 405 to OPTIONS wrote the configuration and watched it change nothing. */
 func (instance *Kernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
+    instance.refuseMutationWhileServing("SetMethodPolicy")
+
     instance.options.MethodPolicy = policy
 }
 
@@ -133,6 +176,14 @@ func copyStringList(values []string) []string {
 }
 
 func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
+    /* building the handler is the moment configuration stops and serving begins, so the freeze is raised
+       here rather than at the first request: it is deterministic, it happens once, and it closes the
+       window in which a mutator could race the very first connection. The router is frozen with it,
+       through a package-private door — a router from outside this package cannot be reached that way and
+       keeps only the written contract, which is all a foreign implementation can be held to. */
+    instance.serving.Store(true)
+    freezeRouterForServing(instance.router)
+
     return nethttp.HandlerFunc(func(rawWriter nethttp.ResponseWriter, request *nethttp.Request) {
         writer := newRecordingResponseWriter(rawWriter)
 
@@ -248,9 +299,12 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.options.ForwardedHeadersPolicy)
 
+        /* the route is matched on the path as the client SPELLED it, not on its decoded form: net/http decodes "%2F" into a separator, so "/admin%2Fusers" — one segment naming a resource called "admin/users" — became two segments and reached the "/admin/users" handler, while a proxy or WAF rule written against the raw request line matched neither spelling. splitRequestPath unescapes each segment after the split, so the value a parameter binds is still the decoded one. */
+        matchPath := request.URL.EscapedPath()
+
         matchResult, _ := instance.router.Match(
             request.Method,
-            request.URL.Path,
+            matchPath,
             request.Host,
             scheme,
         )
@@ -280,7 +334,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     if true == hasGet {
                         getMatchResult, _ := instance.router.Match(
                             nethttp.MethodGet,
-                            request.URL.Path,
+                            matchPath,
                             request.Host,
                             scheme,
                         )
@@ -332,7 +386,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         loggingcontract.Context{
                             "method":         request.Method,
                             "path":           request.URL.Path,
-                            "query":          request.URL.RawQuery,
+                            "query":          internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                             "scheme":         scheme,
                             "host":           request.Host,
                             "allowedMethods": allowedMethods,
@@ -344,7 +398,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         loggingcontract.Context{
                             "method": request.Method,
                             "path":   request.URL.Path,
-                            "query":  request.URL.RawQuery,
+                            "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                             "scheme": scheme,
                             "host":   request.Host,
                         },
@@ -356,7 +410,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     loggingcontract.Context{
                         "method": request.Method,
                         "path":   request.URL.Path,
-                        "query":  request.URL.RawQuery,
+                        "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                         "scheme": scheme,
                         "host":   request.Host,
                     },
@@ -391,6 +445,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             /* net/http documents this sentinel as "abort the connection and suppress the log", and only a panic reaching its own serve loop closes the connection without a response; converted into an error it would answer an aborted upload with a 500 and an error line. The identity check matches net/http's own, so an application error merely wrapping the sentinel is unaffected. */
             if nethttp.ErrAbortHandler == recoveredValue {
+                /* the abort suppresses the response, not the ownership of what it holds: a response in flight may own an open file (FileResponse/ServeReader) and loses its only reference as this panic unwinds past the kernel, so both the assigned response and the one the chain shim still holds are closed before the sentinel is re-raised. Below, the same two closes run on every other panic path; invokeErrorHandlerSafely refuses to honour the sentinel at all for exactly this leak, and honouring it here without closing would be the leak that refusal names. */
+                closeDiscardedResponseBody(finalResponse, requestLogger)
+
+                if chainResponse != finalResponse {
+                    closeDiscardedResponseBody(chainResponse, requestLogger)
+                }
+
                 panic(recoveredValue)
             }
 

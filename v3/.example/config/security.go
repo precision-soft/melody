@@ -21,7 +21,6 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/assets", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/favicon", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/i18n", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/events", melodysecuritycontract.AttributePublicAccess),
 
         melodysecurity.NewAccessControlRegexRule("^/health", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/metrics", melodysecuritycontract.AttributePublicAccess),
@@ -33,6 +32,10 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/twofactor", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/outbox", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/storage", melodysecuritycontract.AttributePublicAccess),
+
+        /* publishing injects a frame into every stream open across the CLUSTER, so it is the write role the catalog writes themselves carry; streaming carries the catalog writes made behind those roles, so it is at least an authenticated reader, and the handler gates the topic on top of that. Both used to sit under a public "^/events" rule. */
+        melodysecurity.NewAccessControlRule(route.EventsPublishPattern, entity.RoleEditor),
+        melodysecurity.NewAccessControlRule(route.EventsStreamPattern, entity.RoleUser),
 
         melodysecurity.NewAccessControlRule(route.ProductsPrefix, entity.RoleEditor),
         melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),

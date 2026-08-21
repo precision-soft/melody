@@ -18,6 +18,47 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Http: the kernel and router configuration doors are boot-only and refuse after serving starts
+
+**What changed.** `Kernel.Use`, `SetNotFoundHandler`, `SetErrorHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy` and every route registration door refuse by name once `Kernel.ServeHttp` has built the handler. The contract sentence is written on `httpcontract.Kernel`, `httpcontract.Router` and `httpcontract.RouteHandler`.
+
+**Symptom.** An application that registers a route or installs a middleware lazily — from inside a handler, from a goroutine started after boot, from a hot-reload path — panics with `may not register a route after the http kernel started serving` or `may not configure the http kernel after it started serving`, naming the door.
+
+**Remedy.** Move the call into the composition root or a module's registration hook, which run before the handler is built. There is no opt-out, and that is deliberate: every one of those doors writes state each request goroutine reads without synchronization, so what used to happen instead was a data race — and for the route tree's maps a concurrent write is an unrecoverable fatal error the process cannot recover from. The READING doors are untouched: `RouteDefinitions`, `RouteDefinition`, `RouteRegistry` and the introspection surface stay open for the life of the process, because the openapi document and the route manifest are served from handlers.
+
+### Http: routes match the path as the client spelled it, and hosts fold case
+
+**What changed.** Matching reads `URL.EscapedPath` and unescapes each segment after the split, so `%2F` stays inside a segment instead of separating two. `matchesHost` folds case and ignores the port unless the route declared one.
+
+**Symptom.** A request to `/admin%2Fusers` no longer reaches the `/admin/users` handler; it reaches a single-segment route, binding `admin/users`. A route bound to `example.com` now also matches `Example.com` and `example.com:8443` — which is what makes it reachable in local development at all.
+
+**Remedy.** Usually nothing. If an application relied on the decoded spelling reaching a deeper route, register the route the client actually addresses. A route that must discriminate on a port declares it: `example.com:8443` still matches only that port. Note that the url generator already refused a `/` inside a parameter value for exactly this reason, so no generated url changes.
+
+### Http: a route declaration that contradicts itself is refused at registration
+
+**What changed.** Four registration refusals join the ones already there: a pattern segment written as `{id}` rather than `:id`; a route declaring `Locales` whose pattern and defaults supply no `_locale`; a route whose pattern carries `:_locale` while declaring no `Locales` list; and route defaults now merge before the locale gate reads them.
+
+**Symptom.** A boot that used to succeed panics by name. Each refused shape produced a route that was silently unreachable or silently unvalidated: the brace pattern matched only the literal url `/users/%7Bid%7D` and bound nothing; `Locales` without a locale parameter could never match anything; and `:_locale` without a list bound whatever the client sent and the kernel published it verbatim as the request locale.
+
+**Remedy.** Write `:id` instead of `{id}`. Give a localized route either a `:_locale` segment or a `_locale` default, and declare the `Locales` list beside it — a route whose locale comes from a default is now reachable, which it was not before.
+
+### Http: the access log redacts query values
+
+**What changed.** The access-log record and the kernel's 405 and no-route records keep the query parameter names and replace every value with `xxxxx`.
+
+**Symptom.** Log lines that used to read `"query": "token=abc123"` now read `"query": "token=xxxxx"`. A query that does not parse is redacted whole.
+
+**Remedy.** Nothing to change. Any log pipeline matching on a query VALUE has to stop; matching on parameter names still works. This is also a patch-level fix on v1 and v2, because a credential in a url was being copied into the journal on every request.
+
+### Example: the event routes are behind the firewall
+
+**What changed.** In the reference application, `/events/publish` is a POST behind `RoleEditor` and `/events/stream` is behind `RoleUser`, with the subscribed topic authorized against the caller.
+
+**Symptom.** `GET /events/publish?topic=…&text=…` no longer works; it is a POST and it requires an editor. `GET /events/stream` requires an authenticated caller, and the catalog topic requires `RoleEditor`.
+
+**Remedy.** This is a change to the reference application, not to the framework, and it is here because the shape it replaced is one an integrator may have copied: a public `^/events` rule let an unauthenticated GET inject a frame into every stream open across the cluster — reachable cross-site from an `<img>` tag — and let an anonymous reader watch the product and user writes made behind `RoleEditor` and `RoleAdmin` go by in real time.
+
+
 ### Http: `NewRequirements` takes pointers and refuses an incomplete or duplicated declaration
 
 **What changed.** `http.NewRequirements` moves from `...Requirement` to `...*Requirement` — what the `RequireAlpha`/`RequireNumeric`/`RequireAlphaLowercase`/`RequireAlphaNumeric` helpers have always returned — and refuses three declarations it used to drop in silence: an empty parameter name, an empty pattern, and one parameter named twice.

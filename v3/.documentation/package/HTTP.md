@@ -138,17 +138,34 @@ Two routes may share one **pattern** as long as the matcher can tell them apart.
 
 ### Locale-restricted routes
 
-`locales` on [`NewRouteOptions`](../../http/route_option.go) is a whitelist checked against the route parameter named exactly `_locale` — the [`RouteAttributeLocale`](../../http/route.go) constant. [`match`](../../http/router.go) reads `params["_locale"]`, so a pattern that binds no parameter under that name yields an empty value, which fails the whitelist for **every** request: the route matches nothing at all. There is no diagnostic — no panic at registration, no log line at match time, and a `404` indistinguishable from a path that was never registered.
+`locales` on [`NewRouteOptions`](../../http/route_option.go) is a whitelist checked against the route parameter named exactly `_locale` — the [`RouteAttributeLocale`](../../http/route.go) constant. A route whose `locales` list and whose pattern contradict each other is **refused at registration**, in both directions, because each shape used to fail in silence:
+
+* declaring `locales` while neither the pattern nor the `defaults` supply `_locale` made the route match **nothing at all** — the whitelist read an empty value and rejected every request, with no panic at registration, no log line at match time, and a `404` indistinguishable from a path that was never registered;
+* carrying `:_locale` in the pattern while declaring **no** `locales` list was the inverse: the whitelist returned early, the segment bound whatever the client sent, and the kernel published that unvalidated, client-chosen value as the request's locale to the translator and to every other consumer.
 
 ```go
 /* works: the pattern binds _locale, so the whitelist has a value to check */
 router.HandleWithOptions("/:_locale/list", listHandler, localizedOptions)
 
-/* permanently dead: "locale" is not "_locale", so every request fails the whitelist */
+/* refused at registration: "locale" is not "_locale", so nothing supplies the whitelist */
 router.HandleWithOptions("/:locale/list", listHandler, localizedOptions)
 ```
 
-A wildcard named `*_locale` (single-segment or catch-all) binds it too. A route `defaults` entry does not rescue the pattern: defaults are applied **after** the whitelist has already rejected the route. Name the parameter `_locale` whenever the route carries `locales`, and read the matched value back through [`Request.Locale`](../../http/request.go), which the kernel publishes from that same parameter, falling back to the configured default locale.
+A wildcard named `*_locale` (single-segment or catch-all) binds it too. A route `defaults` entry now **does** supply it: defaults are merged before the whitelist reads them, in [`match`](../../http/router.go) and in [`AllowedMethods`](../../http/router_matching.go) alike, so a route that declares its locale through `Defaults{"_locale": "en"}` is reachable. It was not before — the gate rejected it sixteen lines before the value meant to satisfy it was filled in, while the kernel read the same map *after* the merge, so the router and the kernel disagreed about whether a default counted. Read the matched value back through [`Request.Locale`](../../http/request.go), which the kernel publishes from that same parameter, falling back to the configured default locale.
+
+### The spelling a route is matched on
+
+The router matches on the escaped path — `request.URL.EscapedPath()` in [`ServeHttp`](../../http/kernel.go) — and unescapes each segment **after** splitting on the separators the client actually sent. An encoded slash therefore stays inside the value where the client put it: `/admin%2Fusers` is one segment naming a resource called `admin/users`, not two segments reaching the `/admin/users` handler. Matching the decoded path made `%2F` a segment separator, so one url reached a handler that a proxy or WAF rule written against the raw request line had never seen — which is also why [`GeneratePath`](../../http/url_generator.go) refuses a `/` inside a parameter value.
+
+A host is compared the way the header is defined: case-insensitively, and with the port significant **only when the route declared one**. A route bound to `example.com` matches `Example.com` and `example.com:8443`; a route bound to `example.com:8443` matches only that port.
+
+A request target that is not a path is not path-routed at all. net/http hands the asterisk-form of `OPTIONS` through as the path `*`, which used to be read as a single segment and offered to every `/:param` route in the application. An empty path is read as the root, so a route registered as `/` answers it.
+
+### Registration is boot-only
+
+Every registration door — `Handle`, `HandleNamed`, `HandleController`, `HandleNamedController`, `HandleWithOptions`, and the same set on a [`RouteGroup`](../../http/router_group.go) — is **boot-only**, and refuses by name once [`Kernel.ServeHttp`](../../http/kernel.go) has built the handler. The same holds for the kernel's own configuration doors: `Use`, `SetNotFoundHandler`, `SetErrorHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy` and `SetMethodPolicy`.
+
+The route table is a tree of plain maps that every request goroutine reads, so writing to it while requests are in flight is an unrecoverable fatal error rather than a torn read; the kernel's fields are an unsynchronized read on every request. Configuration is compiled once and then served. The **reading** doors are untouched and stay open for the life of the process — [`RouteDefinitions`](../../http/router_introspection.go), `RouteDefinition`, `RouteRegistry` and the introspection surface are read from inside handlers, which is how the openapi document and the route manifest are served.
 
 ## Url generation
 

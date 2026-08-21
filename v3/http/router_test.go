@@ -887,3 +887,135 @@ func TestRouterRegistration_AcceptsAnUnnamedCatchAll(t *testing.T) {
         t.Fatalf("expected the unnamed catch-all to match")
     }
 }
+
+func TestRouterRegistration_RefusesBraceParameterSyntax(t *testing.T) {
+    router := NewRouter()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        router.Handle(nethttp.MethodGet, "/users/{id}", routeRegistryTestHandler())
+    }, "route parameter must be written as :name, not {name}")
+}
+
+func TestRouterRegistration_AcceptsALiteralSegmentThatOnlyOpensABrace(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(nethttp.MethodGet, "/users/{id", routeRegistryTestHandler())
+
+    handler, _, _ := router.match(nethttp.MethodGet, "/users/{id", "", "https")
+    if nil == handler {
+        t.Fatalf("expected a segment that is not a brace pair to stay a literal segment")
+    }
+}
+
+func TestRouterRegistration_RefusesLocalesWithoutALocaleParameter(t *testing.T) {
+    router := NewRouter()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        router.HandleWithOptions(
+            "/articles",
+            routeRegistryTestHandler(),
+            NewRouteOptions("article.list", []string{nethttp.MethodGet}, "", nil, nil, nil, []string{"en", "de"}, 0, nil),
+        )
+    }, "route declares locales but neither its pattern nor its defaults supply _locale")
+}
+
+func TestRouterRegistration_AcceptsLocalesSuppliedByADefault(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleWithOptions(
+        "/articles",
+        routeRegistryTestHandler(),
+        NewRouteOptions(
+            "article.list",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            map[string]string{RouteAttributeLocale: "en"},
+            []string{"en", "de"},
+            0,
+            nil,
+        ),
+    )
+
+    handler, params, _ := router.match(nethttp.MethodGet, "/articles", "", "https")
+    if nil == handler {
+        t.Fatalf("expected a route whose locale comes from a default to be reachable")
+    }
+
+    if "en" != params[RouteAttributeLocale] {
+        t.Fatalf("expected the default locale to reach the handler, got %q", params[RouteAttributeLocale])
+    }
+}
+
+func TestRouterRegistration_RefusesALocaleParameterWithNoLocaleList(t *testing.T) {
+    router := NewRouter()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        router.Handle(nethttp.MethodGet, "/:_locale/articles", routeRegistryTestHandler())
+    }, "route pattern carries _locale but declares no locales to validate it against")
+}
+
+func TestRouterRegistration_AnEmptyPatternRegistersTheRootRoute(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(nethttp.MethodGet, "", routeRegistryTestHandler())
+
+    handler, _, _ := router.match(nethttp.MethodGet, "/", "", "https")
+    if nil == handler {
+        t.Fatalf("expected an empty pattern to register the root route rather than an unreachable one")
+    }
+}
+
+func TestRouterMatch_AnEmptyPathReachesTheRootRoute(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(nethttp.MethodGet, "/", routeRegistryTestHandler())
+
+    handler, _, _ := router.match(nethttp.MethodGet, "", "", "https")
+    if nil == handler {
+        t.Fatalf("expected an empty path to be read as the root")
+    }
+}
+
+func TestRouterMatch_TheAsteriskFormIsNotPathRouted(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(nethttp.MethodOptions, "/:anything", routeRegistryTestHandler())
+
+    handler, params, _ := router.match(nethttp.MethodOptions, "*", "", "https")
+    if nil != handler {
+        t.Fatalf("expected the asterisk-form target not to be offered to a parameter route, bound %v", params)
+    }
+
+    if 0 != len(router.AllowedMethods("*", "", "https")) {
+        t.Fatalf("expected the asterisk-form target to advertise no routed methods")
+    }
+}
+
+func TestRouterMatch_AnEncodedSlashDoesNotSplitASegment(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(nethttp.MethodGet, "/admin/users", routeRegistryTestHandler())
+    router.Handle(nethttp.MethodGet, "/:name", routeRegistryTestHandler())
+
+    handler, params, _ := router.match(nethttp.MethodGet, "/admin%2Fusers", "", "https")
+    if nil == handler {
+        t.Fatalf("expected the encoded spelling to match the single-segment route")
+    }
+
+    if "admin/users" != params["name"] {
+        t.Fatalf("expected the encoded separator to stay inside the bound value, got %q", params["name"])
+    }
+}
+
+func TestRouterMatch_AnEncodedSegmentIsUnescapedForTheHandler(t *testing.T) {
+    router := NewRouter()
+
+    router.Handle(nethttp.MethodGet, "/article/:slug", routeRegistryTestHandler())
+
+    _, params, _ := router.match(nethttp.MethodGet, "/article/hello%20world", "", "https")
+    if "hello world" != params["slug"] {
+        t.Fatalf("expected the segment to be unescaped for the handler, got %q", params["slug"])
+    }
+}

@@ -4,7 +4,6 @@ import (
     "bytes"
     "io"
     nethttp "net/http"
-    "net/url"
     "strconv"
     "time"
 
@@ -210,8 +209,8 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
         return exception.NewError(
             "internal-auth query does not match the request",
             map[string]any{
-                "signed":  sanitizeQueryValuesForDiagnostics(envelope.Query),
-                "request": sanitizeQueryValuesForDiagnostics(httpRequest.URL.RawQuery),
+                "signed":  internal.RedactQueryValuesForDiagnostics(envelope.Query),
+                "request": internal.RedactQueryValuesForDiagnostics(httpRequest.URL.RawQuery),
             },
             nil,
         )
@@ -343,26 +342,6 @@ func (instance *HmacTokenSource) reject(
 
     return NewAnonymousToken(), nil
 }
-
-/* sanitizeQueryValuesForDiagnostics keeps the parameter names of a raw query string and redacts every value, the same judgement the http client's url sanitizer applies; a query that does not parse is redacted whole, because an unparseable query cannot have its secret half told apart from its diagnosable half. */
-func sanitizeQueryValuesForDiagnostics(rawQuery string) string {
-    if "" == rawQuery {
-        return ""
-    }
-
-    queryValues, parseErr := url.ParseQuery(rawQuery)
-    if nil != parseErr {
-        return redactedQueryValue
-    }
-
-    for key := range queryValues {
-        queryValues.Set(key, redactedQueryValue)
-    }
-
-    return queryValues.Encode()
-}
-
-const redactedQueryValue = "xxxxx"
 
 /* readAndRestoreBody reads the full request body so it can be hashed, then replaces the consumed body (and GetBody) with a fresh reader so the downstream handler still sees it. Reading happens only after the envelope signature has already been verified, so an unauthenticated caller can never make the server buffer a body. */
 func readAndRestoreBody(httpRequest *nethttp.Request) ([]byte, error) {

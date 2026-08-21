@@ -9,6 +9,7 @@ import (
     "fmt"
     "io"
     "net/http"
+    "net/url"
     "strings"
     "time"
 
@@ -80,8 +81,20 @@ func runServerSentEventCheck(baseUrl string, redisAddress string) {
 
     topic := liveExampleUnique("e2e-sse")
 
+    /* the event routes are behind the firewall now — publishing injects a frame into every stream open across the
+       cluster, so it carries the write role, and the stream carries the catalog writes made behind it. /events sits
+       under the MAIN firewall, whose token source resolves a SESSION, so the identity travels as a cookie: this
+       section opens its own jar and signs in, which is what a section that authenticates does here. The shared
+       jar-less client above still drives the transport, with the cookie passed explicitly, so no session leaks onto
+       any later section. */
+    editorClient := newExampleHttpClient()
+    signInExampleHttpEditor(editorClient, baseUrl, "")
+
+    sessionCookieHeader := exampleSessionCookieHeader(editorClient, baseUrl)
+
     response := client.openStream(serverSentEventLabel, serverSentEventStreamRoute+"?topic="+topic, map[string]string{
         "Accept": "text/event-stream",
+        "Cookie": sessionCookieHeader,
     })
 
     /* both paths, because os.Exit runs no deferred function: without the failure hook a red assertion below leaves
@@ -99,7 +112,7 @@ func runServerSentEventCheck(baseUrl string, redisAddress string) {
     reader := newServerSentEventStreamReader(response.Body)
 
     assertServerSentEventPreamble(reader)
-    assertServerSentEventInProcessPublish(client, reader, topic)
+    assertServerSentEventInProcessPublish(client, reader, topic, sessionCookieHeader)
     assertServerSentEventWireDelivery(redisClient, reader, topic)
     assertServerSentEventIdSanitisation(redisClient, reader, topic)
     assertServerSentEventTopicIsolation(redisClient, reader, topic)
@@ -157,12 +170,18 @@ func assertServerSentEventPreamble(reader *serverSentEventStreamReader) {
     pass("the preamble comment was flushed before any event was published")
 }
 
-func assertServerSentEventInProcessPublish(client *liveExampleClient, reader *serverSentEventStreamReader, topic string) {
+func assertServerSentEventInProcessPublish(client *liveExampleClient, reader *serverSentEventStreamReader, topic string, sessionCookieHeader string) {
     text := liveExampleUnique("in-process")
 
     path := fmt.Sprintf("%s?topic=%s&text=%s", serverSentEventPublishRoute, topic, text)
 
-    response := client.get(serverSentEventLabel, path)
+    /* publishing is a POST now: it broadcasts to every stream open across the cluster, which a GET made reachable
+       from a bare url — an <img> tag on any page was enough. */
+    response := client.call(serverSentEventLabel, liveExampleRequest{
+        method:     "POST",
+        path:       path,
+        headerList: map[string]string{"Cookie": sessionCookieHeader},
+    })
     requireLiveExampleStatus(serverSentEventLabel, path, response, http.StatusAccepted)
 
     frame := requireServerSentEventFrame(reader, "the in-process publish")
@@ -614,4 +633,26 @@ func (instance *serverSentEventStreamReader) next(budget time.Duration) (serverS
     case <-time.After(budget):
         return serverSentEventFrame{}, false
     }
+}
+
+/* exampleSessionCookieHeader renders the cookies a signed-in client holds for the base url as one Cookie header.
+The streaming client inside openStream is built per call and carries no jar, so the identity has to travel as a
+header — which also keeps it scoped to the two requests this section makes rather than to a shared jar. */
+func exampleSessionCookieHeader(client *http.Client, baseUrl string) string {
+    parsedUrl, parseErr := url.Parse(baseUrl)
+    if nil != parseErr {
+    	fail("%s: parse the base url %q: %v", serverSentEventLabel, baseUrl, parseErr)
+    }
+
+    cookieList := client.Jar.Cookies(parsedUrl)
+    if 0 == len(cookieList) {
+    	fail("%s: the signed-in client holds no cookie for %s", serverSentEventLabel, baseUrl)
+    }
+
+    rendered := make([]string, 0, len(cookieList))
+    for _, cookieValue := range cookieList {
+    	rendered = append(rendered, cookieValue.Name+"="+cookieValue.Value)
+    }
+
+    return strings.Join(rendered, "; ")
 }

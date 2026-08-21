@@ -535,3 +535,36 @@ func TestRequestErrors_CarryDistinctMessages(t *testing.T) {
         t.Fatalf("the two refusals must not share a message")
     }
 }
+
+/* the precedence Input documents was implemented but pinned nowhere: every existing case populates a
+single source, so none of them would notice the order changing. */
+func TestRequest_Input_PrefersThePostBodyOverTheQuery(t *testing.T) {
+    httpRequest := httptest.NewRequest("POST", "/submit?field=fromQuery", strings.NewReader("field=fromBody"))
+    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(httpRequest, nil, nil, nil)
+
+    if "fromBody" != request.Input("field") {
+        t.Fatalf("expected the post body to win over the query, got %q", request.Input("field"))
+    }
+}
+
+func TestRequest_Input_PrefersTheQueryOverTheRouteParameters(t *testing.T) {
+    httpRequest := httptest.NewRequest("GET", "/articles/fromParams?id=fromQuery", nil)
+
+    request := NewRequest(httpRequest, map[string]string{"id": "fromParams"}, nil, nil)
+
+    if "fromQuery" != request.Input("id") {
+        t.Fatalf("expected the query to win over the route parameters, got %q", request.Input("id"))
+    }
+}
+
+func TestRequest_Input_FallsThroughToTheRouteParametersOnly(t *testing.T) {
+    httpRequest := httptest.NewRequest("GET", "/articles/fromParams", nil)
+
+    request := NewRequest(httpRequest, map[string]string{"id": "fromParams"}, nil, nil)
+
+    if "fromParams" != request.Input("id") {
+        t.Fatalf("expected the route parameter when no other source carries the key, got %q", request.Input("id"))
+    }
+}

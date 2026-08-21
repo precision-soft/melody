@@ -34,6 +34,14 @@ type MethodPolicy struct {
     AutomaticOptions  bool
 }
 
+/* Kernel is the http entry point an application configures at boot and then serves with.
+
+Every mutator below is BOOT-ONLY. Each writes state that every request goroutine afterwards reads
+without synchronization — the middleware chain, the forwarded-headers policy whose four words decide
+whether a session cookie is marked Secure, the method policy, the not-found and error handlers — so
+calling one once ServeHttp has produced a handler is a data race, not a live reconfiguration.
+Configuration is compiled once and then served; the framework kernel enforces this by refusing such a
+call on the calling goroutine, naming the door. */
 type Kernel interface {
     Use(middlewares ...Middleware)
 

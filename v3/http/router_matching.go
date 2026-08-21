@@ -34,6 +34,10 @@ func (instance *Router) AllowedMethods(path string, host string, scheme string) 
     routes := instance.routeRegistry.routesInternal()
     allowedMethodsSet := make(map[string]struct{})
 
+    if false == requestPathIsRoutable(path) {
+        return make([]string, 0)
+    }
+
     pathSegments := splitRequestPath(path)
 
     for _, routeValue := range routes {
@@ -48,6 +52,13 @@ func (instance *Router) AllowedMethods(path string, host string, scheme string) 
         params, matched := matchPath(routeValue, pathSegments)
         if false == matched {
             continue
+        }
+
+        /* the defaults are merged before the locale gate reads them, exactly as Match does: a route supplying its locale through Defaults is reachable, so the methods it accepts must be advertised rather than filtered out by a gate reading the value before it exists. */
+        for key, defaultValue := range routeValue.defaults {
+            if _, exists := params[key]; false == exists {
+                params[key] = defaultValue
+            }
         }
 
         if false == matchesLocale(routeValue.locales, params) {

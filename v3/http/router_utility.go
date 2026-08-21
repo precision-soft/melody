@@ -10,6 +10,7 @@ import (
     "net"
     nethttp "net/http"
     "net/netip"
+    "net/url"
     stdpath "path"
     "reflect"
     "strings"
@@ -212,14 +213,38 @@ func splitPath(value string) []string {
     return splitNormalizedPath(strings.TrimSpace(value))
 }
 
-/* a request path is never trimmed: whitespace is significant to whatever sits in front of the application, so trimming it would let "/admin%20" reach the "/admin" handler through a proxy rule that never saw a match */
+/* a request path is never trimmed: whitespace is significant to whatever sits in front of the application, so trimming it would let "/admin%20" reach the "/admin" handler through a proxy rule that never saw a match
+
+The path arrives in its ESCAPED spelling and is split on the separators the client actually sent, then
+each segment is unescaped on its own. Splitting the decoded path instead made "%2F" a segment
+separator: "/admin%2Fusers" is one segment naming a resource called "admin/users", but decoded first
+it became two and reached the "/admin/users" handler — while a proxy or WAF rule written against the
+raw request line saw neither. Per-segment unescaping keeps an encoded separator inside the value where
+the client put it, so a parameter can legitimately carry a slash and the route tree still sees exactly
+the segments the request line has. A segment whose escaping is malformed is left as sent rather than
+guessed at, so it matches only a route that literally spells it. */
 func splitRequestPath(value string) []string {
-    return splitNormalizedPath(value)
+    segments := splitNormalizedPath(value)
+
+    for index, segment := range segments {
+        unescapedSegment, unescapeErr := url.PathUnescape(segment)
+        if nil != unescapeErr {
+            continue
+        }
+
+        segments[index] = unescapedSegment
+    }
+
+    return segments
 }
 
 func splitNormalizedPath(value string) []string {
+    /* an empty path is the root, which is what every consumer of it means. Answered as [""] instead,
+       the tree walk started with no segments to consume and reached only the tree root, where a route
+       registered as "/" does not live — it lives under the empty static child — so a request whose
+       target normalized to nothing 404'd even against an application that had registered "/". */
     if "" == value {
-        return []string{""}
+        value = "/"
     }
 
     normalizedPath := value
@@ -793,12 +818,34 @@ func matchesMethod(methods []string, method string) bool {
     return false
 }
 
+/* matchesHost compares host names the way the host header is defined rather than the way two strings
+compare. A host name is case-insensitive, so a client sending Example.com reaches a route bound to
+example.com; and the port is a discriminator only when the route asked for one, so a route bound to
+example.com matches example.com:8443 while a route bound to example.com:8443 still matches only that
+port. The exact comparison this replaced made a route bound to a host unreachable behind any
+non-default port — the whole of local development and every non-443 deployment — and the request fell
+through to a broader route on the same pattern, or to a 404, with nothing recorded. The sibling
+matchesScheme already folds case for the same reason. */
 func matchesHost(expectedHost string, actualHost string) bool {
     if "" == expectedHost {
         return true
     }
 
-    return expectedHost == actualHost
+    if true == strings.EqualFold(expectedHost, actualHost) {
+        return true
+    }
+
+    /* the route named a port, so the port is part of what it asked for and an unported request host cannot satisfy it */
+    if true == strings.Contains(expectedHost, ":") {
+        return false
+    }
+
+    actualHostWithoutPort, _, splitErr := net.SplitHostPort(actualHost)
+    if nil != splitErr {
+        return false
+    }
+
+    return strings.EqualFold(expectedHost, actualHostWithoutPort)
 }
 
 func matchesScheme(schemes []string, scheme string) bool {
@@ -979,4 +1026,18 @@ func matchPath(
     }
 
     return params, true
+}
+
+/* requestPathIsRoutable reports whether a request target is a path at all. The origin-form is the only
+   target a route table can answer: the asterisk-form of OPTIONS names the server rather than a
+   resource, and net/http hands it through as the path "*", which the splitter then read as the single
+   segment "*" — so a server-wide OPTIONS was offered to every "/:param" route in the application and
+   bound the asterisk as that parameter's value. An authority-form CONNECT reaches the same door.
+   Neither is path-routed; both are left to the kernel to answer as no route. */
+func requestPathIsRoutable(path string) bool {
+    if "" == path {
+        return true
+    }
+
+    return strings.HasPrefix(path, "/")
 }

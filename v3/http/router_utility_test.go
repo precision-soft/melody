@@ -1655,3 +1655,85 @@ func TestMarkResponsePrivateForSessionCookie(t *testing.T) {
         })
     }
 }
+
+func TestMatchesHost_FoldsCase(t *testing.T) {
+    if false == matchesHost("api.example.com", "API.Example.COM") {
+        t.Fatalf("expected the host comparison to fold case, as the header definition requires")
+    }
+}
+
+func TestMatchesHost_IgnoresThePortWhenTheRouteDeclaredNone(t *testing.T) {
+    if false == matchesHost("api.example.com", "api.example.com:8443") {
+        t.Fatalf("expected a route bound to a host to be reachable behind a non-default port")
+    }
+}
+
+func TestMatchesHost_ComparesThePortWhenTheRouteDeclaredOne(t *testing.T) {
+    if false == matchesHost("api.example.com:8443", "api.example.com:8443") {
+        t.Fatalf("expected the declared port to match itself")
+    }
+
+    if true == matchesHost("api.example.com:8443", "api.example.com:9999") {
+        t.Fatalf("expected a route that declares a port to discriminate on it")
+    }
+
+    if true == matchesHost("api.example.com:8443", "api.example.com") {
+        t.Fatalf("expected a route that declares a port not to match a request without one")
+    }
+}
+
+func TestMatchesHost_StillRefusesADifferentHost(t *testing.T) {
+    if true == matchesHost("api.example.com", "evil.example.com") {
+        t.Fatalf("expected a different host to be refused")
+    }
+
+    if true == matchesHost("api.example.com", "api.example.com.evil.test") {
+        t.Fatalf("expected a suffix-extended host to be refused")
+    }
+}
+
+func TestRequestPathIsRoutable_RefusesTheAsteriskForm(t *testing.T) {
+    if true == requestPathIsRoutable("*") {
+        t.Fatalf("expected the asterisk-form target not to be path-routed")
+    }
+
+    if false == requestPathIsRoutable("/admin") {
+        t.Fatalf("expected an origin-form target to be path-routed")
+    }
+
+    if false == requestPathIsRoutable("") {
+        t.Fatalf("expected an empty target to be path-routed as the root")
+    }
+}
+
+func TestSplitRequestPath_KeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
+    segments := splitRequestPath("/admin%2Fusers")
+
+    if 2 != len(segments) {
+        t.Fatalf("expected the encoded separator not to split the path, got %v", segments)
+    }
+
+    if "admin/users" != segments[1] {
+        t.Fatalf("expected the segment to be unescaped in place, got %q", segments[1])
+    }
+}
+
+func TestSplitRequestPath_ReadsAnEmptyPathAsTheRoot(t *testing.T) {
+    if false == slicesEqualForTest(splitRequestPath(""), splitRequestPath("/")) {
+        t.Fatalf("expected an empty path to split exactly as the root does")
+    }
+}
+
+func slicesEqualForTest(left []string, right []string) bool {
+    if len(left) != len(right) {
+        return false
+    }
+
+    for index := range left {
+        if left[index] != right[index] {
+            return false
+        }
+    }
+
+    return true
+}

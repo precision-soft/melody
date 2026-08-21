@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - http: `RateLimitMiddleware` and `RegisterRateLimitRequestListener` read the limiter through the interface, so a typed-nil limiter is refused at construction under the guard's own name — it passed the plain comparison, looked live, and dereferenced its nil receiver on the first request the middleware metered
 - http: a serializer resolution failure that is not the not-acceptable refusal is recorded at warning before the result handler's fallback serves the default representation — it was dropped whole, so a client that named an available type and received another had no diagnostic anywhere
+- http: the abort sentinel no longer leaks the response it aborts. `http.ErrAbortHandler` was re-raised ten lines before the kernel captured the response in flight and seventy before either close ran, so a deliberate abort raised by a middleware after its `next()` returned dropped the only reference to a file-backed response — `FileResponse`, `ServeReader` — and leaked one descriptor per aborted request. The comment on `invokeErrorHandlerSafely` already refused to honour the sentinel for exactly this reason
+
+### Security
+
+- http: the access log and the kernel's 405 and no-route records keep the query parameter NAMES and redact every value. A query string is the one part of a request line that routinely carries a credential — an api key, a one-time token, a signed link — and one access-log line is written per request, so a token in a url was copied into the journal on every call, where it is read by more people than the request was
 
 ## [v2.13.0] - 2026-08-18 - Stabilization Sweep, Hardened Failure Paths and Feature Freeze
 
