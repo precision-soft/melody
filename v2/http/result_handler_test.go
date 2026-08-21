@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v2/exception"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     "github.com/precision-soft/melody/v2/internal/testhelper"
+    "github.com/precision-soft/melody/v2/logging"
     "github.com/precision-soft/melody/v2/runtime"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/precision-soft/melody/v2/serializer"
@@ -220,5 +221,49 @@ func TestNormalizeResultToResponse_TypedNilContractResponseBecomesNilInterface(t
 
     if nil != normalized {
         t.Fatalf("expected a typed nil contract response to normalize to the nil interface")
+    }
+}
+
+/* the fallback that serves the default representation no longer swallows the resolution failure: the record is the only diagnostic a client that named an available type and received another will ever produce */
+func TestNormalizeResultToResponse_ARefusedResolutionIsRecordedBeforeTheFallback(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    registerErr := container.Register[*serializer.SerializerManager](
+        serviceContainer,
+        serializer.ServiceSerializerManager,
+        func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
+            return serializer.NewSerializerManager(
+                map[string]serializercontract.Serializer{
+                    serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
+                },
+            )
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scope := serviceContainer.NewScope()
+    capture := &exceptionListenerCaptureLogger{}
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/value", nil)
+    httpRequest.Header.Set("Accept", ",,,")
+
+    request := NewRequest(httpRequest, nil, runtimeInstance, NewRequestContext("test", time.Now()))
+
+    response, err := NormalizeResultToResponse(runtimeInstance, request, map[string]any{"a": "b"})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the fallback representation to be served")
+    }
+
+    if 1 != capture.warningCalls {
+        t.Fatalf("expected the refused resolution to be recorded at warning, got %d", capture.warningCalls)
     }
 }

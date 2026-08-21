@@ -10,6 +10,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     "github.com/precision-soft/melody/v2/logging"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
@@ -23,7 +24,8 @@ func RegisterRateLimitRequestListener(
     eventDispatcher eventcontract.EventDispatcher,
     config *RateLimitConfig,
 ) {
-    if nil == config || nil == config.Limiter() {
+    /* the limiter is read through the interface, the same refusal the middleware door gives a typed nil */
+    if nil == config || true == internal.IsNilInterface(config.Limiter()) {
         exception.Panic(
             exception.NewError("limiter is required for rate limit request listener", nil, nil),
         )

@@ -68,15 +68,25 @@ func (instance *Response) Close() error {
 
 var _ httpcontract.Response = (*Response)(nil)
 
-type ErrorResponsePayload struct {
-    Error string `json:"error"`
-    Time  string `json:"time"`
+/* ErrorResponsePayloadDetail is the error object of the standardized error envelope: the message always, with the debug-only context and cause rendered beside it by the kernel's error renderer. */
+type ErrorResponsePayloadDetail struct {
+    Message string `json:"message"`
 }
 
-func NewErrorResponsePayload(message string, timeString string) *ErrorResponsePayload {
+/* ErrorResponsePayload is the standardized error envelope every framework error body shares: the status names the answer inside the body the way the status line names it outside, the moment dates it, and the error object carries the failure itself. The kernel's error renderer adds requestId and the validation detail where it knows them. */
+type ErrorResponsePayload struct {
+    Status int                        `json:"status"`
+    Time   string                     `json:"time"`
+    Error  ErrorResponsePayloadDetail `json:"error"`
+}
+
+func NewErrorResponsePayload(statusCode int, message string, timeString string) *ErrorResponsePayload {
     return &ErrorResponsePayload{
-        Error: message,
-        Time:  timeString,
+        Status: statusCode,
+        Time:   timeString,
+        Error: ErrorResponsePayloadDetail{
+            Message: message,
+        },
     }
 }
 
@@ -150,16 +160,19 @@ func JsonResponse(statusCode int, payload any) (*Response, error) {
 }
 
 func JsonErrorResponse(statusCode int, message string) *Response {
-    payload := NewErrorResponsePayload(message, time.Now().Format(time.RFC3339))
+    payload := NewErrorResponsePayload(statusCode, message, time.Now().Format(time.RFC3339))
 
     response, jsonResponseErr := JsonResponse(statusCode, payload)
     if nil == jsonResponseErr {
         return response
     }
 
-    fallbackPayload := map[string]string{
-        "error": message,
-        "time":  time.Now().Format(time.RFC3339),
+    fallbackPayload := map[string]any{
+        "status": statusCode,
+        "time":   time.Now().Format(time.RFC3339),
+        "error": map[string]string{
+            "message": message,
+        },
     }
 
     data, marshalErr := json.Marshal(fallbackPayload)

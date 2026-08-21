@@ -50,6 +50,46 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** Add the one method to the custom kernel. Remove the duplicate registration; a route that must coexist differs in at least one discriminator. An application aggregating boot collisions arms `RouteRegistry.SetBootCollisionRecorder` for the boot window.
 
+### Http: every framework error body is one standardized envelope, and the validation detail is under `validationErrors`
+
+**What changed.** Every error the framework renders — the exception listener, the kernel's own fallback paths, and `JsonErrorResponse`, which the security entry points and the examples answer through — carries the one envelope `{"status": ..., "time": ..., "error": {"message": ...}}`, with `requestId` beside them where the request is known and the debug-only `context` and `cause` inside the error object. The body is also negotiated: a client that prefers html gets the html error page with the status and the request id, anything else goes through the serializer manager against the joined Accept lines, and an Accept header that refuses every available type keeps the error's own status with the json body — an error status is the signal itself, and masking a refusal behind 406 would hide it. The per-field validation detail reaches the body under the `validationErrors` key, projected so an entry blaming the rule DECLARATION keeps its field, message and code but loses the context naming the developer's own typo. v1/v2 spell that key `errors`; v3 diverges deliberately, because the key names what the detail is.
+
+**Symptom.** A client parsing the flat `{"error": "<message>"}` body stops finding the message at the top level; a reader of the exception context keyed on `errors` finds `validationErrors`; a client of a failed validation starts receiving the per-field detail it never received.
+
+**Remedy.** Read the message at `error.message` and the status inside the body at `status`; read the validation detail at `validationErrors`. The success half of the standardization — a data envelope over handler results, with a machine-readable error `code` — deliberately ships with the feature train, so nothing about successful responses changes here.
+
+### Http static: the folded root spellings are refused, the excluded index stays excluded, and embedded assets get real validators
+
+**What changed.** The file server refuses the spellings `path.Clean` folds into the mount root — `/..`, `/.`, `//`, `/open/..` — the same refusal every other path already earned, because the matchers in front of the application compare the raw path and those spellings reach the index page from behind whatever rule the other prefix carries. The exclusion list is also consulted against the index file the root resolves to, so excluding `/index.html` excludes it for `/` too. On an embedded filesystem — where files carry no modification time — `Last-Modified` is no longer emitted as the year-one instant and `If-Modified-Since` is not consulted, the entity tag carries the build version instead of the zero timestamp, and the tag reads the modification time at nanosecond resolution. `NewFileServer` copies its configuration, refuses nil options by name, proves an embedded public directory at construction, and honours an explicit `cacheMaxAge` of zero as always-revalidate instead of coercing it to an hour.
+
+**Symptom.** Requests for the folded spellings fall through to the application (usually a 404) instead of answering the index page; clients that conditionally revalidated embedded assets stop being answered 304 forever; a deployment that set `MELODY_STATIC_CACHE_MAX_AGE=0` with cache enabled starts serving `max-age=0`; a boot with `MELODY_PUBLIC_DIR` naming a directory the build did not embed panics instead of serving 404s.
+
+**Remedy.** None for the refusals. A deployment that relied on the hour of freshness sets `MELODY_STATIC_CACHE_MAX_AGE=3600` explicitly; a setter called after `NewFileServer` now configures the next server, so configuration lands before construction.
+
+### Http cors: an empty origin list denies, entries are port-significant, and the preflight can be answered ahead of security
+
+**What changed.** An explicitly empty (non-nil) `AllowOrigins` list denies every origin instead of silently becoming the wildcard, and credentials beside it are refused at boot under their own name. A schemeless allow entry is port-significant: `app.example.com` no longer matches every port of that host. `NewService` reads a nil method or header list as the default `DefaultService` grants — Authorization included. `cors.RegisterRequestListener` and the `RegisterListeners` façade arrive, answering a preflight at priority 100, ahead of token resolution — a preflight carries neither cookie nor Authorization by spec, so aimed at an access-controlled path through the middleware form it was refused opaquely. `CorsMiddleware(nil)` reads as the default service instead of panicking.
+
+**Symptom.** A configuration whose origins variable arrives empty stops allowing everybody; an entry that relied on matching any port of its host stops matching the other ports; a SPA calling an access-controlled endpoint cross-origin starts working once the listeners are registered.
+
+**Remedy.** Name the ports (or the scheme) in the allow entries; register `cors.RegisterListeners(eventDispatcher, service)` for applications with access-controlled cross-origin endpoints; keep the middleware form for applications without them.
+
+### Http: the negotiation readers share one strict grammar
+
+**What changed.** `PrefersHtml`, the compression middleware's `acceptsGzip` and the error-body negotiation read their headers under the serializer's rules: every line of a repeated field joined, members and parameters split outside quoted sections, the `q` parameter compared case-insensitively, and a member whose q falls outside the RFC 7231 qvalue grammar dropped whole. A repeated Accept-Encoding coding resolves to its higher quality.
+
+**Symptom.** `gzip;Q=0` stops being compressed; `q=Inf`, `q=NaN`, `q=5` and `q=-1` stop being honoured as weights and drop their member; a refusal carried in a quoted parameter (`text/html;p="a,b";q=0`) or on a second header line starts being honoured.
+
+**Remedy.** None; clients emitting grammar-conforming headers see no change.
+
+### Exception: an out-of-range status is refused at construction
+
+**What changed.** `NewHttpException` and `NewHttpExceptionWithCause` panic on a status below 100 or above 599 — net/http's `WriteHeader` panics on such a status deep in the response path, and a status the writer clamps serves an exception as success.
+
+**Symptom.** A constructor call with a mistyped status (a `4004`, a `0`) panics where it is made instead of one response write away from it.
+
+**Remedy.** Fix the status at the call site.
+
 ### Security: `NewAccessControlRule` is now segment-bounded, and the cross-segment form has its own name
 
 **What changed.** `NewAccessControlRule` built a rule that matched every path merely beginning with the prefix — `/admin` governed `/administrator` as readily as `/admin/panel`. It now builds a rule bounded to a path SEGMENT: `/admin` governs `/admin` and `/admin/panel` but not `/administrator`. The cross-segment behaviour moves to the explicit `NewAccessControlRawPrefixRule`, on which `PUBLIC_ACCESS` is refused because a raw public rule, being the longest match, shadows a correctly bounded denial. An empty prefix is now refused rather than made a catch-all fallback, and `NewAccessControlRuleWithSegmentPrefix` becomes a deprecated alias for the plain name.

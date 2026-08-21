@@ -58,7 +58,7 @@ func (instance *dirFileSystem) Open(name string) (fs.File, error) {
         return nil, fs.ErrPermission
     }
 
-    /* @important open the path that was validated, not the one that was typed: os.Open(fullPath) would resolve every symlink component a second time, and an attacker who swaps a component between the check and the open serves a file from outside the base directory. Opening realPath makes the bytes served the ones that were checked. */
+    /* the path that was validated is the one that is opened: os.Open(fullPath) resolves every symlink component a second time, so a component swapped between the check and the open serves a file from outside the base directory. Opening realPath makes the bytes served the ones that were checked. */
     return os.Open(realPath)
 }
 

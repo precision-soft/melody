@@ -1320,3 +1320,31 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
         )
     }
 }
+
+/* a typed-nil limiter passes the plain comparison, looks live for the guard, and dereferences its nil receiver on the first request the middleware meters; the interface read refuses it at construction under the same name */
+func TestRateLimitMiddleware_RefusesATypedNilLimiterByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil limiter to be refused at construction")
+        }
+    }()
+
+    _ = RateLimitMiddleware(NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
+}
+
+/* the listener door shares the middleware door's refusal. The panic is asserted by NAME: with the guard dead the nil dispatcher three lines below panics too, and a recover that accepts any panic would report that second failure as the refusal it is not. */
+func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil limiter to be refused at registration")
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "limiter is required") {
+            t.Fatalf("expected the refusal to name the limiter, got %v", recovered)
+        }
+    }()
+
+    RegisterRateLimitRequestListener(nil, NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
+}

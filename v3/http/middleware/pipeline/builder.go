@@ -33,8 +33,106 @@ func (instance *Builder) Build(
     kernelInstance kernelcontract.Kernel,
     group string,
 ) ([]httpcontract.Middleware, *MiddlewareBuildReport, error) {
-    environment := kernelInstance.Environment()
+    ordered, report, selectionErr := instance.selectAndOrder(kernelInstance.Environment(), group)
+    if nil != selectionErr {
+        return nil, report, selectionErr
+    }
 
+    middlewares := make([]httpcontract.Middleware, 0, len(ordered))
+    for _, definition := range ordered {
+        if "" == definition.name {
+            continue
+        }
+
+        if nil == definition.factory {
+            return nil, nil, exception.NewError(
+                "middleware factory is nil",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                nil,
+            )
+        }
+
+        middlewareValue, factoryErr := definition.factory(kernelInstance)
+        if nil != factoryErr {
+            return nil, nil, exception.NewError(
+                "could not build middleware",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                factoryErr,
+            )
+        }
+
+        if nil == middlewareValue {
+            continue
+        }
+
+        middlewares = append(middlewares, middlewareValue)
+        report.SetSelectedNames(append(report.SelectedNames(), definition.name))
+    }
+
+    return middlewares, report, nil
+}
+
+/* MiddlewareDescription is one pipeline entry as the selection and the ordering see it, with no factory run: the definition name, the priority, and the function captured at registration — the middleware itself for a direct registration, the factory for a deferred one. */
+type MiddlewareDescription struct {
+    Name         string
+    Priority     int
+    FunctionName string
+}
+
+/* Describe answers what Build would run WITHOUT running it: the same selection, gating and ordering — refused for the same cycles and missing references — but no factory is invoked, so describing a pipeline has no side effect in the process that asks. */
+func (instance *Builder) Describe(
+    environment string,
+    group string,
+) ([]MiddlewareDescription, *MiddlewareBuildReport, error) {
+    ordered, report, selectionErr := instance.selectAndOrder(environment, group)
+    if nil != selectionErr {
+        return nil, report, selectionErr
+    }
+
+    descriptions := make([]MiddlewareDescription, 0, len(ordered))
+    selectedNames := make([]string, 0, len(ordered))
+
+    for _, definition := range ordered {
+        if "" == definition.name {
+            continue
+        }
+
+        /* the nil-factory refusal is Build's own third refusal, mirrored here so a described pipeline is one the serving boot accepts: without it the listing reports as healthy a definition the build refuses */
+        if nil == definition.factory {
+            return nil, report, exception.NewError(
+                "middleware factory is nil",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                nil,
+            )
+        }
+
+        descriptions = append(
+            descriptions,
+            MiddlewareDescription{
+                Name:         definition.name,
+                Priority:     definition.priority,
+                FunctionName: definition.functionName,
+            },
+        )
+        selectedNames = append(selectedNames, definition.name)
+    }
+
+    report.SetSelectedNames(selectedNames)
+
+    return descriptions, report, nil
+}
+
+/* selectAndOrder is the half of Build every question about the pipeline shares: which definitions the environment and the group admit, and in what order — with the same refusals Build answers with */
+func (instance *Builder) selectAndOrder(
+    environment string,
+    group string,
+) ([]*HttpMiddlewareDefinition, *MiddlewareBuildReport, error) {
     report := &MiddlewareBuildReport{
         requestedGroup: group,
         kernelEnv:      environment,
@@ -74,42 +172,7 @@ func (instance *Builder) Build(
         )
     }
 
-    middlewares := make([]httpcontract.Middleware, 0, len(ordered))
-    for _, definition := range ordered {
-        if "" == definition.name {
-            continue
-        }
-
-        if nil == definition.factory {
-            return nil, nil, exception.NewError(
-                "middleware factory is nil",
-                exceptioncontract.Context{
-                    "middlewareName": definition.name,
-                },
-                nil,
-            )
-        }
-
-        middlewareValue, factoryErr := definition.factory(kernelInstance)
-        if nil != factoryErr {
-            return nil, nil, exception.NewError(
-                "could not build middleware",
-                exceptioncontract.Context{
-                    "middlewareName": definition.name,
-                },
-                factoryErr,
-            )
-        }
-
-        if nil == middlewareValue {
-            continue
-        }
-
-        middlewares = append(middlewares, middlewareValue)
-        report.SetSelectedNames(append(report.SelectedNames(), definition.name))
-    }
-
-    return middlewares, report, nil
+    return ordered, report, nil
 }
 
 func (instance *Builder) selectDefinitions(
@@ -214,7 +277,7 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
 
 /* validateReferenceGating refuses a before or after reference whose target is not active everywhere the referring definition is active. selectDefinitions drops a definition whose environment or group gating does not match; orderDefinitions then sees the surviving reference as a name no node carries and reports it as missing, and Build turns that into the error the application boots on. A pipeline where an always-on middleware orders itself against a dev-only one therefore starts in dev and refuses to start in prod, which is the one place the failure must not be discovered.
 
-The declared sets are compared, never the environment being booted, so the same reference is refused in every environment rather than only in the one that happens to drop the target. An empty set is the universal one — a definition that names no environments runs in all of them — so an always-on definition may only reference another always-on definition, while a dev-only definition may reference a dev-only or an always-on one. Groups carry the same meaning and are checked the same way.
+The declared sets are compared, never the environment being booted, so the same reference is refused in every environment rather than only in the one that happens to drop the target. An empty set is the universal one — a definition that names no environments runs in all of them — so an always-on definition may only reference another always-on definition, while a dev-only definition may reference a dev-only or an always-on one. Groups are not compared as sets: they pre-filter which definitions this build weighs at all, so only the environment gating can make a reference unsatisfiable.
 
 A name no definition carries at all is left alone: that is an ordinary missing reference, and the ordering pass reports every one of them together. */
 func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group string) error {

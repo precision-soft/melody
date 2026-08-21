@@ -429,7 +429,8 @@ func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
 }
 
 func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
-    if nil == config || nil == config.Limiter() {
+    /* the limiter is read through the interface: a typed-nil limiter passes the plain comparison, looks live, and dereferences its nil receiver on the first request the middleware meters — a boot-time refusal by name instead of a per-request panic */
+    if nil == config || true == internal.IsNilInterface(config.Limiter()) {
         exception.Panic(
             exception.NewError("limiter is required for rate limit middleware", nil, nil),
         )

@@ -83,9 +83,11 @@ func (instance *Request) BindJsonAndValidate(target any) error {
     }
 
     httpException := exception.BadRequest("validation failed")
+
+    /* the validationErrors key is the public half of the exception's context: the kernel exception listener projects it into the response body, so the per-field detail the validator computed reaches the client under the one key that names it */
     httpException.SetContext(
         map[string]any{
-            "errors": validationErrors,
+            "validationErrors": validationErrors,
         },
     )
 

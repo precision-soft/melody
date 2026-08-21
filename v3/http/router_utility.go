@@ -298,7 +298,7 @@ func writeResponse(
             )
         }
 
-        response = defaultErrorResponse(request, nethttp.StatusInternalServerError, "internal server error")
+        response = renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, "internal server error", nil)
     }
 
     /* persist the session at most once per request: the panic-recovery path can re-enter writeResponse after the first call already committed the session but then failed while writing the body, and SaveSession does not reset the modified flag, so without this guard the session store would be written twice. The header-commit flag cannot gate this — a handler that streamed its own response still needs its session persisted on that first (already-committed) call. */

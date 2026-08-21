@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- http: `RateLimitMiddleware` and `RegisterRateLimitRequestListener` read the limiter through the interface, so a typed-nil limiter is refused at construction under the guard's own name — it passed the plain comparison, looked live, and dereferenced its nil receiver on the first request the middleware metered
+- http: a serializer resolution failure that is not the not-acceptable refusal is recorded at warning before the result handler's fallback serves the default representation — it was dropped whole, so a client that named an available type and received another had no diagnostic anywhere
+
 ## [v1.19.0] - 2026-08-18 - Stabilization Sweep, Hardened Failure Paths and Feature Freeze
 
 ### Added

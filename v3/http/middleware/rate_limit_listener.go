@@ -5,15 +5,15 @@ import (
     "errors"
     nethttp "net/http"
 
-    eventcontract "github.com/precision-soft/melody/event/contract"
-    "github.com/precision-soft/melody/exception"
-    exceptioncontract "github.com/precision-soft/melody/exception/contract"
-    "github.com/precision-soft/melody/http"
-    httpcontract "github.com/precision-soft/melody/http/contract"
-    "github.com/precision-soft/melody/internal"
-    kernelcontract "github.com/precision-soft/melody/kernel/contract"
-    "github.com/precision-soft/melody/logging"
-    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    eventcontract "github.com/precision-soft/melody/v3/event/contract"
+    "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/http"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
+    kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 /* RateLimitRequestListenerPriority places the limiter ahead of the security chain: token resolution listens at 50 and access control at 20, so a request over budget is answered before it pays an authenticator round — and before a refusal ends the request without the middleware chain ever being built. */

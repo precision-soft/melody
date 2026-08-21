@@ -116,6 +116,9 @@ const (
     environmentKeySmtpAddress = "SMTP_ADDRESS"
 
     environmentKeyOtelExporterEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
+    environmentKeyCorsAllowOrigins     = "APP_CORS_ALLOW_ORIGINS"
+    environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
 )
 
 /* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a

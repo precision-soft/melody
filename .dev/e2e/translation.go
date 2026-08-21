@@ -218,23 +218,26 @@ func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
         )
     }
 
-    /* the body is the FRAMEWORK's error payload ({"error":...,"time":...} from http.JsonErrorResponse), not the
-       example presenter's success/payload/errors envelope: the refusal is produced by the firewall's entry point
-       before any handler runs, so nothing in the application shapes it */
+    /* the body is the FRAMEWORK's standardized error envelope ({"status":...,"time":...,"error":{"message":...}}
+       from http.JsonErrorResponse), not the example presenter's success/payload/errors envelope: the refusal is
+       produced by the firewall's entry point before any handler runs, so nothing in the application shapes it */
     errorPayload := struct {
-        Error string `json:"error"`
-        Time  string `json:"time"`
+        Status int    `json:"status"`
+        Time   string `json:"time"`
+        Error  struct {
+            Message string `json:"message"`
+        } `json:"error"`
     }{}
     if decodeErr := json.Unmarshal(response.body, &errorPayload); nil != decodeErr {
         fail(
-            "%s: the 401 from %s is not the framework's json error payload (%v): %s",
+            "%s: the 401 from %s is not the framework's json error envelope (%v): %s",
             translationLabel,
             path,
             decodeErr,
             exampleTruncate(response.bodyText()),
         )
     }
-    if "" == errorPayload.Error {
+    if "" == errorPayload.Error.Message {
         fail("%s: the 401 from %s carries no error message: %s", translationLabel, path, exampleTruncate(response.bodyText()))
     }
 
@@ -250,7 +253,7 @@ func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
 
     pass(
         "the token firewall answered 401 json (error=%q, WWW-Authenticate=%q) to an Accept: text/html request — its entry point overrides the global 302",
-        errorPayload.Error,
+        errorPayload.Error.Message,
         response.headerList.Get("WWW-Authenticate"),
     )
 }

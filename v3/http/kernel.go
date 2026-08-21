@@ -3,7 +3,6 @@ package http
 import (
     "context"
     "errors"
-    "html"
     nethttp "net/http"
     "runtime/debug"
     "sort"
@@ -453,7 +452,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 }
 
                 exceptionEvent.SetResponse(
-                    defaultErrorResponse(melodyRequest, nethttp.StatusInternalServerError, message),
+                    renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusInternalServerError, message, nil),
                 )
             }
 
@@ -519,7 +518,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 },
             )
 
-            finalResponse = defaultErrorResponse(melodyRequest, nethttp.StatusBadRequest, "bad request")
+            finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusBadRequest, "bad request", nil)
 
             kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
             _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
@@ -567,7 +566,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 message = "payload too large"
             }
 
-            finalResponse = defaultErrorResponse(melodyRequest, statusCode, message)
+            finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil)
 
             kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
             _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
@@ -606,7 +605,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             kernelRequestEvent.SetResponse(
-                defaultErrorResponse(melodyRequest, statusCode, message),
+                renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil),
             )
         }
 
@@ -727,7 +726,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             }
 
                             kernelExceptionEvent.SetResponse(
-                                defaultErrorResponse(request, nethttp.StatusInternalServerError, message),
+                                renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, message, nil),
                             )
                         }
 
@@ -758,7 +757,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             kernelControllerEvent.SetResponse(
-                defaultErrorResponse(melodyRequest, statusCode, message),
+                renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil),
             )
         }
 
@@ -827,7 +826,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 }
 
                 kernelExceptionEvent.SetResponse(
-                    defaultErrorResponse(melodyRequest, nethttp.StatusInternalServerError, message),
+                    renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusInternalServerError, message, nil),
                 )
             }
 
@@ -869,18 +868,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             instance.options.SessionCookiePolicy,
         )
     })
-}
-
-/* defaultErrorResponse renders the kernel's own error answer through the one negotiation the kernel performs — an html page for a browser, a json body for everything else. It is the single spelling of the fallback every refusal and every failure path shares, so the two renderings cannot drift apart between call sites. */
-func defaultErrorResponse(request httpcontract.Request, statusCode int, message string) httpcontract.Response {
-    if true == PrefersHtml(request) {
-        return HtmlResponse(
-            statusCode,
-            "<!doctype html><html><head><meta charset=\"utf-8\"><title>Melody Error</title></head><body><h1>Error</h1><p>"+html.EscapeString(message)+"</p></body></html>",
-        )
-    }
-
-    return JsonErrorResponse(statusCode, message)
 }
 
 /* invokeErrorHandlerSafely runs the application's error handler under the kernel's own recovery: it is called while the failed response's body is still open and held only by the caller, so a panic escaping it would unwind past every close the kernel performs and leak that body — permanently, for a body that is not an os.File. The panic is logged with the stack of its site and answered by the default error response instead; net/http's abort sentinel is treated the same way, because honoring an abort raised here would leak the same body. */

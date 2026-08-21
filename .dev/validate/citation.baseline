@@ -39,6 +39,7 @@ v1 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer i
 v1 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
 
 v2 ~ symbol ~ debug.Stack            ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
+v3 ~ symbol ~ debug.Stack            ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
 v2 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the streaming response asserts on the writer
 v2 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
 v2 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap

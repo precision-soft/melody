@@ -5,8 +5,10 @@ import (
     nethttp "net/http"
 
     "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     "github.com/precision-soft/melody/v2/internal"
+    "github.com/precision-soft/melody/v2/logging"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/precision-soft/melody/v2/serializer"
 )
@@ -77,6 +79,22 @@ func NormalizeResultToResponse(
             /* a header that refuses every available media type is answered as not acceptable rather than served the very type it rejected; a header that simply matches nothing still falls through to the default representation */
             if true == errors.Is(err, serializer.ErrNotAcceptable) {
                 return EmptyResponse(nethttp.StatusNotAcceptable), nil
+            }
+
+            /* a resolution failure that is not the not-acceptable refusal is recorded before the fallback serves the default representation: it was dropped whole, so a client that named an available type and received another had no diagnostic anywhere */
+            if nil != err {
+                loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
+                if nil != loggerInstance {
+                    loggerInstance.Warning(
+                        "serializer resolution failed, serving the default representation",
+                        exception.LogContext(
+                            err,
+                            exceptioncontract.Context{
+                                "acceptHeader": acceptHeader,
+                            },
+                        ),
+                    )
+                }
             }
 
             if nil == err && nil != serializerInstance {

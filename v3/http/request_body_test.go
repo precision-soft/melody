@@ -221,7 +221,7 @@ func TestRequest_BindJsonAndValidateBindsAValidBody(t *testing.T) {
     }
 }
 
-func TestRequest_BindJsonAndValidateCarriesTheErrorsContextKey(t *testing.T) {
+func TestRequest_BindJsonAndValidateCarriesTheValidationErrorsContextKey(t *testing.T) {
     bindErr, _, _ := bindAndValidateOutcome(`{"email":"not-an-email","name":"x"}`)
 
     if nil == bindErr {
@@ -237,9 +237,13 @@ func TestRequest_BindJsonAndValidateCarriesTheErrorsContextKey(t *testing.T) {
         t.Fatalf("expected 400, got: %d", httpException.StatusCode())
     }
 
-    rawErrors, present := httpException.Context()["errors"]
+    rawErrors, present := httpException.Context()["validationErrors"]
     if false == present {
-        t.Fatalf("expected the violations under the errors context key, got: %v", httpException.Context())
+        t.Fatalf("expected the violations under the validationErrors context key, got: %v", httpException.Context())
+    }
+
+    if _, oldKeyPresent := httpException.Context()["errors"]; true == oldKeyPresent {
+        t.Fatalf("expected the retired errors context key to stay absent, got: %v", httpException.Context())
     }
 
     violations, isValidationErrors := rawErrors.(validation.ValidationErrors)

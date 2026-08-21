@@ -134,3 +134,55 @@ func TestPrefersHtml_ReturnsFalseForNeither(t *testing.T) {
         t.Fatalf("expected false when neither text/html nor application/json is present")
     }
 }
+
+func TestPrefersHtml_DropsAMemberWhoseQualityFallsOutsideTheGrammar(t *testing.T) {
+    cases := []struct {
+        acceptHeader string
+        expected     bool
+    }{
+        {"text/html;q=Inf, application/json", false},
+        {"text/html;q=NaN, application/json", false},
+        {"text/html;q=5, application/json", false},
+        {"text/html;q=-1, application/json", false},
+        {"text/html;q=abc", false},
+        {"text/html;q=0.9, application/json;q=Inf", true},
+    }
+
+    for _, testCase := range cases {
+        request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", testCase.acceptHeader)
+
+        actual := PrefersHtml(request)
+        if testCase.expected != actual {
+            t.Fatalf("Accept %q: expected prefersHtml=%v, got %v", testCase.acceptHeader, testCase.expected, actual)
+        }
+    }
+}
+
+func TestPrefersHtml_JoinsEveryLineOfARepeatedAcceptField(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "application/json;q=0.1")
+    request.HttpRequest().Header.Add("Accept", "text/html")
+
+    if false == PrefersHtml(request) {
+        t.Fatalf("expected the html preference on the second header line to be read")
+    }
+}
+
+func TestPrefersHtml_QuotedCommaKeepsTheHtmlRefusal(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(
+        nethttp.MethodGet,
+        "http://example.com/",
+        `text/html;p="a,b";q=0, application/json`,
+    )
+
+    if true == PrefersHtml(request) {
+        t.Fatalf("expected the quoted-comma header to keep the explicit html refusal")
+    }
+}
+
+func TestAcceptQuality_QuotedSemicolonStaysOneParameter(t *testing.T) {
+    /* the quoted section carries a decoy: a naive semicolon split fabricates the fragment q=0.9" — an invalid q that drops the whole member — while the quote-aware split reads the one real q parameter */
+    quality, _ := acceptQuality(`text/html;p="x;q=0.9";q=0.5`, "text/html")
+    if 0.5 != quality {
+        t.Fatalf("expected the quoted semicolon to leave the q parameter readable, got %v", quality)
+    }
+}
