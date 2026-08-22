@@ -600,4 +600,7 @@ func (instance *container) recordTypeIdentityKeyLocked(serviceName string, canon
 
 type providerAny func(resolver containercontract.Resolver) (any, error)
 
-var _ containercontract.Container = (*container)(nil)
+var (
+    _ containercontract.Container       = (*container)(nil)
+    _ containercontract.ScopedRegistrar = (*container)(nil)
+)

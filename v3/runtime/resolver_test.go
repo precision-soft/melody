@@ -56,6 +56,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
     }
 }
 
+/* the name is registered without a type on purpose: a name registered under a type refuses an unassignable override at the install line now, so the mismatch a scope override can still carry lives on a name with no registered types — and the typed read must surface it rather than skip the bad override and answer the container's value */
 func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -64,6 +65,7 @@ func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
         func(resolver containercontract.Resolver) (string, error) {
             return "container", nil
         },
+        container.WithoutTypeRegistration(),
     )
     if nil != err {
         t.Fatalf("register error: %v", err)

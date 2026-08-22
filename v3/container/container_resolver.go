@@ -32,8 +32,10 @@ type instanceStore struct {
 
 /* guardedCreation is one creation the guard has to run: where the value is looked up, how it is built, where it is kept, and which creation-state map tells a concurrent resolution that it is already under way. */
 type guardedCreation struct {
-    requestedKey       string
-    creatingKey        string
+    requestedKey string
+    creatingKey  string
+    /* ownerNodeKey is the graph node the provider builds, written onto the view of the resolution the provider is handed so that anything it resolves later — through a resolver it kept — is recorded as this node's dependency */
+    ownerNodeKey       string
     getCreatingState   func() (*creationState, bool)
     setCreatingState   func(state *creationState)
     clearCreatingState func()
@@ -144,13 +146,12 @@ func (instance *container) serviceWithCreationGuardLocked(
 
     instance.mutex.Unlock()
 
-    createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
-        /* @important the restore is registered before the recovery below so it runs after it: a provider that panics unwinds through that recovery, and an inline restore would never be reached. The resolution that continues above this frame is still the caller's, and leaving it suspended would hide the scope from every scoped service further up the stack. */
-        outerScopeSuspended := resolver.scopeSuspended
-        defer func() {
-            resolver.scopeSuspended = outerScopeSuspended
-        }()
+    /* a provider the CONTAINER owns resolves what it needs from the container alone: a process-lifetime singleton assembled out of one request's values would hold that request for the life of the process, and closing it with the request would take it away from every other one. A provider a SCOPE owns is the opposite case and reads both levels, so it is left unsuspended.
 
+       Both answers ride on the view handed to the provider rather than on the caller's own context, so the resolution that continues above this frame keeps seeing the scope whatever happens here — including a provider that panics. */
+    providerResolver := resolver.childOwnedBy(creation.ownerNodeKey, creation.suspendsScope)
+
+    createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
         defer func() {
             recoveredValue := recover()
             if nil == recoveredValue {
@@ -194,12 +195,7 @@ func (instance *container) serviceWithCreationGuardLocked(
             )
         }()
 
-        /* a provider the CONTAINER owns resolves what it needs from the container alone: a process-lifetime singleton assembled out of one request's values would hold that request for the life of the process, and closing it with the request would take it away from every other one. A provider a SCOPE owns is the opposite case and reads both levels, so it is left unsuspended. */
-        if true == creation.suspendsScope {
-            resolver.scopeSuspended = true
-        }
-
-        createdValue, err, debugInfo = create(resolver)
+        createdValue, err, debugInfo = create(providerResolver)
 
         if true == internal.IsNilInterface(createdValue) {
             /* a nil value handed back together with an error is the provider saying why it could not build the service — "service is not registered" is the everyday one — and that reason is the failure worth naming. Overwriting it here would put a symptom at the top and bury the cause one level down, so the generic report is kept for the genuinely silent (nil, nil) return, where nothing else says anything at all. */

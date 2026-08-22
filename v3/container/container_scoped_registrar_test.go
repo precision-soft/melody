@@ -13,7 +13,6 @@ type scopedRegistrarProbe struct {
     value string
 }
 
-/* @info A name that answers with a process singleton outside a scope and with a per-request service inside one is the ambiguity the two lifetimes exist to keep apart. It is refused where it is made, not where it is resolved. */
 func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -42,9 +41,7 @@ func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     }
 }
 
-/* @info The refusal has to hold in the other order too. Without it, whether a collision is reported at all would depend on which module happened to register first, and a framework service registered after a module's scoped one would silently shadow it.
-
-@info Both registrations opt out of the type registration on purpose: with it, the cross-level TYPE check refuses first and the name check underneath is never reached, so a test written without it stays green even when the name check is deleted. */
+/* both registrations opt out of the type registration on purpose: with it, the cross-level TYPE check refuses first and the name check underneath is never reached. */
 func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -75,7 +72,6 @@ func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
     }
 }
 
-/* @info The cross-level type check is a separate guard from the name one and needs its own proof, or deleting either leaves the other covering for it. */
 func TestRegister_RefusesATypeAScopedRegistrationAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -104,7 +100,6 @@ func TestRegister_RefusesATypeAScopedRegistrationAlreadyHolds(t *testing.T) {
     }
 }
 
-/* @info Declaring Replacing on the scoped registration admits the collision whichever order the two arrive in: the opt-in belongs to the registration that means to shadow, and it must not depend on module ordering to be heard. */
 func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
     containerFirst := NewContainer()
 
@@ -157,7 +152,6 @@ func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
     }
 }
 
-/* @info Two scoped registrations under one name would make which provider answers depend on map iteration, so the second is refused with a cause of its own — the report says which lifetime the name was already taken at. */
 func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -198,7 +192,6 @@ func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
     }
 }
 
-/* @info A type resolving to a singleton outside a scope and to a per-request service inside one is the same ambiguity as a name, so the cross-level type check refuses it whether or not the registration called itself strict — strictness only decides whether two names may share a type at the SAME lifetime. */
 func TestRegisterScoped_RefusesATypeTheContainerAlreadyRegistered(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -228,7 +221,6 @@ func TestRegisterScoped_RefusesATypeTheContainerAlreadyRegistered(t *testing.T) 
     }
 }
 
-/* @info A failed type registration must leave nothing behind: a name kept without its type would answer by name and be absent by type, which is a half-registered service nobody declared. */
 func TestRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -261,7 +253,6 @@ func TestRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.
     }
 }
 
-/* @info The provider contract is enforced in one place for both lifetimes, so a scoped registration cannot accept a shape a container registration would refuse. */
 func TestRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -280,7 +271,6 @@ func TestRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
     }
 }
 
-/* @info A registration made after a scope already exists must reach the scopes created next; the published plan is a cache, and leaving it stale would silently drop the registration for the rest of the process. */
 func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -317,7 +307,6 @@ func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
     }
 }
 
-/* @info Creating a scope has to stay O(1) whatever the plan holds: it happens once per request, and copying the registration maps into every scope would put the whole declared graph on the request path. Holding the plan by reference is what makes that true, so the two scopes must share one pointer. */
 func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -336,6 +325,169 @@ func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
 
     if firstScope.plan != secondScope.plan {
         t.Fatalf("expected both scopes to hold the same plan pointer rather than a copy each")
+    }
+}
+
+func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    plainErr := serviceContainer.RegisterScoped(
+        "service.protected.probe",
+        func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
+            return &scopedRegistrarProbe{value: "scoped"}, nil
+        },
+    )
+    if nil == plainErr {
+        t.Fatalf("expected the protected name to be refused for a scoped registration")
+    }
+
+    replacingErr := serviceContainer.RegisterScoped(
+        "service.protected.probe",
+        func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
+            return &scopedRegistrarProbe{value: "scoped"}, nil
+        },
+        Replacing(),
+    )
+    if nil == replacingErr {
+        t.Fatalf("expected the protected name to be refused even with Replacing declared")
+    }
+}
+
+/* unlike its two siblings — the generic front door and the one on a live scope, which both wrap the failure with a message naming the declaration — this door re-panics the registration's own refusal unchanged, matching MustRegister beside it; the assertion pins that spelling. */
+func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped.must",
+        func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
+            return &scopedRegistrarProbe{value: "scoped"}, nil
+        },
+    )
+
+    scopeInstance := serviceContainer.NewScope()
+
+    value, getErr := scopeInstance.Get("app.scoped.must")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    probe, isProbe := value.(*scopedRegistrarProbe)
+    if false == isProbe || "scoped" != probe.value {
+        t.Fatalf("expected the registration to build its own service, got %#v", value)
+    }
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the duplicate scoped registration to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
+        }
+
+        if "scoped service already registered" != recoveredErr.Error() {
+            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
+        }
+
+        if false == errors.Is(recoveredErr, ErrScopedServiceIdAlreadyRegistered) {
+            t.Fatalf("expected the re-panicked refusal to keep its cause, got %v", recoveredErr)
+        }
+    }()
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped.must",
+        func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
+            return &scopedRegistrarProbe{value: "duplicate"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+}
+
+func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped("app.nil.scoped.provider", nil)
+    if nil == registerScopedErr {
+        t.Fatalf("expected an untyped nil scoped provider to be refused")
+    }
+
+    if "the provider is required to register a scoped service" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+func TestContainerScopedRegistrar_EmptyNameIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped("", scopedNameProbeProvider())
+    if nil == registerScopedErr {
+        t.Fatalf("expected an empty scoped service name to be refused")
+    }
+
+    if "service name is required to register a scoped service" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+func scopedNameProbeProvider() containercontract.Provider[*providerContractProbe] {
+    return func(resolver containercontract.Resolver) (*providerContractProbe, error) {
+        return &providerContractProbe{value: "scoped"}, nil
+    }
+}
+
+func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.post.close.scoped",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "late"}, nil
+        },
+    )
+    if nil == registerScopedErr {
+        t.Fatalf("expected the scoped registration on a closed container to be refused")
+    }
+
+    if "container is closed" != registerScopedErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerScopedErr.Error())
+    }
+}
+
+func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    firstErr := serviceContainer.RegisterScoped(
+        "app.scoped.first",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "first"}, nil
+        },
+    )
+    if nil != firstErr {
+        t.Fatalf("unexpected scoped register error: %v", firstErr)
+    }
+
+    strictErr := serviceContainer.RegisterScoped(
+        "app.scoped.second",
+        func(resolver containercontract.Resolver) (*testService, error) {
+            return &testService{Value: "second"}, nil
+        },
+    )
+    if nil == strictErr {
+        t.Fatalf("expected the strict duplicate scoped type to be refused")
+    }
+
+    if "scoped service type already registered" != strictErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", strictErr.Error())
+    }
+
+    if false == errors.Is(strictErr, ErrScopedServiceTypeAlreadyRegistered) {
+        t.Fatalf("expected a scoped duplicate type cause, got %v", strictErr)
     }
 }
 

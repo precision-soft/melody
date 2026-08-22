@@ -2,6 +2,7 @@ package container
 
 import (
     "reflect"
+    "strings"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -42,6 +43,17 @@ func (instance *container) RegisterScoped(
     if nil == provider {
         return exception.NewError(
             "the provider is required to register a scoped service",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            nil,
+        )
+    }
+
+    /* the override path refuses to substitute a protected "service." name, and a scoped registration of the same name — with Replacing() — would perform exactly that substitution inside every scope, where the kernel resolves through. The protected namespace is the framework's, at both lifetimes. */
+    if true == strings.HasPrefix(serviceName, "service.") {
+        return exception.NewError(
+            "service is protected and cannot be registered as a scoped service",
             map[string]any{
                 "serviceName": serviceName,
             },
@@ -292,5 +304,3 @@ func (instance *container) rebuildScopePlan() *scopePlan {
 
     return plan
 }
-
-var _ containercontract.ScopedRegistrar = (*container)(nil)

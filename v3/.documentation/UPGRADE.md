@@ -18,6 +18,38 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Container: a scoped registration under the protected `service.` prefix is refused at boot
+
+**What changed.** Both scoped registration doors — `Container.RegisterScoped` and `Scope.RegisterScoped`, and the generic helpers over them — refuse a service name beginning with `service.`, with or without `Replacing()`.
+
+**Symptom.** A boot that used to succeed now panics with `service is protected and cannot be registered as a scoped service`, naming the service. The wiring generator produces the same refusal for a constructor carrying `//melody:scoped` under such a name.
+
+**Remedy.** Rename the scoped service out of the reserved namespace. The prefix is the framework's own, and the override path has always refused to substitute a `service.` name for a reason: a scoped registration of that name performs exactly that substitution, inside every scope the kernel resolves through, for the whole life of the process — the protected singleton is replaced once per request with nothing refused anywhere. A CONTAINER-lifetime registration of a `service.`-prefixed name is unaffected, so only the scoped ones have to move.
+
+### Container: `Has` and `HasType` answer under the same suspension `Get` enforces
+
+**What changed.** On the resolver a provider is handed, `Has` and `HasType` consult the request scope only when the resolution may read it. A provider the CONTAINER owns runs with the scope suspended, so it now hears `false` for a name only the scope carries — the same answer its `Get` gives.
+
+**Symptom.** A container-lifetime provider that branches on `resolver.Has(name)` for a scope-only service takes the other branch. Where it previously went on to `MustGet` the name it had just been told existed, it no longer panics.
+
+**Remedy.** Usually nothing: the previous answer was wrong in the dangerous direction. A container provider that genuinely needs a per-request value must not read it at construction — a process-lifetime singleton assembled out of one request's values holds that request for the life of the process. Take the value per call through the runtime or the request's own resolver instead, or make the service scoped.
+
+### Container: `Scope.RegisterScoped` refuses a closed container, and a scope override must fit the types its name is registered under
+
+**What changed.** Three refusals move earlier. `Scope.RegisterScoped` refuses once the container has begun closing, the answer `Container.Register` and `Container.RegisterScoped` already gave. A scope override propagates to every type its name is registered under — the container's registrations, the plan's and the scope's own — and is refused before anything is written when the value does not fit one of them, the rule the container-level door already applied.
+
+**Symptom.** A registration made during shutdown fails where it used to report success. `Scope.OverrideInstance` / `OverrideProtectedInstance` returns `override value is not assignable to the registered service type` for a value that used to install; a test that substituted an unrelated implementation under a name registered under a concrete type is the usual case.
+
+**Remedy.** For the override, register the name under the interface the substitute also satisfies — the guard admits raw assignability for an interface registration — or opt the registration out of the type with `WithoutTypeRegistration()`, which leaves the name with no registered type to fit. The refusal is what stops the name and the type maps from learning two different answers, which is what a type-keyed resolution then served.
+
+### Container: a lazy handle over a request scope becomes terminal when that scope closes
+
+**What changed.** `container.Lazy` and `container.LazyByType` ask the resolver they captured whether it has closed. The first closed answer makes the handle terminal: the scope-is-closed error on that call and on every later one, with the memoized value, the closure and the resolver dropped. `Scope.Closed()` is the door the question is asked through; a resolver that cannot answer it is read as open.
+
+**Symptom.** A handle built over a request scope and used after the request stops answering the memoized value and returns `lazy service scope is closed`. `LazyService.Get` panics with that error rather than handing back a dead request's state.
+
+**Remedy.** Build the handle over the container where it is meant to outlive the request — every container resolution mints a fresh resolver context, so that is also the form safe for concurrent first uses. Code shared across requests resolves per call through `FromResolver` with the current request's resolver; the value is then keyed to the right scope by the scope's own instance map. A handle built over the container is untouched by this change, because the container does not answer the liveness question.
+
 ### Http: the kernel and router configuration doors are boot-only and refuse after serving starts
 
 **What changed.** `Kernel.Use`, `SetNotFoundHandler`, `SetErrorHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy` and every route registration door refuse by name once `Kernel.ServeHttp` has built the handler. The contract sentence is written on `httpcontract.Kernel`, `httpcontract.Router` and `httpcontract.RouteHandler`.

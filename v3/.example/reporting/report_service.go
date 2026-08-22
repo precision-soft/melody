@@ -143,7 +143,11 @@ func (instance *CatalogReportService) RefreshInterval() time.Duration {
     return instance.refreshInterval
 }
 
-const ServiceRequestReportTrail = "service.example.reporting.request_trail"
+/* the name deliberately stays out of the "service." namespace, which the framework reserves for its own:
+a scoped registration there is refused at boot, because a scoped service silently shadowing a protected
+container singleton inside every request is exactly what the protection exists to prevent. The container-lifetime
+services of this application keep the dotted "service.example." spelling, which registration does admit. */
+const ServiceRequestReportTrail = "service-example-reporting-request-trail"
 
 /* the trail belongs to one request: it is built from the request context the kernel installs into every
 scope, and a service that holds one request's identity must not be a process singleton. The directive is what

@@ -780,53 +780,64 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
     }
 }
 
-/* @info A provider that panics unwinds through the guard's recovery, so restoring scope visibility inline after the provider call would never run. The resolution that continues above the failed frame belongs to the caller, and leaving it suspended would hide the scope from every service resolved after the failure. */
-func TestServiceWithCreationGuard_RestoresScopeVisibilityAfterAPanickingProvider(t *testing.T) {
+/* the suspension the container's own providers run under is written on the view handed to the provider, so the two answers are readable at the same instant and are different: the handed view cannot see the scope while it builds a process-lifetime singleton, and the caller's resolution — which continues above this frame — still can. The pair is what tells a suspension carried on the handed view from one written onto the shared context and undone afterwards, which the caller's answer alone cannot distinguish. */
+func TestServiceWithCreationGuard_SuspendsTheHandedViewAndNotTheCallersResolution(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
     scopeInstance := newScope(serviceContainer, serviceContainer.scopePlanForNewScope()).(*scope)
 
     resolver := newScopeResolverContext(serviceContainer, scopeInstance)
 
+    handedScopeVisible := true
+    callerScopeVisibleDuringCreation := false
+
     serviceContainer.mutex.Lock()
     _, guardErr := serviceContainer.serviceWithCreationGuardLocked(
         guardedCreation{
-            requestedKey: "service:app.panicking",
-            creatingKey:  "app.panicking",
+            requestedKey: "service:app.suspended",
+            creatingKey:  "app.suspended",
+            ownerNodeKey: "service:app.suspended",
             getCreatingState: func() (*creationState, bool) {
-                state, exists := serviceContainer.creatingByName["app.panicking"]
+                state, exists := serviceContainer.creatingByName["app.suspended"]
 
                 return state, exists
             },
             setCreatingState: func(state *creationState) {
-                serviceContainer.creatingByName["app.panicking"] = state
+                serviceContainer.creatingByName["app.suspended"] = state
             },
             clearCreatingState: func() {
-                delete(serviceContainer.creatingByName, "app.panicking")
+                delete(serviceContainer.creatingByName, "app.suspended")
             },
             lookup: func() (any, bool) {
                 return nil, false
             },
             create: func(handedResolver containercontract.Resolver) (any, error, *providerDebugInfo) {
-                panic("the provider gives up")
+                handedScopeVisible = handedResolver.(*resolverContext).scopeVisible()
+                callerScopeVisibleDuringCreation = resolver.scopeVisible()
+
+                return &testService{}, nil, nil
             },
-            store: containerNameStore(serviceContainer, "app.panicking", nil),
+            store:         containerNameStore(serviceContainer, "app.suspended", nil),
             suspendsScope: true,
         },
         resolver,
     )
     serviceContainer.mutex.Unlock()
 
-    if nil == guardErr {
-        t.Fatalf("expected the panicking provider to fail the resolution")
+    if nil != guardErr {
+        t.Fatalf("unexpected creation error: %v", guardErr)
     }
 
-    if true == resolver.scopeSuspended {
-        t.Fatalf("expected scope visibility to be restored after the panic")
+    if true == handedScopeVisible {
+        t.Fatalf("expected the view handed to a container provider to be suspended")
+    }
+
+    if false == callerScopeVisibleDuringCreation {
+        t.Fatalf("expected the caller's own resolution to keep seeing its scope while the provider ran")
     }
 
     if false == resolver.scopeVisible() {
-        t.Fatalf("expected the resolution to see its scope again after the panic")
+        t.Fatalf("expected the caller's resolution to see its scope after the creation")
     }
 }
 

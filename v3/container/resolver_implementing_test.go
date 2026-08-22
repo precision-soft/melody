@@ -2,7 +2,6 @@ package container
 
 import (
     "errors"
-    "reflect"
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -288,16 +287,24 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
     }
 }
 
-/* @info a per-request override installed under a registered name takes the registration's place in a collection gathered on the scope, because the references resolve by name through the scope */
+/* @info a per-request override installed under a registered name takes the registration's place in a collection gathered on the scope, because the references resolve by name through the scope. The registration is made under the INTERFACE, which is what admits a different implementation as the override: an override must fit every type its name is registered under, so substituting an *auditHandler for a name registered under *invoiceHandler is refused before anything is written. */
 func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
-    serviceContainer := newCollectionContainer(t)
+    serviceContainer := NewContainer()
+
+    MustRegister(serviceContainer, "handler.invoice", func(resolver containercontract.Resolver) (collectableHandler, error) {
+        return &invoiceHandler{}, nil
+    })
+
+    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
+        return &auditHandler{}, nil
+    })
 
     requestScope := serviceContainer.NewScope()
     defer func() {
         _ = requestScope.Close()
     }()
 
-    overrideErr := requestScope.OverrideProtectedInstance(defaultServiceNameForType(reflect.TypeOf(&invoiceHandler{})), &auditHandler{})
+    overrideErr := requestScope.OverrideProtectedInstance("handler.invoice", &auditHandler{})
     if nil != overrideErr {
         t.Fatalf("expected the override to install, got %v", overrideErr)
     }

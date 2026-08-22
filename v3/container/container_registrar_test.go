@@ -60,3 +60,17 @@ func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
         },
     )
 }
+
+/* the refusal is SHADOWED: the contract gate underneath answers an untyped nil with the identical message and the identical context, so this test pins the verdict rather than the position of the guard. The scoped sibling below is not shadowed — that one spells "scoped service" — which is why the two are asserted separately. */
+func TestContainerRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register("app.nil.provider", nil)
+    if nil == registerErr {
+        t.Fatalf("expected an untyped nil provider to be refused")
+    }
+
+    if "the provider is required to register a service" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
+}
