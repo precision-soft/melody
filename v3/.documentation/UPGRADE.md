@@ -994,6 +994,38 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **Remedy.** Close the placeholder, double the literal percent, or trim the name. Every refusal replaces a template fragment that was being handed to a consuming service as though it were the value.
 
+### Container: registration refuses a typed-nil provider and a colliding identity key
+
+**What changed.** The one gate all three registration paths go through refuses a typed-nil provider function — `var f containercontract.Provider[T]` handed in uninitialized — instead of registering a signature-valid function that panics on its first call. And two DIFFERENT types whose identity keys coincide (pointer-to-unnamed-composite types drop the package path, so `*[]alpha.Bus` and `*[]beta.Bus` of same-short-named packages read identically) refuse to coexist, at the container door and the scoped one alike.
+
+**Symptom.** A boot that used to report success and fail at the first resolution now fails at the registration line, naming the service; a wiring whose two same-keyed types used to produce false circular-dependency reports at resolution and merged nodes at teardown now refuses the second declaration at boot.
+
+**Remedy.** Initialize the provider before registering it. For a genuine identity-key collision, name one of the composite types — a defined type alias (`type buses []contract.Bus`) carries its package path and keys uniquely.
+
+### Container: a closed container refuses writes, and a finished teardown refuses resolutions
+
+**What changed.** `Register` and `OverrideProtectedInstance` on a closed container refuse the way the scoped registrar always has, and a resolution after the teardown finished is refused instead of answered out of the maps. Between the two closing states the memoized instances are still served, so a service's own `Close` keeps resolving what it reports through.
+
+**Symptom.** A late registration that used to report success for a service no resolution could ever build now returns the closed-container error; a resolver kept across shutdown that used to receive a closed service with a nil error now receives the same error.
+
+**Remedy.** Usually nothing — both were silent failure modes. A shutdown path that legitimately resolves during the teardown (a drain reporting through the logger) is unaffected: the refusal starts only after the last `Close` returned.
+
+### Container: an override must fit every registered type of its name, and an override installed mid-creation wins
+
+**What changed.** `OverrideProtectedInstance` refuses, before anything is written, a value that cannot sit under a type its name is registered under — judged the way the readers will judge it, raw assignability for an interface registration and canonical identity for a value-typed one. And an override installed while a provider was still building the same service wins the slot: the creation that lost closes the value it built and the resolution answers the override.
+
+**Symptom.** An override of the wrong type used to be accepted and then served through `GetByType` — a poisoned type cache — and now returns an error naming the registered type and the value's. A test that installed an override during a warm-up race and sometimes had it overwritten now keeps it deterministically.
+
+**Remedy.** Fix the override's type where the refusal points. Nothing else: the race half had no correct outcome before.
+
+### Container: the teardown closes replaced built instances and breaks ties on creation order
+
+**What changed.** An override replacing an instance the container itself built moves the replaced instance to a graveyard the teardown closes — under the same identity marks that keep a pointer shared by several names from closing twice — instead of leaking it; the scope's `ClosedWithScope` filings evict into the same kind of graveyard. And where the dependency graph says nothing, both teardowns now close in **creation order, latest first**, instead of by the node key descending.
+
+**Symptom.** A process whose overrides used to strand container-built values no longer leaks them at shutdown. A teardown whose order between unrelated services was decided by spelling — `app.worker` closed before the logger, `zz.worker` after — now closes what was built later first, so a service built during another's construction closes before it.
+
+**Remedy.** Nothing for the graveyard. If a test pinned the exact close order of services with no declared dependency edge, it was pinning a string comparison; declare the edge or accept the creation order.
+
 ## v3.0.0
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version. The entry below is the one rewrite that does not compile afterwards: v1 and v2 keep the identifiers, v3 has never carried them.

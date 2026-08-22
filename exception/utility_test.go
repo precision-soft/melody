@@ -1069,3 +1069,46 @@ func TestBuildCauseChain_ASingleWrapChainIsUnchanged(t *testing.T) {
         t.Fatalf("expected the chain walked top down, got %v", chain)
     }
 }
+
+type contextPanicProviderError struct{}
+
+func (instance *contextPanicProviderError) Error() string {
+    return "the provider refused"
+}
+
+func (instance *contextPanicProviderError) Context() exceptioncontract.Context {
+    panic("context rendering gave up")
+}
+
+/* renderErrorText already keeps a panicking Error() from unwinding through the recovery defer LogContext runs inside of, but a foreign Context() ran bare — at the top provider, in the cause-context walk, and in the From* constructors that run on the same recovery paths. The record survives with the panic value in the context's place instead of the process unwinding on a second panic. */
+func TestLogContext_AProviderWhoseContextPanicsIsContained(t *testing.T) {
+    foreignErr := &contextPanicProviderError{}
+
+    logContext := LogContext(foreignErr)
+    if nil == logContext {
+        t.Fatalf("expected the record to survive the panicking context")
+    }
+
+    if "" == logContext["contextPanicked"] {
+        t.Fatalf("expected the panic value to be kept in the context's place, got %#v", logContext)
+    }
+
+    wrapped := NewError("wrapper", nil, foreignErr)
+    wrappedContext := LogContext(wrapped)
+    if nil == wrappedContext {
+        t.Fatalf("expected the record of the wrapper to survive the cause's panicking context")
+    }
+}
+
+func TestFromError_AProviderWhoseContextPanicsIsContained(t *testing.T) {
+    foreignErr := &contextPanicProviderError{}
+
+    converted := FromError(foreignErr)
+    if nil == converted {
+        t.Fatalf("expected the conversion to survive the panicking context")
+    }
+
+    if "" == converted.Context()["contextPanicked"] {
+        t.Fatalf("expected the panic value to be kept in the context's place, got %#v", converted.Context())
+    }
+}

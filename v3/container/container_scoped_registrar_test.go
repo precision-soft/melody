@@ -5,6 +5,8 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    collisionalpha "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
+    collisionbeta "github.com/precision-soft/melody/v3/container/internal/collisionbeta/contract"
 )
 
 type scopedRegistrarProbe struct {
@@ -334,5 +336,30 @@ func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
 
     if firstScope.plan != secondScope.plan {
         t.Fatalf("expected both scopes to hold the same plan pointer rather than a copy each")
+    }
+}
+
+/* the identity registry guards the scoped type door with the same refusal the container door carries: two pointer-to-unnamed-composite types of same-short-named packages share one identity key, and a scoped registration taking the key of an already-registered DIFFERENT type would hand the creation guard and the teardown one node for two types. The second declaration is refused at its own boot line. */
+func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    firstRegisterErr := serviceContainer.RegisterScoped(
+        "app.scoped.collision.alpha",
+        func(resolver containercontract.Resolver) (*struct{ Bus collisionalpha.Bus }, error) {
+            return &struct{ Bus collisionalpha.Bus }{}, nil
+        },
+    )
+    if nil != firstRegisterErr {
+        t.Fatalf("unexpected register error: %v", firstRegisterErr)
+    }
+
+    secondRegisterErr := serviceContainer.RegisterScoped(
+        "app.scoped.collision.beta",
+        func(resolver containercontract.Resolver) (*struct{ Bus collisionbeta.Bus }, error) {
+            return &struct{ Bus collisionbeta.Bus }{}, nil
+        },
+    )
+    if nil == secondRegisterErr {
+        t.Fatalf("expected the colliding identity key to be refused at the scoped door")
     }
 }

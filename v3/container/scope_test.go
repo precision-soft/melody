@@ -671,3 +671,65 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
         t.Fatal("a container provider reached a scope-only entry: it would hold one request for the life of the process")
     }
 }
+
+/* a ClosedWithScope override replacing a created instance evicts it from the maps the teardown reads, but the evicted value is still the scope's to close — it waits in the graveyard and closes with the scope, exactly once. Before the graveyard it simply leaked, with both calls reporting success. */
+func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &scopedCloseRecorder{}
+
+    registerErr := serviceContainer.RegisterScoped(
+        "app.evicted.service",
+        func(resolver containercontract.Resolver) (*recordingScopedService, error) {
+            return &recordingScopedService{name: "created", recorder: recorder}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.evicted.service"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    overridingScope, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
+    if false == hasOptions {
+        t.Fatalf("expected the scope to implement OverrideServiceWithOptions")
+    }
+
+    overrideErr := overridingScope.OverrideProtectedInstanceWithOptions(
+        "app.evicted.service",
+        &recordingScopedService{name: "override", recorder: recorder},
+        ClosedWithScope(),
+    )
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    recorded := recorder.recorded()
+
+    createdCloses := 0
+    overrideCloses := 0
+    for _, name := range recorded {
+        if "created" == name {
+            createdCloses = createdCloses + 1
+        }
+        if "override" == name {
+            overrideCloses = overrideCloses + 1
+        }
+    }
+
+    if 1 != createdCloses {
+        t.Fatalf("expected the evicted created instance to be closed exactly once, got %v", recorded)
+    }
+
+    if 1 != overrideCloses {
+        t.Fatalf("expected the ClosedWithScope override to be closed exactly once, got %v", recorded)
+    }
+}

@@ -57,13 +57,47 @@ func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
 
-/* containerInstanceStore keeps a finished service in the container's own maps. It is the store of every container-owned creation: the value is a process-lifetime singleton and the container is the only thing that outlives every scope. */
-func containerInstanceStore(storeInContainer func(value any)) instanceStore {
+/* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */
+func containerNameStore(
+    containerInstance *container,
+    serviceName string,
+    canonicalTargetType reflect.Type,
+) instanceStore {
     return instanceStore{
-        keep: func(value any) error {
-            storeInContainer(value)
+        keep: func(value any) (any, bool, error) {
+            if existingValue, exists := containerInstance.instances[serviceName]; true == exists {
+                return existingValue, true, nil
+            }
 
-            return nil
+            containerInstance.instances[serviceName] = value
+            containerInstance.builtServiceNames[serviceName] = struct{}{}
+            containerInstance.recordCreationOrderLocked("service:" + serviceName)
+
+            if nil != canonicalTargetType {
+                containerInstance.typeInstances[canonicalTargetType] = value
+                containerInstance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalTargetType))
+            }
+
+            return value, false, nil
+        },
+    }
+}
+
+/* containerTypeStore is containerNameStore's counterpart for a type-keyed registration with no name to file under. */
+func containerTypeStore(
+    containerInstance *container,
+    canonicalTargetType reflect.Type,
+) instanceStore {
+    return instanceStore{
+        keep: func(value any) (any, bool, error) {
+            if existingValue, exists := containerInstance.typeInstances[canonicalTargetType]; true == exists {
+                return existingValue, true, nil
+            }
+
+            containerInstance.typeInstances[canonicalTargetType] = value
+            containerInstance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalTargetType))
+
+            return value, false, nil
         },
     }
 }
@@ -184,9 +218,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
                     providerFunctionString: providerFunctionString,
                 }
             },
-            store: containerInstanceStore(func(value any) {
-                instance.containerInstance.instances[serviceName] = value
-            }),
+            store: containerNameStore(instance.containerInstance, serviceName, nil),
             suspendsScope: true,
         },
         instance,
@@ -228,6 +260,13 @@ func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type) 
 func (instance *resolverContext) MustGet(serviceName string) any {
     value, getErr := instance.Get(serviceName)
     if nil != getErr {
+        melodyErr, isMelodyErr := getErr.(*exception.Error)
+        if true == isMelodyErr && nil != melodyErr {
+            melodyErr.SetContextValue("serviceName", serviceName)
+
+            exception.Panic(melodyErr)
+        }
+
         exception.Panic(
             exception.NewError(
                 "failed to get service instance",
@@ -443,10 +482,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                         providerFunctionString: providerFunctionString,
                     }
                 },
-                store: containerInstanceStore(func(resolvedValue any) {
-                    instance.containerInstance.instances[serviceName] = resolvedValue
-                    instance.containerInstance.typeInstances[canonicalTargetType] = resolvedValue
-                }),
+                store: containerNameStore(instance.containerInstance, serviceName, canonicalTargetType),
                 suspendsScope: true,
             },
             instance,
@@ -500,9 +536,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                     providerFunctionString: providerFunctionString,
                 }
             },
-            store: containerInstanceStore(func(value any) {
-                instance.containerInstance.typeInstances[canonicalTargetType] = value
-            }),
+            store: containerTypeStore(instance.containerInstance, canonicalTargetType),
             suspendsScope: true,
         },
         instance,
@@ -515,6 +549,13 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
         typeString := ""
         if nil != targetType {
             typeString = targetType.String()
+        }
+
+        melodyErr, isMelodyErr := getByTypeErr.(*exception.Error)
+        if true == isMelodyErr && nil != melodyErr {
+            melodyErr.SetContextValue("type", typeString)
+
+            exception.Panic(melodyErr)
         }
 
         exception.Panic(

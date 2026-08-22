@@ -53,7 +53,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
 
     var provider exceptioncontract.ContextProvider
     if true == errors.As(err, &provider) && false == isNilInterfaceValue(provider) {
-        errorContext := provider.Context()
+        errorContext := renderedContextOf(provider)
         for key, value := range errorContext {
             if "error" == key {
                 continue
@@ -119,7 +119,7 @@ func FromError(err error) *Error {
 
     var provider exceptioncontract.ContextProvider
     if true == errors.As(err, &provider) && false == isNilInterfaceValue(provider) {
-        context = provider.Context()
+        context = renderedContextOf(provider)
     }
 
     return NewError(err.Error(), context, err)
@@ -134,7 +134,7 @@ func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
 
     var provider exceptioncontract.ContextProvider
     if true == errors.As(err, &provider) && false == isNilInterfaceValue(provider) {
-        context = provider.Context()
+        context = renderedContextOf(provider)
     }
 
     return newWithLevel(err.Error(), context, err, level)
@@ -149,7 +149,7 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
 
     var provider exceptioncontract.ContextProvider
     if true == errors.As(err, &provider) && false == isNilInterfaceValue(provider) {
-        for key, value := range provider.Context() {
+        for key, value := range renderedContextOf(provider) {
             mergedContext[key] = value
         }
     }
@@ -159,6 +159,22 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
     }
 
     return newWithLevel(err.Error(), mergedContext, err, level)
+}
+
+/* renderedContextOf reads a provider's context under a recover, the way renderErrorText reads the message: LogContext runs inside recovery defers, and the From* constructors run on the same paths, so a foreign Context() that panics — typically on the very field that made the error worth raising — would otherwise raise a second panic past the recovery that is reporting the first. A panicking context costs the context and nothing else, with the panic value kept in its place. */
+func renderedContextOf(provider exceptioncontract.ContextProvider) (context exceptioncontract.Context) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        context = exceptioncontract.Context{
+            "contextPanicked": fmt.Sprintf("%v", recoveredValue),
+        }
+    }()
+
+    return provider.Context()
 }
 
 /* renderErrorText produces the loggable text of an error under a recover: LogContext runs inside recovery defers, where a value whose Error() panics — often on the very nil field that made it panic-worthy in the first place — would raise a second panic past the recovery that is reporting the first, and the connection was reset with the original failure reaching no record at all. The container teardown's close-error rendering makes the same trade for the same reason. */
@@ -355,7 +371,7 @@ func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]a
         /* the immediate node is asserted rather than searched with errors.As: a deep search emits the nearest provider's context once per intervening wrapper, while the cursor advances one link at a time */
         causeProvider, isProvider := current.(exceptioncontract.ContextProvider)
         if true == isProvider {
-            causeContext := causeProvider.Context()
+            causeContext := renderedContextOf(causeProvider)
             if nil != causeContext && 0 < len(causeContext) {
                 chain = append(chain, causeContext)
                 hasAnyContext = true

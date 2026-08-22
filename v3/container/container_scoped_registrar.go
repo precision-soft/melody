@@ -114,6 +114,9 @@ func (instance *container) registerScoped(
     }
 
     instance.scopedProviders[serviceName] = provider
+    if nil != serviceType {
+        instance.scopedProviderServiceTypeByName[serviceName] = serviceType
+    }
 
     if true == registerOption.ReplacesContainerService {
         instance.scopedReplacesContainerService[serviceName] = true
@@ -133,6 +136,7 @@ func (instance *container) registerScoped(
         )
         if nil != registerScopedTypeErr {
             delete(instance.scopedProviders, serviceName)
+            delete(instance.scopedProviderServiceTypeByName, serviceName)
             delete(instance.scopedReplacesContainerService, serviceName)
             delete(instance.scopedCollectionPriorityByName, serviceName)
 
@@ -166,6 +170,10 @@ func (instance *container) registerScopedType(
         }
 
         return nil
+    }
+
+    if identityCollisionErr := instance.recordTypeIdentityKeyLocked(serviceName, canonicalType); nil != identityCollisionErr {
+        return identityCollisionErr
     }
 
     /* the cross-level check does not care whether the registration is strict: strictness decides whether a second name may share a type at the SAME lifetime, while a type answering with a singleton outside a scope and with a per-request service inside one is the ambiguity itself, whichever way it was declared. */
