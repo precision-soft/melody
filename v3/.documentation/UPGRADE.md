@@ -1058,6 +1058,38 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **Remedy.** Nothing for the graveyard. If a test pinned the exact close order of services with no declared dependency edge, it was pinning a string comparison; declare the edge or accept the creation order.
 
+### Configuration: the http shutdown wait becomes a parameter, and two dead interfaces are gone
+
+**What changed.** `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`) sets how long a stopping http server waits for the requests it has already admitted, defaulting to five seconds — the value the framework used to hardcode. It reaches the server through `Configuration.Http().ShutdownTimeout()`, a method added to `config/contract.HttpConfiguration`, and the same budget bounds the join of the `OnHttpShutdown` hooks and the drain of the request scopes. `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are deleted from the application package: nothing implemented either, nothing could inject one, and the branch that read them would have applied their zero values verbatim to the server had it ever become reachable.
+
+**Symptom.** An out-of-tree implementation of `config/contract.HttpConfiguration` no longer compiles until it declares `ShutdownTimeout() time.Duration`. A boot with `MELODY_HTTP_SHUTDOWN_TIMEOUT=0` or a negative value now fails with `http shutdown timeout must be positive`, where before the key did not exist. A type written against either deleted interface no longer compiles.
+
+**Remedy.** Add the accessor to your implementation. Set the key to whatever your supervisor's termination grace allows, or leave it unset for the previous five seconds. There is no replacement for the deleted interfaces: the per-request limits are fixed in this major and the shutdown wait is the parameter.
+
+### Application: three boot doors close, and one refuses a name nothing consumes
+
+**What changed.** An **http** process whose `.env` artifacts contributed no keys at all refuses to boot rather than serve on development defaults; a cli process stays permissive. A module registered from inside a module boot hook is refused, and so is a route queued from inside one. `RegisterConfiguration` refuses any name but `logging`.
+
+**Symptom.** A production binary started from a directory without its `.env` files, which used to serve on `dev` with the profiler and the debug commands enabled behind a single warning, now fails the boot naming the project directory. A composition root that registered a module or a route from inside `RegisterServices` or any other hook — where it never took effect — now sees a refusal. A configuration registered under a misspelled name, which used to be stored and never read, now fails the boot.
+
+**Remedy.** Give the http process its environment files, or set any `MELODY_*` key explicitly. Move module registrations to `ModuleProvider` and route registrations to `RegisterHttpRoutes`, the hooks made for them. Correct the configuration name to `logging`.
+
+### Application: the framework's default services can be substituted, and a middleware factory may not yield nil
+
+**What changed.** The logger, the url generator, the serializer manager, the default serializer and the validator are registered only when the container does not already hold them, the way the cache, the session and the firewall manager already were; `service.serializer`, which two documented resolvers named and nothing registered, is now registered. The logger is additionally resolved once eagerly at boot, so a provider that cannot build fails the boot instead of the first request. A middleware factory returning nil, or a typed nil, fails the pipeline build naming the definition. The firewall manager is registered whatever the process mode.
+
+**Symptom.** An application that used to hit the duplicate-registration exit when bringing its own serializer manager now substitutes it. A logging configuration that cannot build now fails at the boot step that owns it rather than at an arbitrary later resolution. A middleware factory that returned nil to disable itself conditionally now fails the boot.
+
+**Remedy.** A factory that wants to disable itself returns a pass-through middleware instead of nil. Everything else needs no action.
+
+### Application: the boot order puts the application's routes first and the kernel listeners last
+
+**What changed.** `bootHttp` runs before the module phases, so the application's own routes register before any module's and win the router's registration-order tie-break; the duplicate-route refusals are collected into the aggregated boot report rather than panicking one at a time. The kernel's default listeners are wired at the end of `Boot` in every process shape, so a console process's dispatcher answers with the same set the serving process runs, and the framework exception listener steps aside when the application installed its own error handler.
+
+**Symptom.** Where an application route and a module route shared a pattern, the application's now wins where the module's used to. A boot with several duplicate routes reports them together instead of stopping at the first. An error handler installed at boot, which could never run, now runs. `debug:events` in a console process no longer reports an empty dispatcher.
+
+**Remedy.** Nothing, unless a deployment relied on a module route shadowing an application route on the same pattern — declare the intended one and remove the other.
+
 ## v3.0.0
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version. The entry below is the one rewrite that does not compile afterwards: v1 and v2 keep the identifiers, v3 has never carried them.

@@ -18,12 +18,12 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
+    "github.com/precision-soft/melody/v3/internal"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/logging"
     "github.com/precision-soft/melody/v3/messagebus"
     "github.com/precision-soft/melody/v3/openapi"
     "github.com/precision-soft/melody/v3/runtime"
-    "github.com/precision-soft/melody/v3/version"
 )
 
 type commandSuggestion struct {
@@ -42,7 +42,8 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
         )
     }
 
-    if nil == command {
+    /* read through the interface: a typed nil passes a plain comparison and reaches command.Name() three lines below */
+    if true == internal.IsNilInterface(command) {
         exception.Panic(
             exception.NewError(
                 "cli command may not be nil",
@@ -52,7 +53,8 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
         )
     }
 
-    commandName := command.Name()
+    /* the name is judged trimmed because that is the name the command is dispatched under: the cli registration trims before registering, so a padded name accepted raw here would pass this gate and then either collide at every dispatch — two names differing only in padding — or register under a spelling no argv can produce, with the suggestion table blocking every invocation of a command that exists. */
+    commandName := strings.TrimSpace(command.Name())
     if "" == commandName {
         exception.Panic(
             exception.NewError(
@@ -66,7 +68,7 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
     }
 
     for _, existingCommand := range instance.cliCommands {
-        if commandName == existingCommand.Name() {
+        if commandName == strings.TrimSpace(existingCommand.Name()) {
             /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
             instance.recordBootCollision(bootCollisionKindCliCommand, commandName)
             return
@@ -90,7 +92,8 @@ func (instance *Application) bootCli() {
             debug.NewMiddlewareCommand(func() []httpcontract.Middleware {
                 return instance.httpMiddlewares.all(instance.kernel)
             }),
-            &debug.VersionCommand{ApplicationVersion: version.BuildVersion()},
+            /* the application slot stays empty on purpose: the application's own version arrives through output.SetApplicationVersion, and melody's version filled in here made debug:version print the framework version twice — an application that never declared its version reads <unknown> instead of a lie */
+            &debug.VersionCommand{},
         )
     }
 
@@ -169,7 +172,8 @@ func (instance *Application) runCli() error {
         availableCommands = append(
             availableCommands,
             commandSuggestion{
-                Name:        command.Name(),
+                /* trimmed to the dispatched spelling: the suggestion gate compares the trimmed input against this list, and a raw padded name here would fail the exact match and block a command that exists */
+                Name:        strings.TrimSpace(command.Name()),
                 Description: command.Description(),
             },
         )

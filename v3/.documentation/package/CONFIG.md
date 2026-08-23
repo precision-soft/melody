@@ -55,6 +55,7 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_HTTP_ADDRESS`                | `kernel.http_address`                | `":8080"`                                    |
 | `MELODY_HTTP_MAX_REQUEST_BODY_BYTES` | `kernel.http.max_request_body_bytes` | `1048576`                                    |
 | `MELODY_HTTP_SESSION_TTL`            | `kernel.http.session_ttl`            | `0s`                                         |
+| `MELODY_HTTP_SHUTDOWN_TIMEOUT`       | `kernel.http.shutdown_timeout`       | `5s`                                         |
 | `MELODY_CLI_NAME`                    | `kernel.cli_name`                    | `"melody"`                                   |
 | `MELODY_CLI_DESCRIPTION`             | `kernel.cli_description`             | `""`                                         |
 | `MELODY_LOG_PATH`                    | `kernel.log_path`                    | `%kernel.logs_dir%/%kernel.environment%.log` |
@@ -116,6 +117,16 @@ Which is why the application says so at boot rather than picking a lifetime on t
 The ttl is a **lifetime since the last write, not an idle timeout.** The expiry is stamped when the session is stored, and a session is only stored when it was modified — [`Manager.SaveSession`](../../session/manager.go) returns early otherwise, and the response path calls it under the same condition — so reading a session never refreshes it. With `MELODY_HTTP_SESSION_TTL=30m` a user who logs in and then browses read-only pages is logged out 30 minutes after the login, however active they were; this is not `gc_maxlifetime`. The choice is deliberate: refreshing on read would turn every request carrying a session into a storage write, which on [`FileStorage`](../../session/file_storage.go) re-serialises the whole map. An application that wants a true idle timeout can buy one explicitly with a `kernel.request` listener that writes to the session — a last-seen timestamp, say — accepting the one storage write per request that costs.
 
 On the default this reads: nothing expires at all, so the question does not arise until a lifetime is set — at which point it is measured from the login, not from the last page.
+
+### Http shutdown timeout
+
+How long a stopping http server waits for the requests it has already admitted before cutting them. Read through [`Http().ShutdownTimeout()`](../../config/http.go).
+
+| Environment key                | Parameter name                 | Default |
+|--------------------------------|--------------------------------|---------|
+| `MELODY_HTTP_SHUTDOWN_TIMEOUT` | `kernel.http.shutdown_timeout` | `5s`    |
+
+The value is a Go duration string and must be positive: zero and negative values fail the boot. The default is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
 
 ### Static file cache
 
@@ -275,11 +286,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpShutdownTimeoutKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpShutdownTimeout`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

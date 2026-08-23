@@ -24,6 +24,8 @@ func (instance *Configuration) registerDefaultParameters(
     /* the default is zero — no expiry — because that is what every deployment predating the setting already had, and picking a bound here would start logging users out at a lifetime nobody chose; the unbounded-growth hazard of the in-memory storage is answered by the boot warning, not by a quiet default. The full reasoning lives on DefaultSessionTtl. */
     instance.setDefaultParameter(HttpSessionTtlKey, DefaultSessionTtl.String())
 
+    instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
+
     instance.setDefaultParameter(CliNameKey, "melody")
 
     instance.setDefaultParameter(CliDescriptionKey, "")

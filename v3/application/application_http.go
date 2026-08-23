@@ -20,6 +20,7 @@ import (
     "github.com/precision-soft/melody/v3/session"
 )
 
+/* RegisterHttpRoute queues one of the application's own routes. The queue drains before any module's RegisterHttpRoutes runs, so where a root route and a module route meet at dispatch, the root route wins the registration-order tie-break: the composition root wrote its route against the application, not against whichever module boots beside it. */
 func (instance *Application) RegisterHttpRoute(
     method string,
     pattern string,
@@ -27,6 +28,17 @@ func (instance *Application) RegisterHttpRoute(
 ) {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register http routes after boot", nil, nil))
+    }
+
+    /* the queue drains early in the boot, before the module phases: a registrar queued from inside a module boot hook would never run — a route silently absent — so the door refuses during the boot window; a module registers its routes through RegisterHttpRoutes, on the hook made for them */
+    if true == instance.booting {
+        exception.Panic(
+            exception.NewError(
+                "may not register http routes from inside a module boot hook; a module registers routes through RegisterHttpRoutes",
+                nil,
+                nil,
+            ),
+        )
     }
 
     instance.httpRouteRegistrars = append(
@@ -81,6 +93,24 @@ func (instance *Application) OnHttpShutdown(hook func()) {
     instance.httpShutdownHooks = append(instance.httpShutdownHooks, hook)
 }
 
+
+/* errorHandlerReporter is the door through which the composition root asks a kernel whether the
+application installed its own error handler — a Has door like the logger's, so a replacement kernel
+that does not implement it keeps the framework exception listener unconditionally, exactly the
+behavior it has today. */
+type errorHandlerReporter interface {
+    HasErrorHandler() bool
+}
+
+func kernelHasErrorHandler(httpKernel httpcontract.Kernel) bool {
+    reporter, ok := httpKernel.(errorHandlerReporter)
+    if false == ok {
+        return false
+    }
+
+    return reporter.HasErrorHandler()
+}
+
 func (instance *Application) bootHttp() {
     kernelInstance := instance.kernel
 
@@ -89,9 +119,12 @@ func (instance *Application) bootHttp() {
     }
 }
 
-func (instance *Application) runHttp(
-    ctx context.Context,
-) error {
+/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot, in every
+process shape: the listeners are inert in a console that never dispatches a kernel event, and a
+dispatcher inspected there answers with the same set the serving process runs — the introspection
+command used to report an empty dispatcher for a correctly wired application. The conditions are
+boot-final by contract: an error handler is installed by boot, and debug mode is configuration. */
+func (instance *Application) registerKernelHttpListeners() {
     eventDispatcher := instance.kernel.EventDispatcher()
 
     if true == instance.kernel.DebugMode() {
@@ -100,8 +133,19 @@ func (instance *Application) runHttp(
 
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
-    http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
 
+    /* the framework exception listener answers every kernel.exception dispatch, so with it
+       registered an error handler the application installed at boot could never run — the kernel
+       consults the handler only when the dispatch produced no response. A handler installed by boot
+       therefore takes the listener's place; without one the listener renders exactly as before. */
+    if false == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
+        http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
+    }
+}
+
+func (instance *Application) runHttp(
+    ctx context.Context,
+) error {
     configuration := instance.configuration
 
     httpKernel := instance.kernel.HttpKernel()
@@ -121,15 +165,17 @@ func (instance *Application) runHttp(
         Handler: httpHandler,
     }
 
-    applyHttpServerTimeouts(httpServer, configuration)
+    applyHttpServerTimeouts(httpServer)
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
+
+    applyHttpServerErrorLog(httpServer, logger)
 
     instance.warnOnUnboundedDefaultCacheBackend(logger)
 
     instance.warnOnUnboundedDefaultSessionStorage(logger)
 
-    /* net/http runs these the moment Shutdown is called, on their own goroutines, so a streaming handler is released while the server drains the rest; wrapping each one recovers a panicking hook through the framework logger (a bare goroutine would otherwise crash the drain) and counts it into shutdownHooksDone so runHttp can join the hooks before returning */
+    /* net/http runs these the moment Shutdown is called, on their own goroutines, so a streaming handler is released while the server drains the rest; wrapping each one recovers a panicking hook through the framework logger (a bare goroutine would otherwise crash the drain) and counts it into shutdownHooksDone so awaitHttpServerEnd can join the hooks before returning */
     var shutdownHooksDone sync.WaitGroup
     for _, hook := range instance.httpShutdownHooks {
         httpServer.RegisterOnShutdown(
@@ -149,15 +195,48 @@ func (instance *Application) runHttp(
         errorChannel <- listenAndServeErr
     }()
 
+    return awaitHttpServerEnd(
+        ctx,
+        httpServer,
+        errorChannel,
+        logger,
+        configuration.Http().ShutdownTimeout(),
+        httpKernel,
+        &shutdownHooksDone,
+    )
+}
+
+/* awaitHttpServerEnd waits for whichever ends the serving first: the cancelled context or the server's own failure. The serve error is read even on the shutdown branch — when the listen fails in the same instant the context is cancelled, the select's choice of branch is arbitrary, and taking the shutdown branch used to discard the real failure, so a process that never served a byte reported a clean shutdown. Shutdown closes the listeners before it returns, so the serve goroutine has already been released and the receive is bounded. A shutdown that outlives its configured budget surfaces the deadline error and the process exits non-zero on purpose: the overrun is the operator's signal that draining hung, not a success to smooth over.
+
+Shutdown answers for the connections the server still owns, and only for those: a handler that hijacked its connection took it out of the server's accounting, so Shutdown returns immediately and reports success while that handler runs on. The shutdown hooks and the request scopes the kernel opened are what remains measurable about them, and both are joined under the same budget for the same reason the budget exists. The hooks are joined first: they are what releases the streaming handlers whose scopes the drain then waits on. */
+func awaitHttpServerEnd(
+    ctx context.Context,
+    httpServer *nethttp.Server,
+    errorChannel chan error,
+    logger loggingcontract.Logger,
+    shutdownTimeout time.Duration,
+    httpKernel httpcontract.Kernel,
+    shutdownHooksDone *sync.WaitGroup,
+) error {
     select {
     case <-ctx.Done():
-        shutdownContext, cancel := context.WithTimeout(context.Background(), resolveHttpShutdownTimeout(configuration))
+        shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
         defer cancel()
 
         shutdownErr := httpServer.Shutdown(shutdownContext)
 
         /* Shutdown starts the shutdown hooks on their own goroutines but never waits for them, and it reports quiescent at once when the only open connections are hijacked (websocket), so join the hooks — within the same shutdown budget — before returning, otherwise the process exits while a hook is still releasing those handlers */
-        waitForHttpShutdownHooks(&shutdownHooksDone, shutdownContext)
+        waitForHttpShutdownHooks(shutdownHooksDone, shutdownContext)
+
+        serveErr := <-errorChannel
+        if nil != serveErr && false == errors.Is(serveErr, nethttp.ErrServerClosed) {
+            logger.Error(
+                "http server error",
+                exception.LogContext(serveErr),
+            )
+
+            return markHttpRunErrorLogged(serveErr)
+        }
 
         if nil != shutdownErr {
             logger.Error(
@@ -165,12 +244,12 @@ func (instance *Application) runHttp(
                 exception.LogContext(shutdownErr),
             )
 
-            return shutdownErr
+            return markHttpRunErrorLogged(shutdownErr)
         }
 
         drainErr := awaitOpenRequestScopes(shutdownContext, httpKernel, logger)
         if nil != drainErr {
-            return drainErr
+            return markHttpRunErrorLogged(drainErr)
         }
 
         return nil
@@ -182,12 +261,22 @@ func (instance *Application) runHttp(
                 exception.LogContext(err),
             )
 
-            return err
+            return markHttpRunErrorLogged(err)
         }
 
         return nil
     }
 }
+
+/* markHttpRunErrorLogged hands the exit handler an error that already carries its own record. Run's failure travels to the exit handler, which logs whatever arrives unlogged, and the http failure was logged here first and then wrapped afresh — so one fall was rendered three times on the way out. */
+func markHttpRunErrorLogged(err error) error {
+    wrappedErr := exception.FromError(err)
+
+    _ = exception.MarkLogged(wrappedErr)
+
+    return wrappedErr
+}
+
 
 /* warnOnUnboundedDefaultCacheBackend reports, once at boot, that the cache melody wired by default carries no item ceiling. Whether an entry ever leaves the map is then decided entirely by the caller: a key cached with a positive ttl is reclaimed by the sweep, and one cached without stays for as long as the process lives, with nothing to evict it under memory pressure. The constructor's second argument sets how often that sweep runs, not how long an entry lives. The warning is raised from the http path alone on purpose: a command runs and exits, taking its map with it, so there is genuinely nothing to warn a cli invocation about, and a warning it cannot act on would only teach it to ignore the ones it can. */
 func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingcontract.Logger) {

@@ -3,9 +3,8 @@ package application
 import (
     "context"
     "errors"
+    "net"
     nethttp "net/http"
-    "os"
-    "os/exec"
     "strings"
     "sync"
     "sync/atomic"
@@ -13,14 +12,21 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/config"
+    configcontract "github.com/precision-soft/melody/v3/config/contract"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/event"
+    eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    "github.com/precision-soft/melody/v3/session"
+    sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
 func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
@@ -41,6 +47,19 @@ func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
     if 1 != len(applicationInstance.httpRouteRegistrars) {
         t.Fatalf("expected 1 registrar, got %d", len(applicationInstance.httpRouteRegistrars))
     }
+}
+
+/* the queue this door feeds drains before the module phases run: a registrar queued from inside a module boot hook would never execute — a route silently absent — so the door refuses for the boot window and points at the hook made for module routes */
+func TestApplicationRegisterHttpRoute_RefusesDuringTheBootWindow(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{booting: true}).RegisterHttpRoute(
+            nethttp.MethodGet,
+            "/late",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, nil
+            },
+        )
+    }, "may not register http routes from inside a module boot hook")
 }
 
 func TestApplicationRegisterHttpRoute_PanicsAfterBoot(t *testing.T) {
@@ -99,251 +118,58 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
     }, "may not register http middlewares after boot")
 }
 
-/* @info http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a Server-Sent Events stream or a websocket blocks the entire shutdown timeout and is then cut mid-flight. The hook is what lets the application release those handlers, and net/http runs it the moment Shutdown begins. */
-func TestOnHttpShutdown_HooksRunWhenTheServerShutsDown(t *testing.T) {
-    released := make(chan struct{})
-
-    httpServer := &nethttp.Server{Handler: nethttp.NotFoundHandler()}
-    httpServer.RegisterOnShutdown(func() { close(released) })
-
-    shutdownContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-    defer cancel()
-
-    if shutdownErr := httpServer.Shutdown(shutdownContext); nil != shutdownErr {
-        t.Fatalf("shutdown: %v", shutdownErr)
-    }
-
-    select {
-    case <-released:
-    case <-time.After(2 * time.Second):
-        t.Fatalf("the shutdown hook never ran")
-    }
-}
-
-/* @info The hook list reaches the server: a nil hook is rejected outright, and a registered one is kept. */
-func TestOnHttpShutdown_RejectsNilAndKeepsTheHook(t *testing.T) {
-    applicationInstance := &Application{}
-
-    applicationInstance.OnHttpShutdown(func() {})
-    if 1 != len(applicationInstance.httpShutdownHooks) {
-        t.Fatalf("expected the hook to be registered, got %d", len(applicationInstance.httpShutdownHooks))
-    }
-
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("a nil shutdown hook must panic")
-        }
-    }()
-
-    applicationInstance.OnHttpShutdown(nil)
-}
-
-/* @info OnHttpShutdown copies its hooks into the net/http server once, on the main goroutine, before ListenAndServe; a hook registered after boot never reaches the server (silently dropped) and the append races, so — like every sibling registrar — it must panic once the application has booted. */
-func TestOnHttpShutdown_PanicsAfterBoot(t *testing.T) {
+func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
         testhelper.NewEmbeddedEnvFs(),
         testhelper.NewEmbeddedStaticFs(),
     )
 
-    applicationInstance.Boot()
-
-    testhelper.AssertPanicsWithError(t, func() {
-        applicationInstance.OnHttpShutdown(func() {})
-    }, "may not register http shutdown hooks after boot")
-}
-
-/* @info net/http runs each shutdown hook on a bare `go f()`, where a panic cannot be recovered by Run's logOnRecoverAndExit and would hard-crash the process mid-drain, skipping Application.Close(). The wrapper recovers the panic through the framework logger and still marks the hook done, so a panicking hook is contained like every other extension point. */
-func TestWrapHttpShutdownHook_ContainsAPanicAndStillCompletes(t *testing.T) {
-    var hooksDone sync.WaitGroup
-
-    wrapped := wrapHttpShutdownHook(
-        func() {
-            exception.Panic(exception.NewError("shutdown hook boom", nil, nil))
+    applicationInstance.RegisterHttpRoute(
+        nethttp.MethodGet,
+        "/boot-http-probe",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
         },
-        &hooksDone,
-        logging.NewNopLogger(),
     )
 
-    /* net/http runs the hook on its own goroutine; an unrecovered panic there would crash the whole test binary */
-    hookReturned := make(chan struct{})
-    go func() {
-        wrapped()
+    applicationInstance.bootHttp()
 
-        close(hookReturned)
-    }()
-
-    select {
-    case <-hookReturned:
-    case <-time.After(2 * time.Second):
-        t.Fatalf("the wrapped shutdown hook never returned")
+    found := false
+    for _, route := range applicationInstance.kernel.HttpRouter().RouteDefinitions() {
+        if "/boot-http-probe" == route.Pattern() {
+            found = true
+        }
     }
 
-    hooksDone.Wait()
+    if false == found {
+        t.Fatalf("expected the declared route to reach the router when the boot ran the registrars")
+    }
 }
 
-/* @info Shutdown starts the hooks on detached goroutines and returns immediately when the only open connections are hijacked, so runHttp must join the hooks before returning. waitForHttpShutdownHooks must not report done until the registered hook has actually finished. */
-func TestWaitForHttpShutdownHooks_BlocksUntilTheHookCompletes(t *testing.T) {
-    var hooksDone sync.WaitGroup
+func TestApplicationRegisterHttpMiddlewares_HandsThemToThePipeline(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
 
-    hookFinished := make(chan struct{})
+    before := len(applicationInstance.httpMiddlewares.definitions)
 
-    wrapped := wrapHttpShutdownHook(
-        func() {
-            time.Sleep(50 * time.Millisecond)
+    applicationInstance.RegisterHttpMiddlewares(func(next httpcontract.Handler) httpcontract.Handler {
+        return next
+    })
 
-            close(hookFinished)
+    applicationInstance.RegisterHttpMiddlewareFactories(
+        func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+            return func(next httpcontract.Handler) httpcontract.Handler {
+                return next
+            }
         },
-        &hooksDone,
-        logging.NewNopLogger(),
     )
 
-    /* net/http starts each shutdown hook on its own goroutine */
-    go wrapped()
-
-    waitReturned := make(chan struct{})
-    go func() {
-        waitForHttpShutdownHooks(&hooksDone, context.Background())
-
-        close(waitReturned)
-    }()
-
-    select {
-    case <-waitReturned:
-        select {
-        case <-hookFinished:
-        default:
-            t.Fatalf("the wait returned before the shutdown hook completed")
-        }
-    case <-time.After(2 * time.Second):
-        t.Fatalf("the wait never returned")
-    }
-}
-
-/* @info The join is bounded by the shutdown budget: a hook that never finishes must not pin the process forever, so a spent context releases the wait. */
-func TestWaitForHttpShutdownHooks_ReturnsWhenTheBudgetIsSpent(t *testing.T) {
-    var hooksDone sync.WaitGroup
-
-    /* a hook that never completes */
-    hooksDone.Add(1)
-
-    ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-    defer cancel()
-
-    waitReturned := make(chan struct{})
-    go func() {
-        waitForHttpShutdownHooks(&hooksDone, ctx)
-
-        close(waitReturned)
-    }()
-
-    select {
-    case <-waitReturned:
-    case <-time.After(2 * time.Second):
-        t.Fatalf("the wait ignored the spent shutdown budget and hung")
-    }
-}
-
-/* the reproduction below cannot be observed from inside the test binary: the unpatched wrapper answers an *exception.ExitError with os.Exit, which no recover intercepts and which would simply end the test run. TestMain therefore doubles as a probe entry point — when the environment variable names a probe the process runs that reproduction and exits zero instead of running the suite — and the test re-executes this binary, bounds it with a deadline and asserts on the child's exit status. */
-const shutdownHookProbeEnvironmentVariable = "MELODY_APPLICATION_SHUTDOWN_HOOK_PROBE"
-
-const shutdownHookProbeExitCode = 7
-
-func TestMain(mainInstance *testing.M) {
-    probeName := os.Getenv(shutdownHookProbeEnvironmentVariable)
-    if "" != probeName {
-        runShutdownHookProbe(probeName)
-
-        os.Exit(0)
-    }
-
-    os.Exit(mainInstance.Run())
-}
-
-func runShutdownHookProbe(probeName string) {
-    switch probeName {
-    case "hookAsksToExit":
-        var hooksDone sync.WaitGroup
-
-        wrapped := wrapHttpShutdownHook(
-            func() {
-                exception.Exit(
-                    exception.NewExitError(
-                        shutdownHookProbeExitCode,
-                        exception.NewError("shutdown hook asked to exit", nil, nil),
-                    ),
-                )
-            },
-            &hooksDone,
-            logging.NewNopLogger(),
-        )
-
-        wrapped()
-
-        hooksDone.Wait()
-
-    default:
-        os.Exit(97)
-    }
-}
-
-/* @info logging.LogOnRecover answers an *exception.ExitError with os.Exit, and a shutdown hook runs while the server is still draining: an exit there cuts the in-flight requests the drain exists to finish, skips the remaining hooks and skips Application.Close(). The wrapper must log the hook's demand and let the drain run to the end. */
-func TestWrapHttpShutdownHook_DoesNotExitTheProcessWhenTheHookAsksTo(t *testing.T) {
-    binaryPath, executableErr := os.Executable()
-    if nil != executableErr {
-        t.Fatalf("could not locate the test binary to re-execute: %v", executableErr)
-    }
-
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
-
-    command := exec.CommandContext(ctx, binaryPath)
-    command.Env = append(os.Environ(), shutdownHookProbeEnvironmentVariable+"=hookAsksToExit")
-
-    combinedOutput, runErr := command.CombinedOutput()
-
-    if nil != ctx.Err() {
-        t.Fatalf("the shutdown hook probe never returned and had to be killed; output: %s", combinedOutput)
-    }
-
-    if nil == runErr {
-        return
-    }
-
-    exitErr := (*exec.ExitError)(nil)
-    if true == errors.As(runErr, &exitErr) {
-        if shutdownHookProbeExitCode == exitErr.ExitCode() {
-            t.Fatalf("the shutdown hook terminated the process with its own exit code %d, cutting the drain short; output: %s", exitErr.ExitCode(), combinedOutput)
-        }
-
-        t.Fatalf("the shutdown hook probe died with exit status %d instead of returning; output: %s", exitErr.ExitCode(), combinedOutput)
-    }
-
-    t.Fatalf("could not run the shutdown hook probe: %v; output: %s", runErr, combinedOutput)
-}
-
-/* @info an exit demand from a hook is downgraded, not discarded: the error it carries is what reaches the log, so the reason the hook wanted the process gone is still on the record */
-func TestHttpShutdownHookError_UnwrapsTheErrorAnExitDemandCarries(t *testing.T) {
-    carried := exception.NewError("shutdown hook asked to exit", nil, nil)
-
-    resolved := httpShutdownHookError(
-        exception.NewExitError(shutdownHookProbeExitCode, carried),
-    )
-
-    if carried != resolved {
-        t.Fatalf("expected the error carried by the exit demand, got %+v", resolved)
-    }
-}
-
-/* @info a value that is not an error at all still has to reach the log as one, so a hook panicking with a bare string is not silently swallowed */
-func TestHttpShutdownHookError_WrapsANonErrorPanicValue(t *testing.T) {
-    resolved := httpShutdownHookError("bare string panic")
-
-    if nil == resolved {
-        t.Fatalf("expected a non-nil error for a bare panic value")
-    }
-    if "panic in http shutdown hook" != resolved.Message() {
-        t.Fatalf("unexpected message for a bare panic value: %q", resolved.Message())
+    if before+2 != len(applicationInstance.httpMiddlewares.definitions) {
+        t.Fatalf("expected both registrations to reach the pipeline, got %d definitions over %d", len(applicationInstance.httpMiddlewares.definitions), before)
     }
 }
 
@@ -443,7 +269,6 @@ func newCacheWarningTestApplication(t *testing.T, mode string, logger loggingcon
     return applicationInstance
 }
 
-/* @info The unbounded default cache keeps every key for the life of the process, which only matters in a process that stays up; the http path is where the application is told, once, at boot. */
 func TestRunHttp_WarnsAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -463,7 +288,6 @@ func TestRunHttp_WarnsAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     }
 }
 
-/* @info An application that bounded its own cache backend must not be nagged, or the warning stops meaning anything. */
 func TestRunHttp_StaysSilentWhenTheApplicationBoundedItsCacheBackend(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -507,6 +331,7 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
     }
 
     applicationInstance := &Application{
+        ctx:                  context.Background(),
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
         kernel:               newTestKernel(),
@@ -526,7 +351,6 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
     return applicationInstance
 }
 
-/* @info The storage melody wired itself lives in this process and nothing outside it can expire an entry; with a ttl of zero nothing inside it can either. A request that arrives without a session cookie gets a session regardless of who sent it, so the pair is the one combination in which an unauthenticated caller decides how much memory this process keeps. */
 func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -546,7 +370,6 @@ func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing
     }
 }
 
-/* @info a lifetime the deployment chose reclaims the entries the default storage holds, so there is nothing left to warn about. */
 func TestRunHttp_StaysSilentWhenTheSessionTtlIsBounded(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -566,7 +389,6 @@ func TestRunHttp_StaysSilentWhenTheSessionTtlIsBounded(t *testing.T) {
     }
 }
 
-/* @info a storage the application registered is the operator's to expire, so an unbounded ttl beside it is a choice rather than a hazard melody introduced. */
 func TestRunHttp_StaysSilentWhenTheApplicationRegisteredItsSessionStorage(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -584,6 +406,209 @@ func TestRunHttp_StaysSilentWhenTheApplicationRegisteredItsSessionStorage(t *tes
     warnings := logger.warningsContaining(unboundedSessionWarningFragment)
     if 0 != len(warnings) {
         t.Fatalf("expected no session warning when the application supplied the storage, got %v", warnings)
+    }
+}
+
+func TestMarkHttpRunErrorLogged_WrapsAndMarks(t *testing.T) {
+    original := errors.New("bind refused")
+
+    marked := markHttpRunErrorLogged(original)
+
+    exceptionErr, isExceptionErr := marked.(*exception.Error)
+    if false == isExceptionErr {
+        t.Fatalf("expected an exception error, got %T", marked)
+    }
+
+    if false == exceptionErr.AlreadyLogged() {
+        t.Fatalf("expected the wrapped failure to be marked logged")
+    }
+
+    if false == errors.Is(marked, original) {
+        t.Fatalf("expected the original failure to stay reachable in the chain")
+    }
+}
+
+func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) {
+    serveErr := errors.New("listen tcp: bind refused by the probe")
+
+    for iteration := 0; iteration < 20; iteration++ {
+        errorChannel := make(chan error, 1)
+        errorChannel <- serveErr
+
+        cancelledContext, cancel := context.WithCancel(context.Background())
+        cancel()
+
+        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter()), &sync.WaitGroup{})
+        if nil == endErr {
+            t.Fatalf("expected the serve error to be reported instead of a clean shutdown (iteration %d)", iteration)
+        }
+
+        if false == errors.Is(endErr, serveErr) {
+            t.Fatalf("expected the serve error in the chain, got: %v", endErr)
+        }
+    }
+}
+
+/* the configured budget must travel from the environment key through the configuration into the shutdown, so the proof drives runHttp itself: a connection that sent half a request stays active through the whole shutdown, and only the 50ms the environment named — not the 5s default — explains a shutdown that gives up this fast. */
+func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T) {
+    logger := &warningRecordingLogger{}
+
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.HttpAddressKey:         "127.0.0.1:34519",
+                config.HttpShutdownTimeoutKey: "50ms",
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        ctx:                  context.Background(),
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        kernel:               newTestKernel(),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    applicationInstance.registerCache()
+
+    runContext, cancelRun := context.WithCancel(context.Background())
+    defer cancelRun()
+
+    runResult := make(chan error, 1)
+    go func() {
+        runResult <- applicationInstance.runHttp(runContext)
+    }()
+
+    var connection net.Conn
+    var dialErr error
+    for attempt := 0; attempt < 200; attempt++ {
+        connection, dialErr = net.Dial("tcp", "127.0.0.1:34519")
+        if nil == dialErr {
+            break
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+    if nil != dialErr {
+        t.Fatalf("the server never came up: %v", dialErr)
+    }
+    defer func() {
+        _ = connection.Close()
+    }()
+
+    /* half a request keeps the connection active for the whole shutdown: the header never completes, so the server cannot idle it */
+    _, writeErr := connection.Write([]byte("GET / HTTP/1.1\r\n"))
+    if nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    shutdownRequestedAt := time.Now()
+    cancelRun()
+
+    var runErr error
+    select {
+    case runErr = <-runResult:
+
+    case <-time.After(4 * time.Second):
+        t.Fatalf("expected runHttp to return within the configured budget; it is still waiting")
+    }
+
+    elapsed := time.Since(shutdownRequestedAt)
+
+    if nil == runErr {
+        t.Fatalf("expected the overrun shutdown budget to be reported as a failure")
+    }
+
+    if false == strings.Contains(runErr.Error(), "context deadline exceeded") {
+        t.Fatalf("expected the budget overrun in the failure, got %q", runErr.Error())
+    }
+
+    if elapsed > 2*time.Second {
+        t.Fatalf("expected the shutdown to be cut at the configured 50ms, took %v", elapsed)
+    }
+}
+
+/* the budget is the parameter, not a constant: a request held open past the configured wait must be cut when the budget says so, and well before the default would. The handler is released only after the assertion, so the shutdown can never finish on its own first. */
+func TestAwaitHttpServerEnd_CutsTheShutdownAtTheConfiguredBudget(t *testing.T) {
+    handlerStarted := make(chan struct{})
+    releaseHandler := make(chan struct{})
+
+    serveMux := nethttp.NewServeMux()
+    serveMux.HandleFunc("/", func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        close(handlerStarted)
+        <-releaseHandler
+    })
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("unexpected listen error: %v", listenErr)
+    }
+
+    httpServer := &nethttp.Server{Handler: serveMux}
+
+    errorChannel := make(chan error, 1)
+    go func() {
+        errorChannel <- httpServer.Serve(listener)
+    }()
+
+    go func() {
+        response, requestErr := nethttp.Get("http://" + listener.Addr().String() + "/")
+        if nil == requestErr {
+            _ = response.Body.Close()
+        }
+    }()
+
+    <-handlerStarted
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    shutdownStartedAt := time.Now()
+    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, http.NewKernel(http.NewRouter()), &sync.WaitGroup{})
+    elapsed := time.Since(shutdownStartedAt)
+
+    close(releaseHandler)
+
+    if nil == endErr {
+        t.Fatalf("expected the overrun shutdown budget to be reported as a failure")
+    }
+
+    if false == strings.Contains(endErr.Error(), "context deadline exceeded") {
+        t.Fatalf("expected the budget overrun in the failure, got %q", endErr.Error())
+    }
+
+    if elapsed > 2*time.Second {
+        t.Fatalf("expected the shutdown to be cut at the 50ms budget, took %v", elapsed)
+    }
+}
+
+func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
+    errorChannel := make(chan error, 1)
+    errorChannel <- nethttp.ErrServerClosed
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter()), &sync.WaitGroup{})
+    if nil != endErr {
+        t.Fatalf("expected a clean shutdown for the server's own closed signal, got: %v", endErr)
     }
 }
 
@@ -609,6 +634,127 @@ func (instance *errorHandlerlessKernel) ServeHttp(serviceContainer containercont
 }
 
 var _ httpcontract.Kernel = (*errorHandlerlessKernel)(nil)
+
+func TestKernelHasErrorHandler_ReadsTheHasDoor(t *testing.T) {
+    bareKernel := http.NewKernel(http.NewRouter())
+
+    if true == kernelHasErrorHandler(bareKernel) {
+        t.Fatalf("expected no error handler on a fresh kernel")
+    }
+
+    bareKernel.SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return nil
+        },
+    )
+
+    if false == kernelHasErrorHandler(bareKernel) {
+        t.Fatalf("expected the installed error handler to be reported")
+    }
+
+    if true == kernelHasErrorHandler(&errorHandlerlessKernel{}) {
+        t.Fatalf("expected a kernel without the door to be read as having no handler")
+    }
+}
+
+/* the gate is proven through the boot-end registration itself: after it the exception listener
+either answers a kernel.exception dispatch or leaves it unanswered, which is the observable
+difference between the listener registered and skipped. The handler is installed BEFORE the
+registration runs, because that is the contract — an error handler installed by boot takes the
+listener's place. */
+func TestRegisterKernelHttpListeners_SkipsTheExceptionListenerWhenAnErrorHandlerIsInstalled(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    applicationInstance.kernel.HttpKernel().SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return nil
+        },
+    )
+
+    applicationInstance.registerKernelHttpListeners()
+
+    runtimeInstance := runtime.New(
+        context.Background(),
+        applicationInstance.kernel.ServiceContainer().NewScope(),
+        applicationInstance.kernel.ServiceContainer(),
+    )
+
+    exceptionEvent := http.NewKernelExceptionEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
+        exception.NewError("boot gate failure", nil, nil),
+    )
+
+    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil != exceptionEvent.Response() {
+        t.Fatalf("expected the framework exception listener to be skipped when a handler is installed")
+    }
+}
+
+func TestRegisterKernelHttpListeners_RegistersTheExceptionListenerWithoutAnErrorHandler(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    applicationInstance.registerKernelHttpListeners()
+
+    runtimeInstance := runtime.New(
+        context.Background(),
+        applicationInstance.kernel.ServiceContainer().NewScope(),
+        applicationInstance.kernel.ServiceContainer(),
+    )
+
+    exceptionEvent := http.NewKernelExceptionEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
+        exception.NewError("boot gate failure", nil, nil),
+    )
+
+    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil == exceptionEvent.Response() {
+        t.Fatalf("expected the framework exception listener to answer without a handler installed")
+    }
+}
+
+/* the contrast half of the move: running the http server registers nothing — the listeners belong
+to Boot, in every process shape, so what the server runs is exactly what the console inspects */
+func TestRunHttp_RegistersNoKernelListeners(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    runtimeInstance := runtime.New(
+        context.Background(),
+        applicationInstance.kernel.ServiceContainer().NewScope(),
+        applicationInstance.kernel.ServiceContainer(),
+    )
+
+    exceptionEvent := http.NewKernelExceptionEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
+        exception.NewError("run http gate failure", nil, nil),
+    )
+
+    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil != exceptionEvent.Response() {
+        t.Fatalf("expected runHttp to register no listener; the boot-end registration owns them")
+    }
+}
 
 /* countingHttpKernel is the errorHandlerless kernel plus the one door the shutdown drain reads, so a test can drive the drain against a count it controls rather than against a live server. */
 type countingHttpKernel struct {
@@ -687,5 +833,151 @@ func TestAwaitOpenRequestScopes_DoesNotWaitOnAKernelThatCannotBeAsked(t *testing
     drainErr := awaitOpenRequestScopes(cancelledContext, &errorHandlerlessKernel{}, &warningRecordingLogger{})
     if nil != drainErr {
         t.Fatalf("expected no drain for a kernel with no counter, got: %v", drainErr)
+    }
+}
+
+/* the whole chain, end to end and through runHttp itself: a handler hijacks its connection, the kernel's request scope stays open behind it, and the shutdown must refuse to report a stop it did not obtain. net/http's Shutdown returns immediately for a hijacked connection — it stopped being the server's the moment the handler took it — so before the scope was counted this exact shape answered nil in no time at all while the handler ran on and the container closed under it. */
+func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *testing.T) {
+    handlerHijacked := make(chan struct{})
+    releaseHandler := make(chan struct{})
+
+    kernelInstance := newTestKernel()
+
+    kernelInstance.httpRouter.Handle(
+        nethttp.MethodGet,
+        "/upgrade",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            hijacker, ok := writer.(nethttp.Hijacker)
+            if false == ok {
+                close(handlerHijacked)
+
+                return http.TextResponse(nethttp.StatusOK, "no hijacker"), nil
+            }
+
+            connection, _, hijackErr := hijacker.Hijack()
+            if nil != hijackErr {
+                close(handlerHijacked)
+
+                return http.TextResponse(nethttp.StatusOK, "hijack failed"), nil
+            }
+
+            close(handlerHijacked)
+            <-releaseHandler
+
+            _ = connection.Close()
+
+            return http.TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.HttpAddressKey:         "127.0.0.1:34521",
+                config.HttpShutdownTimeoutKey: "200ms",
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        ctx:                  context.Background(),
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        kernel:               kernelInstance,
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return &warningRecordingLogger{}, nil
+        },
+    )
+
+    applicationInstance.registerCache()
+
+    /* the request path resolves these on its way to the handler, and the bare test container carries none of them: without the configuration the kernel answers 500 before routing, and the hijack this test is about never happens */
+    kernelInstance.serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return configuration, nil
+        },
+    )
+    kernelInstance.serviceContainer.MustRegister(
+        session.ServiceSessionManager,
+        func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
+            return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
+        },
+    )
+    kernelInstance.serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return kernelInstance.eventDispatcher, nil
+        },
+    )
+
+    runContext, cancelRun := context.WithCancel(context.Background())
+    defer cancelRun()
+
+    runResult := make(chan error, 1)
+    go func() {
+        runResult <- applicationInstance.runHttp(runContext)
+    }()
+
+    for attempt := 0; attempt < 200; attempt++ {
+        probeConnection, dialErr := net.Dial("tcp", "127.0.0.1:34521")
+        if nil == dialErr {
+            _ = probeConnection.Close()
+
+            break
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+
+    go func() {
+        /* the request ends in EOF by construction: the handler takes the connection and closes it, so there is no response to read. What the test observes is the shutdown, not this. */
+        response, requestErr := nethttp.Get("http://127.0.0.1:34521/upgrade")
+        if nil == requestErr {
+            _ = response.Body.Close()
+        }
+    }()
+
+    select {
+    case <-handlerHijacked:
+
+    case <-time.After(4 * time.Second):
+        t.Fatalf("the hijacking handler was never reached")
+    }
+
+    cancelRun()
+
+    var runErr error
+    select {
+    case runErr = <-runResult:
+
+    case <-time.After(4 * time.Second):
+        close(releaseHandler)
+
+        t.Fatalf("expected runHttp to return within the configured budget; it is still waiting")
+    }
+
+    close(releaseHandler)
+
+    if nil == runErr {
+        t.Fatalf("expected the undrained request scope to be reported instead of a clean stop")
+    }
+
+    if false == strings.Contains(runErr.Error(), "http shutdown left request scopes open") {
+        t.Fatalf("expected the undrained scopes in the failure, got %q", runErr.Error())
     }
 }

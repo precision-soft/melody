@@ -485,6 +485,17 @@ func (instance *Configuration) buildHttpConfiguration() error {
         )
     }
 
+    shutdownTimeout, shutdownTimeoutErr := instance.MustGet(KernelHttpShutdownTimeout).Duration()
+    if nil != shutdownTimeoutErr {
+        return exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": HttpShutdownTimeoutKey,
+            },
+            shutdownTimeoutErr,
+        )
+    }
+
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
         instance.MustGet(KernelDefaultLocale).MustString(),
@@ -495,6 +506,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         staticCacheMaxAge,
         staticExcludedPaths,
         sessionTtl,
+        shutdownTimeout,
     )
     if nil != newHttpConfigurationErr {
         return exception.NewError("could not initialize the http configuration", nil, newHttpConfigurationErr)

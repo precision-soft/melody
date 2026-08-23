@@ -24,13 +24,17 @@ import (
 type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 
 type Application struct {
-    booted                bool
-    ctx                   context.Context
-    configuration         configcontract.Configuration
-    runtimeFlags          *RuntimeFlags
-    kernel                kernelcontract.Kernel
-    embeddedPublicFiles   fs.FS
-    modules               []applicationcontract.Module
+    booted bool
+    /* raised for the boot window so the module doors can refuse a registration arriving from inside a module boot hook: the phase loops iterate a snapshot of the module list, so a module registered mid-boot would receive only the hooks of whatever phases had not run yet — a half-booted module reporting a successful boot */
+    booting             bool
+    ctx                 context.Context
+    configuration       configcontract.Configuration
+    runtimeFlags        *RuntimeFlags
+    kernel              kernelcontract.Kernel
+    embeddedPublicFiles fs.FS
+    modules             []applicationcontract.Module
+    /* the identity set behind the module dedup: one instance reached through two providers boots once. Keyed by the interface value and populated lazily, because tests legitimately assemble a bare Application without the constructor. */
+    registeredModuleInstances map[applicationcontract.Module]struct{}
     cliCommands           []clicontract.Command
     httpRouteRegistrars   []RouteRegistrar
     httpMiddlewares       *HttpMiddleware
@@ -53,6 +57,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     if true == instance.booted {
         return instance.kernel
     }
+
+    instance.booting = true
 
     defer instance.logOnRecoverAndExit()
 
@@ -82,7 +88,15 @@ func (instance *Application) Boot() kernelcontract.Kernel {
         )
     }
 
+    instance.refuseHttpBootWithoutEnvironment()
+
     instance.ensureRuntimeDirectories()
+
+    /* armed before the first route can register and disarmed only after the aggregated report has had its chance to raise, so every duplicate route of the whole boot lands in that report instead of panicking one at a time */
+    instance.armRouteCollisionRecorder()
+
+    /* the application's own routes register before any module's: where a root route and a module route meet at dispatch, the router breaks the tie on registration order, and the composition root wrote its route against the application, not against whichever module happens to boot with it */
+    instance.bootHttp()
 
     instance.bootModulesPostConfigurationResolve()
 
@@ -94,11 +108,14 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.panicOnBootCollisions()
 
-    instance.bootHttp()
+    instance.disarmRouteCollisionRecorder()
+
+    instance.registerKernelHttpListeners()
 
     instance.warnUnappliedSecretMarks()
 
     instance.booted = true
+    instance.booting = false
 
     return instance.kernel
 }
@@ -208,7 +225,9 @@ func (instance *Application) Configuration() configcontract.Configuration {
     return instance.configuration
 }
 
-/* ProcessRole is the resolved process role (config.RoleWeb, config.RoleWorker or config.RoleAll): an explicit --role flag wins over the MELODY_PROCESS_ROLE parameter, which defaults to all. Melody gates nothing on it — wiring code queries it to decide whether to register background runners (outbox relays, consumers) on this process; services resolve the same value through ServiceProcessRole. */
+/* ProcessRole is the resolved process role (config.RoleWeb, config.RoleWorker or config.RoleAll): an explicit --role flag wins over the MELODY_PROCESS_ROLE parameter, which defaults to all. Melody gates nothing on it — wiring code queries it to decide whether to register background runners (outbox relays, consumers) on this process; services resolve the same value through ServiceProcessRole.
+
+Nothing in this major waits for those runners: when Run returns, the container closes immediately, so a goroutine still draining loses its services under it. A runner that must finish its work observes the run context and completes its drain before the handler that received the context returns. */
 func (instance *Application) ProcessRole() string {
     return instance.runtimeFlags.Role()
 }
@@ -236,9 +255,8 @@ func (instance *Application) Run() {
 
         runCliErr := instance.runCli()
         if nil != runCliErr {
-            /* the exit-coded error may arrive wrapped — the cli action folds a command's error together with shutdown-close failures — so walk the cause chain rather than assert the top type, or an intended exit code degrades into a panic with a different code */
-            var exitError *exception.ExitError
-            if true == errors.As(runCliErr, &exitError) {
+            exitError, isExitRequested := resolveCliExitError(runCliErr)
+            if true == isExitRequested {
                 exception.Exit(exitError)
             }
 
@@ -258,6 +276,22 @@ func (instance *Application) Run() {
     }
 }
 
+/* resolveCliExitError answers the exit error a failed cli run should end the process with, or nil when the failure carries none. The exit-coded error may arrive wrapped — the cli action folds a command's error together with shutdown-close failures — so the cause chain is walked rather than the top type asserted, or an intended exit code degrades into a panic with a different code. The branch is a function so the typed-nil decision can be handed a chain rather than reached through a process exit. */
+func resolveCliExitError(runCliErr error) (*exception.ExitError, bool) {
+    var exitError *exception.ExitError
+
+    if false == errors.As(runCliErr, &exitError) {
+        return nil, false
+    }
+
+    /* errors.As matches this type on a typed-nil link and reports success. Answering that as an exit would hand Exit a nil it refuses, and the run's real error would be discarded in favour of a message about melody's own plumbing, so the run falls through to the ordinary panic that carries it. The answer is a separate boolean because the typed nil and the absence are the same pointer, and only the boolean can tell the caller them apart. */
+    if nil == exitError {
+        return nil, false
+    }
+
+    return exitError, true
+}
+
 func (instance *Application) RegisterConfiguration(name string, configuration any) {
     if true == instance.booted {
         exception.Panic(
@@ -274,6 +308,20 @@ func (instance *Application) RegisterConfiguration(name string, configuration an
     if "" == name {
         exception.Panic(
             exception.NewError("cannot register configuration with empty name", nil, nil),
+        )
+    }
+
+    /* the registry is consumed in exactly one place in this major, under exactly one name: the logging configuration. Any other name is unreadable by construction — no accessor exists through which a module could get it back — so accepting it would store a configuration the operator believes is active while nothing can ever consult it; a misspelling of the one supported name is the ordinary way that happens. */
+    if loggingcontract.LoggingConfigurationName != name {
+        exception.Panic(
+            exception.NewError(
+                "unknown configuration name: nothing in this major consumes it",
+                exceptioncontract.Context{
+                    "configurationName": name,
+                    "supportedNames":    []string{loggingcontract.LoggingConfigurationName},
+                },
+                nil,
+            ),
         )
     }
 
@@ -371,7 +419,7 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
     )
 }
 
-/* applicationExit terminates the process when the teardown of a normally-returning Run reports a failure; tests replace it to observe the exit code without stopping the test binary */
+/* applicationExit terminates the process when the teardown of a normally-returning Run reports a failure; tests replace it to observe the exit code without stopping the test binary, the way signalContextExit is replaced */
 var applicationExit = os.Exit
 
 /* shieldedCloseStep is the door the clean-shutdown teardown runs through; tests replace it to drive the abandoned branch without waiting out the real budget, the way they replace applicationExit to observe an exit code */
@@ -398,6 +446,39 @@ func (instance *Application) closeAndExitOnFailure() {
     }
 
     applicationExit(1)
+}
+
+/* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys at all. Every built-in parameter has a development default — environment dev, debug tooling, debug commands, debug log level — so a production binary run from a directory without its .env files would otherwise serve on all of them, announced by nothing louder than one warning; refusing is the same direction the empty CORS allow list took, because booting the wrong environment is the widening. A cli process stays permissive: development commands legitimately run without any environment file, and a command takes its configuration with it when it exits. */
+func (instance *Application) refuseHttpBootWithoutEnvironment() {
+    if config.ModeHttp != instance.runtimeFlags.Mode() {
+        return
+    }
+
+    counter, isCounter := instance.configuration.(environmentKeyCounter)
+    if false == isCounter {
+        return
+    }
+
+    if 0 < counter.EnvironmentKeyCount() {
+        return
+    }
+
+    projectDirectory := instance.configuration.Kernel().ProjectDir()
+
+    exception.Panic(
+        exception.NewError(
+            "no environment keys were loaded from the .env artifacts and the process is booting in http mode; refusing to serve on development defaults"+missingEnvironmentFileHint(projectDirectory),
+            exceptioncontract.Context{
+                "projectDirectory": projectDirectory,
+            },
+            nil,
+        ),
+    )
+}
+
+/* environmentKeyCounter is the part of a configuration that can say how many keys the .env artifacts contributed. Asked for rather than demanded, the way servingMarker is: only the http boot refusal reads it, and a configuration double that does not carry it simply keeps the permissive behavior. */
+type environmentKeyCounter interface {
+    EnvironmentKeyCount() int
 }
 
 /* servingMarker is the part of a configuration that can be told the wiring phase is over. It is asked for rather than demanded: only the application emits the signal, so requiring every configcontract.Configuration — every test double included — to carry the method would cost more than it buys. */

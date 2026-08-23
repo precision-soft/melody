@@ -45,6 +45,84 @@ func TestConfigurationHttpSessionTtlKeepsZeroAsAnExplicitChoice(t *testing.T) {
     }
 }
 
+func TestConfigurationHttpShutdownTimeoutDefaultsToFiveSeconds(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    if DefaultHttpShutdownTimeout != configuration.Http().ShutdownTimeout() {
+        t.Fatalf("expected the default shutdown timeout, got %v", configuration.Http().ShutdownTimeout())
+    }
+}
+
+func TestConfigurationHttpShutdownTimeoutIsReadFromTheEnvironment(t *testing.T) {
+    source := &testEnvironmentSource{
+        values: map[string]string{
+            HttpShutdownTimeoutKey: "45s",
+        },
+    }
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    if 45*time.Second != configuration.Http().ShutdownTimeout() {
+        t.Fatalf("expected the configured shutdown timeout, got %v", configuration.Http().ShutdownTimeout())
+    }
+}
+
+func TestConfigurationHttpShutdownTimeoutRejectsZeroAndNegative(t *testing.T) {
+    for _, value := range []string{"0", "-1s"} {
+        source := &testEnvironmentSource{
+            values: map[string]string{
+                HttpShutdownTimeoutKey: value,
+            },
+        }
+
+        environment, err := NewEnvironment(source)
+        if nil != err {
+            t.Fatalf("new environment error: %v", err)
+        }
+
+        _, err = NewConfiguration(environment, "/tmp/melody")
+        if nil == err {
+            t.Fatalf("expected the shutdown timeout %q to fail the boot", value)
+        }
+    }
+}
+
+func TestConfigurationHttpShutdownTimeoutRejectsAnUnparsableValue(t *testing.T) {
+    source := &testEnvironmentSource{
+        values: map[string]string{
+            HttpShutdownTimeoutKey: "soon",
+        },
+    }
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    _, err = NewConfiguration(environment, "/tmp/melody")
+    if nil == err {
+        t.Fatalf("expected an unparsable shutdown timeout to fail the boot")
+    }
+}
+
 func TestConfigurationHttpSessionTtlIsReadFromTheEnvironment(t *testing.T) {
     source := &testEnvironmentSource{
         values: map[string]string{
@@ -398,6 +476,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 testCase.staticCacheMaxAge,
                 testCase.staticExcludedPaths,
                 testCase.sessionTtl,
+                DefaultHttpShutdownTimeout,
             )
 
             if nil == httpErr {
@@ -426,6 +505,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
         3600,
         []string{"/internal"},
         time.Minute,
+        7*time.Second,
     )
     if nil != httpErr {
         t.Fatalf("unexpected error: %v", httpErr)
@@ -454,5 +534,37 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     }
     if time.Minute != httpConfigurationInstance.SessionTtl() {
         t.Fatalf("unexpected session ttl: %s", httpConfigurationInstance.SessionTtl())
+    }
+    if 7*time.Second != httpConfigurationInstance.ShutdownTimeout() {
+        t.Fatalf("unexpected shutdown timeout: %s", httpConfigurationInstance.ShutdownTimeout())
+    }
+}
+
+func TestNewHttpConfiguration_RefusesANonPositiveShutdownTimeout(t *testing.T) {
+    for _, invalidTimeout := range []time.Duration{0, -time.Second} {
+        httpConfigurationInstance, httpErr := newHttpConfiguration(
+            ":8080",
+            "en",
+            "public",
+            "index.html",
+            1024,
+            false,
+            3600,
+            nil,
+            0,
+            invalidTimeout,
+        )
+
+        if nil == httpErr {
+            t.Fatalf("expected the shutdown timeout %v to be refused", invalidTimeout)
+        }
+
+        if nil != httpConfigurationInstance {
+            t.Fatalf("expected no configuration over a refused value")
+        }
+
+        if "http shutdown timeout must be positive" != httpErr.Error() {
+            t.Fatalf("expected the refusal to name the rule, got %q", httpErr.Error())
+        }
     }
 }

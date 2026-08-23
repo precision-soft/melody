@@ -24,6 +24,9 @@ const MinimumSessionTtl = time.Second
 Zero is not free of hazard, and the hazard is worth naming here rather than discovering in a memory graph: melody mints a session for every request that arrives without a session cookie, so once an application writes to a session on a public path — a csrf token, a flash message, a locale — an unbounded lifetime turns every cookie-less request into a permanent entry. That is survivable in a shared store an operator can expire, and it is not in the default in-memory one, which is why the application warns at boot when it finds both together rather than quietly picking a lifetime on the deployment's behalf. Set this to what the deployment actually wants. */
 const DefaultSessionTtl = 0 * time.Second
 
+/* DefaultHttpShutdownTimeout is how long a stopping http server waits for the requests already admitted when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. Five seconds is deliberately far below the thirty the write timeout promises each request: a deployment whose supervisor grants a longer termination grace raises this to match, and one that leaves both at their defaults trades the tail of the slowest requests for a process that is gone before the supervisor escalates. */
+const DefaultHttpShutdownTimeout = 5 * time.Second
+
 func newHttpConfiguration(
     address string,
     defaultLocale string,
@@ -34,6 +37,7 @@ func newHttpConfiguration(
     staticCacheMaxAge int,
     staticExcludedPaths []string,
     sessionTtl time.Duration,
+    shutdownTimeout time.Duration,
 ) (*httpConfiguration, error) {
     if false == strings.Contains(address, ":") {
         address = ":" + address
@@ -54,6 +58,7 @@ func newHttpConfiguration(
         staticCacheMaxAge:         staticCacheMaxAge,
         staticExcludedPaths:       copiedStaticExcludedPaths,
         sessionTtl:                sessionTtl,
+        shutdownTimeout:           shutdownTimeout,
     }
 
     validateErr := httpConfigurationInstance.validate()
@@ -74,6 +79,7 @@ type httpConfiguration struct {
     staticCacheMaxAge         int
     staticExcludedPaths       []string
     sessionTtl                time.Duration
+    shutdownTimeout           time.Duration
 }
 
 func (instance *httpConfiguration) Address() string {
@@ -112,6 +118,11 @@ func (instance *httpConfiguration) StaticExcludedPaths() []string {
 /* SessionTtl is how long a stored session stays valid, DefaultSessionTtl when MELODY_HTTP_SESSION_TTL says nothing. The clock runs from the last write, not from the last request, and reading a session does not refresh it: a session written on every request renews itself, while one written once at login lapses this long after that write however active the visitor was. Zero stores the session without any expiry and is available as an explicit choice. */
 func (instance *httpConfiguration) SessionTtl() time.Duration {
     return instance.sessionTtl
+}
+
+/* ShutdownTimeout is how long a stopping http server waits for the requests it has already admitted before cutting them, DefaultHttpShutdownTimeout when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. Exceeding it is reported as a shutdown failure and the process exits non-zero, because requests were lost; only a positive value can describe a wait, so zero and negative fail the boot instead of silently becoming the default. */
+func (instance *httpConfiguration) ShutdownTimeout() time.Duration {
+    return instance.shutdownTimeout
 }
 
 func (instance *httpConfiguration) validate() error {
@@ -153,6 +164,11 @@ func (instance *httpConfiguration) validate() error {
     validateSessionTtlErr := instance.validateSessionTtl()
     if nil != validateSessionTtlErr {
         return validateSessionTtlErr
+    }
+
+    validateShutdownTimeoutErr := instance.validateShutdownTimeout()
+    if nil != validateShutdownTimeoutErr {
+        return validateShutdownTimeoutErr
     }
 
     return nil
@@ -330,6 +346,22 @@ func (instance *httpConfiguration) validateSessionTtl() error {
             exceptioncontract.Context{
                 "sessionTtl": instance.sessionTtl.String(),
                 "minimum":    MinimumSessionTtl.String(),
+            },
+            nil,
+        )
+    }
+
+    return nil
+}
+
+/* only a positive duration can describe a wait, and unlike the session ttl there is no meaning left over for zero: a deployment that wants no graceful window says so with a value as small as it likes, while zero and negative are refused rather than silently normalized to a default the operator did not choose. */
+func (instance *httpConfiguration) validateShutdownTimeout() error {
+    if 0 >= instance.shutdownTimeout {
+        return exception.NewError(
+            "http shutdown timeout must be positive",
+            exceptioncontract.Context{
+                "shutdownTimeout": instance.shutdownTimeout.String(),
+                "default":         DefaultHttpShutdownTimeout.String(),
             },
             nil,
         )

@@ -59,23 +59,39 @@ survived=0
 broken=0
 total=0
 
-while IFS='~' read -r file line occurrence anchor replacement package runpattern; do
+while IFS='~' read -r file line occurrence anchor replacement package runpattern tags; do
     [ -z "${file}" ] && continue
     case "${file}" in \#*) continue ;; esac
-    echo "${package}"
-done < "${TABLE}" | sort -u | while read -r package; do
-    if ! go test "${package}" >/dev/null 2>&1; then
-        echo "CONTROL FAILED for ${package} — abandoning, nothing can be concluded"
-        exit 1
+    echo "${package} ${tags}"
+done < "${TABLE}" | sort -u | while read -r package tags; do
+    if [ -n "${tags}" ]; then
+        if ! go test -tags "${tags}" "${package}" >/dev/null 2>&1; then
+            echo "CONTROL FAILED for ${package} under -tags ${tags} — abandoning, nothing can be concluded"
+            exit 1
+        fi
+        echo "control green: ${package} (-tags ${tags})"
+    else
+        if ! go test "${package}" >/dev/null 2>&1; then
+            echo "CONTROL FAILED for ${package} — abandoning, nothing can be concluded"
+            exit 1
+        fi
+        echo "control green: ${package}"
     fi
-    echo "control green: ${package}"
 done || exit 1
 
-while IFS='~' read -r file line occurrence anchor replacement package runpattern; do
+while IFS='~' read -r file line occurrence anchor replacement package runpattern tags; do
     [ -z "${file}" ] && continue
     case "${file}" in \#*) continue ;; esac
 
     total=$((total + 1))
+
+    # the eighth field is optional: a source behind a build tag is invisible to the default build,
+    # so both its guard and its test only exist under that tag
+    if [ -n "${tags}" ]; then
+        TAGFLAG="-tags ${tags}"
+    else
+        TAGFLAG=""
+    fi
 
     if [ -z "${anchor}" ] || [ -z "${line}" ] || [ -z "${occurrence}" ] || [ -z "${package}" ] || [ -z "${runpattern}" ]; then
         echo "[${total}] BROKEN: row does not split into all fields"
@@ -119,7 +135,7 @@ while IFS='~' read -r file line occurrence anchor replacement package runpattern
         continue
     fi
 
-    listed=$(go test "${package}" -run "${runpattern}" -list "${runpattern}" 2>&1)
+    listed=$(go test ${TAGFLAG} "${package}" -run "${runpattern}" -list "${runpattern}" 2>&1)
     if echo "${listed}" | grep -qE "build failed|cannot use|undefined:|syntax error|declared and not used|too many|not enough"; then
         echo "[${total}] BROKEN: the mutant does not compile"
         broken=$((broken + 1))
@@ -135,7 +151,7 @@ while IFS='~' read -r file line occurrence anchor replacement package runpattern
         continue
     fi
 
-    if go test "${package}" -run "${runpattern}" >/dev/null 2>&1; then
+    if go test ${TAGFLAG} "${package}" -run "${runpattern}" >/dev/null 2>&1; then
         echo "[${total}] SURVIVED: ${file}:${line} '${anchor}' -> '${replacement}' (${matched} test(s))"
         survived=$((survived + 1))
     else
