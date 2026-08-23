@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+    "net/textproto"
     "time"
 
     httpclientcontract "github.com/precision-soft/melody/v3/httpclient/contract"
@@ -25,12 +26,27 @@ func NewRequestOptions() *RequestOptions {
     }
 }
 
+/* Headers hands out a copy: the live map invited writes that bypass the canonicalization SetHeader exists to enforce, and a non-canonical spelling planted through the getter next to the canonical one made the request-time winner a map-iteration choice — in what is often a credential header, the exact nondeterminism the setters refuse. The setters remain the one door that writes. */
 func (instance *RequestOptions) Headers() map[string]string {
-    return instance.headers
+    return copyStringMap(instance.headers)
 }
 
+/* Query hands out a copy under the same single-door rule as Headers. */
 func (instance *RequestOptions) Query() map[string]string {
-    return instance.query
+    return copyStringMap(instance.query)
+}
+
+func copyStringMap(values map[string]string) map[string]string {
+    if nil == values {
+        return nil
+    }
+
+    copied := make(map[string]string, len(values))
+    for key, value := range values {
+        copied[key] = value
+    }
+
+    return copied
 }
 
 func (instance *RequestOptions) Body() any {
@@ -57,12 +73,14 @@ func (instance *RequestOptions) SetMaxResponseBodyBytes(maxResponseBodyBytes int
     instance.maxResponseBodyBytes = maxResponseBodyBytes
 }
 
+/* SetHeader stores the key canonicalized, so two spellings of one header land on one entry deterministically — the last sequential write wins — instead of surviving as two map entries whose request-time winner map iteration chose. */
 func (instance *RequestOptions) SetHeader(key string, value string) {
-    instance.headers[key] = value
+    instance.headers[textproto.CanonicalMIMEHeaderKey(key)] = value
 }
 
+/* SetHeaders refuses a map carrying two spellings that collapse onto one header, the way the client config constructor does: inside one map there is no sequential order to make the survivor deterministic. */
 func (instance *RequestOptions) SetHeaders(headers map[string]string) {
-    for key, value := range headers {
+    for key, value := range canonicalHeaderMap(headers) {
         instance.headers[key] = value
     }
 }

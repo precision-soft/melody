@@ -4,9 +4,9 @@
 #
 #   docker exec melody-dev-1 bash /app/.dev/run-batch.sh "bash /app/.dev/mutate.sh /app/.dev/mutate/lot<N>.table"
 #
-# A table row has seven tilde-separated fields:
+# A table row has seven tilde-separated fields, plus an optional eighth carrying build tags:
 #
-#   file ~ expected line ~ occurrence ~ anchor ~ replacement ~ package ~ -run pattern
+#   file ~ expected line ~ occurrence ~ anchor ~ replacement ~ package ~ -run pattern [~ build tags]
 #
 # Blank lines and lines opening with # are skipped.
 #
@@ -16,7 +16,7 @@
 #
 # A row is abandoned as BROKEN rather than reported when it cannot prove anything:
 #
-#   - it does not split into all seven fields, or the anchor is empty
+#   - it does not split into the seven required fields, or the anchor is empty
 #   - the file does not exist in the copy
 #   - the requested occurrence of the anchor does not sit on the expected line — textual twins put the
 #     same anchor at the same indentation in two functions, and a mistaken occurrence moves the

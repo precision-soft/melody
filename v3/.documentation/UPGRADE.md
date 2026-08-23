@@ -1090,6 +1090,38 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **Remedy.** Nothing, unless a deployment relied on a module route shadowing an application route on the same pattern — declare the intended one and remove the other.
 
+### Httpclient: `buildUrl` is RFC 3986 reference resolution, and a base url wants its trailing slash
+
+**What changed.** The target is resolved against the base url by RFC 3986 reference resolution — the rule Symfony and Guzzle implement — instead of being appended to the base as a prefix: an absolute-path target (`/users`) replaces the base path entirely, a relative one (`users`) merges over the last segment of the base path, and an empty target names the base resource itself, with its trailing slash. Because the merge cuts the last segment of a base spelled without a trailing slash, `NewHttpClientConfig` and `SetBaseUrl` refuse such a base by panic; a base with an empty path (`https://host`) stays legal.
+
+**Symptom.** A client built with `NewHttpClientConfig("https://host/v1", ...)` panics at construction with `the base url path must end with a slash`. A client rebuilt with `"https://host/v1/"` and calling `Get("/users")` reaches `https://host/users` where the old join reached `https://host/v1/users`.
+
+**Remedy.** Spell the base with its trailing slash and the targets relative: `"https://host/v1/"` + `"users"` names `https://host/v1/users` under both rules. Targets that begin with `/` are the ones whose meaning changed — drop the leading slash to keep them under the base path. The panic at construction is deliberate: without it the changed meaning would surface as a 404 in production.
+
+### Httpclient: the `TransportConfig` fields are pointers, built with `TransportDuration` and `TransportCount`
+
+**What changed.** The eight override fields become `*time.Duration`/`*int`. A nil field means "not set" and falls back to the default beside it; a SET value reaches `net/http` verbatim, zero and negative included, carrying the meaning `net/http` and `net.Dialer` give it — `MaxIdleConns: 0` is an unbounded pool, `IdleConnTimeout: 0` waits forever, a negative `KeepAlive` disables the probes. `DefaultTransportConfig()` stays the fully populated statement of the defaults.
+
+**Symptom.** A `TransportConfig` literal spelling bare values no longer compiles.
+
+**Remedy.** Wrap each value: `DialTimeout: httpclient.TransportDuration(5 * time.Second)`, `MaxIdleConns: httpclient.TransportCount(200)`. A field that used to be left zero to mean "inherit the default" is now LEFT NIL to mean it — which is what the zero value of a pointer field already is, so an override that only named some fields carries the same meaning it had.
+
+### Httpclient: the foreign-origin refusal reads the resolved url, and a relative target needs a base url
+
+**What changed.** On a client WITH a base url, the refusal of a target leaving the base origin is judged on the RESOLVED url rather than on the target's spelling, so the network-path form (`//other.example/x`) and any case of the scheme are covered. On a client WITHOUT a base url, a relative target is refused by name instead of failing inside `net/http` with the cause unnamed.
+
+**Symptom.** `Get("//other.example/x")` on a based client answers `the request url leaves the origin of the configured base url` where it used to hang the reference under the base path. `Get("/users")` on a base-less client answers `the request url is relative and the client has no base url` instead of `failed to create request`.
+
+**Remedy.** A caller that talks to more than one origin builds a client without a base url, as before. A caller that hit the second refusal was already failing — the error now names the missing half.
+
+### Httpclient: header maps are canonicalized at every door, the getters hand out copies, and a nil option is refused
+
+**What changed.** `NewHttpClientConfig` and `RequestOptions.SetHeaders` refuse a map carrying two spellings that collapse onto one header; `HttpClient.SetHeader` and `RequestOptions.SetHeader` store the canonical spelling. `RequestOptions.Headers()` and `Query()` hand out copies. A nil `RequestOption` in a call's option list is refused with its index instead of being called.
+
+**Symptom.** A configuration map holding both `x-api-key` and `X-Api-Key` panics naming the collision. A header rotation through `SetHeader("x-api-key", ...)` on a client configured with `X-Api-Key` overwrites the entry it means to instead of leaving two. Code that wrote into the map returned by `Headers()` no longer reaches the option set.
+
+**Remedy.** Keep one spelling per header in each map. Code that mutated the getters' maps moves to `SetHeader`/`SetQuery`, the doors that write.
+
 ## v3.0.0
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version. The entry below is the one rewrite that does not compile afterwards: v1 and v2 keep the identifiers, v3 has never carried them.
