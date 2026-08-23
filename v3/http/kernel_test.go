@@ -562,6 +562,133 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
     }
 }
 
+/* the guarantee this pins is the one F-134 exists for, and it is the exact case the neighbouring test does NOT cover: there a listener fails while producing a response and the response wins, which is right, because nothing required was skipped. Here a listener marked required sits BEHIND the one that stops and answers, so the response it produced would be served with access control never consulted — the cached /admin page handed to an anonymous caller. The kernel is required to drop that response for the error page, and it tells the two cases apart by the TYPE of the error the dispatch returned, not by whether a response exists.
+
+Measured on all three majors before it was written: no suite anywhere pins the kernel half of this refusal. v1 and v2 shipped the repair and proved only the dispatcher's half, so this test is what puts the two in disagreement. */
+func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/admin",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+    requiredRegistration := dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        10,
+    )
+
+    registrar, isRegistrar := any(dispatcher).(eventcontract.RequiredListenerRegistrar)
+    if false == isRegistrar {
+        t.Fatalf("expected the dispatcher to mark required listeners")
+    }
+
+    registrar.MarkListenerRequired(requiredRegistration)
+
+    /* the cache-shaped listener: it answers the request from its own store and stops, at a priority ahead of the required one */
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent, ok := eventValue.Payload().(*KernelRequestEvent)
+            if false == ok {
+                return nil
+            }
+
+            requestEvent.SetResponse(TextResponse(nethttp.StatusOK, "from the cache"))
+            eventValue.StopPropagation()
+
+            return nil
+        },
+        50,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/admin", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the cached response to be dropped for the error page, got %d", recorder.Code)
+    }
+
+    if true == strings.Contains(recorder.Body.String(), "from the cache") {
+        t.Fatalf("expected the cached body never to reach the writer, got %q", recorder.Body.String())
+    }
+}
+
+/* the kernel.controller twin of the test above, for the same reason and with the same measurement behind it */
+func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/admin",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+    requiredRegistration := dispatcher.AddListener(
+        kernelcontract.EventKernelController,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        10,
+    )
+
+    registrar, isRegistrar := any(dispatcher).(eventcontract.RequiredListenerRegistrar)
+    if false == isRegistrar {
+        t.Fatalf("expected the dispatcher to mark required listeners")
+    }
+
+    registrar.MarkListenerRequired(requiredRegistration)
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelController,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            controllerEvent, ok := eventValue.Payload().(*KernelControllerEvent)
+            if false == ok {
+                return nil
+            }
+
+            controllerEvent.SetResponse(TextResponse(nethttp.StatusOK, "from the cache"))
+            eventValue.StopPropagation()
+
+            return nil
+        },
+        50,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/admin", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the cached response to be dropped for the error page, got %d", recorder.Code)
+    }
+
+    if true == strings.Contains(recorder.Body.String(), "from the cache") {
+        t.Fatalf("expected the cached body never to reach the writer, got %q", recorder.Body.String())
+    }
+}
+
 func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(

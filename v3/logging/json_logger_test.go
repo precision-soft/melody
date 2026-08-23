@@ -5,6 +5,7 @@ import (
     "bytes"
     "encoding/json"
     "errors"
+    "io"
     "os"
     "strings"
     "sync"
@@ -602,3 +603,55 @@ func TestJsonLogger_Close_WithANonClosableWriter_KeepsTheLoggerAlive(t *testing.
     }
 }
 
+/* Enabled must answer with the same arithmetic Log uses, or a caller that asks before building a record and a logger that decides after receiving one would disagree: a level the threshold drops must be reported disabled, one it keeps reported enabled, and an unknown level weighed at error priority — the branch that exists so the level least deserving of silence is not filed as debug. */
+func TestJsonLogger_EnabledAnswersTheThresholdLogItselfApplies(t *testing.T) {
+    logger := NewJsonLogger(io.Discard, loggingcontract.LevelWarning)
+
+    levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
+    if false == isReporter {
+        t.Fatalf("expected the json logger to answer the level question")
+    }
+
+    cases := []struct {
+        level    loggingcontract.Level
+        expected bool
+    }{
+        {loggingcontract.LevelDebug, false},
+        {loggingcontract.LevelInfo, false},
+        {loggingcontract.LevelWarning, true},
+        {loggingcontract.LevelError, true},
+        {loggingcontract.LevelEmergency, true},
+        /* an unrecognised level weighs as error, which is above this threshold */
+        {loggingcontract.Level("audit"), true},
+    }
+
+    for _, testCase := range cases {
+        if testCase.expected != levelReporter.Enabled(testCase.level) {
+            t.Fatalf("expected %q enabled=%v under a warning threshold", testCase.level, testCase.expected)
+        }
+    }
+}
+
+/* a closed logger writes nothing whatever its threshold says, so it reports nothing enabled: the caller asking is about to build a record, and one built for a logger that has stopped writing is waste with no record at the end of it */
+func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
+    file, createErr := os.CreateTemp(t.TempDir(), "melody-json-logger-enabled-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    logger := NewJsonLogger(file, loggingcontract.LevelDebug)
+
+    levelReporter := logger.(loggingcontract.LevelReporter)
+
+    if false == levelReporter.Enabled(loggingcontract.LevelDebug) {
+        t.Fatalf("expected debug to be enabled before the logger is closed")
+    }
+
+    if closeErr := logger.(interface{ Close() error }).Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if true == levelReporter.Enabled(loggingcontract.LevelEmergency) {
+        t.Fatalf("expected a closed logger to report nothing enabled")
+    }
+}

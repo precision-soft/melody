@@ -50,6 +50,9 @@ Shared behaviours — the first, second and last applying to every command on th
 
 - [`ContainerCommand`](../../debug/command_container.go)
 - [`EventCommand`](../../debug/command_event.go)
+    - [`NewEventCommand(deferredListenerProvider DeferredListenerProvider) *EventCommand`](../../debug/command_event.go)
+- [`DeferredListener`](../../debug/command_event.go)
+- [`DeferredListenerProvider`](../../debug/command_event.go)
 - [`RouterCommand`](../../debug/command_router.go)
 - [`ParameterCommand`](../../debug/command_parameter.go)
 - [`VersionCommand`](../../debug/command_version.go)

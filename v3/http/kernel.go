@@ -662,13 +662,18 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
         instance.logEventDispatchError(requestLogger, "kernel request error", eventKernelRequestErr)
 
-        /* the kernel.request dispatch fails closed when it aborted with an error and no listener produced a response: the dispatcher stops at the first failing listener, so listeners behind it — the access-control listener among them — never ran, and proceeding to the handler would treat a partially-processed request as authorized */
-        if nil != eventKernelRequestErr && nil == kernelRequestEvent.Response() {
+        /* the kernel.request dispatch fails closed when it aborted with an error and no listener produced a response: the dispatcher stops at the first failing listener, so listeners behind it — the access-control listener among them — never ran, and proceeding to the handler would treat a partially-processed request as authorized. A dispatch that skipped a listener marked required is refused too: a listener stopping propagation is entitled to answer the request, but not with access control never consulted, so the response it produced is dropped for the error page. The error is judged on itself rather than through its cause chain, so an application event dispatched by a listener that skips a required listener of its own stays an ordinary listener failure. */
+        _, requiredListenerSkipped := eventKernelRequestErr.(*event.RequiredListenerSkippedError)
+
+        if nil != eventKernelRequestErr && (true == requiredListenerSkipped || nil == kernelRequestEvent.Response()) {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode {
                 message = debugErrorMessage(eventKernelRequestErr)
             }
+
+            /* the response the stopping listener produced is replaced below and reaches no writer, so a file-backed body would be leaked */
+            closeDiscardedResponseBody(kernelRequestEvent.Response(), requestLogger)
 
             kernelRequestEvent.SetResponse(
                 renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil),
@@ -814,13 +819,17 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelControllerErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelController, kernelControllerEvent)
         instance.logEventDispatchError(requestLogger, "kernel controller error", eventKernelControllerErr)
 
-        /* the kernel.controller dispatch fails closed on the same terms as the kernel.request path: the dispatcher stops at the first failing listener, so a listener behind it never ran, and proceeding to the handler would treat a partially-processed request as authorized */
-        if nil != eventKernelControllerErr && nil == kernelControllerEvent.Response() {
+        /* the kernel.controller dispatch fails closed on the same terms as the kernel.request path: the dispatcher stops at the first failing listener, so a required listener behind it — marked through RequiredListenerRegistrar — never ran, and proceeding to the handler would treat a partially-processed request as authorized */
+        _, controllerRequiredListenerSkipped := eventKernelControllerErr.(*event.RequiredListenerSkippedError)
+
+        if nil != eventKernelControllerErr && (true == controllerRequiredListenerSkipped || nil == kernelControllerEvent.Response()) {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode {
                 message = debugErrorMessage(eventKernelControllerErr)
             }
+
+            closeDiscardedResponseBody(kernelControllerEvent.Response(), requestLogger)
 
             kernelControllerEvent.SetResponse(
                 renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil),

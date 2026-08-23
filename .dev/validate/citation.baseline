@@ -54,6 +54,7 @@ v3 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgrade
 v3 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
 v3 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
 v3 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
+v3 ~ symbol ~ runtime.FuncForPC      ~ runtime.FuncForPC, named as the reflection the event dispatch stopped paying for on every listener of every dispatch
 
 # ------------------------------------------------------------------------------------------------------
 # the third-party client, under the name of the integration that wraps it

@@ -19,11 +19,13 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
     "github.com/precision-soft/melody/v3/internal"
+    kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/logging"
     "github.com/precision-soft/melody/v3/messagebus"
     "github.com/precision-soft/melody/v3/openapi"
     "github.com/precision-soft/melody/v3/runtime"
+    "github.com/precision-soft/melody/v3/security"
 )
 
 type commandSuggestion struct {
@@ -88,7 +90,7 @@ func (instance *Application) bootCli() {
             debugCommands,
             &debug.ContainerCommand{},
             &debug.ParameterCommand{},
-            &debug.EventCommand{},
+            debug.NewEventCommand(instance.securityDeferredListeners),
             debug.NewMiddlewareCommand(func() []httpcontract.Middleware {
                 return instance.httpMiddlewares.all(instance.kernel)
             }),
@@ -128,6 +130,34 @@ func (instance *Application) registerCoreCliCommandIfAbsent(command clicontract.
     }
 
     instance.RegisterCliCommand(command)
+}
+
+/* securityDeferredListeners feeds the declaration channel of debug:events with what only the serving process wires: the security pair stays http-only by design, so a console dispatcher can never show it and the command says so instead of rendering an absence. A process without a compiled security configuration declares nothing, and the serving process itself declares nothing either — there the pair is registered for real and the dispatcher answers. */
+func (instance *Application) securityDeferredListeners() []debug.DeferredListener {
+    if nil == instance.securityConfiguration {
+        return nil
+    }
+
+    if config.ModeHttp == instance.runtimeFlags.Mode() {
+        return nil
+    }
+
+    deferredNote := "registered only in the http serving process"
+
+    return []debug.DeferredListener{
+        {
+            EventName:    kernelcontract.EventKernelRequest,
+            Priority:     security.KernelFirewallListenerPriority,
+            ListenerName: "security resolution listener",
+            Note:         deferredNote,
+        },
+        {
+            EventName:    kernelcontract.EventKernelRequest,
+            Priority:     security.KernelAccessControlListenerPriority,
+            ListenerName: "security access control listener",
+            Note:         deferredNote,
+        },
+    }
 }
 
 func (instance *Application) runCli() error {

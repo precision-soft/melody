@@ -20,6 +20,7 @@ func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcont
 
     instance.registerRequiredRequestContextListener(eventDispatcher)
 
+    /* the registration each call answers is deliberately discarded: these five are installed once at boot and live for the process, so nothing here ever removes them. An application that removes a subscriber at runtime must keep what AddSubscriber returns — the subscriber value is not accepted back. */
     eventDispatcher.AddSubscriber(
         subscriber.NewProductEventSubscriber(),
     )

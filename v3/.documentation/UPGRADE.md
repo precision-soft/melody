@@ -18,6 +18,46 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Event: `AddSubscriber` answers a registration, and `RemoveSubscriber` takes it
+
+**What changed.** `AddSubscriber(subscriber)` returns an `event/contract.SubscriberRegistration`, and `RemoveSubscriber` takes that registration where it used to take the subscriber value.
+
+**Symptom.** Code that calls `RemoveSubscriber(mySubscriber)` no longer compiles. Code that only ever ADDS subscribers compiles unchanged, because Go permits a call whose return value is discarded — so an application that registers at boot and never removes feels nothing at all.
+
+**Remedy.** Keep what `AddSubscriber` returns and hand it back:
+
+```go
+registration := eventDispatcher.AddSubscriber(subscriber)
+// later
+removedCount := eventDispatcher.RemoveSubscriber(registration)
+```
+
+**Why the value could not stay.** A subscriber filed under its own pointer is not identifiable: a subscriber struct that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type were one identity in the dispatcher. `RemoveSubscriber(a)` took down `b`'s listeners as well and reported a plausible count for it, and nothing in either value could ever tell them apart. Two consequences follow, both of them widenings: registering the same subscriber twice is now legal and produces two independent installations, and a subscriber that is not a pointer installs like any other — the refusal that guarded the pointer filing has nothing left to guard. The frozen majors took the narrower repair for the same defect, refusing the second registration of one identity; this major takes the redesign instead.
+
+### Event: a dispatch that skipped a required listener fails closed, with a type you can assert
+
+**What changed.** When a listener ends a dispatch early — by stopping propagation or by failing — and a listener marked required through `RequiredListenerRegistrar` sits behind it, the dispatch returns an `*event.RequiredListenerSkippedError` instead of completing, or instead of returning only the ending listener's own failure. The http kernel refuses such a dispatch on `kernel.request` and `kernel.controller` even when a listener produced a response, dropping that response for the error page.
+
+**Symptom.** A listener that stops propagation and answers the request at a priority ahead of a required listener — an http cache above the access-control listener is the shape this was found in — now yields a 500 error page where it used to deliver its own response. A dispatch that used to complete quietly now returns an error.
+
+**Remedy.** This is the guarantee working; the previous behaviour served pages with access control never consulted. If the listener is legitimately entitled to short-circuit past required listeners, mark it: `MarkListenerMaySkipRequiredListeners(registration)`. Both marks default off, so a dispatcher with no marked listeners behaves exactly as before. Assert the type on the error a dispatch returns DIRECTLY rather than through `errors.As`: a listener may dispatch further events, and a nested dispatch skipping a required listener of its own travels up as the cause of an ordinary listener error, which is a different and wider policy.
+
+### Event: marking an unknown registration panics, and the adapter refuses a dispatcher that cannot mark
+
+**What changed.** `MarkListenerRequired` and `MarkListenerMaySkipRequiredListeners` panic when the registration is not one the dispatcher holds, where an unknown registration used to be a documented silent no-op. `EventDispatcherAdapter` panics when the dispatcher it wraps does not implement `RequiredListenerRegistrar`, where it used to absorb the mark. `NewEventDispatcherAdapter` no longer takes a clock — the parameter was validated and never read, and `EVENT.md` had documented the one-argument signature from the beginning.
+
+**Symptom.** A boot that marked a stale or hand-built registration now panics with `event listener registration is not registered`. An adapter over a custom dispatcher panics with `the wrapped event dispatcher cannot mark required listeners`. A call to `NewEventDispatcherAdapter(dispatcher, clock)` no longer compiles.
+
+**Remedy.** Mark the registration `AddListener` returned, not one assembled by hand. Drop the second argument at the adapter constructor. If you wrap a dispatcher of your own and want the required-listener guarantee, implement `RequiredListenerRegistrar` on it — the silent absorption was the defect: callers probe for that interface precisely to learn whether the guarantee is available, and the adapter satisfies the probe on its own behalf, so swallowing the mark answered the probe yes and left the guarantee unarmed.
+
+### Event and debug: subscriber declarations are validated whole, and `debug:events --verbose` changes its json shape
+
+**What changed.** `AddSubscriber` validates every subscribed event before registering a single listener, and refuses a subscriber that declares no events as well as an event name mapped to an empty list. Under `--verbose`, the json document of `debug:events` carries `data.{events, listeners}` where it carried the event list alone; without `--verbose` the shape is unchanged.
+
+**Symptom.** A subscriber whose declaration is partly malformed now panics before anything is installed, where it used to install the valid part and then panic. A subscriber assembled from configuration that produced an empty declaration now fails the boot instead of registering nothing and reporting success. A machine consumer reading `data.items` from `debug:events --format=json --verbose` finds it under `data.events.items`.
+
+**Remedy.** Fix the declaration — the half-installed subscriber was the defect: its first event's listeners were live and firing under a subscriber the caller had been told was refused. For the json consumer, read `data.events.items` under `--verbose`, or drop the flag; the listener detail, including the marks that say whether the fail-closed guarantee is armed, is now reachable from json at all, which it was not before.
+
 ### Container: a scoped registration under the protected `service.` prefix is refused at boot
 
 **What changed.** Both scoped registration doors — `Container.RegisterScoped` and `Scope.RegisterScoped`, and the generic helpers over them — refuse a service name beginning with `service.`, with or without `Replacing()`.

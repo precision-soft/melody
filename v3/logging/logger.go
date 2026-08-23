@@ -19,6 +19,18 @@ type logEntry struct {
     Context map[string]any             `json:"context"`
 }
 
+/* LevelEnabled asks a logger whether a record at this level would survive its threshold, and answers true for one that cannot be asked. It is the single door onto loggingcontract.LevelReporter, so the "absent means enabled" rule lives in one place rather than being restated at each caller — a site that spelled the fallback the other way would silently stop recording against every logger that does not implement the capability, which is most of them.
+
+Ask it only where the answer saves work that is otherwise thrown away: a context map assembled at the call site, a name resolved through reflection. A record whose arguments already exist costs nothing to hand over, and gating it here would only add a second place where a level decision is made. */
+func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bool {
+    levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
+    if false == isReporter {
+        return true
+    }
+
+    return levelReporter.Enabled(level)
+}
+
 func LogError(logger loggingcontract.Logger, err error) {
     if nil == err {
         return

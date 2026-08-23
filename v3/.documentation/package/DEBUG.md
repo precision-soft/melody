@@ -20,6 +20,8 @@ The commands are intended for diagnostics and local debugging (container service
 
 `debug:parameters` reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none — with the length withheld, while an ordinary parameter prints in the clear.
 
+`debug:events --format=json --verbose` carries the per-listener detail — priority, source, owner and the required / may-skip marks — under `data.listeners`, beside the event list under `data.events`; without `--verbose` the json `data` stays the plain list payload. The **declaration** of the listeners a serving process wires and this one does not is on `data.servingProcessListeners` at every verbosity, beside the listing rather than instead of it, because it exists so that "is access control wired?" is not answered with an absence meaning "not in this process". `--order` reaches both halves of the document: it orders the events, while inside one event the listener rows keep the dispatch order their `order` field reports. The table summary's `SUBSCRIBERS` total counts distinct subscribers across the whole dispatcher, while the per-event column counts them per event.
+
 ## Flags and output
 
 Every debug command declares [`output.DebugFlags()`](../../cli/output/standard_flag.go) as its flag set and renders its result through [`output.Render`](../../cli/output/renderer.go), so all six share one interface. `DebugFlags()` is [`output.StandardFlags()`](../../cli/output/standard_flag.go) with `--quiet` defaulted to `false`, since a debug command's headers are the point. See [CLI](CLI.md#standard-output-flags) for the full table of flags and defaults.
@@ -37,6 +39,9 @@ Three behaviours apply to every command on this page:
 
 - [`ContainerCommand`](../../debug/command_container.go)
 - [`EventCommand`](../../debug/command_event.go)
+    - [`NewEventCommand(deferredListenerProvider DeferredListenerProvider) *EventCommand`](../../debug/command_event.go)
+- [`DeferredListener`](../../debug/command_event.go)
+- [`DeferredListenerProvider`](../../debug/command_event.go)
 - [`RouterCommand`](../../debug/command_router.go)
 - [`ParameterCommand`](../../debug/command_parameter.go)
 - [`VersionCommand`](../../debug/command_version.go)
@@ -83,6 +88,7 @@ func main() {
 
     /* Register returns nothing: it fails fast through exception.Panic on a nil argument, an empty name or a duplicate name */
     cli.Register(commandContext, &debug.ContainerCommand{}, runtimeInstance)
+    /* the zero value leaves the deferred-listener provider nil, so data.servingProcessListeners is omitted; debug.NewEventCommand(provider) is what fills it, and is what the framework's own wiring uses */
     cli.Register(commandContext, &debug.EventCommand{}, runtimeInstance)
     cli.Register(commandContext, &debug.ParameterCommand{}, runtimeInstance)
     cli.Register(commandContext, &debug.RouterCommand{}, runtimeInstance)

@@ -139,7 +139,22 @@ func (instance *jsonLogger) Closed() bool {
     return instance.closed.Load()
 }
 
+/* Enabled answers the same question Log asks itself first, and answers it with the same arithmetic: a level below the configured threshold is dropped, and an invalid level weighs as error rather than as the lowest priority for the reason written at that branch. A closed logger writes nothing at all, so it reports nothing enabled — the caller asking is about to build a record, and a record built for a logger that has stopped writing is pure waste. */
+func (instance *jsonLogger) Enabled(level loggingcontract.Level) bool {
+    if true == instance.closed.Load() {
+        return false
+    }
+
+    effectivePriority := priorityForLevel(level)
+    if false == IsValidLevel(level) {
+        effectivePriority = priorityForLevel(loggingcontract.LevelError)
+    }
+
+    return effectivePriority >= priorityForLevel(instance.minLevel)
+}
+
 var _ loggingcontract.Logger = (*jsonLogger)(nil)
+var _ loggingcontract.LevelReporter = (*jsonLogger)(nil)
 
 func normalizeJsonContext(input map[string]any) map[string]any {
     if nil == input {

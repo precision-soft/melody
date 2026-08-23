@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: `DEBUG.md` lists `NewEventCommand`, `DeferredListener` and `DeferredListenerProvider`, and `EVENT.md` lists the two constructors `NewRequiredListenerSkippedErrorWithStoppedListenerFailure` and `NewRequiredListenerSkippedErrorWithCause`. Five exported symbols this major ships and no document on any major named — the type list stopped at `EventCommand` and at the base constructor, so the declaration channel of `debug:events` and the two refusals that carry a cause were reachable only by reading the source
+
 - http: `RateLimitMiddleware` and `RegisterRateLimitRequestListener` read the limiter through the interface, so a typed-nil limiter is refused at construction under the guard's own name — it passed the plain comparison, looked live, and dereferenced its nil receiver on the first request the middleware metered
 - http: a serializer resolution failure that is not the not-acceptable refusal is recorded at warning before the result handler's fallback serves the default representation — it was dropped whole, so a client that named an available type and received another had no diagnostic anywhere
 - http: the abort sentinel no longer leaks the response it aborts. `http.ErrAbortHandler` was re-raised ten lines before the kernel captured the response in flight and seventy before either close ran, so a deliberate abort raised by a middleware after its `next()` returned dropped the only reference to a file-backed response — `FileResponse`, `ServeReader` — and leaked one descriptor per aborted request. The comment on `invokeErrorHandlerSafely` already refused to honour the sentinel for exactly this reason
