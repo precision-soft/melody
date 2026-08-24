@@ -18,6 +18,126 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Cache: the manager no longer closes a backend it was handed
+
+**What changed.** [`NewManager`](../cache/manager.go) builds a manager that does not own its backend: `Close` leaves the backend open, because on the container path both are registered services and the container closes each one itself — the cascade closed the backend twice, which a backend wrapping a connection typically reports as a failure on the second call. `NewManagerOwningBackend` keeps the cascade for the caller that builds both by hand.
+
+**Symptom.** A manager built directly with `NewManager` over a hand-built backend no longer stops that backend's cleanup goroutine on `Close`; the backend outlives the manager until its own `Close`.
+
+**Remedy.** A caller that builds both by hand and wants one `Close` to end both switches to `NewManagerOwningBackend`. The container path needs no action.
+
+### Cache: a closed in-memory backend refuses every operation
+
+**What changed.** [`InMemoryBackend`](../cache/in_memory.go) carries a closed flag: after `Close`, every operation answers `cache backend is closed` instead of silently succeeding against a map whose cleanup goroutine is gone — an entry written after `Close` was never reclaimed by anything and grew the map for the rest of the process. `Close` itself stays idempotent.
+
+**Symptom.** A write or read that races a shutdown past the backend's `Close` receives an error instead of a silent success that nothing would ever sweep.
+
+**Remedy.** None for the ordinary lifecycle. Code that deliberately used a closed backend as a plain map keeps a backend it does not close, or its own map.
+
+### Cache: the in-memory backend refuses what it silently accepted
+
+**What changed.** Four degenerate inputs that used to be absorbed are refused. The empty key answers `cache key is empty` on every operation — it used to be a real key, which the `rueidis` backend refuses, so every caller whose key came up empty silently shared one entry until the deployment switched backends. A negative ttl on `Set`/`SetMultiple` answers `cache ttl is negative` — it used to store an immortal entry, the exact opposite of a ttl computed from an already-passed deadline; zero keeps meaning no expiry. `Increment`/`Decrement` on an existing empty or blank payload answer `cache value is not a valid int64` the way any textual payload does — it used to be adopted as a zero counter and overwritten, destroying the entry, where redis `INCRBY` errors. A negative `maxItems` panics at construction — it used to silently mean unbounded, disarming eviction the operator believed was armed.
+
+**Symptom.** Each refused input surfaces as an error (or, for `maxItems`, a boot-time panic) at the call that produced it, instead of a silently wrong cache.
+
+**Remedy.** Fix the calling code: supply a non-empty key, clamp a computed ttl at zero, keep counter keys away from non-counter writes, and pass `0` for an explicitly unbounded backend.
+
+### Cache: the key grammar is the contract's, on both backends
+
+**What changed.** `cachecontract.Backend` now states the key grammar — non-empty, no spaces, no newlines, at most 1024 bytes — and the in-memory backend enforces it with the same refusals the redis backend always answered. The two implementations of one promise refused different keys.
+
+**Symptom.** A key carrying a space or a newline — typically built from user input — now fails every operation against the in-memory backend with `cache key contains spaces`/`cache key contains newlines`, where it silently worked in development and failed only in production.
+
+**Remedy.** Sanitize the key at the call site (hash it, or strip the whitespace). The refusal names the key.
+
+### Cache: a payload the serializer cannot decode is a typed miss
+
+**What changed.** [`Manager.Get`](../cache/manager.go) wraps a deserialization failure in the new [`DeserializationError`](../cache/deserialization_error.go), and [`Remember`](../cache/remember.go) treats that type as a miss: the callback recomputes and its `Set` overwrites the corrupt payload, so the key heals instead of staying poisoned until an expiry a ttl of zero postpones forever. [`Manager.Many`](../cache/manager.go) no longer discards the whole answer over one corrupt entry: the entry is left out the way an absent key is, and the error returned beside the good values is a `DeserializationError` naming the culprit keys deterministically. Every other error keeps meaning the cache itself failed.
+
+**Symptom.** A key whose payload was corrupted out-of-band recovers on the next `Remember` instead of erroring forever; `Many` over a corrupt entry returns the good values plus a typed error naming the bad keys, where it used to return nothing and an anonymous encoding error.
+
+**Remedy.** None for most callers. A caller of `Many` that treated any error as "no values" now also has the partial map available; a custom `Cache` implementation that wants the same self-healing under `Remember` wraps its own deserialization failures with `NewDeserializationError`.
+
+### Cache: `Remember` answers one shape on the miss and on every hit
+
+**What changed.** The computing call of [`Remember`](../cache/remember.go) returns the value passed through the manager's serializer round-trip — one local encode and decode, no backend involved — which is the exact shape every cached call answers. Until now one key had two shapes: the callback's own value on the miss, the decoded generic form on every hit, so a type assertion worked on the cold path and failed on the warm one, from the second call on. A `Cache` implementation that does not expose its stored shape answers the callback's value unchanged.
+
+**Symptom.** A callback returning `int` is answered as `float64` on the FIRST call too, and a struct as `map[string]any`, where the miss used to answer the callback's own types. The cost is uniform rather than deferred: an integer beyond 2^53 comes back changed on the computing call as well.
+
+**Remedy.** Type-assert against the decoded shape, or decode into a typed target. Where a cached value carries an integer that large, carry a version inside it or key it so it never decodes through JSON.
+
+### Cache: the zero-value RememberOption reads as the defaults
+
+**What changed.** A `&RememberOption{}` built as a literal used to silently disarm the stampede protection it never asked to configure, and its zero `waitTimeout` made every miss answer an instant timeout; [`Remember`](../cache/remember.go) now reads the exact zero-value option as `NewDefaultRememberOption()` — protection on, wait unbounded. Separately, a `waitTimeout` of zero set through the constructor now means no waiting rather than no answer: a result the in-flight call has already memoized is taken without blocking, and only a flight still in the air answers with the timeout.
+
+**Symptom.** Callers passing a literal option regain the single-flight callback the default promises; callers polling with a zero timeout receive a completed result instead of a guaranteed error.
+
+**Remedy.** None. A caller that genuinely wants protection off builds the option through `NewDefaultRememberOption().WithStampedeProtectionEnabled(false)`, which carries a non-zero shape and stays what it says.
+
+### Cache: a value-kind Cache no longer coalesces in Remember
+
+**What changed.** [`Remember`](../cache/remember.go) coalesces concurrent callers under one in-flight computation only for pointer-kind `Cache` implementations, whose address tells instances apart. A value-kind implementation used to share one flight per type: two different instances with different backends collapsed onto one leader, and the second caller received — and cached nothing from — the value computed for somebody else's cache. A value-kind instance now runs every callback itself.
+
+**Symptom.** A struct- or map-kind `Cache` implementation loses stampede deduplication and never a correct answer.
+
+**Remedy.** Implement `Cache` on a pointer receiver to regain coalescing.
+
+### Cache: a recovered panic carries its cause
+
+**What changed.** The recovery boundaries of [`cache.Remember`](../cache/remember.go) hand the panic value on as the CAUSE of the error they fabricate, and capture the stack of the goroutine that raised it. The `panic` context key they already wrote is unchanged; `panicStack` is added beside it. A panic raised by the cache itself — the backend or the serializer, on the leader's own reads and writes — is now reported as `cache remember cache access panicked` rather than being blamed on the callback, which the wrapper recovers separately.
+
+**Symptom.** `errors.Is` and `errors.As` on the returned error now reach the failure underneath, where before they stopped at the fabricated wrapper. A diagnosis that followed `cache remember callback panicked` into a callback that never panicked now names the cache access instead.
+
+**Remedy.** None for a reader that only renders the error. A caller that branches on `errors.Is` against a sentinel it also uses for non-panic failures should check whether it means to treat a panicked callback the same way.
+
+### Serializer: a refusal of one type is not a refusal of the negotiation
+
+**What changed.** `Accept: application/json;q=0` against a manager that also holds `text/plain` is answered with plain text rather than `406 Not Acceptable`. A type covered by a `q=0` range is recorded as refused and can never be served — by the negotiation or by the fallback, which steps past json when json is what was refused — and `ErrNotAcceptable` is answered only when every registered type is refused. A manager deliberately configured without json now answers an empty or unmatched accept header with its first configured serializer in lexical MIME order, where it used to refuse with `no default serializer configured` while a serializer sat beside the refusal.
+
+**Symptom.** A request whose accept header names one type it does not want, against an application with more than one serializer registered, receives a representation where it used to receive a 406.
+
+**Remedy.** None: this is what the manager's own comment and `SERIALIZER.md` promised. A client that wants nothing at all still gets its 406 by refusing everything — `*/*;q=0`.
+
+### Serializer: the accept header is read on the one strict grammar
+
+**What changed.** The manager's own header parser reads `q` through [`internal.ParseQualityValue`](../internal/quality_value.go) and splits members and parameters through [`internal.SplitOutsideQuotes`](../internal/split_outside_quotes.go), the grammar the http readers already shared. A `q` outside the RFC 7231 qvalue grammar drops its whole member instead of being scored as full acceptance, clamped into a fabricated refusal, or carried through as a `NaN` weight no comparison could select or refuse; and a comma or semicolon inside a quoted parameter value stays inside its member, so the `q=0` in `text/plain;version="1,2";q=0` keeps covering the type it names instead of being detached from it.
+
+**Symptom.** `q=1e-1` and `q=1.5`, which used to be accepted, now drop their member. A header whose every member is malformed is refused by the manager, and the http result handler answers that refusal with the default serializer.
+
+**Remedy.** Spell `q` within the RFC grammar — a zero with up to three decimal digits, or a one with up to three zero decimals.
+
+### Serializer: two mime keys that normalize to one are refused at construction
+
+**What changed.** `NewSerializerManager` refuses a map in which two spellings collapse onto one normalized key — `application/json` and `Application/JSON; charset=x` — naming the normalized key and both spellings in sorted order. The overwrite used to be silent, with map iteration order deciding which serializer survived, so the winner could change from one boot to the next and the loser vanished. A typed-nil serializer instance is refused exactly like the untyped nil, at construction rather than on the first request the negotiation routes to it.
+
+**Symptom.** An application whose serializer map carries two spellings of one media type fails to build its manager instead of booting with an arbitrary winner.
+
+**Remedy.** Register each media type once, under any spelling.
+
+### Serializer: a plain-text payload is never aliased into the caller's buffer
+
+**What changed.** `PlainTextSerializer.Serialize([]byte)` returns a copy rather than the caller's backing array, and `Deserialize` into a `*[]byte` stores a copy rather than the payload slice itself. A typed-nil pointer target is refused with the same error the untyped nil gets, where it used to pass the plain comparison, match its case and dereference nil on the assignment.
+
+**Symptom.** None for a caller that did not rely on the aliasing. A caller returning a pooled buffer after `Serialize` no longer overwrites the bytes it believed it had snapshotted.
+
+**Remedy.** None.
+
+### Clock: `FrozenClock.Advance` refuses a negative duration
+
+**What changed.** `Advance` accepted a negative duration and silently moved the frozen clock backwards, breaking the monotonic invariants the code under test relies on. It now panics with `invalid advance duration`; zero remains a no-op.
+
+**Symptom.** A test advancing by a negative duration panics at the call site.
+
+**Remedy.** Use `TravelTo`, the deliberate door for backwards motion.
+
+### Clock and runtime: the nil refusals read through the interface
+
+**What changed.** `ClockMustFromContainer`, `ClockMustFromResolver`, `runtime.New` and the `runtime` resolvers judge their arguments through the interface rather than with a plain `nil ==` comparison, so a typed nil is refused by name at the door it was handed to. `selectRuntimeResolver` reads the same way: a custom `Runtime` whose `Scope()` yields a typed nil no longer has its healthy container bypassed.
+
+**Symptom.** A wiring mistake that used to surface as a nil dereference inside the container package — on the request path, with the panic blaming the container — is now refused where it was made, naming the argument.
+
+**Remedy.** None.
+
 ### Event: `AddSubscriber` answers a registration, and `RemoveSubscriber` takes it
 
 **What changed.** `AddSubscriber(subscriber)` returns an `event/contract.SubscriberRegistration`, and `RemoveSubscriber` takes that registration where it used to take the subscriber value.

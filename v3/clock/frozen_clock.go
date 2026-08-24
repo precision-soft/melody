@@ -72,7 +72,7 @@ func newFrozenTicker(clockInstance *FrozenClock, ticker *time.Ticker) *frozenTic
         doneChannel:   doneChannel,
     }
 
-    /* @important do NOT close channelInstance on stop: time.Ticker (and so systemTicker) leaves its channel open forever, and a consumer that selects on a stopped ticker's channel would spin on the zero value from a closed one. Same interface, same semantics. */
+    /* do NOT close channelInstance on stop: time.Ticker (and so systemTicker) leaves its channel open forever, and a consumer that selects on a stopped ticker's channel would spin on the zero value from a closed one. Same interface, same semantics. */
     go func() {
         defer close(doneChannel)
 

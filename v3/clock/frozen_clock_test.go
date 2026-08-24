@@ -76,7 +76,7 @@ func TestFrozenClockNewTicker_ReflectsTravelToOnNextTick(t *testing.T) {
 
     clockInstance.TravelTo(targetTime)
 
-    /* @info a tick fired before TravelTo can already sit in the buffered ticker channel carrying the pre-travel time, so drain any stale ticks and assert the ticker eventually reflects the traveled time instead of reading exactly one tick, which races the 1ms interval. */
+    /* a tick fired before TravelTo can already sit in the buffered channel carrying the pre-travel time, so the stale ticks are drained: reading exactly one tick would race the 1ms interval */
     deadline := time.After(250 * time.Millisecond)
     for {
         select {

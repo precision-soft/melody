@@ -3,10 +3,13 @@ package main
 import (
     "bytes"
     "context"
+    "strings"
     "time"
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     rueidiscache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
+    melodycache "github.com/precision-soft/melody/v3/cache"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
 )
 
 /* runCacheCheck exercises the rueidis cache backend against a live redis: a set/get round-trip, a
@@ -93,4 +96,79 @@ func runCacheCheck(address string) {
         fail("cache: increment counter wrong — wanted 3 then 7, got %d then %d", first, second)
     }
     pass("cache atomic increment counter (3 → 7)")
+
+    assertCacheKeyGrammarIsOneContract(ctx, backend)
+}
+
+/* assertCacheKeyGrammarIsOneContract is the one cache claim no unit test can settle: the Backend contract
+states that a key is non-empty, carries no spaces or newlines and is at most 1024 bytes, and that EVERY
+implementation refuses a malformed key with the same answer — the point being that a caller cannot tell the
+backends apart by which keys they accept. A fake proves what the fake was written to say; only the in-memory
+backend and a live redis, asked the same question in the same process, prove that the two agree. The payload
+identity is the same kind of claim: redis has no nil to store, so an implementation preserving the
+distinction would be tellable apart by reading back what was written. */
+func assertCacheKeyGrammarIsOneContract(ctx context.Context, redisBackend *rueidiscache.Backend) {
+    inMemory := melodycache.NewInMemoryBackend(16, time.Minute, melodyclock.NewSystemClock())
+    defer inMemory.Close()
+
+    malformedKeys := []struct {
+        key      string
+        expected string
+    }{
+        {key: "", expected: "cache key is empty"},
+        {key: "with space", expected: "cache key contains spaces"},
+        {key: "with\nnewline", expected: "cache key contains newlines"},
+        {key: strings.Repeat("k", 1025), expected: "cache key is too long"},
+    }
+
+    for _, malformed := range malformedKeys {
+        _, _, memoryErr := inMemory.Get(malformed.key)
+        _, _, redisErr := redisBackend.GetCtx(ctx, malformed.key)
+
+        if nil == memoryErr || nil == redisErr {
+            fail(
+                "cache: the key %q was refused by only one backend — in-memory %v, redis %v",
+                malformed.key,
+                memoryErr,
+                redisErr,
+            )
+        }
+        if false == strings.Contains(memoryErr.Error(), malformed.expected) {
+            fail("cache: the in-memory refusal for %q was %v, wanted %q", malformed.key, memoryErr, malformed.expected)
+        }
+        if false == strings.Contains(redisErr.Error(), malformed.expected) {
+            fail("cache: the redis refusal for %q was %v, wanted %q", malformed.key, redisErr, malformed.expected)
+        }
+    }
+    pass("cache key grammar answered identically by the in-memory backend and by live redis (4 refusals)")
+
+    if setErr := inMemory.Set("nil-payload", nil, time.Minute); nil != setErr {
+        fail("cache: in-memory nil payload set: %v", setErr)
+    }
+    if setErr := redisBackend.SetCtx(ctx, "nil-payload", nil, time.Minute); nil != setErr {
+        fail("cache: redis nil payload set: %v", setErr)
+    }
+
+    memoryPayload, memoryFound, memoryReadErr := inMemory.Get("nil-payload")
+    if nil != memoryReadErr || false == memoryFound {
+        fail("cache: in-memory nil payload read back %v / found %v", memoryReadErr, memoryFound)
+    }
+    redisPayload, redisFound, redisReadErr := redisBackend.GetCtx(ctx, "nil-payload")
+    if nil != redisReadErr || false == redisFound {
+        fail("cache: redis nil payload read back %v / found %v", redisReadErr, redisFound)
+    }
+    if nil == memoryPayload || 0 != len(memoryPayload) {
+        fail("cache: the in-memory backend read a nil payload back as %#v, wanted an empty non-nil slice", memoryPayload)
+    }
+    if nil == redisPayload || 0 != len(redisPayload) {
+        fail("cache: redis read a nil payload back as %#v, wanted an empty non-nil slice", redisPayload)
+    }
+    pass("a nil payload reads back as an empty non-nil slice from both backends")
+
+    if deleteErr := inMemory.Delete("nil-payload"); nil != deleteErr {
+        fail("cache: in-memory nil payload cleanup: %v", deleteErr)
+    }
+    if deleteErr := redisBackend.DeleteCtx(ctx, "nil-payload"); nil != deleteErr {
+        fail("cache: redis nil payload cleanup: %v", deleteErr)
+    }
 }
