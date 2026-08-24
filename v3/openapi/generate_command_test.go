@@ -118,7 +118,7 @@ func runOpenApiGenerateCommand(
     return output.String(), runErr
 }
 
-/* @info the documented invocation is relative, and anchoring it at whatever directory the process happened to start in writes the document into a different tree per launcher while reporting success — the sibling wiring command has always anchored at the project directory, and the two flags must mean one thing. The parent directories are created on the way, and the atomic write leaves the 0644 mode and no temp residue. */
+/* the documented invocation is relative, and anchoring it at whatever directory the process happened to start in writes the document into a different tree per launcher while reporting success — the sibling wiring command has always anchored at the project directory, and the two flags must mean one thing. The parent directories are created on the way, and the atomic write leaves the 0644 mode and no temp residue. */
 func TestGenerateCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
@@ -169,7 +169,7 @@ func TestGenerateCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) 
     }
 }
 
-/* @info the stdout branch goes through the writer the cli hands over, not the process stdout: a harness that captures the command's output must see the document. */
+/* the stdout branch goes through the writer the cli hands over, not the process stdout: a harness that captures the command's output must see the document. */
 func TestGenerateCommand_PrintsTheDocumentToTheWriterWhenOutIsEmpty(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
@@ -188,7 +188,7 @@ func TestGenerateCommand_PrintsTheDocumentToTheWriterWhenOutIsEmpty(t *testing.T
     }
 }
 
-/* @info the write replaces the file whole; an existing file that is not a JSON document is someone's source a mistyped --out points at, not a previous output of this command. */
+/* the write replaces the file whole; an existing file that is not a JSON document is someone's source a mistyped --out points at, not a previous output of this command. */
 func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
@@ -219,7 +219,7 @@ func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     }
 }
 
-/* @info a file already holding a JSON document is a previous output and is replaced in place, which is what every regeneration does. */
+/* a file already holding a JSON document is a previous output and is replaced in place, which is what every regeneration does. */
 func TestGenerateCommand_ReplacesAPreviousDocument(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
@@ -238,7 +238,7 @@ func TestGenerateCommand_ReplacesAPreviousDocument(t *testing.T) {
     }
 }
 
-/* @info the auto-registration gate reads the registry service alone, so a container without the info service reaches the command and the tolerant resolver answers an empty Info — required title and version as empty strings; the run still succeeds, but it says what the success would otherwise conceal. */
+/* the auto-registration gate reads the registry service alone, so a container without the info service reaches the command and the tolerant resolver answers an empty Info — required title and version as empty strings; the run still succeeds, but it says what the success would otherwise conceal. */
 func TestGenerateCommand_WarnsWhenTheInfoServiceIsAbsent(t *testing.T) {
     projectDirectory := t.TempDir()
 

@@ -126,7 +126,7 @@ func TestBuildSchema_ParenthesizedValidationConstraintsEmitted(t *testing.T) {
     }
 }
 
-/* @info character-class and non-empty constraints must reach the spec */
+/* character-class and non-empty constraints must reach the spec */
 
 func TestBuildSchema_CharacterClassConstraintsEmitPattern(t *testing.T) {
     components := map[string]*Schema{}
@@ -142,7 +142,7 @@ func TestBuildSchema_CharacterClassConstraintsEmitPattern(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
-    /* @important the validator short-circuits on an empty string (it accepts ""), so the advertised class uses a * quantifier (which also matches "") rather than + which would reject the "" the validator accepts */
+    /* the validator short-circuits on an empty string (it accepts ""), so the advertised class uses a * quantifier (which also matches "") rather than + which would reject the "" the validator accepts */
     if "^[a-zA-Z]*$" != schema.Properties["letters"].Pattern {
         t.Fatalf("expected alpha to advertise pattern ^[a-zA-Z]*$ (the validator accepts \"\"), got %q", schema.Properties["letters"].Pattern)
     }
@@ -167,7 +167,7 @@ func TestBuildSchema_MultiplePatternRulesEmittedAsAllOf(t *testing.T) {
         t.Fatalf("expected a code property")
     }
 
-    /* @important the validator enforces BOTH the regex and the alpha pattern; a single OpenAPI `pattern` can hold only one (RE2 has no lookahead to AND them), so both must be advertised as allOf members rather than silently dropping all but the last */
+    /* the validator enforces BOTH the regex and the alpha pattern; a single OpenAPI `pattern` can hold only one (RE2 has no lookahead to AND them), so both must be advertised as allOf members rather than silently dropping all but the last */
     if 2 != len(code.AllOf) {
         t.Fatalf("expected two pattern rules to be advertised as two allOf members, got %d: %+v", len(code.AllOf), code)
     }
@@ -205,7 +205,7 @@ func TestBuildSchema_NotBlankAndNotEmptyEmitMinLength(t *testing.T) {
         t.Fatalf("expected notEmpty to advertise minLength 1, got %v", title.MinLength)
     }
 
-    /* @important an explicit min must win over the notBlank floor regardless of tag order */
+    /* an explicit min must win over the notBlank floor regardless of tag order */
     if code := schema.Properties["code"]; nil == code.MinLength || 4 != *code.MinLength {
         t.Fatalf("expected an explicit min(value=4) to override the notBlank minLength floor, got %v", code.MinLength)
     }
@@ -226,7 +226,7 @@ func TestBuildSchema_NotEmptyEmitsCollectionFloors(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
-    /* @important the validator rejects an empty slice/map, so the spec must advertise the matching collection floor rather than the string-only minLength */
+    /* the validator rejects an empty slice/map, so the spec must advertise the matching collection floor rather than the string-only minLength */
     if tags := schema.Properties["tags"]; nil == tags.MinItems || 1 != *tags.MinItems {
         t.Fatalf("expected notEmpty on an array field to advertise minItems 1, got %v", tags.MinItems)
     }
@@ -237,7 +237,7 @@ func TestBuildSchema_NotEmptyEmitsCollectionFloors(t *testing.T) {
         t.Fatalf("expected notEmpty on a map field to advertise minProperties 1, got %v", labels.MinProperties)
     }
 
-    /* @important an untagged collection keeps no floor, proving the minItems comes from notEmpty and not from the array shape itself */
+    /* an untagged collection keeps no floor, proving the minItems comes from notEmpty and not from the array shape itself */
     if plain := schema.Properties["plain"]; nil != plain.MinItems {
         t.Fatalf("expected an untagged array field to advertise no minItems, got %v", plain.MinItems)
     }
@@ -285,7 +285,7 @@ func TestBuildSchema_NotEmptyOnFixedArrayIsVacuous(t *testing.T) {
     }
 }
 
-/* @info the vacuity of notEmpty on a fixed-length array must not dismantle the unsatisfiable marking another rule placed: dropping minItems 1 beside a maxItems 0 would leave the empty array advertised as valid while the validator rejects every payload */
+/* the vacuity of notEmpty on a fixed-length array must not dismantle the unsatisfiable marking another rule placed: dropping minItems 1 beside a maxItems 0 would leave the empty array advertised as valid while the validator rejects every payload */
 func TestBuildSchema_FixedArrayNotEmptyKeepsUnsatisfiableMarking(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -325,7 +325,7 @@ func TestBuildSchema_NotEmptyOnScalarIsUnsatisfiable(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
-    /* @important notEmpty's validator rejects any non string/array/slice/map kind outright (constraint_not_empty.go default branch), so an integer/number field carrying it is unsatisfiable server-side; the spec must advertise the same impossible exclusive range (> 0 and < 0) instead of an unconstrained scalar a client would trust */
+    /* notEmpty's validator rejects any non string/array/slice/map kind outright (constraint_not_empty.go default branch), so an integer/number field carrying it is unsatisfiable server-side; the spec must advertise the same impossible exclusive range (> 0 and < 0) instead of an unconstrained scalar a client would trust */
     count := schema.Properties["count"]
     if nil == count.Minimum || 0 != *count.Minimum || nil == count.Maximum || 0 != *count.Maximum ||
         nil == count.ExclusiveMinimum || false == *count.ExclusiveMinimum || nil == count.ExclusiveMaximum || false == *count.ExclusiveMaximum {
@@ -336,7 +336,7 @@ func TestBuildSchema_NotEmptyOnScalarIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected notEmpty on a number field to advertise an unsatisfiable exclusive range, got %+v", ratio)
     }
 
-    /* @important a boolean has no numeric or length facet to contradict, and an empty enum is invalid under the OpenAPI 3.0 meta-schema (enum requires minItems 1), so notEmpty advertises two contradictory single-value enums under allOf — a value can be neither both true and false, yet each enum is non-empty and spec-valid */
+    /* a boolean has no numeric or length facet to contradict, and an empty enum is invalid under the OpenAPI 3.0 meta-schema (enum requires minItems 1), so notEmpty advertises two contradictory single-value enums under allOf — a value can be neither both true and false, yet each enum is non-empty and spec-valid */
     flag := schema.Properties["flag"]
     if 2 != len(flag.AllOf) {
         t.Fatalf("expected notEmpty on a boolean field to advertise two contradictory allOf enums (unsatisfiable), got %+v", flag)
@@ -349,7 +349,7 @@ func TestBuildSchema_NotEmptyOnScalarIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected no empty top-level enum on the boolean schema (invalid under OAS 3.0), got %+v", flag.Enum)
     }
 
-    /* @important an untagged scalar keeps no constraint, proving the unsatisfiable markers come from notEmpty and not the scalar shape itself */
+    /* an untagged scalar keeps no constraint, proving the unsatisfiable markers come from notEmpty and not the scalar shape itself */
     if plain := schema.Properties["plain"]; nil != plain.Minimum || nil != plain.Maximum {
         t.Fatalf("expected an untagged integer field to advertise no numeric bound, got %+v", plain)
     }
@@ -369,7 +369,7 @@ func TestBuildSchema_NotEmptyOnTimeFieldIsUnsatisfiable(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
-    /* @important a time.Time renders as {type:string, format:date-time}, but notEmpty's validator reflects on the value whose kind is Struct (not string/array/slice/map) and rejects every value via its default branch (constraint_not_empty.go); the spec must advertise the same impossible length window (minLength 1, maxLength 0) instead of a satisfiable date-time string a client would trust */
+    /* a time.Time renders as {type:string, format:date-time}, but notEmpty's validator reflects on the value whose kind is Struct (not string/array/slice/map) and rejects every value via its default branch (constraint_not_empty.go); the spec must advertise the same impossible length window (minLength 1, maxLength 0) instead of a satisfiable date-time string a client would trust */
     createdAt := schema.Properties["createdAt"]
     if "date-time" != createdAt.Format ||
         nil == createdAt.MinLength || 1 != *createdAt.MinLength ||
@@ -380,13 +380,15 @@ func TestBuildSchema_NotEmptyOnTimeFieldIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected notEmpty to clear nullable on a time.Time field, got %+v", createdAt)
     }
 
-    /* @important notBlank's validator stringifies via fmt.Sprintf (constraint_not_blank.go), so a time.Time renders to a non-blank value and is accepted; the satisfiable date-time string with minLength 1 matches the validator and must NOT be marked unsatisfiable */
+    /* inverted with the validation repairs: notBlank judges a string and refuses a time.Time outright ("value must be a string", constraint_not_blank.go), where the pre-repair constraint stringified it via fmt and accepted it — so the satisfiable date-time string this used to assert is now the same impossible window as notEmpty */
     updatedAt := schema.Properties["updatedAt"]
-    if "date-time" != updatedAt.Format || nil == updatedAt.MinLength || 1 != *updatedAt.MinLength || nil != updatedAt.MaxLength {
-        t.Fatalf("expected notBlank on a time.Time field to stay a satisfiable date-time string (minLength 1, no maxLength), got %+v", updatedAt)
+    if "date-time" != updatedAt.Format ||
+        nil == updatedAt.MinLength || 1 != *updatedAt.MinLength ||
+        nil == updatedAt.MaxLength || 0 != *updatedAt.MaxLength {
+        t.Fatalf("expected notBlank on a time.Time field to advertise an unsatisfiable date-time string (minLength 1, maxLength 0), got %+v", updatedAt)
     }
 
-    /* @important an untagged time.Time keeps a plain date-time string, proving the unsatisfiable window comes from notEmpty and not the time.Time shape itself */
+    /* an untagged time.Time keeps a plain date-time string, proving the unsatisfiable window comes from notEmpty and not the time.Time shape itself */
     deletedAt := schema.Properties["deletedAt"]
     if "date-time" != deletedAt.Format || nil != deletedAt.MinLength || nil != deletedAt.MaxLength {
         t.Fatalf("expected an untagged time.Time field to advertise an unconstrained date-time string, got %+v", deletedAt)
@@ -411,7 +413,8 @@ func TestBuildSchema_RegexCharacterClassBracketPreserved(t *testing.T) {
     }
 }
 
-func TestBuildSchema_MaxLengthAcceptsNonIntegerPrefix(t *testing.T) {
+/* inverted with the validation repairs: parseIntStrict refuses a bound that is not an integer in its entirety, so max=99.5 — which the pre-repair parse read as 99 — now fails the rule closed and the field accepts nothing, null and absence included */
+func TestBuildSchema_MaxBoundWithNonIntegerValueIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
     visited := map[reflect.Type]bool{}
@@ -424,12 +427,16 @@ func TestBuildSchema_MaxLengthAcceptsNonIntegerPrefix(t *testing.T) {
     schema := buildSchema(requestType, components, names, visited)
 
     name := schema.Properties["name"]
-    if nil == name.MaxLength || 99 != *name.MaxLength {
-        t.Fatalf("expected MaxLength 99 from max=99.5 (validator truncates the leading integer via Sscanf), got %v", name.MaxLength)
+    if nil == name.MinLength || 1 != *name.MinLength || nil == name.MaxLength || 0 != *name.MaxLength {
+        t.Fatalf("expected max=99.5 to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", name)
+    }
+    if 1 != len(schema.Required) || "name" != schema.Required[0] {
+        t.Fatalf("expected the reject-all field listed required (the absent zero value goes through the same refused rule), got %v", schema.Required)
     }
 }
 
-func TestBuildSchema_NegativeMinClampedNegativeMaxUnsatisfiable(t *testing.T) {
+/* inverted with the validation repairs: a length is never negative, so min/max refuse a negative bound at the tag door (constraint_min_length.go / constraint_max_length.go WithParams) and the rule fails closed before any value is examined — where the pre-repair min=-5 silently accepted everything (mirrored as a clamp to 0) and the pre-repair max=-10 refused every non-null value while passing null */
+func TestBuildSchema_NegativeBoundsAreUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
     visited := map[reflect.Type]bool{}
@@ -442,29 +449,31 @@ func TestBuildSchema_NegativeMinClampedNegativeMaxUnsatisfiable(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
-    /* @important a negative min imposes no floor (MinLength.Validate uses len < min, never true for a negative bound, so the validator accepts every value); it stays clamped to a spec-valid minLength 0 advertising the same "no minimum" */
     low := schema.Properties["low"]
-    if nil == low.MinLength || 0 != *low.MinLength {
-        t.Fatalf("expected a negative min=-5 to be clamped to a spec-valid minLength 0, got %v", low.MinLength)
+    if nil == low.MinLength || 1 != *low.MinLength || nil == low.MaxLength || 0 != *low.MaxLength {
+        t.Fatalf("expected min=-5 to advertise an unsatisfiable string (minLength 1, maxLength 0), got: %+v", low)
     }
 
-    /* @important a negative max makes MaxLength.Validate (len > max) reject every value including "", so the field is unsatisfiable and the schema advertises an impossible length window (minLength 1, maxLength 0) rather than maxLength 0 which would advertise "" as valid */
     high := schema.Properties["high"]
     if nil == high.MinLength || 1 != *high.MinLength || nil == high.MaxLength || 0 != *high.MaxLength {
-        t.Fatalf("expected a negative max=-10 to advertise an unsatisfiable string schema (minLength 1, maxLength 0), got: %+v", high)
+        t.Fatalf("expected max=-10 to advertise an unsatisfiable string schema (minLength 1, maxLength 0), got: %+v", high)
+    }
+
+    if 2 != len(schema.Required) {
+        t.Fatalf("expected both reject-all fields listed required (the absent zero value goes through the same refused rule), got %v", schema.Required)
     }
 }
 
-/* @info a negative max admits no non-null value, but MaxLength.Validate passes a nil pointer (dereferenceValue returns absent), so the validator still accepts null on a NULLABLE field. The mirror must therefore contradict only the value space and preserve the nullable advertisement — matching the integer/number/boolean branch — rather than clearing Nullable and advertising a null the validator accepts as invalid. A non-nullable field stays fully unsatisfiable. */
-func TestApplyValidation_NegativeMaxOnNullableStringKeepsNullValid(t *testing.T) {
+/* inverted with the validation repairs: a negative max is refused at constraint construction, so the rule fails closed with a value-independent error and the null the pre-repair constraint let through (dereferenceValue skipping the nil pointer) is refused with everything else — Nullable is cleared on both shapes where the pre-repair mirror preserved it on the nullable one */
+func TestApplyValidation_NegativeMaxRejectsNullToo(t *testing.T) {
     nullable := &Schema{Type: "string", Nullable: true}
     applyValidation(nullable, "max(value=-1)", nil)
 
-    if false == nullable.Nullable {
-        t.Fatalf("expected a nullable string with a negative max to keep null valid (the validator accepts null), but Nullable was cleared")
+    if true == nullable.Nullable {
+        t.Fatalf("expected a negative max to clear Nullable (the refused rule rejects null with everything else)")
     }
     if nil == nullable.MinLength || 1 != *nullable.MinLength || nil == nullable.MaxLength || 0 != *nullable.MaxLength {
-        t.Fatalf("expected the non-null value space contradicted (minLength 1, maxLength 0), got: %+v", nullable)
+        t.Fatalf("expected the value space contradicted (minLength 1, maxLength 0), got: %+v", nullable)
     }
 
     nonNullable := &Schema{Type: "string"}
@@ -528,7 +537,7 @@ func TestBuildSchema_UnsignedFieldCarriesZeroFloor(t *testing.T) {
     }
 }
 
-/* @info a collection element carries no validate tag, so the unsigned floor belongs to the element schema; without it the items of a []uint advertise the negatives the decoder rejects */
+/* a collection element carries no validate tag, so the unsigned floor belongs to the element schema; without it the items of a []uint advertise the negatives the decoder rejects */
 func TestBuildSchema_UnsignedCollectionElementCarriesZeroFloor(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -797,7 +806,7 @@ func TestBuildSchema_AStackedDiamondKeepsThePopulatedProperty(t *testing.T) {
     }
 }
 
-/* @info nullable ref validation */
+/* nullable ref validation */
 
 type emailRefTarget struct {
     Value string `json:"value"`
@@ -833,7 +842,7 @@ func TestApplyValidation_EmailFormatNotLeakedOntoNullableRefWrapper(t *testing.T
     }
 }
 
-/* @info numeric bound */
+/* numeric bound */
 
 func TestApplyValidation_EmailFormatOnlyOnStringType(t *testing.T) {
     structType := reflect.StructOf([]reflect.StructField{
@@ -873,7 +882,8 @@ func TestApplyValidation_PointerGreaterLessThanFieldIsRequired(t *testing.T) {
     }
 }
 
-func TestApplyValidation_GreaterLessThanBoundParsesLeadingIntegerLikeValidator(t *testing.T) {
+/* inverted with the validation repairs: parseIntStrict refuses a bound with trailing junk, so greaterThan=5x — which the pre-repair parse read as 5 — now fails the rule closed and the field accepts nothing, absence included */
+func TestApplyValidation_GreaterLessThanMalformedBoundIsUnsatisfiable(t *testing.T) {
     floatType := reflect.TypeOf(float64(0))
     structType := reflect.StructOf([]reflect.StructField{
         {Name: "Low", Type: floatType, Tag: `json:"low" validate:"greaterThan=5x"`},
@@ -882,24 +892,20 @@ func TestApplyValidation_GreaterLessThanBoundParsesLeadingIntegerLikeValidator(t
 
     schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    low := schema.Properties["low"]
-    if nil == low || nil == low.Minimum {
-        t.Fatalf("expected a minimum on low (the validator parses the leading integer of `5x` and enforces >5), got %#v", low)
+    for _, name := range []string{"low", "high"} {
+        property := schema.Properties[name]
+        if nil == property.Minimum || 0 != *property.Minimum || nil == property.ExclusiveMinimum || false == *property.ExclusiveMinimum ||
+            nil == property.Maximum || 0 != *property.Maximum || nil == property.ExclusiveMaximum || false == *property.ExclusiveMaximum {
+            t.Fatalf("expected the malformed bound on %q to advertise the empty exclusive window, got %+v", name, property)
+        }
     }
-    if 5.0 != *low.Minimum {
-        t.Fatalf("expected minimum 5 from `greaterThan=5x`, got %v", *low.Minimum)
-    }
-
-    high := schema.Properties["high"]
-    if nil == high || nil == high.Maximum {
-        t.Fatalf("expected a maximum on high (the validator parses the leading integer of `9y` and enforces <9), got %#v", high)
-    }
-    if 9.0 != *high.Maximum {
-        t.Fatalf("expected maximum 9 from `lessThan=9y`, got %v", *high.Maximum)
+    if 2 != len(schema.Required) {
+        t.Fatalf("expected both reject-all fields listed required, got %v", schema.Required)
     }
 }
 
-func TestApplyValidation_GreaterLessThanBoundMatchesValidatorIntegerTruncation(t *testing.T) {
+/* inverted with the validation repairs: a numeric parameter must be an integer in its entirety, so greaterThan=9.99 — which the pre-repair parse truncated to a bound of 9 — now fails the rule closed and the field accepts nothing */
+func TestApplyValidation_GreaterLessThanNonIntegerBoundIsUnsatisfiable(t *testing.T) {
     floatType := reflect.TypeOf(float64(0))
     structType := reflect.StructOf([]reflect.StructField{
         {Name: "Price", Type: floatType, Tag: `json:"price" validate:"greaterThan=9.99"`},
@@ -908,56 +914,40 @@ func TestApplyValidation_GreaterLessThanBoundMatchesValidatorIntegerTruncation(t
 
     schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    price := schema.Properties["price"]
-    if nil == price || nil == price.Minimum {
-        t.Fatalf("expected a minimum on price, got %#v", price)
-    }
-    if 9.0 != *price.Minimum {
-        t.Fatalf("the runtime validator truncates greaterThan=9.99 to an integer bound (>9); the spec minimum must match, got %v", *price.Minimum)
-    }
-
-    count := schema.Properties["count"]
-    if nil == count || nil == count.Maximum {
-        t.Fatalf("expected a maximum on count, got %#v", count)
-    }
-    if 130.0 != *count.Maximum {
-        t.Fatalf("the runtime validator truncates lessThan=130.9 to an integer bound (<130); the spec maximum must match, got %v", *count.Maximum)
+    for _, name := range []string{"price", "count"} {
+        property := schema.Properties[name]
+        if nil == property.Minimum || 0 != *property.Minimum || nil == property.ExclusiveMinimum || false == *property.ExclusiveMinimum ||
+            nil == property.Maximum || 0 != *property.Maximum || nil == property.ExclusiveMaximum || false == *property.ExclusiveMaximum {
+            t.Fatalf("expected the non-integer bound on %q to advertise the empty exclusive window, got %+v", name, property)
+        }
     }
 }
 
-/* @info bare and valued constraint defaults */
-
-func TestApplyValidation_BareStringConstraintsMirrorValidatorDefaults(t *testing.T) {
-    minSchema := &Schema{Type: "string"}
-    applyValidation(minSchema, "min", nil)
-    if nil == minSchema.MinLength || 1 != *minSchema.MinLength {
-        t.Fatalf("expected bare min to advertise minLength 1, got %v", minSchema.MinLength)
-    }
-
-    maxSchema := &Schema{Type: "string"}
-    applyValidation(maxSchema, "max", nil)
-    if nil == maxSchema.MaxLength || 100 != *maxSchema.MaxLength {
-        t.Fatalf("expected bare max to advertise maxLength 100, got %v", maxSchema.MaxLength)
+/* inverted with the validation repairs: a parameterized rule named without parameters fails closed (createConstraintWithParams answers "constraint requires parameters"), so the minLength 1 / maxLength 100 defaults the pre-repair mirror advertised for a bare min/max no longer exist — the field accepts nothing */
+func TestApplyValidation_BareStringConstraintsAreUnsatisfiable(t *testing.T) {
+    for _, tag := range []string{"min", "max"} {
+        schema := &Schema{Type: "string"}
+        applyValidation(schema, tag, nil)
+        if nil == schema.MinLength || 1 != *schema.MinLength || nil == schema.MaxLength || 0 != *schema.MaxLength {
+            t.Fatalf("expected bare %q to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", tag, schema)
+        }
     }
 }
 
-func TestApplyValidation_BareNumericConstraintsMirrorValidatorDefaults(t *testing.T) {
+/* inverted with the validation repairs: the pre-repair bare greaterThan meant "greater than zero" and the bare lessThan "less than zero" — silent configurations nobody wrote; both now fail closed, and the assertion pins the FULL empty exclusive window on both ends, because the old open-ended ">0" advertisement satisfies a minimum-only check incidentally */
+func TestApplyValidation_BareNumericConstraintsAreUnsatisfiable(t *testing.T) {
     greaterThanSchema := &Schema{Type: "integer"}
     applyValidation(greaterThanSchema, "greaterThan", nil)
-    if nil == greaterThanSchema.Minimum || 0 != *greaterThanSchema.Minimum {
-        t.Fatalf("expected bare greaterThan to advertise minimum 0, got %v", greaterThanSchema.Minimum)
-    }
-    if nil == greaterThanSchema.ExclusiveMinimum || false == *greaterThanSchema.ExclusiveMinimum {
-        t.Fatalf("expected bare greaterThan to advertise an exclusive minimum")
+    if nil == greaterThanSchema.Minimum || 0 != *greaterThanSchema.Minimum || nil == greaterThanSchema.ExclusiveMinimum || false == *greaterThanSchema.ExclusiveMinimum ||
+        nil == greaterThanSchema.Maximum || 0 != *greaterThanSchema.Maximum || nil == greaterThanSchema.ExclusiveMaximum || false == *greaterThanSchema.ExclusiveMaximum {
+        t.Fatalf("expected bare greaterThan to advertise the empty exclusive window, got %+v", greaterThanSchema)
     }
 
     lessThanSchema := &Schema{Type: "number"}
     applyValidation(lessThanSchema, "lessThan", nil)
-    if nil == lessThanSchema.Maximum || 0 != *lessThanSchema.Maximum {
-        t.Fatalf("expected bare lessThan to advertise maximum 0, got %v", lessThanSchema.Maximum)
-    }
-    if nil == lessThanSchema.ExclusiveMaximum || false == *lessThanSchema.ExclusiveMaximum {
-        t.Fatalf("expected bare lessThan to advertise an exclusive maximum")
+    if nil == lessThanSchema.Minimum || 0 != *lessThanSchema.Minimum || nil == lessThanSchema.ExclusiveMinimum || false == *lessThanSchema.ExclusiveMinimum ||
+        nil == lessThanSchema.Maximum || 0 != *lessThanSchema.Maximum || nil == lessThanSchema.ExclusiveMaximum || false == *lessThanSchema.ExclusiveMaximum {
+        t.Fatalf("expected bare lessThan to advertise the empty exclusive window, got %+v", lessThanSchema)
     }
 }
 
@@ -975,29 +965,19 @@ func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
     }
 }
 
-/* @info L2: a value-less min defaults to minLength 1 but must be raise-only — it may not lower a higher floor an earlier rule already set. The validator enforces every rule (effective floor stays 5), so advertising minLength 1 would offer values the validator rejects. Mirrors the value-less max branch, which was already tighten-only. */
-func TestApplyValidation_ValuelessMinIsRaiseOnly(t *testing.T) {
-    afterHigh := &Schema{Type: "string"}
-    applyValidation(afterHigh, "min(value=5),min", nil)
-    if nil == afterHigh.MinLength || 5 != *afterHigh.MinLength {
-        t.Fatalf("expected a value-less min not to lower an existing minLength 5, got %v", afterHigh.MinLength)
-    }
-
-    beforeHigh := &Schema{Type: "string"}
-    applyValidation(beforeHigh, "min,min(value=5)", nil)
-    if nil == beforeHigh.MinLength || 5 != *beforeHigh.MinLength {
-        t.Fatalf("expected a real min(value=5) to win over a value-less min regardless of order, got %v", beforeHigh.MinLength)
-    }
-
-    bare := &Schema{Type: "string"}
-    applyValidation(bare, "min", nil)
-    if nil == bare.MinLength || 1 != *bare.MinLength {
-        t.Fatalf("expected a bare min alone to still advertise minLength 1, got %v", bare.MinLength)
+/* inverted with the validation repairs: a bare min beside a valued one no longer means "floor 1" — the bare rule fails closed on its own, the validator enforces every rule, and one refused rule rejects the whole field whatever its siblings allow, in either tag order */
+func TestApplyValidation_BareMinBesideAValuedMinStillFailsClosed(t *testing.T) {
+    for _, tag := range []string{"min(value=5),min", "min,min(value=5)"} {
+        schema := &Schema{Type: "string"}
+        applyValidation(schema, tag, nil)
+        if nil == schema.MinLength || 1 != *schema.MinLength || nil == schema.MaxLength || 0 != *schema.MaxLength {
+            t.Fatalf("expected %q to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", tag, schema)
+        }
     }
 }
 
-/* @info L3: the mirror decides a numeric bound is unsatisfiable via parseLeadingInt, and that decision must match the validator's parseIntStrict (validation/validation_rule.go) so the spec never advertises satisfiability the validator does not honour. Both share the same fmt.Sscanf("%d") acceptance; this locks parseLeadingInt against that contract over the boundary cases (a leading integer is accepted, trailing junk is tolerated, a non-numeric or empty string is rejected). */
-func TestParseLeadingIntMatchesValidator(t *testing.T) {
+/* the semantic lockstep with the validator's parseIntStrict is proved in lockstep_test.go through the validator itself (TestLockstepNumericBoundAgreesWithValidator); this pins only the strict acceptance in isolation — an integer in its entirety, where the pre-repair parse tolerated trailing junk, read a float's leading digits and accepted surrounding space. */
+func TestParseBoundStrict(t *testing.T) {
     cases := []struct {
         input  string
         wantOk bool
@@ -1006,23 +986,28 @@ func TestParseLeadingIntMatchesValidator(t *testing.T) {
         {"5", true, 5},
         {"-5", true, -5},
         {"0", true, 0},
-        {"5abc", true, 5},
+        {"+5", true, 5},
+        {"007", true, 7},
+        {"5abc", false, 0},
+        {"1e3", false, 0},
+        {"-0.5", false, 0},
+        {" 5", false, 0},
         {"abc", false, 0},
         {"", false, 0},
     }
 
     for _, testCase := range cases {
-        got, ok := parseLeadingInt(testCase.input)
+        got, ok := parseBoundStrict(testCase.input)
         if ok != testCase.wantOk || (true == ok && got != testCase.want) {
             t.Fatalf(
-                "parseLeadingInt(%q) = (%d, %v), want (%d, %v)",
+                "parseBoundStrict(%q) = (%d, %v), want (%d, %v)",
                 testCase.input, got, ok, testCase.want, testCase.wantOk,
             )
         }
     }
 }
 
-/* @info a parenthesized parameter that lacks '=' (a stray-paren typo such as min(5)/notEmpty(foo)/email(x)) makes the validator's parseValidationTag reject the whole tag with a value-independent "invalid validation tag syntax" error, so the field accepts no value; the mirror's splitRule silently dropped the malformed pair and advertised a satisfiable schema, so this asserts the field is now advertised unsatisfiable */
+/* a parenthesized parameter that lacks '=' (a stray-paren typo such as min(5)/notEmpty(foo)/email(x)) makes the validator's parseValidationTag reject the whole tag with a value-independent "invalid validation tag syntax" error, so the field accepts no value; the mirror's splitRule silently dropped the malformed pair and advertised a satisfiable schema, so this asserts the field is now advertised unsatisfiable */
 func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
     for _, tag := range []string{"notEmpty(foo)", "min(x)", "min(5)", "email(x)"} {
         schema := &Schema{Type: "string"}
@@ -1036,7 +1021,7 @@ func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
         }
     }
 
-    /* @important a well-formed parenthesized tag must NOT be swept up by the syntax guard: min(value=3) still advertises its real bound */
+    /* a well-formed parenthesized tag must NOT be swept up by the syntax guard: min(value=3) still advertises its real bound */
     valid := &Schema{Type: "string"}
     applyValidation(valid, "min(value=3)", nil)
     if nil == valid.MinLength || 3 != *valid.MinLength || nil != valid.MaxLength {
@@ -1044,7 +1029,43 @@ func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
     }
 }
 
-/* @info a malformed numeric/length tag makes the validator fail the field closed, so the spec advertises an unsatisfiable schema rather than a passable default */
+/* the empty pattern compiles to an expression matching every string, so the validator's WithParams refuses it at construction and the rule fails closed — where the pre-repair mirror compiled "" and advertised a pattern that matches everything */
+func TestApplyValidation_EmptyRegexPatternIsUnsatisfiable(t *testing.T) {
+    for _, tag := range []string{"regex=", "regex(pattern=)"} {
+        schema := &Schema{Type: "string", Nullable: true}
+        applyValidation(schema, tag, nil)
+
+        if nil == schema.MinLength || 1 != *schema.MinLength || nil == schema.MaxLength || 0 != *schema.MaxLength {
+            t.Fatalf("expected %q to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", tag, schema)
+        }
+        if true == schema.Nullable || "" != schema.Pattern {
+            t.Fatalf("expected %q to clear nullable and emit no pattern, got %+v", tag, schema)
+        }
+    }
+}
+
+/* a tag that survives the empty/skip-marker guard yet parses to no rule at all is a syntax error to the validator (parseValidationTag, 0 == len(rules)) — where the pre-repair mirror iterated zero rules and advertised a satisfiable field. The empty tag and the skip marker stay exactly what they are: no validation at all. */
+func TestApplyValidation_TagWithZeroRulesIsUnsatisfiable(t *testing.T) {
+    for _, tag := range []string{",", " , ", ",,"} {
+        schema := &Schema{Type: "string"}
+        applyValidation(schema, tag, nil)
+
+        if nil == schema.MinLength || 1 != *schema.MinLength || nil == schema.MaxLength || 0 != *schema.MaxLength {
+            t.Fatalf("expected %q to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", tag, schema)
+        }
+    }
+
+    for _, tag := range []string{"", "-", " - ", " "} {
+        schema := &Schema{Type: "string"}
+        applyValidation(schema, tag, nil)
+
+        if nil != schema.MinLength || nil != schema.MaxLength {
+            t.Fatalf("expected the empty/skip tag %q to leave the schema unconstrained, got %+v", tag, schema)
+        }
+    }
+}
+
+/* a malformed numeric/length tag makes the validator fail the field closed, so the spec advertises an unsatisfiable schema rather than a passable default */
 
 type malformedBoundRequest struct {
     Name string `json:"name" validate:"max=abc"`
@@ -1060,7 +1081,7 @@ func TestBuildSchema_MalformedMinMaxBoundIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important the validator rejects every value of a field whose numeric tag cannot be parsed, so the string schema must reject every value too (an impossible length window) rather than advertise a passable default a client would trust */
+    /* the validator rejects every value of a field whose numeric tag cannot be parsed, so the string schema must reject every value too (an impossible length window) rather than advertise a passable default a client would trust */
     for _, fieldName := range []string{"name", "code"} {
         property := schema.Properties[fieldName]
         if nil == property || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
@@ -1083,7 +1104,7 @@ func TestBuildSchema_MalformedGreaterLessThanBoundIsUnsatisfiable(t *testing.T) 
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important the validator rejects every value of a field whose greaterThan/lessThan tag cannot be parsed, so the number schema must be unsatisfiable: an empty exclusive range that is both > 0 and < 0 */
+    /* the validator rejects every value of a field whose greaterThan/lessThan tag cannot be parsed, so the number schema must be unsatisfiable: an empty exclusive range that is both > 0 and < 0 */
     for _, fieldName := range []string{"floor", "ceiling"} {
         property := schema.Properties[fieldName]
         if nil == property ||
@@ -1113,7 +1134,7 @@ func TestBuildSchema_EmailDoesNotClobberStructuralByteFormat(t *testing.T) {
     }
 }
 
-/* @info notBlank/notEmpty reject a null pointer, so the spec must not advertise the field nullable */
+/* notBlank/notEmpty reject a null pointer, so the spec must not advertise the field nullable */
 
 func TestApplyValidation_NotBlankNotEmptyPointerFieldNotNullable(t *testing.T) {
     structType := reflect.StructOf([]reflect.StructField{
@@ -1125,7 +1146,7 @@ func TestApplyValidation_NotBlankNotEmptyPointerFieldNotNullable(t *testing.T) {
 
     schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    /* @important the validator rejects a null pointer for notBlank/notEmpty (NotBlank.Validate fails the deref, NotEmpty.Validate rejects a nil pointer), so a pointer field carrying either must not be advertised nullable, otherwise a client trusting the spec sends null and is then rejected — the same fix already applied to greaterThan/lessThan */
+    /* the validator rejects a null pointer for notBlank/notEmpty (NotBlank.Validate fails the deref, NotEmpty.Validate rejects a nil pointer), so a pointer field carrying either must not be advertised nullable, otherwise a client trusting the spec sends null and is then rejected — the same fix already applied to greaterThan/lessThan */
     for _, name := range []string{"name", "title", "tags", "labels"} {
         property := schema.Properties[name]
         if nil == property {
@@ -1137,7 +1158,7 @@ func TestApplyValidation_NotBlankNotEmptyPointerFieldNotNullable(t *testing.T) {
     }
 }
 
-/* @info a degenerate min=0 must not suppress the notEmpty/notBlank non-empty floor, in either tag order */
+/* a degenerate min=0 must not suppress the notEmpty/notBlank non-empty floor, in either tag order */
 
 func TestBuildSchema_DegenerateMinZeroDoesNotSuppressNotEmptyFloor(t *testing.T) {
     stringType := reflect.TypeOf("")
@@ -1151,7 +1172,7 @@ func TestBuildSchema_DegenerateMinZeroDoesNotSuppressNotEmptyFloor(t *testing.T)
 
     schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    /* @important the validator rejects "" for notEmpty/notBlank, so a degenerate min=0 (whose minLength 0 floor advertises "" as valid) must be raised to 1 regardless of which side of the tag it sits on */
+    /* the validator rejects "" for notEmpty/notBlank, so a degenerate min=0 (whose minLength 0 floor advertises "" as valid) must be raised to 1 regardless of which side of the tag it sits on */
     for _, name := range []string{"a", "b", "c", "d"} {
         property := schema.Properties[name]
         if nil == property || nil == property.MinLength || 1 != *property.MinLength {
@@ -1159,13 +1180,13 @@ func TestBuildSchema_DegenerateMinZeroDoesNotSuppressNotEmptyFloor(t *testing.T)
         }
     }
 
-    /* @important an explicit min >= 1 still wins over the notEmpty floor */
+    /* an explicit min >= 1 still wins over the notEmpty floor */
     if e := schema.Properties["e"]; nil == e || nil == e.MinLength || 5 != *e.MinLength {
         t.Fatalf("expected an explicit min=5 to win over the notEmpty floor, got %+v", e)
     }
 }
 
-/* @info a constraint whose validator rejects the field's underlying kind outright (notEmpty on a struct, greaterThan/lessThan on a non-numeric) must advertise the field unsatisfiable, mirroring the scalar/time.Time handling */
+/* a constraint whose validator rejects the field's underlying kind outright (notEmpty on a struct, greaterThan/lessThan on a non-numeric) must advertise the field unsatisfiable, mirroring the scalar/time.Time handling */
 
 type nestedNamedStruct struct {
     Value string `json:"value"`
@@ -1232,7 +1253,7 @@ func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important a named struct field renders as a $ref; notEmpty's validator rejects a struct value outright, so the $ref must be wrapped in a contradictory object constraint under allOf rather than advertised as a satisfiable object */
+    /* a named struct field renders as a $ref; notEmpty's validator rejects a struct value outright, so the $ref must be wrapped in a contradictory object constraint under allOf rather than advertised as a satisfiable object */
     named := schema.Properties["named"]
     if nil == named || "" != named.Ref || 2 != len(named.AllOf) {
         t.Fatalf("expected named struct notEmpty to wrap the $ref in a contradictory allOf, got %+v", named)
@@ -1244,13 +1265,13 @@ func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected the unsatisfiable struct field to not be advertised as nullable, got %+v", named)
     }
 
-    /* @important a *struct field is also rejected (notEmpty rejects a null pointer and a struct value), so its nullable allOf-wrapped $ref must gain the same contradiction and lose nullable */
+    /* a *struct field is also rejected (notEmpty rejects a null pointer and a struct value), so its nullable allOf-wrapped $ref must gain the same contradiction and lose nullable */
     namedPtr := schema.Properties["namedPtr"]
     if nil == namedPtr || true == namedPtr.Nullable || 0 == len(namedPtr.AllOf) || false == isImpossibleObject(namedPtr.AllOf[len(namedPtr.AllOf)-1]) {
         t.Fatalf("expected pointer-to-struct notEmpty to be an unsatisfiable, non-nullable allOf, got %+v", namedPtr)
     }
 
-    /* @important an inline struct renders as an object with no additionalProperties; the validator rejects the struct value, so advertise an impossible object */
+    /* an inline struct renders as an object with no additionalProperties; the validator rejects the struct value, so advertise an impossible object */
     inline := schema.Properties["inline"]
     if false == isImpossibleObject(inline) {
         t.Fatalf("expected inline struct notEmpty to advertise an impossible object (minProperties 1, maxProperties 0), got %+v", inline)
@@ -1273,25 +1294,25 @@ func TestBuildSchema_GreaterLessThanOnNonNumericIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important greaterThan/lessThan's validator rejects a non-numeric value outright ("value must be numeric"), so a string field is unsatisfiable: an impossible length window */
+    /* greaterThan/lessThan's validator rejects a non-numeric value outright ("value must be numeric"), so a string field is unsatisfiable: an impossible length window */
     code := schema.Properties["code"]
     if nil == code || nil == code.MinLength || 1 != *code.MinLength || nil == code.MaxLength || 0 != *code.MaxLength {
         t.Fatalf("expected greaterThan on a string to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", code)
     }
 
-    /* @important a boolean carries no length/numeric facet, so unsatisfiability is two contradictory single-value enums under allOf */
+    /* a boolean carries no length/numeric facet, so unsatisfiability is two contradictory single-value enums under allOf */
     flag := schema.Properties["flag"]
     if nil == flag || 2 != len(flag.AllOf) || nil == flag.AllOf[0].Enum || nil == flag.AllOf[1].Enum {
         t.Fatalf("expected lessThan on a boolean to advertise contradictory enums under allOf, got %+v", flag)
     }
 
-    /* @important an array field is unsatisfiable: minItems 1 with maxItems 0 */
+    /* an array field is unsatisfiable: minItems 1 with maxItems 0 */
     items := schema.Properties["items"]
     if nil == items || nil == items.MinItems || 1 != *items.MinItems || nil == items.MaxItems || 0 != *items.MaxItems {
         t.Fatalf("expected greaterThan on an array to advertise an impossible array (minItems 1, maxItems 0), got %+v", items)
     }
 
-    /* @important a map renders as an object; it is unsatisfiable: minProperties 1 with maxProperties 0 */
+    /* a map renders as an object; it is unsatisfiable: minProperties 1 with maxProperties 0 */
     bag := schema.Properties["bag"]
     if false == isImpossibleObject(bag) {
         t.Fatalf("expected lessThan on a map to advertise an impossible object (minProperties 1, maxProperties 0), got %+v", bag)
@@ -1302,7 +1323,8 @@ type notBlankNullableInner struct {
     Value string `json:"value"`
 }
 
-func TestBuildSchema_NotBlankClearsNullableOnNonStringPointers(t *testing.T) {
+/* inverted with the validation repairs: notBlank judges a string, so on every non-string shape it refuses the non-null value ("value must be a string") on top of the null it always refused — where the pre-repair constraint stringified the value with %v and accepted anything non-null, and the mirror cleared only the nullable advertisement */
+func TestBuildSchema_NotBlankOnNonStringShapesIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
     visited := map[reflect.Type]bool{}
@@ -1323,39 +1345,47 @@ func TestBuildSchema_NotBlankClearsNullableOnNonStringPointers(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
-    /* @important notBlank rejects a nil pointer for a field of any kind (dereferenceValue returns ok=false), so a non-string pointer field must not advertise null as valid — but it stays satisfiable because the validator accepts any non-null value (%v is non-blank), so no length/items/properties floor and no unsatisfiable marker is added */
     count := schema.Properties["count"]
-    if true == count.Nullable || nil != count.MinLength || nil != count.Minimum || nil != count.Maximum {
-        t.Fatalf("expected notBlank on a *int to clear nullable and add no bound, got %+v", count)
+    if true == count.Nullable ||
+        nil == count.Minimum || 0 != *count.Minimum || nil == count.ExclusiveMinimum ||
+        nil == count.Maximum || 0 != *count.Maximum || nil == count.ExclusiveMaximum {
+        t.Fatalf("expected notBlank on a *int to advertise the empty exclusive window with nullable cleared, got %+v", count)
     }
     flag := schema.Properties["flag"]
-    if true == flag.Nullable || nil != flag.AllOf {
-        t.Fatalf("expected notBlank on a *bool to clear nullable and stay satisfiable (no contradictory allOf), got %+v", flag)
+    if true == flag.Nullable || 2 != len(flag.AllOf) {
+        t.Fatalf("expected notBlank on a *bool to advertise the two contradictory enums with nullable cleared, got %+v", flag)
     }
     tags := schema.Properties["tags"]
-    if true == tags.Nullable || nil != tags.MinItems {
-        t.Fatalf("expected notBlank on a *[]int to clear nullable and add no minItems, got %+v", tags)
+    if true == tags.Nullable || nil == tags.MinItems || 1 != *tags.MinItems || nil == tags.MaxItems || 0 != *tags.MaxItems {
+        t.Fatalf("expected notBlank on a *[]int to advertise the impossible items window with nullable cleared, got %+v", tags)
     }
     labels := schema.Properties["labels"]
-    if true == labels.Nullable || nil != labels.MinProperties {
-        t.Fatalf("expected notBlank on a *map to clear nullable and add no minProperties, got %+v", labels)
+    if true == labels.Nullable || nil == labels.MinProperties || 1 != *labels.MinProperties || nil == labels.MaxProperties || 0 != *labels.MaxProperties {
+        t.Fatalf("expected notBlank on a *map to advertise the impossible properties window with nullable cleared, got %+v", labels)
     }
 
-    /* @important a *struct renders as a nullable allOf-wrapped $ref; notBlank rejects null but accepts a non-nil struct, so clear only nullable and keep the $ref satisfiable (no impossible-object contradiction sibling) */
+    /* a *struct renders as a nullable allOf-wrapped $ref: notBlank refuses the nil pointer as required AND the struct as non-string, so the reference gains the type-agnostic not:{} contradiction and loses its null */
     obj := schema.Properties["obj"]
     if true == obj.Nullable {
         t.Fatalf("expected notBlank on a *struct to clear nullable, got %+v", obj)
     }
-    if true == isImpossibleObject(obj) {
-        t.Fatalf("expected notBlank on a *struct to stay satisfiable (validator accepts a non-nil struct), got %+v", obj)
+    contradicted := false
+    for _, member := range obj.AllOf {
+        if true == isImpossibleObject(member) {
+            contradicted = true
+        }
+    }
+    if false == contradicted {
+        t.Fatalf("expected notBlank on a *struct to carry the not:{} contradiction beside the reference, got %+v", obj)
     }
 
-    /* @important an untagged pointer keeps nullable, proving the clear comes from notBlank and not the pointer shape itself */
+    /* an untagged pointer keeps nullable, proving the contradiction comes from notBlank and not the pointer shape itself */
     if plain := schema.Properties["plain"]; false == plain.Nullable {
         t.Fatalf("expected an untagged *int field to stay nullable, got %+v", plain)
     }
 }
 
+/* inverted with the validation repairs: the length constraints refuse a non-string value outright, so max on an integer or boolean no longer measures a stringification — EVERY bound rejects the whole non-null value space, the satisfiable max=5 of the pre-repair mirror included, and only a nullable field keeps its null (the constraint passes a nil pointer) */
 func TestBuildSchema_MaxOnNonStringScalar(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -1375,32 +1405,31 @@ func TestBuildSchema_MaxOnNonStringScalar(t *testing.T) {
 
     schema := buildSchema(requestType, components, names, visited)
 
-    /* @important MaxLength stringifies any value via %v and rejects len > max; the shortest integer stringification is 1 character, so max=0 admits no non-null value — a non-nullable integer field is fully unsatisfiable (impossible exclusive range and nullable cleared) */
     zero := schema.Properties["zero"]
     if nil == zero.Minimum || 0 != *zero.Minimum || nil == zero.Maximum || 0 != *zero.Maximum ||
         nil == zero.ExclusiveMinimum || nil == zero.ExclusiveMaximum || true == zero.Nullable {
         t.Fatalf("expected max=0 on an int to advertise an unsatisfiable exclusive range (> 0 and < 0), got %+v", zero)
     }
 
-    /* @important a malformed max fails the field closed at the validator (parseIntStrict), so the scalar is unsatisfiable too */
+    /* a malformed max fails the rule closed at construction (parseIntStrict), so the scalar is unsatisfiable through the kind-independent path */
     bad := schema.Properties["bad"]
     if nil == bad.Minimum || nil == bad.Maximum {
         t.Fatalf("expected a malformed max on an int to advertise an unsatisfiable range, got %+v", bad)
     }
 
-    /* @important the shortest boolean stringification is "true" (4 characters), so max=3 admits neither true nor false — unsatisfiable via two contradictory allOf enums */
     flag := schema.Properties["flag"]
     if 2 != len(flag.AllOf) {
         t.Fatalf("expected max=3 on a boolean to advertise two contradictory allOf enums, got %+v", flag)
     }
 
-    /* @important max=5 admits at least one integer ("0".."9" are 1 character); there is no exact OpenAPI facet for a stringified-length ceiling, so the field is left unconstrained rather than mis-advertised as unsatisfiable */
+    /* inverted: the pre-repair mirror left max=5 on an int unconstrained because the stringified "5" fit the bound; the constraint now refuses the integer itself, so the field is unsatisfiable like its siblings */
     ok := schema.Properties["ok"]
-    if nil != ok.Minimum || nil != ok.Maximum || nil != ok.AllOf {
-        t.Fatalf("expected a satisfiable max=5 on an int to add no numeric/allOf constraint, got %+v", ok)
+    if nil == ok.Minimum || 0 != *ok.Minimum || nil == ok.Maximum || 0 != *ok.Maximum ||
+        nil == ok.ExclusiveMinimum || nil == ok.ExclusiveMaximum {
+        t.Fatalf("expected max=5 on an int to advertise the empty exclusive window (the validator refuses a non-string value), got %+v", ok)
     }
 
-    /* @important a nil pointer passes MaxLength (Validate returns nil for ok=false), so a nullable scalar with max=0 still accepts null: contradict only the non-null value space while keeping nullable advertised */
+    /* a nil pointer still passes (dereferenceValue returns ok=false), so a nullable scalar keeps its null: contradict only the non-null value space while keeping nullable advertised */
     nullableZero := schema.Properties["nullableZero"]
     if false == nullableZero.Nullable {
         t.Fatalf("expected max=0 on a *int to keep nullable (the validator accepts null), got %+v", nullableZero)
@@ -1409,7 +1438,7 @@ func TestBuildSchema_MaxOnNonStringScalar(t *testing.T) {
         t.Fatalf("expected max=0 on a *int to advertise an impossible non-null exclusive range, got %+v", nullableZero)
     }
 
-    /* @important an untagged scalar keeps no bound, proving the markers come from max and not the scalar shape itself */
+    /* an untagged scalar keeps no bound, proving the markers come from max and not the scalar shape itself */
     if plain := schema.Properties["plain"]; nil != plain.Minimum || nil != plain.Maximum {
         t.Fatalf("expected an untagged int field to advertise no numeric bound, got %+v", plain)
     }
@@ -1429,7 +1458,7 @@ func TestBuildSchema_ParamsOnNonParameterizableConstraintIsUnsatisfiable(t *test
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams rejects the rule), so the spec must advertise the field as unsatisfiable rather than as a satisfiable string a client would trust */
+    /* the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams rejects the rule), so the spec must advertise the field as unsatisfiable rather than as a satisfiable string a client would trust */
     for _, fieldName := range []string{"email", "name"} {
         property := schema.Properties[fieldName]
         if nil == property || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
@@ -1453,7 +1482,7 @@ func TestBuildSchema_UnconsumedParameterizedParamsIsUnsatisfiable(t *testing.T) 
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important a parameterizable constraint that receives parameters without its recognized key fails the rule closed in the validator (WithParams returns an error, createConstraintWithParams rejects the rule) before Constraint.Validate runs, so the spec must advertise the field unsatisfiable rather than as the satisfiable default bound (minLength 1, the match-all `.*` pattern, or > 0) a client would trust */
+    /* a parameterizable constraint that receives parameters without its recognized key fails the rule closed in the validator (WithParams returns an error, createConstraintWithParams rejects the rule) before Constraint.Validate runs, so the spec must advertise the field unsatisfiable rather than as the satisfiable default bound (minLength 1, the match-all `.*` pattern, or > 0) a client would trust */
     for _, fieldName := range []string{"name", "code"} {
         property := schema.Properties[fieldName]
         if nil == property || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
@@ -1481,7 +1510,7 @@ func TestBuildSchema_ParamsOnNonParameterizableConstraintOnStructIsUnsatisfiable
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important the validator fails the rule closed before Constraint.Validate runs, so a struct field ($ref or nullable allOf-wrapped $ref) carrying params on a non-parameterizable constraint accepts no value either — the early-return branch of applyValidation must advertise it unsatisfiable (contradictory allOf, mirroring notEmpty-on-struct), not as a satisfiable object */
+    /* the validator fails the rule closed before Constraint.Validate runs, so a struct field ($ref or nullable allOf-wrapped $ref) carrying params on a non-parameterizable constraint accepts no value either — the early-return branch of applyValidation must advertise it unsatisfiable (contradictory allOf, mirroring notEmpty-on-struct), not as a satisfiable object */
     for _, fieldName := range []string{"inline", "plain"} {
         property := schema.Properties[fieldName]
         if nil == property {
@@ -1510,7 +1539,7 @@ func TestBuildSchema_MalformedMinOnNonStringFieldsIsUnsatisfiable(t *testing.T) 
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important a malformed min value fails the rule closed for a field of ANY kind (createConstraintWithParams rejects it before Validate runs), so integer/number/boolean/array fields must be advertised unsatisfiable, not as satisfiable defaults — mirroring the malformed-max handling */
+    /* a malformed min value fails the rule closed for a field of ANY kind (createConstraintWithParams rejects it before Validate runs), so integer/number/boolean/array fields must be advertised unsatisfiable, not as satisfiable defaults — mirroring the malformed-max handling */
     for _, fieldName := range []string{"age", "score", "ok", "tags"} {
         property := schema.Properties[fieldName]
         if nil == property {
@@ -1540,7 +1569,7 @@ func TestBuildSchema_UncompilableRegexIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected the code property to exist")
     }
 
-    /* @important the validator accepts the empty string (and null for a pointer) even for an uncompilable pattern, rejecting only non-empty values; the spec must therefore advertise maxLength 0 (only the empty string) — not the uncompilable pattern verbatim, and not a fully unsatisfiable field that would also forbid the empty string */
+    /* the validator accepts the empty string (and null for a pointer) even for an uncompilable pattern, rejecting only non-empty values; the spec must therefore advertise maxLength 0 (only the empty string) — not the uncompilable pattern verbatim, and not a fully unsatisfiable field that would also forbid the empty string */
     if "" != property.Pattern {
         t.Fatalf("expected an uncompilable pattern not to be advertised verbatim, got pattern %q", property.Pattern)
     }
@@ -1570,7 +1599,7 @@ func TestBuildSchema_UncompilableRegexOnPointerKeepsNullable(t *testing.T) {
         t.Fatalf("expected the code property to exist")
     }
 
-    /* @important the validator accepts null for a *string with an uncompilable regex (Regex.Validate returns nil for a nil pointer), so the nullable advertisement must be preserved while non-empty strings are excluded via maxLength 0 */
+    /* the validator accepts null for a *string with an uncompilable regex (Regex.Validate returns nil for a nil pointer), so the nullable advertisement must be preserved while non-empty strings are excluded via maxLength 0 */
     if false == property.Nullable {
         t.Fatalf("expected a nullable pointer field with an uncompilable regex to stay nullable, got %+v", property)
     }
@@ -1594,14 +1623,14 @@ func TestBuildSchema_NegativeMaxOnNullableKeepsNullable(t *testing.T) {
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* @important a negative max parses fine, so MaxLength.Validate runs and accepts a nil pointer (dereferenceValue ok=false): the validator rejects only non-null values, so a nullable field must keep Nullable=true (emptyValueSpace), not be marked fully unsatisfiable */
+    /* inverted with the validation repairs: a negative max is refused at constraint construction, so the rule fails closed before the nil pointer could be skipped — the null the pre-repair constraint let through is refused with everything else, and Nullable is cleared on every shape */
     for _, fieldName := range []string{"count", "ratio", "flag"} {
         property := schema.Properties[fieldName]
         if nil == property {
             t.Fatalf("expected the %q property to exist", fieldName)
         }
-        if false == property.Nullable {
-            t.Fatalf("expected nullable field %q with a negative max to keep Nullable=true, got %+v", fieldName, property)
+        if true == property.Nullable {
+            t.Fatalf("expected the refused negative max on %q to clear Nullable (the invalid rule rejects null too), got %+v", fieldName, property)
         }
     }
 }
@@ -1640,7 +1669,7 @@ func TestBuildSchema_UncompilableRegexNotLoosenedByLaterMax(t *testing.T) {
         t.Fatalf("expected the code property to exist")
     }
 
-    /* @important the validator enforces both rules: the uncompilable regex rejects every non-empty value (only "" satisfies), so a later max=5 must not raise the advertised ceiling back to 5 and resurrect 1..5-char values the regex rejects — the tighter maxLength 0 must win */
+    /* the validator enforces both rules: the uncompilable regex rejects every non-empty value (only "" satisfies), so a later max=5 must not raise the advertised ceiling back to 5 and resurrect 1..5-char values the regex rejects — the tighter maxLength 0 must win */
     if nil == property.MaxLength || 0 != *property.MaxLength {
         t.Fatalf("expected maxLength 0 to survive a later max=5 (tighter bound wins), got %+v", property)
     }
@@ -1650,7 +1679,8 @@ type uncompilableRegexThenValuelessMaxRequest struct {
     Code string `json:"code" validate:"regex(pattern=a{3,1}),max"`
 }
 
-func TestBuildSchema_UncompilableRegexNotLoosenedByValuelessMax(t *testing.T) {
+/* inverted with the validation repairs: the bare max no longer means "default ceiling 100" — it fails the rule closed on its own, so the whole field is unsatisfiable whatever the uncompilable regex beside it would have allowed, and the assertion pins the full impossible window rather than the maxLength 0 both readings share */
+func TestBuildSchema_UncompilableRegexBesideABareMaxFailsClosed(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(uncompilableRegexThenValuelessMaxRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
@@ -1664,13 +1694,15 @@ func TestBuildSchema_UncompilableRegexNotLoosenedByValuelessMax(t *testing.T) {
         t.Fatalf("expected the code property to exist")
     }
 
-    /* @important a value-less max (default maxLength 100) must not raise the maxLength 0 an uncompilable regex set: the validator enforces both, so the tighter ceiling wins */
-    if nil == property.MaxLength || 0 != *property.MaxLength {
-        t.Fatalf("expected maxLength 0 to survive a later value-less max, got %+v", property)
+    if nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
+        t.Fatalf("expected the bare max to fail the field closed (minLength 1, maxLength 0), got %+v", property)
+    }
+    if false == containsString(schema.Required, "code") {
+        t.Fatalf("expected the reject-all field listed required, got %v", schema.Required)
     }
 }
 
-/* @info The generator's bracket-balance helper is documented as an exact mirror of the validator's, so a tag the validator accepts must never be swept up by the syntax guard. RE2 reads a ']' that closes no character class as a literal, and the validator handles this; a generator still rejecting it advertises an unsatisfiable field for values the api happily accepts. */
+/* The generator's bracket-balance helper is documented as an exact mirror of the validator's, so a tag the validator accepts must never be swept up by the syntax guard. RE2 reads a ']' that closes no character class as a literal, and the validator handles this; a generator still rejecting it advertises an unsatisfiable field for values the api happily accepts. */
 func TestApplyValidation_LiteralClosingBracketMatchesTheValidator(t *testing.T) {
     schema := &Schema{Type: "string"}
     applyValidation(schema, "regex(pattern=^a]b$)", nil)
@@ -1683,7 +1715,7 @@ func TestApplyValidation_LiteralClosingBracketMatchesTheValidator(t *testing.T) 
     }
 }
 
-/* @info The runtime validator registers regex only under the name "regex" — there is no "pattern" constraint, and an unknown rule fails the field closed for every value. Advertising `pattern=...` as a satisfiable regex-constrained string published a contract the api rejects outright. */
+/* The runtime validator registers regex only under the name "regex" — there is no "pattern" constraint, and an unknown rule fails the field closed for every value. Advertising `pattern=...` as a satisfiable regex-constrained string published a contract the api rejects outright. */
 func TestApplyValidation_PatternIsNotARegexAlias(t *testing.T) {
     schema := &Schema{Type: "string"}
     applyValidation(schema, "pattern=^[0-9]+$", nil)
@@ -1693,8 +1725,8 @@ func TestApplyValidation_PatternIsNotARegexAlias(t *testing.T) {
     }
 }
 
-/* @info a []byte renders as {string, byte}, but the validator's string facets never see a string there — Regex/alpha/numeric/alphanumeric ignore a []byte and accept every blob, and min/max measure fmt.Sprintf("%v", value) (e.g. "[1 2 3]") not the base64 text — so the mirror must not attach pattern/minLength/maxLength to a byte-format field, exactly as the email branch already declines format byte. Without the guard regex=^[a-z]+$ leaks a pattern, regex=a** advertises maxLength 0 (only the empty payload) and min/max/alpha over-constrain a blob the server actually accepts. */
-func TestApplyValidation_StringFacetsSkipByteSliceField(t *testing.T) {
+/* inverted with the validation repairs: a []byte renders as {string, byte}, but the constraints measure the RAW value, and a []byte is not a string — every one of these now refuses it outright ("value must be a string") where the pre-repair constraints ignored it (the format constraints) or measured its fmt rendering (min/max). The field is a plain slice, so even the nil blob is refused (a slice is not a pointer, nothing skips), and each field is fully unsatisfiable and required. */
+func TestApplyValidation_StringConstraintsOnByteSliceAreUnsatisfiable(t *testing.T) {
     byteType := reflect.TypeOf([]byte(nil))
     structType := reflect.StructOf([]reflect.StructField{
         {Name: "Pattern", Type: byteType, Tag: `json:"pattern" validate:"regex=^[a-z]+$"`},
@@ -1714,26 +1746,18 @@ func TestApplyValidation_StringFacetsSkipByteSliceField(t *testing.T) {
             t.Fatalf("expected the []byte field %q to stay {string, byte}, got {%q, %q}", name, property.Type, property.Format)
         }
         if "" != property.Pattern || nil != property.AllOf {
-            t.Fatalf("expected no pattern facet on the []byte field %q, got pattern=%q allOf=%v", name, property.Pattern, property.AllOf)
+            t.Fatalf("expected no pattern facet on the []byte field %q (the refusal is the whole advertisement), got pattern=%q allOf=%v", name, property.Pattern, property.AllOf)
         }
-        if nil != property.MinLength || nil != property.MaxLength {
-            t.Fatalf("expected no length facet on the []byte field %q, got minLength=%v maxLength=%v", name, property.MinLength, property.MaxLength)
+        if nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
+            t.Fatalf("expected the []byte field %q advertised unsatisfiable (minLength 1, maxLength 0), got minLength=%v maxLength=%v", name, property.MinLength, property.MaxLength)
+        }
+        if false == containsString(schema.Required, name) {
+            t.Fatalf("expected the reject-all field %q listed required, got %v", name, schema.Required)
         }
     }
 }
 
-/* @info parseLeadingInt must return the platform int, the same width the validator's parseIntStrict uses, so a bound in the 2^31..2^63-1 range that overflows a 32-bit int is rejected identically on both sides instead of parsing into a wider int64 and wrapping to a satisfiable facet the validator refuses. The 32-bit overflow itself is unobservable on a 64-bit test host, so this asserts the concrete return kind, which pins the width divergence on every platform. */
-func TestParseLeadingIntReturnsPlatformIntWidth(t *testing.T) {
-    parsed, ok := parseLeadingInt("5")
-    if false == ok {
-        t.Fatalf("expected parseLeadingInt to accept a plain integer")
-    }
-    if reflect.Int != reflect.TypeOf(parsed).Kind() {
-        t.Fatalf("parseLeadingInt must return the platform int (matching the validator's parseIntStrict) so 32-bit overflow behaviour is identical, got %T", parsed)
-    }
-}
-
-/* @info validateInternal checks every tagged field even when the property is omitted, so a constraint the Go zero value fails (min>=1 on a string, a non-pointer greaterThan bound>=0, a non-pointer lessThan bound<=0) turns an absent property into a 400; the spec must list such a field required — as notBlank/notEmpty already do — while a min of 0, a negative greaterThan bound, or a positive lessThan bound admits the zero value and keeps the field optional. */
+/* validateInternal checks every tagged field even when the property is omitted, so a constraint the Go zero value fails turns an absent property into a 400 and the spec must list the field required. Two paths lead there: a satisfiable bound the zero value fails (min=3 on a string, a non-pointer greaterThan bound >= 0), and — since the validation repairs — a bare parameterized constraint, whose refused rule rejects the absent zero value like everything else. A min of 0, a negative greaterThan bound, or a positive lessThan bound admits the zero value and keeps the field optional. */
 func TestBuildSchema_ZeroValueRejectingConstraintsAreRequired(t *testing.T) {
     stringType := reflect.TypeOf("")
     intType := reflect.TypeOf(0)
@@ -1763,7 +1787,7 @@ func TestBuildSchema_ZeroValueRejectingConstraintsAreRequired(t *testing.T) {
     }
 }
 
-/* @info a pointer string field has no zero value the length constraint would measure: an omitted property leaves it nil, the validator's dereference reports absence and accepts the payload, so advertising the field required would force clients to send what the server does not demand. */
+/* a pointer string field under a SATISFIABLE bound has no zero value the length constraint would measure: an omitted property leaves it nil, the validator's dereference reports absence and accepts the payload, so advertising the field required would force clients to send what the server does not demand. Inverted with the validation repairs for the bare min: that rule now fails closed before the nil pointer could be skipped, so its absence is refused like everything else and the field is required. */
 func TestBuildSchema_PointerMinFieldStaysOptional(t *testing.T) {
     pointerStringType := reflect.TypeOf((*string)(nil))
     structType := reflect.StructOf([]reflect.StructField{
@@ -1773,14 +1797,16 @@ func TestBuildSchema_PointerMinFieldStaysOptional(t *testing.T) {
 
     schema := buildSchema(structType, map[string]*Schema{}, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    for _, name := range []string{"nick", "alias"} {
-        if true == containsString(schema.Required, name) {
-            t.Fatalf("expected the pointer field %q to stay optional (the validator accepts its absence), required=%v", name, schema.Required)
-        }
+    if true == containsString(schema.Required, "nick") {
+        t.Fatalf("expected the pointer field \"nick\" to stay optional (the validator accepts its absence), required=%v", schema.Required)
+    }
+
+    if false == containsString(schema.Required, "alias") {
+        t.Fatalf("expected the bare-min pointer field \"alias\" required (the refused rule rejects the absent nil too), required=%v", schema.Required)
     }
 }
 
-/* @info a POSIX named class ([:alpha:]) nested in a bracket expression has its own closing ']' that the character-class scanner must not read as the end of the whole class; otherwise regex=[[:alpha:],] is split at the in-class comma into an uncompilable pattern plus a stray ']' rule. The validator rejects such a tag for every value including "", so the mirror must keep the class intact and advertise the compilable pattern rather than a maxLength-0 (empty-string-satisfiable) field. This keeps the local scanner in lockstep with validation/validation_rule.go. */
+/* a POSIX named class ([:alpha:]) nested in a bracket expression has its own closing ']' that the character-class scanner must not read as the end of the whole class; otherwise regex=[[:alpha:],] is split at the in-class comma into an uncompilable pattern plus a stray ']' rule. The validator rejects such a tag for every value including "", so the mirror must keep the class intact and advertise the compilable pattern rather than a maxLength-0 (empty-string-satisfiable) field. This keeps the local scanner in lockstep with validation/validation_rule.go. */
 func TestApplyValidation_PosixClassKeepsTheClassIntact(t *testing.T) {
     schema := &Schema{Type: "string"}
     applyValidation(schema, `regex=[[:alpha:],]`, nil)
@@ -1790,7 +1816,7 @@ func TestApplyValidation_PosixClassKeepsTheClassIntact(t *testing.T) {
     }
 }
 
-/* @info RE2 recognises only [: :] as a POSIX named class; a [. .] collating element and a [= =] equivalence element are NOT supported, so RE2 (and regexp.Compile) read the inner '[' as an ordinary class literal. The character-class scanner must do the same: treating [. or [= as a POSIX opener makes it hunt for a ".]"/"=]" delimiter that never arrives, so the class over-extends to the end of the tag, hasBalancedRuleBrackets reports the tag unbalanced, and splitTopLevelRules splits regex=[a,b[.c] at the in-class comma into "regex=[a" (an uncompilable class advertised as maxLength 0, empty-string-only) plus a stray "b[.c]" rule — a contract the validator, which compiles the class whole and rejects every value including "", never honours. The plain and equivalence fields lock the [. and [= literal handling; the posix field pairs a real [:alpha:] class with a following in-class comma and a [. literal so the whole tag survives as one satisfiable pattern rather than closing early at the ':]' — matching validation/validation_rule.go. */
+/* RE2 recognises only [: :] as a POSIX named class; a [. .] collating element and a [= =] equivalence element are NOT supported, so RE2 (and regexp.Compile) read the inner '[' as an ordinary class literal. The character-class scanner must do the same: treating [. or [= as a POSIX opener makes it hunt for a ".]"/"=]" delimiter that never arrives, so the class over-extends to the end of the tag, hasBalancedRuleBrackets reports the tag unbalanced, and splitTopLevelRules splits regex=[a,b[.c] at the in-class comma into "regex=[a" (an uncompilable class advertised as maxLength 0, empty-string-only) plus a stray "b[.c]" rule — a contract the validator, which compiles the class whole and rejects every value including "", never honours. The plain and equivalence fields lock the [. and [= literal handling; the posix field pairs a real [:alpha:] class with a following in-class comma and a [. literal so the whole tag survives as one satisfiable pattern rather than closing early at the ':]' — matching validation/validation_rule.go. */
 func TestBuildSchema_CollatingEquivalenceOpenersStayLiteralInsideClass(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -1837,7 +1863,7 @@ type emailFacetRequest struct {
     Name   string `json:"name" validate:"min=3,email"`
 }
 
-/* @info the email format is an annotation, not a structural format: the validator still enforces every later string facet on the same raw string, so the mirror must not let the annotation swallow a max/regex/min that follows it in tag order */
+/* the email format is an annotation, not a structural format: the validator still enforces every later string facet on the same raw string, so the mirror must not let the annotation swallow a max/regex/min that follows it in tag order */
 func TestBuildSchema_EmailAnnotationKeepsLaterStringFacets(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(emailFacetRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -1886,8 +1912,8 @@ type notBlankKindsRequest struct {
     When  time.Time `json:"when" validate:"notBlank"`
 }
 
-/* @info notBlank turns absence into a 400 only for a pointer or interface (nil dereferences to nothing) or a genuine string (the zero "" is blank); the other zero values stringify non-blank ("0", "[]", the zero time) and pass, so listing them required would forbid an omission the validator accepts */
-func TestBuildSchema_NotBlankRequiredOnlyWhereAbsenceIsRejected(t *testing.T) {
+/* inverted with the validation repairs: notBlank turns absence into a 400 on EVERY kind — a nil pointer or interface is refused as required, the zero "" is blank, and every other zero value is refused as a non-string ("value must be a string") where it used to stringify non-blank and pass — so all seven fields are required, and the non-string ones are advertised unsatisfiable on top */
+func TestBuildSchema_NotBlankRequiredOnEveryKind(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(notBlankKindsRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
@@ -1896,24 +1922,21 @@ func TestBuildSchema_NotBlankRequiredOnlyWhereAbsenceIsRejected(t *testing.T) {
         t.Fatalf("expected the request component to be built")
     }
 
-    expected := map[string]bool{"name": true, "score": true, "data": true}
-    if len(expected) != len(schema.Required) {
-        t.Fatalf("expected exactly the string, pointer and interface fields required, got %v", schema.Required)
-    }
-    for _, requiredName := range schema.Required {
-        if false == expected[requiredName] {
-            t.Fatalf("unexpected required field %q in %v", requiredName, schema.Required)
+    for _, requiredName := range []string{"name", "score", "data", "age", "tags", "blob", "when"} {
+        if false == containsString(schema.Required, requiredName) {
+            t.Fatalf("expected %q required (nothing notBlank accepts survives its absence), got %v", requiredName, schema.Required)
         }
     }
 
+    /* the []byte field is no longer merely floor-free: the blob itself is refused as a non-string, so the byte-format string carries the impossible window */
     blob := schema.Properties["blob"]
-    if nil != blob.MinLength {
-        t.Fatalf("expected notBlank to stay off the byte-format string (the validator accepts an empty blob), got minLength %v", *blob.MinLength)
+    if nil == blob.MinLength || 1 != *blob.MinLength || nil == blob.MaxLength || 0 != *blob.MaxLength {
+        t.Fatalf("expected notBlank on the []byte field advertised unsatisfiable (minLength 1, maxLength 0), got %+v", blob)
     }
 
     name := schema.Properties["name"]
-    if nil == name.MinLength || 1 != *name.MinLength {
-        t.Fatalf("expected the genuine string to carry the minLength 1 floor, got %v", name.MinLength)
+    if nil == name.MinLength || 1 != *name.MinLength || nil != name.MaxLength {
+        t.Fatalf("expected the genuine string to keep the satisfiable minLength 1 floor, got %+v", name)
     }
 }
 
@@ -1921,7 +1944,7 @@ type interfaceRejectAllRequest struct {
     Data any `json:"data" validate:"min=abc"`
 }
 
-/* @info a malformed bound rejects every value of every kind, but an interface field builds an empty schema no facet can contradict; not against the empty schema is the one advertisement no value satisfies */
+/* a malformed bound rejects every value of every kind, but an interface field builds an empty schema no facet can contradict; not against the empty schema is the one advertisement no value satisfies */
 func TestBuildSchema_MalformedBoundOnInterfaceFieldAdvertisedUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(interfaceRejectAllRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -1951,7 +1974,7 @@ type embedNotBlankRequest struct {
     Title       string `json:"title"`
 }
 
-/* @info the validator runs a promoted embed's own tag against the embed value, so notEmpty on an embed rejects every payload of the enclosing object; the parent schema must advertise that, while notBlank on a pointer embed stays satisfiable and must not be contradicted */
+/* the validator runs a promoted embed's own tag against the embed value, so notEmpty on an embed rejects every payload of the enclosing object and the parent schema must advertise that. Inverted with the validation repairs for the notBlank half: a pointer embed is now refused whether nil (required) or materialised (a struct is not a string), so the parent it used to leave satisfiable is contradicted too. */
 func TestBuildSchema_EmbedRejectAllTagContradictsTheParentSchema(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(embedRejectAllRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -1969,13 +1992,27 @@ func TestBuildSchema_EmbedRejectAllTagContradictsTheParentSchema(t *testing.T) {
         t.Fatalf("expected the documented properties to be preserved alongside the contradiction, got %v", schema.Properties)
     }
 
-    satisfiableComponents := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(embedNotBlankRequest{}), satisfiableComponents, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    notBlankComponents := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(embedNotBlankRequest{}), notBlankComponents, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    satisfiable := satisfiableComponents["embedNotBlankRequest"]
-    if nil != satisfiable.MinProperties || nil != satisfiable.MaxProperties {
-        t.Fatalf("expected notBlank on a pointer embed to leave the parent satisfiable, got %+v", satisfiable)
+    notBlankParent := notBlankComponents["embedNotBlankRequest"]
+    if nil == notBlankParent.MinProperties || 1 != *notBlankParent.MinProperties || nil == notBlankParent.MaxProperties || 0 != *notBlankParent.MaxProperties {
+        t.Fatalf("expected notBlank on a pointer embed to contradict the parent (nil and materialised are both refused), got %+v", notBlankParent)
     }
+
+    /* a bare parameterized constraint on an embed fails the rule closed like any other reject-all tag, where it used to resolve to the registered default */
+    bareComponents := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(embedBareMinRequest{}), bareComponents, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    bareParent := bareComponents["embedBareMinRequest"]
+    if nil == bareParent.MinProperties || 1 != *bareParent.MinProperties || nil == bareParent.MaxProperties || 0 != *bareParent.MaxProperties {
+        t.Fatalf("expected a bare min on an embed to contradict the parent, got %+v", bareParent)
+    }
+}
+
+type embedBareMinRequest struct {
+    EmbedAudit `validate:"min"`
+    Title      string `json:"title"`
 }
 
 type quotedScalarRequest struct {
@@ -1989,7 +2026,7 @@ type quotedScalarRequest struct {
     Window  int     `json:"window,string" validate:"greaterThan=5,lessThan=6"`
 }
 
-/* @info encoding/json's ",string" option makes the decoder demand the quoted textual form and refuse the bare scalar, so the spec must advertise the string the payload actually spells */
+/* encoding/json's ",string" option makes the decoder demand the quoted textual form and refuse the bare scalar, so the spec must advertise the string the payload actually spells */
 func TestBuildSchema_JsonStringOptionAdvertisedAsQuotedString(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(quotedScalarRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2047,7 +2084,7 @@ type dynamicValueRequest struct {
     Bag    any `json:"bag" validate:"notEmpty"`
 }
 
-/* @info the validator judges an interface field's DECODED dynamic value — a positive number passes greaterThan and a non-empty string passes notEmpty — so the kind-classified reject-all arms must not contradict it */
+/* the validator judges an interface field's DECODED dynamic value — a positive number passes greaterThan and a non-empty string passes notEmpty — so the kind-classified reject-all arms must not contradict it */
 func TestBuildSchema_DynamicRulesOnInterfaceFieldsStaySatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(dynamicValueRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2074,7 +2111,7 @@ type interfaceMalformedComparisonRequest struct {
     Valid   any `json:"valid" validate:"greaterThan=5"`
 }
 
-/* @info GreaterThan/LessThan.WithParams run the same parseIntStrict as min/max, so a malformed bound fails constraint creation and rejects every payload before any value is examined; on an interface field the kind-classified branches are exempt, leaving not as the only truthful advertisement — a VALID bound stays satisfiable, judged on the decoded dynamic value */
+/* GreaterThan/LessThan.WithParams run the same parseIntStrict as min/max, so a malformed bound fails constraint creation and rejects every payload before any value is examined; on an interface field the kind-classified branches are exempt, leaving not as the only truthful advertisement — a VALID bound stays satisfiable, judged on the decoded dynamic value */
 func TestBuildSchema_MalformedComparisonBoundOnInterfaceFieldAdvertisedUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(interfaceMalformedComparisonRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2143,8 +2180,8 @@ type embedPointerReceiverStringerMaxOneRequest struct {
     Title                  string `json:"title"`
 }
 
-/* @info MaxLength stringifies a value embed with %v and the default struct rendering never drops its braces ("{}" is the floor), so a parseable max below 2 rejects every payload; a pointer embed passes through the nil escape, a value-method Stringer delegates %v and voids the floor, and a pointer-receiver String() stays out of the value's method set so the floor holds */
-func TestBuildSchema_ValueEmbedMaxBelowTheBraceFloorContradictsTheParentSchema(t *testing.T) {
+/* inverted with the validation repairs: the length constraint refuses a non-string value outright, so max on ANY struct embed rejects every payload that carries the embed — the brace-floor arithmetic (a parseable max below the 2-character "{}" rendering), the Stringer delegation that voided it and the nil escape that spared a pointer embed are all gone. Every one of these six shapes is contradicted; the pointer embed among them is the declared fail-closed over-approximation (a payload that never materialises it would pass). */
+func TestBuildSchema_MaxOnAnyEmbedContradictsTheParentSchema(t *testing.T) {
     for _, testCase := range []struct {
         requestType   reflect.Type
         componentName string
@@ -2152,6 +2189,9 @@ func TestBuildSchema_ValueEmbedMaxBelowTheBraceFloorContradictsTheParentSchema(t
         {reflect.TypeOf(embedValueMaxOneRequest{}), "embedValueMaxOneRequest"},
         {reflect.TypeOf(embedValueMaxNegativeRequest{}), "embedValueMaxNegativeRequest"},
         {reflect.TypeOf(embedPointerReceiverStringerMaxOneRequest{}), "embedPointerReceiverStringerMaxOneRequest"},
+        {reflect.TypeOf(embedValueMaxTwoRequest{}), "embedValueMaxTwoRequest"},
+        {reflect.TypeOf(embedPointerMaxOneRequest{}), "embedPointerMaxOneRequest"},
+        {reflect.TypeOf(embedStringerMaxOneRequest{}), "embedStringerMaxOneRequest"},
     } {
         components := map[string]*Schema{}
         buildSchema(testCase.requestType, components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2161,30 +2201,13 @@ func TestBuildSchema_ValueEmbedMaxBelowTheBraceFloorContradictsTheParentSchema(t
             t.Fatalf("expected %s contradicted (minProperties 1, maxProperties 0), got %+v", testCase.componentName, schema)
         }
     }
-
-    for _, testCase := range []struct {
-        requestType   reflect.Type
-        componentName string
-    }{
-        {reflect.TypeOf(embedValueMaxTwoRequest{}), "embedValueMaxTwoRequest"},
-        {reflect.TypeOf(embedPointerMaxOneRequest{}), "embedPointerMaxOneRequest"},
-        {reflect.TypeOf(embedStringerMaxOneRequest{}), "embedStringerMaxOneRequest"},
-    } {
-        components := map[string]*Schema{}
-        buildSchema(testCase.requestType, components, map[reflect.Type]string{}, map[reflect.Type]bool{})
-
-        schema := components[testCase.componentName]
-        if nil != schema.MinProperties || nil != schema.MaxProperties {
-            t.Fatalf("expected %s to stay satisfiable, got %+v", testCase.componentName, schema)
-        }
-    }
 }
 
 type quotedUnsignedRequest struct {
     Slots uint `json:"slots,string"`
 }
 
-/* @info literalStore consumes a quoted "null" on every ,string kind and leaves the zero value, so the advertised pattern must admit the spelling the decoder accepts — and nothing else beyond the digits */
+/* literalStore consumes a quoted "null" on every ,string kind and leaves the zero value, so the advertised pattern must admit the spelling the decoder accepts — and nothing else beyond the digits */
 func TestBuildSchema_JsonStringOptionAdvertisesTheNullLiteral(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(quotedUnsignedRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2199,7 +2222,7 @@ type duplicateBoundsRequest struct {
     Amount int `json:"amount" validate:"greaterThan=5,greaterThan=3,lessThan=10,lessThan=20"`
 }
 
-/* @info the validator enforces every duplicate rule, so the effective window is the intersection; the mirror must keep the tightest bound of each side instead of letting the last rule overwrite it */
+/* the validator enforces every duplicate rule, so the effective window is the intersection; the mirror must keep the tightest bound of each side instead of letting the last rule overwrite it */
 func TestBuildSchema_DuplicateComparisonBoundsKeepTheTightestWindow(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(duplicateBoundsRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2223,7 +2246,7 @@ type quotedNullRejectingRequest struct {
     Ratio  *float64 `json:"ratio,string" validate:"notBlank"`
 }
 
-/* @info the quoted "null" decodes to null on a pointer and to the zero value on a bare scalar, so the advertisement must follow the validator: a null-rejecting rule withdraws the spelling (pattern, enum, or not on the pattern-less float), a window admitting zero keeps it, and a nullable empty value space accepts exactly the null literal */
+/* the quoted "null" decodes to null on a pointer and to the zero value on a bare scalar, so the advertisement must follow the validator: a null-rejecting rule withdraws the spelling, a window admitting zero keeps it, and a nullable empty value space accepts exactly the null literal. Inverted with the validation repairs for the two notBlank fields: notBlank on a non-string shape now refuses everything, so the quoted forms that used to keep the two boolean literals (flag) or merely exclude null (ratio) are unsatisfiable strings. */
 func TestBuildSchema_JsonStringOptionWithdrawsTheRejectedNullSpelling(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(quotedNullRejectingRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2236,8 +2259,8 @@ func TestBuildSchema_JsonStringOptionWithdrawsTheRejectedNullSpelling(t *testing
     }
 
     flag := schema.Properties["flag"]
-    if nil == flag.Enum || 2 != len(*flag.Enum) {
-        t.Fatalf("expected the null-rejecting quoted pointer boolean advertised as the two literals alone, got %+v", flag)
+    if "string" != flag.Type || nil == flag.MinLength || 1 != *flag.MinLength || nil == flag.MaxLength || 0 != *flag.MaxLength {
+        t.Fatalf("expected notBlank on the quoted pointer boolean advertised unsatisfiable in its string form, got %+v", flag)
     }
 
     floor := schema.Properties["floor"]
@@ -2256,8 +2279,8 @@ func TestBuildSchema_JsonStringOptionWithdrawsTheRejectedNullSpelling(t *testing
     }
 
     ratio := schema.Properties["ratio"]
-    if nil == ratio.Not || nil == ratio.Not.Enum || "null" != (*ratio.Not.Enum)[0] {
-        t.Fatalf("expected the pattern-less quoted float to exclude the withdrawn null through not, got %+v", ratio)
+    if "string" != ratio.Type || nil == ratio.MinLength || 1 != *ratio.MinLength || nil == ratio.MaxLength || 0 != *ratio.MaxLength {
+        t.Fatalf("expected notBlank on the quoted pointer float advertised unsatisfiable in its string form, got %+v", ratio)
     }
 }
 
@@ -2266,7 +2289,7 @@ type quotedUnsignedEmptyWindowRequest struct {
     Turns uint `json:"turns,string" validate:"lessThan"`
 }
 
-/* @info an unsigned target under a negative ceiling — or the exclusive zero ceiling of a value-less lessThan — accepts nothing, and the kind-blind window check cannot see it: the quoted form must stay unsatisfiable instead of advertising a digits pattern every payload of which the validator rejects */
+/* an unsigned target under a negative lessThan ceiling accepts nothing (the constraint refuses every unsigned value against a negative bound), and — since the validation repairs — a bare lessThan fails the rule closed outright; on either path the kind-blind window check cannot see the emptiness, and the quoted form must stay unsatisfiable instead of advertising a digits pattern every payload of which the validator rejects */
 func TestBuildSchema_JsonStringOptionKeepsTheEmptyUnsignedWindowUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(quotedUnsignedEmptyWindowRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2279,7 +2302,7 @@ func TestBuildSchema_JsonStringOptionKeepsTheEmptyUnsignedWindowUnsatisfiable(t 
     }
 }
 
-/* @info the validator measures a length fixed at zero, so notEmpty rejects every payload; advertising minItems 1 alone told a client a non-empty array would be accepted */
+/* the validator measures a length fixed at zero, so notEmpty rejects every payload; advertising minItems 1 alone told a client a non-empty array would be accepted */
 func TestBuildSchema_NotEmptyOnZeroLengthArrayIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -3168,10 +3191,75 @@ func TestBuildSchema_AReferenceStaysUnsatisfiableWhereTheValidatorRejectsIt(t *t
         }
     }
 
-    /* notBlank rejects only the null, and a non-pointer collection advertises none, so the reference is left exactly as it was built */
+    /* inverted with the validation repairs: notBlank judges a string, so the named collection behind the reference is refused with everything else and the bare reference the pre-repair mirror left alone gains the contradiction */
     labelled := schema.Properties["labelled"]
-    if nil == labelled || "#/components/schemas/cyclicNodes" != labelled.Ref || 0 != len(labelled.AllOf) {
-        t.Fatalf("expected notBlank on a non-pointer collection to leave the bare reference, got %+v", labelled)
+    if nil == labelled || 0 == len(labelled.AllOf) || false == isImpossibleObject(labelled.AllOf[len(labelled.AllOf)-1]) {
+        t.Fatalf("expected notBlank on a non-pointer collection contradicted behind its reference, got %+v", labelled)
+    }
+}
+
+type referencedStringConstraintInner struct {
+    Name string `json:"name"`
+}
+
+type referencedStringConstraintRequest struct {
+    Fixed    referencedStringConstraintInner  `json:"fixed" validate:"min=5"`
+    Optional *referencedStringConstraintInner `json:"optional" validate:"max=5"`
+}
+
+/* min/max and the format constraints refuse the value a reference stands for — a struct is not a string — while passing a nil pointer, so a non-pointer field is fully unsatisfiable and required (its absent zero struct is refused too), and a pointer field keeps exactly its null and stays optional */
+func TestBuildSchema_StringConstraintsOnAReferenceAreUnsatisfiable(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(referencedStringConstraintRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["referencedStringConstraintRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    fixed := schema.Properties["fixed"]
+    if nil == fixed || true == fixed.Nullable || 0 == len(fixed.AllOf) || false == isImpossibleObject(fixed.AllOf[len(fixed.AllOf)-1]) {
+        t.Fatalf("expected min=5 on a struct reference contradicted with nullable cleared, got %+v", fixed)
+    }
+    if false == containsString(schema.Required, "fixed") {
+        t.Fatalf("expected the non-pointer reject-all field required, got %v", schema.Required)
+    }
+
+    optional := schema.Properties["optional"]
+    if nil == optional || false == optional.Nullable || 0 == len(optional.AllOf) || false == isImpossibleObject(optional.AllOf[len(optional.AllOf)-1]) {
+        t.Fatalf("expected max=5 on a *struct reference contradicted while KEEPING nullable (the constraint passes the nil pointer), got %+v", optional)
+    }
+    if true == containsString(schema.Required, "optional") {
+        t.Fatalf("expected the pointer field to stay optional (its absence is the null the validator skips), got %v", schema.Required)
+    }
+}
+
+type unsatisfiableEmbedComponent struct {
+    EmbedAudit `validate:"notEmpty"`
+    Label      string `json:"label"`
+}
+
+type unsatisfiableComponentHolderRequest struct {
+    Fixed    unsatisfiableEmbedComponent  `json:"fixed"`
+    Optional *unsatisfiableEmbedComponent `json:"optional"`
+}
+
+/* a field of a component the poisoned embed made unsatisfiable is itself refused when absent: the zero struct runs the embed tag and the validator rejects it, so the non-pointer field must be listed required even though its own tag is empty — while the pointer field stays optional, its nil skipping the descent */
+func TestBuildSchema_FieldOfAnUnsatisfiableComponentIsRequired(t *testing.T) {
+    components := map[string]*Schema{}
+    buildSchema(reflect.TypeOf(unsatisfiableComponentHolderRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+
+    schema := components["unsatisfiableComponentHolderRequest"]
+    if nil == schema {
+        t.Fatalf("expected the request component to be built")
+    }
+
+    if false == containsString(schema.Required, "fixed") {
+        t.Fatalf("expected the non-pointer field of an unsatisfiable component required, got %v", schema.Required)
+    }
+
+    if true == containsString(schema.Required, "optional") {
+        t.Fatalf("expected the pointer field of an unsatisfiable component to stay optional, got %v", schema.Required)
     }
 }
 
