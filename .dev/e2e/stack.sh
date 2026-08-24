@@ -94,7 +94,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=107
+EXPECTED_CHECK_COUNT_INTEGER=118
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -984,6 +984,108 @@ restore_example_env_local
 trap - EXIT
 
 check_section_end "OPTIONAL ENV KEY" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 DEBUG COMMANDS — the dev-registered family answers from the v3 example, and the two commands that
+# used to build in order to list now describe by default. The split is asserted on STATE — the state
+# column, the scoped block, and the two exit codes — not on the command's own word about itself.
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 DEBUG COMMANDS" "${TAG_VALIDATE}" "e2e"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:version 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'MELODY: v'; then
+    check_pass "v3 debug:version reports the framework version"
+else
+    check_fail "v3 debug:version did not report the framework version (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:events --format=json 2>/dev/null"
+V3_EVENTS_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+if printf '%s' "${V3_EVENTS_JSON_STRING}" | grep -q '"command":"debug:events"'; then
+    check_pass "v3 debug:events answers its json envelope"
+else
+    check_fail "v3 debug:events did not answer its envelope (${V3_EVENTS_JSON_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:middleware 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_MIDDLEWARE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_MIDDLEWARE_OUTPUT_STRING}" | grep -q 'static'; then
+    check_pass "v3 debug:middleware lists the static middleware of the example's pipeline"
+else
+    check_fail "v3 debug:middleware did not list the pipeline (${V3_MIDDLEWARE_OUTPUT_STRING:-<empty>})"
+fi
+
+# the describing listing carries what only the description channel knows: the definition name, the
+# priority the ordering used and the status of each entry. The build channel hands back the built chain
+# alone, so a listing produced by building could name none of the three
+if printf '%s' "${V3_MIDDLEWARE_OUTPUT_STRING}" | grep -q 'priority' && printf '%s' "${V3_MIDDLEWARE_OUTPUT_STRING}" | grep -q 'reason'; then
+    check_pass "v3 debug:middleware describes the pipeline rather than building it"
+else
+    check_fail "v3 debug:middleware did not carry the description columns (${V3_MIDDLEWARE_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --limit=0 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_CONTAINER_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_CONTAINER_OUTPUT_STRING}" | grep -q 'service.example.product.repository'; then
+    check_pass "v3 debug:container lists the example's registered services"
+else
+    check_fail "v3 debug:container did not list the example services (${V3_CONTAINER_OUTPUT_STRING:-<empty>})"
+fi
+
+# the scoped block is the half the pre-repair listing could not reach at all: it walked Names(), which
+# does not see scoped registrations, so a scoped definition was invisible to the command that exists to
+# show what the container holds
+if printf '%s' "${V3_CONTAINER_OUTPUT_STRING}" | grep -q 'service-example-reporting-request-trail'; then
+    check_pass "v3 debug:container lists the request-scoped report trail"
+else
+    check_fail "v3 debug:container does not list the scoped report trail (${V3_CONTAINER_OUTPUT_STRING:-<empty>})"
+fi
+
+# state, not the command's word: a service the boot never resolved reads registered, which it can only
+# do if nothing ran its provider. The old listing called Get on every name, so every row would read built
+if printf '%s' "${V3_CONTAINER_OUTPUT_STRING}" | grep -q 'service.example.product.repository *| registered'; then
+    check_pass "v3 debug:container ran no provider for the listing"
+else
+    check_fail "v3 debug:container built a service it only had to list (${V3_CONTAINER_OUTPUT_STRING:-<empty>})"
+fi
+
+# the deployment gate, end to end: the bare listing succeeds where the sweep refuses. The scoped report
+# trail depends on the request context, which a console process has no scope carrying — so --build has a
+# real failure to report here, and that is what makes the two exit codes a measurement rather than a pair
+# of zeroes
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --limit=0 >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 debug:container exits zero when it only describes"
+else
+    check_fail "v3 debug:container did not exit zero while describing (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --build --limit=0 --format=json 2>/dev/null"
+V3_CONTAINER_BUILD_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+if printf '%s' "${V3_CONTAINER_BUILD_JSON_STRING}" | grep -q '"code":"debug.buildFailed"' && printf '%s' "${V3_CONTAINER_BUILD_JSON_STRING}" | grep -q 'service-example-reporting-request-trail'; then
+    check_pass "v3 debug:container --build reports its failures on the envelope, naming them"
+else
+    check_fail "v3 debug:container --build did not report the sweep failure (${V3_CONTAINER_BUILD_JSON_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --build --limit=0 >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=1'; then
+    check_pass "v3 debug:container --build fails a deployment gate on a service that does not resolve"
+else
+    check_fail "v3 debug:container --build did not fail the gate (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# the two discriminators the dispatch breaks ties on: without them two overlapping routes render
+# identically and the command cannot answer which one responds
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:router --limit=3 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'priority' && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'order'; then
+    check_pass "v3 debug:router reports the priority and the registration order"
+else
+    check_fail "v3 debug:router did not report the discriminators (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+check_section_end "V3 DEBUG COMMANDS" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # V3 DATABASE MIGRATIONS — the db:* family and the composition root run one set over six tables

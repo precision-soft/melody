@@ -21,6 +21,7 @@ import (
     "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    middlewarepipeline "github.com/precision-soft/melody/v3/http/middleware/pipeline"
     "github.com/precision-soft/melody/v3/logging"
     "github.com/precision-soft/melody/v3/messagebus"
     "github.com/precision-soft/melody/v3/openapi"
@@ -91,9 +92,14 @@ func (instance *Application) bootCli() {
             &debug.ContainerCommand{},
             &debug.ParameterCommand{},
             debug.NewEventCommand(instance.securityDeferredListeners),
-            debug.NewMiddlewareCommand(func() []httpcontract.Middleware {
-                return instance.httpMiddlewares.all(instance.kernel)
-            }),
+            debug.NewMiddlewareCommand(
+                func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+                    return instance.httpMiddlewares.describe(instance.kernel)
+                },
+                func() ([]httpcontract.Middleware, error) {
+                    return instance.httpMiddlewares.buildForInspection(instance.kernel)
+                },
+            ),
             /* the application slot stays empty on purpose: the application's own version arrives through output.SetApplicationVersion, and melody's version filled in here made debug:version print the framework version twice — an application that never declared its version reads <unknown> instead of a lie */
             &debug.VersionCommand{},
         )

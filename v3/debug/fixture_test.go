@@ -1,14 +1,33 @@
+/* The shared test material of this package: the doubles every test file of it reaches for, the helpers
+that build them, and — where a contract spans every source rather than any one of them — the test that
+asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to
+exist without a matching source, which is what keeps every other one honest. A test provable from a
+single source belongs in that source's own mirror, not here. */
 package debug
 
 import (
     "bytes"
     "context"
     "strings"
+    "testing"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    middlewarepipeline "github.com/precision-soft/melody/v3/http/middleware/pipeline"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
+
+func newTestMiddlewareCommandWithEmptyProviders() *MiddlewareCommand {
+    return NewMiddlewareCommand(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            return nil, nil, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            return nil, nil
+        },
+    )
+}
 
 func newTestRuntime(serviceContainer containercontract.Container) *testRuntime {
     return &testRuntime{
@@ -132,4 +151,37 @@ func isDebugTableSeparatorRow(cell []string) bool {
     }
 
     return true
+}
+
+/* the name is what an operator types and the description is what `melody list` prints beside it; both are read from these accessors by the cli registrar, and an empty description leaves a command undiscoverable in the only place it is advertised */
+func TestDebugCommands_CarryTheirNameAndDescription(t *testing.T) {
+    commandList := []struct {
+        command      clicontract.Command
+        expectedName string
+    }{
+        {&ContainerCommand{}, "debug:container"},
+        {&EventCommand{}, "debug:events"},
+        {&RouterCommand{}, "debug:router"},
+        {&ParameterCommand{}, "debug:parameters"},
+        {newTestMiddlewareCommandWithEmptyProviders(), "debug:middleware"},
+        {&VersionCommand{}, "debug:version"},
+    }
+
+    seenNameList := map[string]bool{}
+
+    for _, commandEntry := range commandList {
+        if commandEntry.expectedName != commandEntry.command.Name() {
+            t.Fatalf("expected name %q, got %q", commandEntry.expectedName, commandEntry.command.Name())
+        }
+
+        if "" == commandEntry.command.Description() {
+            t.Fatalf("%s: expected a description", commandEntry.expectedName)
+        }
+
+        if true == seenNameList[commandEntry.command.Name()] {
+            t.Fatalf("two commands answer to %q", commandEntry.command.Name())
+        }
+
+        seenNameList[commandEntry.command.Name()] = true
+    }
 }

@@ -58,6 +58,53 @@ removedCount := eventDispatcher.RemoveSubscriber(registration)
 
 **Remedy.** Fix the declaration — the half-installed subscriber was the defect: its first event's listeners were live and firing under a subscriber the caller had been told was refused. For the json consumer, read `data.events.items` under `--verbose`, or drop the flag; the listener detail, including the marks that say whether the fail-closed guarantee is armed, is now reachable from json at all, which it was not before.
 
+### Debug: `NewMiddlewareCommand` takes a description provider and a build provider
+
+**What changed.** `debug.NewMiddlewareCommand` takes two channels where it took one: `MiddlewareDescriptionProvider`, which reports the pipeline as the selection and the ordering see it with no factory run, and `MiddlewareBuildProvider`, which produces the built chain. `debug.MiddlewareProvider` is removed. The constructor refuses a nil provider by panic, and a zero-value command answers a named refusal instead of calling a nil function.
+
+**Symptom.** `debug.NewMiddlewareCommand(func() []httpcontract.Middleware { … })` no longer compiles. An application that lets `Application.bootCli` register the debug family — which is every application that does not wire the command by hand — feels nothing.
+
+**Remedy.** Hand in the two providers the application already has:
+
+```go
+debug.NewMiddlewareCommand(
+    func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+        return myPipeline.Describe(kernelInstance)
+    },
+    func() ([]httpcontract.Middleware, error) {
+        return myPipeline.BuildForInspection(kernelInstance)
+    },
+)
+```
+
+**Why one provider could not stay.** It returned the built chain, so listing the pipeline meant building it — every factory run and every dependency resolved as the price of a table — and the entries the selection dropped could not be reported at all, because a built chain does not carry them. The two channels are what let the default listing describe and `--build` build.
+
+### Debug: `debug:container` and `debug:middleware` describe by default and build under `--build`
+
+**What changed.** The bare `debug:container` listing runs no provider: it reports names, lifetimes, built state and the provider's declared return type out of the registration records. The resolve sweep that builds services sits behind a new `--build` flag; naming a single service still resolves that one. The bare `debug:middleware` listing describes the pipeline, with the inactive entries carrying their reasons, and `--build` runs the real factories under a recover. The `--build` sweep reports its failures on the envelope, with `error.code = "debug.buildFailed"`, the failure count and the failed names in the details, and the first failure as the cause.
+
+**Symptom.** A script that ran `app debug:container` as a smoke test — relying on the listing to construct every service and exit non-zero when one did not — now sees it pass, because the listing no longer builds anything. The listing itself is faster and no longer opens connections.
+
+**Remedy.** Add the flag where the building was the point: `app debug:container --build --format=json || exit 1`. Note that the `debug:*` family is registered on the development environment alone, `debug:router` excepted, so on a deployed application the invocation falls to the unknown-command path and exits `2` with `cli command not found` — a `|| exit 1` gate fires there for the wrong reason. A gate that must exercise the container has to run against a process booted in the development environment.
+
+**Why the default could not stay.** `Get` was called on every name in the container, so listing a production wiring dialled every pool, opened every connection and built every singleton as the price of a table — the introspection door exists precisely so that listing a container does not mean building it.
+
+### Debug: `debug:router` reports the two discriminators the dispatch breaks ties on
+
+**What changed.** Every `debug:router` row carries `priority` and `order`, in the table and in the json document, and under `--verbose` also `requirements`, `defaults` and `attributes`. The listing's comparator is total: equal pattern and methods are broken by registration order.
+
+**Symptom.** A machine consumer reading `data.items` finds four new fields per item, and two more under `--verbose`. A table consumer parsing by column position sees `priority` and `order` inserted after `name`. Rows that used to flip between runs now hold still.
+
+**Remedy.** Read the fields by name. The additions are what makes the command answerable: priority and registration order are the two discriminators the dispatch itself uses, so two routes overlapping on pattern and methods rendered identically and the command that exists to say which one answers could not say it.
+
+### Debug: `debug:version` reads the version rows off the envelope meta
+
+**What changed.** The application row reads `envelope.Meta.Version.Application`, where `NewMeta` has already applied the fallback chain — the command's explicit `ApplicationVersion`, then the process-wide declaration made through `output.SetApplicationVersion`, then nothing.
+
+**Symptom.** An application that declared its version through `output.SetApplicationVersion` — which is where a composition root's `main` declares it — now sees that version in the `application` row and in the json document, where it used to see an empty value.
+
+**Remedy.** None; the row now reports what the process declared. An application that sets `ApplicationVersion` on the command itself is unaffected: the explicit value still wins.
+
 ### Container: a scoped registration under the protected `service.` prefix is refused at boot
 
 **What changed.** Both scoped registration doors — `Container.RegisterScoped` and `Scope.RegisterScoped`, and the generic helpers over them — refuse a service name beginning with `service.`, with or without `Replacing()`.
