@@ -16,7 +16,7 @@ var (
     defaultLocalePattern = regexp.MustCompile(`^[a-z]{2}(-[A-Za-z]{2})?$`)
 )
 
-/* MinimumSessionTtl is the shortest session lifetime that can still describe a session. Below it the value is not a short session, it is a broken one: the write succeeds, but the entry lapses before the response reaches the client and the client comes back with the cookie — a login that answers "welcome" and leaves the user logged out — and a second is the finest unit http itself dates anything in. Zero keeps its own meaning of "no expiry" and is not affected. */
+/* MinimumSessionTtl is the shortest session lifetime that can still describe a session. Below it the value is not a short session, it is a broken one: the storage purges every lapsed entry on the write that stores the new one, so a ttl smaller than the time that write takes makes SaveSession report success and persist nothing — a login that answers "welcome" and leaves the user logged out. A session also has to survive the response reaching the client and the client coming back, which no sub-second lifetime does, and a second is the finest unit http itself dates anything in. Zero keeps its own meaning of "no expiry" and is not affected. */
 const MinimumSessionTtl = time.Second
 
 /* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing. It is zero — no expiry — which is what every deployment that predates the setting already had, so upgrading does not start logging users out at a lifetime nobody chose.

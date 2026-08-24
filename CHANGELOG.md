@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the `MinimumSessionTtl` comment and the `MELODY_HTTP_SESSION_TTL` section of `CONFIG.md` name the mechanism that makes a sub-second lifetime broken rather than merely short: the storage purges every lapsed entry on the very write that stores the new one, so a ttl smaller than the time that write takes has `SaveSession` report success and persist nothing. Both documents named only the second reason — that no sub-second lifetime survives the response reaching the client and the client coming back — which is true and is not the one an operator hits first. Documentation only; the guard and its refusal are unchanged
+
 - documentation: `DEBUG.md` lists `NewEventCommand`, `DeferredListener` and `DeferredListenerProvider`, and `EVENT.md` lists the two constructors `NewRequiredListenerSkippedErrorWithStoppedListenerFailure` and `NewRequiredListenerSkippedErrorWithCause`. Five exported symbols this major ships and no document on any major named — the type list stopped at `EventCommand` and at the base constructor, so the declaration channel of `debug:events` and the two refusals that carry a cause were reachable only by reading the source
 
 - documentation: `DEBUG.md` names the cycle-guarded walk that runs before `json.Marshal` on a route attribute. The bullet described the degradation an unserializable value gets and stopped there, so the half that matters most was unwritten: `fmt` has no cycle detection, and a route attribute pointing at itself recursed until the goroutine stack was gone — a fatal error no recover turns into a reported failure, which is the process dying rather than the document degrading

@@ -47,25 +47,26 @@ A present key with an empty string value is considered **present** (it is a vali
 
 All recognised `.env` keys and their defaults live in [`config/environment.go`](../../config/environment.go) and [`config/configuration_default.go`](../../config/configuration_default.go):
 
-| Env key                              | Parameter name                       | Default                                      |
-|--------------------------------------|--------------------------------------|----------------------------------------------|
-| `MELODY_ENV`                         | `kernel.environment`                 | `"dev"`                                      |
-| `MELODY_DEFAULT_MODE`                | `kernel.default_mode`                | `"http"`                                     |
-| `MELODY_PROCESS_ROLE`                | `kernel.process_role`                | `"all"`                                      |
-| `MELODY_HTTP_ADDRESS`                | `kernel.http_address`                | `":8080"`                                    |
-| `MELODY_HTTP_MAX_REQUEST_BODY_BYTES` | `kernel.http.max_request_body_bytes` | `1048576`                                    |
-| `MELODY_HTTP_SESSION_TTL`            | `kernel.http.session_ttl`            | `0s`                                         |
-| `MELODY_HTTP_SHUTDOWN_TIMEOUT`       | `kernel.http.shutdown_timeout`       | `5s`                                         |
-| `MELODY_CLI_NAME`                    | `kernel.cli_name`                    | `"melody"`                                   |
-| `MELODY_CLI_DESCRIPTION`             | `kernel.cli_description`             | `""`                                         |
-| `MELODY_LOG_PATH`                    | `kernel.log_path`                    | `%kernel.logs_dir%/%kernel.environment%.log` |
-| `MELODY_LOG_LEVEL`                   | `kernel.log_level`                   | `"debug"`                                    |
-| `MELODY_DEFAULT_LOCALE`              | `kernel.default_locale`              | `"en"`                                       |
-| `MELODY_PUBLIC_DIR`                  | `kernel.public_dir`                  | `"public"`                                   |
-| `MELODY_STATIC_INDEX_FILE`           | `kernel.static.index_file`           | `"index.html"`                               |
-| `MELODY_STATIC_ENABLE_CACHE`         | `kernel.static.enable_cache`         | `true`                                       |
-| `MELODY_STATIC_CACHE_MAX_AGE`        | `kernel.static.cache_max_age`        | `3600`                                       |
-| `MELODY_STATIC_EXCLUDED_PATHS`       | `kernel.static.excluded_paths`       | `""`                                         |
+| Env key                                   | Parameter name                            | Default                                      |
+|-------------------------------------------|-------------------------------------------|----------------------------------------------|
+| `MELODY_ENV`                              | `kernel.environment`                      | `"dev"`                                      |
+| `MELODY_DEFAULT_MODE`                     | `kernel.default_mode`                     | `"http"`                                     |
+| `MELODY_PROCESS_ROLE`                     | `kernel.process_role`                     | `"all"`                                      |
+| `MELODY_HTTP_ADDRESS`                     | `kernel.http_address`                     | `":8080"`                                    |
+| `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`      | `kernel.http.max_request_body_bytes`      | `1048576`                                    |
+| `MELODY_HTTP_SESSION_TTL`                 | `kernel.http.session_ttl`                 | `0s`                                         |
+| `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                         |
+| `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                         |
+| `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                   |
+| `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                         |
+| `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_dir%/%kernel.environment%.log` |
+| `MELODY_LOG_LEVEL`                        | `kernel.log_level`                        | `"debug"`                                    |
+| `MELODY_DEFAULT_LOCALE`                   | `kernel.default_locale`                   | `"en"`                                       |
+| `MELODY_PUBLIC_DIR`                       | `kernel.public_dir`                       | `"public"`                                   |
+| `MELODY_STATIC_INDEX_FILE`                | `kernel.static.index_file`                | `"index.html"`                               |
+| `MELODY_STATIC_ENABLE_CACHE`              | `kernel.static.enable_cache`              | `true`                                       |
+| `MELODY_STATIC_CACHE_MAX_AGE`             | `kernel.static.cache_max_age`             | `3600`                                       |
+| `MELODY_STATIC_EXCLUDED_PATHS`            | `kernel.static.excluded_paths`            | `""`                                         |
 
 Project layout defaults that are not env-overridable:
 
@@ -110,13 +111,23 @@ The value is a Go duration string, so it **must carry a unit** — `30m`, `24h`,
 The default is [`DefaultSessionTtl`](../../config/http.go), **zero — no expiry**, which is what every deployment that predates this setting already had; upgrading does not begin ending sessions at a lifetime nobody chose. It is worth knowing what zero costs here specifically, because the cost does not come from anything the application wrote. Melody mints a session for every request that arrives without a session cookie, so the moment an application writes to a session on a public path — a csrf token, a flash message, a locale — every cookie-less request leaves an entry behind: a crawler, a health check, a hotlinked image. With no expiry nothing reclaims it:
 
 - [`InMemoryStorage`](../../session/in_memory_storage.go), the default store, only ever deletes entries that carry an expiry — its background cleanup skips entries with none — so the map grows without bound for the process's whole lifetime;
-- [`FileStorage`](../../session/file_storage.go) holds every session in one map and re-serialises **the whole map** on every write, so each save gets progressively more expensive as the file grows and nothing is ever purged from it.
+- [`FileStorage`](../../session/file_storage.go) holds every session in one map and re-serialises **the whole map** on every write, so each save gets progressively more expensive as the file grows. Its flush does purge the entries that have lapsed, but with no expiry there are none to purge, so nothing ever leaves.
 
 Which is why the application says so at boot rather than picking a lifetime on the deployment's behalf: an http application that is still on the framework-supplied [`InMemoryStorage`](../../session/in_memory_storage.go) **and** on a ttl of zero logs a warning naming both halves. Either half alone is silent — a shared storage is the operator's to prune, and a lifetime the deployment set reclaims on its own. Set `MELODY_HTTP_SESSION_TTL` to what the deployment actually wants; a value such as `24h` is long enough that no ordinary browsing session is cut short and short enough that abandoned entries leave.
 
 The ttl is a **lifetime since the last write, not an idle timeout.** The expiry is stamped when the session is stored, and a session is only stored when it was modified — [`Manager.SaveSession`](../../session/manager.go) returns early otherwise, and the response path calls it under the same condition — so reading a session never refreshes it. With `MELODY_HTTP_SESSION_TTL=30m` a user who logs in and then browses read-only pages is logged out 30 minutes after the login, however active they were; this is not `gc_maxlifetime`. The choice is deliberate: refreshing on read would turn every request carrying a session into a storage write, which on [`FileStorage`](../../session/file_storage.go) re-serialises the whole map. An application that wants a true idle timeout can buy one explicitly with a `kernel.request` listener that writes to the session — a last-seen timestamp, say — accepting the one storage write per request that costs.
 
 On the default this reads: nothing expires at all, so the question does not arise until a lifetime is set — at which point it is measured from the login, not from the last page.
+
+### Session tombstone retention
+
+How long a deleted session id is remembered, so that a slow in-flight request still holding a snapshot loaded before the delete cannot write the deleted session back. Read through [`Http().SessionTombstoneRetention()`](../../config/http.go).
+
+| Environment key                           | Parameter name                            | Default |
+|-------------------------------------------|-------------------------------------------|---------|
+| `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`    |
+
+The value is a Go duration string and must be positive: zero and negative values fail the boot, because a window that refuses nothing disarms the logout defence. The default is [`DefaultSessionTombstoneRetention`](../../config/http.go), five minutes.
 
 ### Http shutdown timeout
 
@@ -286,11 +297,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpShutdownTimeoutKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpShutdownTimeoutKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpShutdownTimeout`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpShutdownTimeout`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

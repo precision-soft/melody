@@ -117,6 +117,10 @@ func main() {
     runSessionRotationCheck()
     sections++
 
+    section("SESSION TOMBSTONE (in-process)")
+    runSessionTombstoneCheck()
+    sections++
+
     redisAddress := os.Getenv("REDIS_ADDRESS")
 
     if address := redisAddress; "" != address {

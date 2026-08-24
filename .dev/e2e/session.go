@@ -1,6 +1,7 @@
 package main
 
 import (
+    "errors"
     "io"
     nethttp "net/http"
     "net/http/cookiejar"
@@ -32,6 +33,9 @@ const (
     sessionCartValue   = "SKU-1"
     sessionIdentityKey = "userId"
     sessionIdentity    = "u-1"
+
+    /* the body the in-flight handler produces, so the assertion can tell the handler's own response apart from the 500 a storage outage would substitute */
+    sessionHandlerBody = "handler-body"
 )
 
 /* sessionProbeSeparator joins the fields the probe routes report back. Every field is a session id or a value
@@ -359,7 +363,7 @@ func newSessionServiceContainer(storage sessioncontract.Storage, projectDirector
     serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return session.NewManager(storage, 30*time.Minute), nil
+            return session.NewManagerOwningStorage(storage, 30*time.Minute), nil
         },
     )
 
@@ -385,4 +389,229 @@ func (instance *staticEnvironmentSource) Load() (map[string]string, error) {
     }
 
     return copied, nil
+}
+
+/* runSessionTombstoneCheck drives the write-back refusal over a real loopback http server, with two CONCURRENT
+requests naming the same session — which is the only shape the guarantee has: one request loads the session, a
+second one ends it, and the first one then tries to save what it loaded. Nothing here is faked; the two requests
+run through the same kernel, against the same on-disk store, and the barrier only decides the interleaving the
+guarantee is written for instead of waiting for it to happen by luck.
+
+The reason this needs a live section at all is that mutation cannot reach it: the refusal is a guard against a
+RACE, so a mutant that moves the check outside the critical section survives every sequential run. Measured
+before it was written, the guarantee had no live check on any major — the section above probes only the
+rotation.
+
+What is asserted is STATE, never the framework's word about itself: the error the held save answers, the bytes
+of the session file read back from disk, the Set-Cookie the client actually received, and the status of the
+response the handler produced. */
+func runSessionTombstoneCheck() {
+    storageDirectory, storageDirectoryErr := os.MkdirTemp("", "melody-e2e-tombstone")
+    if nil != storageDirectoryErr {
+        fail("session tombstone: temporary directory: %v", storageDirectoryErr)
+    }
+    removeStorageOnFailure := pushFailureCleanup(func() {
+        _ = os.RemoveAll(storageDirectory)
+    })
+    defer removeStorageOnFailure()
+    defer os.RemoveAll(storageDirectory)
+
+    storagePath := filepath.Join(storageDirectory, "sessions.json")
+
+    storage, storageErr := session.NewFileStorageFromPath(storagePath)
+    if nil != storageErr {
+        fail("session tombstone: file storage: %v", storageErr)
+    }
+
+    closeStorageOnFailure := pushFailureCleanup(func() {
+        _ = storage.Close()
+    })
+    defer closeStorageOnFailure()
+    defer storage.Close()
+
+    serviceContainer := newSessionServiceContainer(storage, storageDirectory)
+    sessionManager := session.SessionMustFromContainer(serviceContainer)
+
+    /* the barrier: the in-flight handler reports the id it loaded and then waits, so the harness can land the
+       ending request in the window the guarantee is about instead of racing for it */
+    inFlightLoaded := make(chan string, 1)
+    sessionEnded := make(chan struct{}, 2)
+
+    router := melodyhttp.NewRouter()
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/start",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            currentSession := requestSession(request)
+            currentSession.Set(sessionIdentityKey, sessionIdentity)
+
+            if saveErr := sessionManager.SaveSession(currentSession); nil != saveErr {
+                return nil, saveErr
+            }
+
+            return sessionProbeResponse(currentSession.Id()), nil
+        },
+    )
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/hold-then-save",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            currentSession := requestSession(request)
+            currentSession.Set(sessionCartKey, sessionCartValue)
+
+            inFlightLoaded <- currentSession.Id()
+            <-sessionEnded
+
+            /* the save the whole guarantee is about: the session this request loaded was ended under it while
+               it was running, and the write must be refused rather than re-creating the entry with the
+               pre-logout identity intact */
+            saveErr := sessionManager.SaveSession(currentSession)
+
+            refusal := "not-refused"
+            if true == errors.Is(saveErr, session.ErrSessionDeleted) {
+                refusal = "refused-as-deleted"
+            } else if nil != saveErr {
+                refusal = "refused-as-" + saveErr.Error()
+            }
+
+            return sessionProbeResponse(currentSession.Id(), refusal, sessionHandlerBody), nil
+        },
+    )
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/logout",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            currentSession := requestSession(request)
+            endedId := currentSession.Id()
+
+            currentSession.Clear()
+
+            return sessionProbeResponse(endedId), nil
+        },
+    )
+
+    router.Handle(
+        nethttp.MethodGet,
+        "/rotate",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            currentSession := requestSession(request)
+            previousId := currentSession.Id()
+
+            rotated, rotateErr := melodyhttp.RegenerateRequestSession(request)
+            if nil != rotateErr {
+                return nil, rotateErr
+            }
+
+            return sessionProbeResponse(previousId, rotated.Id()), nil
+        },
+    )
+
+    server := httptest.NewServer(melodyhttp.NewKernel(router).ServeHttp(serviceContainer))
+    defer server.Close()
+
+    anonymous := func() *nethttp.Client {
+        return &nethttp.Client{Timeout: 10 * time.Second}
+    }
+
+    /* (1) a save held open across a concurrent delete is refused, and refused by NAME: the cause is
+       session.ErrSessionDeleted, which is what lets the response path tell the session ending apart from a
+       storage outage */
+    _, startFields := sessionProbe(anonymous(), server.URL+"/start", "")
+    liveId := startFields[0]
+
+    heldResponse := make(chan *nethttp.Response, 1)
+    heldFields := make(chan []string, 1)
+
+    go func() {
+        response, fields := sessionProbe(anonymous(), server.URL+"/hold-then-save", liveId)
+        heldResponse <- response
+        heldFields <- fields
+    }()
+
+    inFlightId := <-inFlightLoaded
+    if liveId != inFlightId {
+        fail("session tombstone: the in-flight request loaded %q, wanted the live session %q", inFlightId, liveId)
+    }
+
+    _, logoutFields := sessionProbe(anonymous(), server.URL+"/logout", liveId)
+    if liveId != logoutFields[0] {
+        fail("session tombstone: the logout ended %q, wanted %q", logoutFields[0], liveId)
+    }
+
+    sessionEnded <- struct{}{}
+
+    inFlightResponse := <-heldResponse
+    inFlightFields := <-heldFields
+
+    if 3 != len(inFlightFields) {
+        fail("session tombstone: the in-flight probe reported %d fields, wanted 3", len(inFlightFields))
+    }
+    if "refused-as-deleted" != inFlightFields[1] {
+        fail("session tombstone: the held save answered %q, wanted the refusal to carry session.ErrSessionDeleted", inFlightFields[1])
+    }
+    pass("(1) a save held open across a concurrent delete was refused with session.ErrSessionDeleted")
+
+    /* (2) the deleted id does not come back into the store the in-flight request could still have written it
+       to — read from the file on disk, not from the manager */
+    if nil != sessionManager.Session(liveId) {
+        fail("session tombstone: the deleted session %q was resurrected by the in-flight save", liveId)
+    }
+    if true == strings.Contains(readSessionStore(storagePath), liveId) {
+        fail("session tombstone: the deleted id %q is still written in the store at %s", liveId, storagePath)
+    }
+    pass("(2) the deleted id never reappeared in the session file on disk")
+
+    /* (3) the client of the in-flight request is logged out cleanly rather than answered 500: the session
+       ending is not a storage outage, so the handler's own response is served untouched and only the cookie
+       is expired. That difference is the whole reason the cause is a distinct error. */
+    if nethttp.StatusOK != inFlightResponse.StatusCode {
+        fail("session tombstone: the in-flight request answered %d, wanted the handler's own response", inFlightResponse.StatusCode)
+    }
+    if sessionHandlerBody != inFlightFields[2] {
+        fail("session tombstone: the handler's response was replaced — wanted %q, got %q", sessionHandlerBody, inFlightFields[2])
+    }
+
+    expiringCookie := responseSessionCookie(inFlightResponse)
+    if nil == expiringCookie {
+        fail("session tombstone: the in-flight response emitted no session cookie — the client keeps presenting a deleted id")
+    }
+    if "" != expiringCookie.Value || 0 <= expiringCookie.MaxAge {
+        fail("session tombstone: wanted an expiring session cookie, got value=%q MaxAge=%d", expiringCookie.Value, expiringCookie.MaxAge)
+    }
+    pass("(3) the client got the expiring cookie and the handler's own response, not a 500")
+
+    /* (4) a rotated-away id is remembered exactly the same way: the rotation retires an id, and a request
+       holding a snapshot from before it must not be able to buy it back */
+    _, secondStartFields := sessionProbe(anonymous(), server.URL+"/start", "")
+    rotatingId := secondStartFields[0]
+
+    secondHeldFields := make(chan []string, 1)
+
+    go func() {
+        _, fields := sessionProbe(anonymous(), server.URL+"/hold-then-save", rotatingId)
+        secondHeldFields <- fields
+    }()
+
+    if rotatingId != <-inFlightLoaded {
+        fail("session tombstone: the second in-flight request loaded the wrong session")
+    }
+
+    _, rotateFields := sessionProbe(anonymous(), server.URL+"/rotate", rotatingId)
+    if rotatingId != rotateFields[0] || rotatingId == rotateFields[1] {
+        fail("session tombstone: the rotation reported %v, wanted %q rotated to a fresh id", rotateFields, rotatingId)
+    }
+
+    sessionEnded <- struct{}{}
+
+    secondFields := <-secondHeldFields
+    if "refused-as-deleted" != secondFields[1] {
+        fail("session tombstone: the save held across a rotation answered %q, wanted the same refusal a delete produces", secondFields[1])
+    }
+    if true == strings.Contains(readSessionStore(storagePath), rotatingId) {
+        fail("session tombstone: the rotated-away id %q was written back into the store", rotatingId)
+    }
+    pass("(4) an id retired by a rotation buys nothing either — the held save was refused the same way")
 }

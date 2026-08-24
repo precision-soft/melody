@@ -779,22 +779,6 @@ The framework's own `Session` is latched out of use rather than merely cleared, 
 
 See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR, and [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
 
-### Compile-level: `session/contract.Session` gained `SetShared`
-
-**What changed.** [`session/contract.Session`](../session/contract/session.go) declares `SetShared(key string, value any)`. `Set` stores a value the storage layer is free to copy — every entry is deep-copied on the way into the store and on the way out of it, which is what keeps a session read on one request from writing into another request's data — while `SetShared` stores the handle itself, so `Get` hands back that very value and every reader of the session reaches the one object. The write decides the semantics and `Get` honours whichever was chosen, so there is no `GetShared` and no `IsShared` to implement alongside it.
-
-**Symptom.** An out-of-tree implementation of `session/contract.Session` no longer satisfies the interface, so the assignment that hands it to the framework fails to compile with `missing method SetShared`.
-
-**Remedy.** Implement it. An implementation backed by an in-process map already stores what it is given, so delegating is both the shortest implementation and the honest one:
-
-```go
-func (instance *CustomSession) SetShared(key string, value any) {
-	instance.Set(key, value)
-}
-```
-
-An implementation whose storage serialises cannot carry a handle across a round trip, and should refuse the save rather than write something that loads back as a plain copy — [`FileStorage.Save`](../session/file_storage.go) refuses the whole session before touching anything and names the offending key. See [`package/SESSION.md`](./package/SESSION.md) for the distinction and what each write is for.
-
 ### Compile-level: `config/contract.HttpConfiguration` gained `StaticExcludedPaths`
 
 **What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `StaticExcludedPaths() []string`, the path prefixes the built-in file server declines before it looks at the disk. The framework's own implementation reads them from `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`), a comma-separated list that is empty by default. Since the built-in file server sits outermost in the pipeline, excluding a prefix is how an application takes a part of the url back — to put authentication in front of a directory, or to serve it from a root of its own.
@@ -1208,6 +1192,119 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 **Symptom.** A configuration map holding both `x-api-key` and `X-Api-Key` panics naming the collision. A header rotation through `SetHeader("x-api-key", ...)` on a client configured with `X-Api-Key` overwrites the entry it means to instead of leaving two. Code that wrote into the map returned by `Headers()` no longer reaches the option set.
 
 **Remedy.** Keep one spelling per header in each map. Code that mutated the getters' maps moves to `SetHeader`/`SetQuery`, the doors that write.
+
+### Session: an injected file handle opened for appending is refused
+
+**What changed.** `session.NewFileStorageFromFile` refuses a handle opened with `O_APPEND`, naming it, and the write itself now names offset zero instead of seeking to it.
+
+**Symptom.** A construction that used to succeed now fails at boot with `session storage file is opened for appending`.
+
+**Remedy.** Open the handle without `os.O_APPEND` — `os.O_RDWR|os.O_CREATE` is what this storage needs — or hand the path to `session.NewFileStorageFromPath` and let it own the file. The refusal replaces a silent corruption: an appending write ignores the offset, so every snapshot landed after the document it was replacing and the truncation then cut the pair to the new length. Measured, a growing snapshot left the file readable and lost every save with no error on any path, and a shrinking one left a document the next boot refused to decode, losing every persisted session.
+
+### Session: a userland `Storage` may now be called concurrently for different sessions
+
+**What changed.** `Manager.SaveSession` and `Manager.DeleteSession` hold a lock keyed to the session id across the storage call instead of one lock for the whole manager. The tombstone check and the write are still one critical section for the SAME session, which is the invariant that stops a logout being undone by a request that loaded the session before it; two requests acting on different sessions no longer wait on each other. Sixteen concurrent saves of distinct sessions against a storage with a 2 ms round trip took 35.5 ms and now take 2.8 ms.
+
+**Symptom.** An implementation of `session/contract.Storage` written against the previous behaviour — one that assumed the manager serialised every call and therefore keeps unsynchronised state of its own — can now be entered concurrently for different session ids. Both storages melody ships took a mutex of their own all along and are unaffected; so is any storage that delegates to a client which is already safe for concurrent use, which redis and database clients are.
+
+**Remedy.** Make the implementation safe for concurrent calls naming different session ids — for most storages this is already true and needs no change. Calls naming the same id are still serialised by the manager, so per-session state needs nothing added.
+
+### Http: the end of a session is a warning, not a storage outage
+
+**What changed.** When another request ends a session while this one is running, the response path records it at **warning** under its own name. The two genuine failures on that path — a save that could not land and a delete that could not land — keep the error level. All of them now carry the session id, the request method and the path.
+
+**Symptom.** `session was deleted while the request was in flight` moves from `error` to `warning`. An alert counting session errors will see its volume drop, by exactly the traffic that was never a failure: a user logging out in one tab produced one of these per concurrent request in the others.
+
+**Remedy.** If an alert was tuned around that volume, retune it; the records it was counting were the session ending, which `SESSION.md` and `HTTP.md` both describe as the normal outcome.
+
+### Session: the contract gains an atomic Snapshot
+
+**What changed.** `session/contract.Session` carries `Snapshot() (values map[string]any, modified bool, cleared bool)` — the three answers read under one lock acquisition — and the response path decides between deleting and saving through it. Reading the flags and the values through the individual accessors let a `Clear` racing the response land between the reads and write the pre-logout state back under a live id.
+
+**Symptom.** An out-of-tree implementation of the `Session` contract stops compiling with "missing method Snapshot".
+
+**Remedy.** Implement `Snapshot` as one critical section over the same three answers the accessors give; a single-threaded implementation can simply return `instance.All(), instance.IsModified(), instance.IsCleared()`.
+
+### Session: a sub-second positive ttl is refused by the manual constructor too
+
+**What changed.** `session.NewManager` and its siblings refuse a positive ttl below one second, the refusal `MELODY_HTTP_SESSION_TTL` validation has always given: such a lifetime stores no usable session — `SaveSession` reports success and the entry lapses before the client returns.
+
+**Symptom.** A hand-wired manager built with, say, `500*time.Millisecond` now panics at construction naming the rule; zero keeps meaning no expiry.
+
+**Remedy.** Use a lifetime of at least one second, or zero for no expiry.
+
+### Behavioural: `Session.Clear` latches, and a deleted session cannot be saved again
+
+**What changed.** Two related refusals. [`Session.Clear`](../session/session.go) now latches: a later `Set` puts the value back and marks the session modified, but the session stays cleared, so the response path still deletes it. And [`Manager.DeleteSession`](../session/manager.go) remembers the id for [`TombstoneRetention`](../session/manager.go), so [`SaveSession`](../session/manager.go) refuses a write under an id another request deleted, returning an error whose cause is [`ErrSessionDeleted`](../session/manager.go). The unexported `abandon`, which applied the latch for rotation alone, is gone.
+
+**Symptom.** A handler that clears a session and then writes to the same object no longer keeps the session alive: previously the write lifted the cleared flag and the response path saved the session back under the pre-logout id and re-issued its cookie. And a request holding a session that another request deleted mid-flight now gets an error from `SaveSession` instead of silently re-creating the entry; the response path answers that by expiring the browser cookie and serving the handler's response unchanged.
+
+**Remedy.** A handler that wants a usable session after ending one asks the manager for a new session rather than writing to the cleared one:
+
+```go
+sessionInstance.Clear()
+
+replacement := manager.NewSession()
+replacement.Set(sessionKeyFlash, "you have been signed out")
+
+request.Attributes().Set(melodyhttp.RequestAttributeSession, replacement)
+```
+
+Code that calls `SaveSession` directly should treat `ErrSessionDeleted` as the session having ended rather than as a failure:
+
+```go
+if err := manager.SaveSession(sessionInstance); nil != err {
+    if true == errors.Is(err, session.ErrSessionDeleted) {
+        /* another request signed this session out; nothing to persist */
+        return nil
+    }
+
+    return err
+}
+```
+
+### Behavioural: a negative session ttl fails at construction
+
+**What changed.** [`session.NewManager`](../session/manager.go) panics on a negative `ttl`, as the configuration path already did.
+
+**Symptom.** Code that computed a ttl dynamically and could produce a negative value — `time.Until(expiry)` on an instant already past — now fails at construction instead of building a manager. It previously produced sessions with **no expiry at all**, because both storages test `0 < ttl` and treat anything else as "never expires": the value that reads as "already lapsed" produced the immortal session.
+
+**Remedy.** Clamp before constructing, and use zero when no expiry is what you mean:
+
+```go
+ttl := time.Until(expiry)
+if 0 > ttl {
+    ttl = config.MinimumSessionTtl
+}
+```
+
+### Behavioural: `Session.Get` hands out a copy
+
+**What changed.** [`session.Session.Get`](../session/session.go) returns a copy at the depth `All` copies at. The live nested value it used to hand out, mutated in place, changed the session without passing through `Set`: `modified` stayed false, `SaveSession` skipped the write and reported success, and the mutation silently never persisted.
+
+**Symptom.** Code that mutated the map or slice returned by `Get` and relied on the live session object changing underneath — within the same request only, since the mutation never reached the storage — now works on its own copy.
+
+**Remedy.** Read, mutate the copy, `Set` it back — the pattern that was always the correct one is unaffected:
+
+```go
+profile := sessionInstance.Get("profile").(map[string]any)
+profile["role"] = "admin"
+sessionInstance.Set("profile", profile)
+```
+
+### Compile-level: `config/contract.HttpConfiguration` gained `SessionTombstoneRetention`
+
+**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `SessionTombstoneRetention() time.Duration`, how long a deleted session id keeps refusing a write-back. The framework's own implementation reads it from `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`), five minutes by default — the constant the window used to be — and refuses zero and negative at boot, because a window that refuses nothing is not a shorter window but a disarmed logout defence.
+
+**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method SessionTombstoneRetention`.
+
+**Remedy.** Implement it. Returning `config.DefaultSessionTombstoneRetention` keeps the behaviour the interface had without the method:
+
+```go
+func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Duration {
+	return config.DefaultSessionTombstoneRetention
+}
+```
 
 ## v3.0.0
 

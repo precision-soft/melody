@@ -1164,6 +1164,48 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     }
 }
 
+/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    response := TextResponse(nethttp.StatusOK, "handler body")
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{
+        saveErr: exception.NewError("session was deleted and cannot be saved again", nil, session.ErrSessionDeleted),
+    }
+    sessionInstance := &stubSession{id: "session-123", isModified: true}
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        response,
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    httpResponse := writer.Result()
+
+    if nethttp.StatusOK != httpResponse.StatusCode {
+        t.Fatalf("expected the handler's own response to be served, got %d", httpResponse.StatusCode)
+    }
+
+    cookies := httpResponse.Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected the clearing cookie, got %d cookies", len(cookies))
+    }
+
+    if "" != cookies[0].Value || 0 <= cookies[0].MaxAge {
+        t.Fatalf("expected an expiring session cookie, got value %q maxAge %d", cookies[0].Value, cookies[0].MaxAge)
+    }
+}
+
 /* A storage outage on the save path answers 500 rather than the response the handler produced: the handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored — and the client cannot tell the difference. The cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
 func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
@@ -1286,6 +1328,55 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
 
     if response != writtenResponse {
         t.Fatalf("expected the caller's response back, got %#v", writtenResponse)
+    }
+}
+
+/* the divergent fake constructs the interleaving instead of awaiting it: its Snapshot answers a cleared session while the individual accessors still answer a live one, exactly the state a Clear landing mid-decision produces. The branch must follow the snapshot. */
+type snapshotDivergentSession struct {
+    stubSession
+}
+
+func (instance *snapshotDivergentSession) Snapshot() (map[string]any, bool, bool) {
+    return map[string]any{}, true, true
+}
+
+func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &snapshotDivergentSession{
+        stubSession{
+            id:         "1234567890abcdef1234567890abcdef",
+            isModified: true,
+            isCleared:  false,
+        },
+    }
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{
+            TrustForwardedHeaders: false,
+            TrustedProxyList:      []string{},
+        },
+        httpcontract.SessionCookiePolicy{
+            Path:     "/",
+            Domain:   "",
+            SameSite: nethttp.SameSiteLaxMode,
+        },
+    )
+
+    if 1 != sessionManager.deleteCalled || 0 != sessionManager.saveCalled {
+        t.Fatalf("expected the snapshot's cleared flag to take the delete branch, got %d deletes and %d saves", sessionManager.deleteCalled, sessionManager.saveCalled)
     }
 }
 
@@ -1499,6 +1590,49 @@ func writeResponseWithSessionOutcome(
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
+}
+
+/* a session another request ended under this one is the session ending, not a storage outage — the contract says so in as many words. At error it read exactly like a redis that had fallen over, so a user who logged out in a second tab paged the operator once per concurrent request. */
+func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinates(t *testing.T) {
+    capture := &sessionPersistenceCaptureLogger{}
+
+    writeResponseWithSessionOutcome(
+        t,
+        capture,
+        &stubSessionManager{
+            saveErr: exception.NewError(
+                "session was deleted and cannot be saved again",
+                map[string]any{"sessionRef": sessionIdLogReference("session-123")},
+                session.ErrSessionDeleted,
+            ),
+        },
+        &stubSession{id: "session-123", isModified: true},
+    )
+
+    if 1 != len(capture.entries) {
+        t.Fatalf("expected exactly one record, got %d: %v", len(capture.entries), capture.entries)
+    }
+
+    record := capture.entries[0]
+
+    if loggingcontract.LevelWarning != record.level {
+        t.Fatalf("expected the session ending at warning, got %v", record.level)
+    }
+
+    if "session was deleted while the request was in flight" != record.message {
+        t.Fatalf("unexpected message: %q", record.message)
+    }
+
+    /* the record names the session through a one-way reference, never the raw id */
+    if nil != record.context["sessionId"] {
+        t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
+    }
+
+    for key, expected := range map[string]any{"sessionRef": sessionIdLogReference("session-123"), "method": nethttp.MethodPost, "path": "/account/settings"} {
+        if expected != record.context[key] {
+            t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
+        }
+    }
 }
 
 /* a storage outage keeps the error level it deserves, and it too names the session — through a one-way reference, never the raw id — and the route. */

@@ -476,6 +476,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 testCase.staticCacheMaxAge,
                 testCase.staticExcludedPaths,
                 testCase.sessionTtl,
+                DefaultSessionTombstoneRetention,
                 DefaultHttpShutdownTimeout,
             )
 
@@ -505,6 +506,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
         3600,
         []string{"/internal"},
         time.Minute,
+        11*time.Minute,
         7*time.Second,
     )
     if nil != httpErr {
@@ -535,8 +537,41 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     if time.Minute != httpConfigurationInstance.SessionTtl() {
         t.Fatalf("unexpected session ttl: %s", httpConfigurationInstance.SessionTtl())
     }
+    if 11*time.Minute != httpConfigurationInstance.SessionTombstoneRetention() {
+        t.Fatalf("unexpected session tombstone retention: %s", httpConfigurationInstance.SessionTombstoneRetention())
+    }
     if 7*time.Second != httpConfigurationInstance.ShutdownTimeout() {
         t.Fatalf("unexpected shutdown timeout: %s", httpConfigurationInstance.ShutdownTimeout())
+    }
+}
+
+func TestNewHttpConfiguration_RefusesANonPositiveSessionTombstoneRetention(t *testing.T) {
+    for _, invalidRetention := range []time.Duration{0, -time.Second} {
+        httpConfigurationInstance, httpErr := newHttpConfiguration(
+            ":8080",
+            "en",
+            "public",
+            "index.html",
+            1024,
+            false,
+            3600,
+            nil,
+            0,
+            invalidRetention,
+            DefaultHttpShutdownTimeout,
+        )
+
+        if nil == httpErr {
+            t.Fatalf("expected the tombstone retention %v to be refused", invalidRetention)
+        }
+
+        if nil != httpConfigurationInstance {
+            t.Fatalf("expected no configuration over a refused value")
+        }
+
+        if "http session tombstone retention must be positive" != httpErr.Error() {
+            t.Fatalf("expected the refusal to name the rule, got %q", httpErr.Error())
+        }
     }
 }
 
@@ -552,6 +587,7 @@ func TestNewHttpConfiguration_RefusesANonPositiveShutdownTimeout(t *testing.T) {
             3600,
             nil,
             0,
+            DefaultSessionTombstoneRetention,
             invalidTimeout,
         )
 
