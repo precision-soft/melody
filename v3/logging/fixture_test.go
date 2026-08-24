@@ -1,10 +1,10 @@
 package logging
 
 import (
-    "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
+/* the capturing double stands in for whatever logger a suite exercises; the logger, recover, json-logger and request-logger tests all reach it from here. */
 type captureLogger struct {
     lastLevel   loggingcontract.Level
     lastMessage string
@@ -40,9 +40,8 @@ func (instance *captureLogger) Emergency(message string, context loggingcontract
 }
 
 var _ loggingcontract.Logger = (*captureLogger)(nil)
-var _ = exception.NewError
 
-/* the probe stands in for a third-party error type someone panics a typed nil of: it satisfies the error interface while its Error() dereferences the nil receiver, which is exactly what the recover helpers must never do */
+/* typedNilProbeError is the concrete error type whose typed nil the package has to read as the nil its producer meant, rather than dereference. */
 type typedNilProbeError struct {
     message string
 }

@@ -2,6 +2,7 @@ package validation
 
 import (
     "encoding/json"
+    goerrors "errors"
     "fmt"
     "reflect"
     "sort"
@@ -19,7 +20,7 @@ import (
 /* maxNestedValidationDepth bounds the recursive descent into nested struct/slice/map/embedded values so a self-referential or deeply cyclic payload cannot overflow the stack; the visited-pointer set below short-circuits genuine reference cycles, and this depth cap is the belt-and-suspenders backstop for value cycles the pointer set cannot observe. Reaching the cap yields a validation error, never a silent pass: the tags below it were never enforced, so reporting the payload valid would let a caller nest past the cap to bypass validation outright. */
 const maxNestedValidationDepth = 64
 
-/* @important cyclicReference identifies an already-visited pointer/map header during the recursive descent so a reference cycle (a self-referential linked node, a slice/map that reaches back to an ancestor) is validated once and then short-circuited instead of recursing forever. */
+/* cyclicReference identifies a pointer on the CURRENT descent path, so a reference cycle — a self-referential node, a structure that reaches back to an ancestor — is validated once and then short-circuited instead of recursing forever. The set is path-scoped, an entry leaving it when its subtree returns, because only an ancestor still on the path can close a cycle: a whole-call set reads a shared non-cyclic pointer, the same value reachable through two sibling fields, as a cycle and skips every constraint under its second occurrence. */
 type cyclicReference struct {
     pointer uintptr
     typ     reflect.Type
@@ -54,8 +55,9 @@ type Validator struct {
 }
 
 type constructedConstraint struct {
-    constraint validationcontract.Constraint
-    ok         bool
+    constraint   validationcontract.Constraint
+    ok           bool
+    refusalCause string
 }
 
 func (instance *Validator) RegisterConstraint(name string, constraint validationcontract.Constraint) {
@@ -128,7 +130,7 @@ func (instance *Validator) validateInternal(data any) ValidationErrors {
     return instance.validateReflected(reflect.ValueOf(data), "", 0, make(map[cyclicReference]bool))
 }
 
-/* @important validateReflected drives the recursive cascade: it unwraps pointers/interfaces (skipping nil and already-visited references), then dispatches structs, slices/arrays and maps to their per-kind walkers so that validate tags declared on nested fields are enforced with a path that identifies the offending nested field. Scalar leaves have no tags of their own to enforce here (their owning struct applies the tag) and fall through untouched, so a flat payload with no nested tags produces exactly the same result as before. */
+/* validateReflected drives the recursive cascade: it unwraps pointers and interfaces, skipping nil and already-visited references, then dispatches structs, slices, arrays and maps to their per-kind walkers, so a validate tag declared on a nested field is enforced under a path that identifies that field. A scalar leaf falls through untouched — the tag on it belongs to the struct that owns it. */
 func (instance *Validator) validateReflected(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
     var errors ValidationErrors
 
@@ -174,7 +176,11 @@ func (instance *Validator) validateReflected(value reflect.Value, path string, d
         }
         visited[reference] = true
 
-        return instance.validateReflected(value.Elem(), path, depth+1, visited)
+        errors = append(errors, instance.validateReflected(value.Elem(), path, depth+1, visited)...)
+
+        delete(visited, reference)
+
+        return errors
     case reflect.Struct:
         return instance.validateStruct(value, path, depth, visited)
     case reflect.Slice, reflect.Array:
@@ -404,20 +410,30 @@ func (instance *Validator) applyFieldRules(field reflect.StructField, value refl
     }
 
     validateTag := field.Tag.Get("validate")
-    /* the trimmed comparison keeps the skip marker in lockstep with the openapi mirror's splitRules, which trims the tag before reading it — a padded " - " must not turn into an unknown rule that rejects every value while the spec advertises no validation */
+    /* the trimmed comparison keeps a padded " - " a skip marker instead of an unknown rule that rejects every value, and keeps that marker in lockstep with the openapi mirror's splitRules, which trims the tag before reading it */
     if trimmedTag := strings.TrimSpace(validateTag); "" == trimmedTag || "-" == trimmedTag {
         return errors
     }
 
     rules, err := parseValidationTag(validateTag)
     if nil != err {
+        context := map[string]any{
+            "tag": validateTag,
+        }
+
+        /* the parser names the comma-separated segment it refused; without it a long tag reports only that "the tag" is invalid */
+        var parseError *exception.Error
+        if true == goerrors.As(err, &parseError) {
+            if part, exists := parseError.Context()["part"]; true == exists {
+                context["part"] = part
+            }
+        }
+
         return append(errors, NewValidationError(
             fieldPath,
             "invalid validation tag syntax",
             ErrorInvalidRuleSyntax,
-            map[string]any{
-                "tag": validateTag,
-            },
+            context,
         ))
     }
 
@@ -440,7 +456,7 @@ func embeddedFieldPath(field reflect.StructField, path string) string {
     return path + "." + field.Name
 }
 
-/* dominantVisibleField mirrors the openapi mirror's dominantEmbeddedField (openapi/schema.go): a single candidate wins outright, exactly one explicitly json-named candidate beats the untagged ones, and anything else is the ambiguity encoding/json drops — no field is populated, so none is validated. */
+/* dominantVisibleField mirrors encoding/json's dominance pick, and the openapi mirror's dominantEmbeddedField (openapi/schema.go) with it: a single candidate wins outright, exactly one explicitly json-named candidate beats the untagged ones, and anything else is the ambiguity encoding/json drops — no field is populated, so none is validated. */
 func dominantVisibleField(group []visibleFieldCandidate) (visibleFieldCandidate, bool) {
     if 1 == len(group) {
         return group[0], true
@@ -462,7 +478,7 @@ func dominantVisibleField(group []visibleFieldCandidate) (visibleFieldCandidate,
     return visibleFieldCandidate{}, false
 }
 
-/* validationJsonFieldName mirrors the openapi mirror's jsonFieldName: the name a payload spells the field with, and whether the field is omitted outright — a field encoding/json never populates cannot be satisfied by any payload, so validating its permanent zero value would reject every request (a field literally named "-" is spelled "-," and stays validated). */
+/* validationJsonFieldName mirrors the openapi mirror's jsonFieldName and yields the name a payload spells the field with, and whether the field is omitted outright — a field encoding/json never populates cannot be satisfied by any payload, so validating its permanent zero value would reject every request (a field literally named "-" is spelled "-," and stays validated). */
 func validationJsonFieldName(field reflect.StructField) (string, bool) {
     tag := field.Tag.Get("json")
     if "-" == tag {
@@ -492,7 +508,7 @@ func hasExplicitValidationJsonName(field reflect.StructField) bool {
     return "" != parts[0] && "-" != parts[0]
 }
 
-/* isPromotedValidationEmbed mirrors the openapi mirror's isPromotedEmbed (openapi/schema.go): an anonymous struct (or pointer to one) without an explicit json name flattens onto its parent object, and a json-named embed is an ordinary field holding a nested object. An embedded time.Time flattens like any other embed and contributes no name of its own, all of its fields being unexported; the shape where it owns the whole body instead is the promoted codec, which promotesValidationTimeCodec settles before this walk begins. */
+/* isPromotedValidationEmbed matches encoding/json's flattening, and the openapi mirror's isPromotedEmbed (openapi/schema.go) with it: an anonymous struct (or pointer to one) without an explicit json name flattens onto its parent object, and a json-named embed is an ordinary field holding a nested object. An embedded time.Time flattens like any other embed and contributes no name of its own, all of its fields being unexported; the shape where it owns the whole body instead is the promoted codec, which promotesValidationTimeCodec settles before this walk begins. */
 func isPromotedValidationEmbed(field reflect.StructField) bool {
     if false == field.Anonymous {
         return false
@@ -521,7 +537,7 @@ var validationJsonMarshalerInterfaceType = reflect.TypeOf((*json.Marshaler)(nil)
 /* validationTimeCodecCache memoizes promotesValidationTimeCodec: the answer is a property of the type alone, and the decode probe below is then offered to a type once instead of once per value validated. */
 var validationTimeCodecCache sync.Map
 
-/* promotesValidationTimeCodec reports a struct that a payload can only ever spell as an RFC 3339 string: such a body is handed whole to the embedded time and populates nothing else in the struct, so no constraint declared there can be satisfied by any payload and enforcing one would reject every body the spec describes, which is the reason a `json:"-"` field is left alone as well. Both halves are asked, because they are different questions: what the wire form looks like is decided by the promoted marshaler, while what a body populates is decided by the unmarshaler, and a struct can promote the one while declaring the other. Only the first half is the openapi mirror's question — promotesEmbeddedTimeCodec (openapi/schema.go) advertises a wire form and rightly stops at it — so it is promotesValidationTimeEncoding below, not this predicate, that has to stay identical to the mirror. */
+/* promotesValidationTimeCodec reports a struct that a payload can only ever spell as an RFC 3339 string: such a body is handed whole to the embedded time and populates nothing else in the struct, so no constraint declared there can be satisfied by any payload and enforcing one would reject every body the type is able to decode, which is the reason a `json:"-"` field is left alone as well. Both halves are asked, because they are different questions: what the wire form looks like is decided by the promoted marshaler, while what a body populates is decided by the unmarshaler, and a struct can promote the one while declaring the other. Only the first half is the openapi mirror's question — promotesEmbeddedTimeCodec (openapi/schema.go) advertises a wire form and rightly stops at it — so it is promotesValidationTimeEncoding below, not this predicate, that has to stay identical to the mirror. */
 func promotesValidationTimeCodec(structType reflect.Type) bool {
     if cached, exists := validationTimeCodecCache.Load(structType); true == exists {
         return cached.(bool)
@@ -529,9 +545,10 @@ func promotesValidationTimeCodec(structType reflect.Type) bool {
 
     promotes := promotesValidationTimeEncoding(structType) && refusesValidationObjectBody(structType)
 
-    validationTimeCodecCache.Store(structType, promotes)
+    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE verdict: the probe below runs application code whose answer is not guaranteed stable, and two goroutines computing opposite verdicts with a plain Store would leave the frozen one decided by store ordering. The parsed-tag and constructed-constraint memos settle the same way for the same reason; nestedTagBearingTypeCache is the one that does not, because its producer only reads the type's declared tags and every caller computes the same answer */
+    stored, _ := validationTimeCodecCache.LoadOrStore(structType, promotes)
 
-    return promotes
+    return stored.(bool)
 }
 
 /* promotesValidationTimeEncoding reports a struct whose promoted json codec is time.Time's, which is the encoding half alone: it mirrors the openapi mirror's promotesEmbeddedTimeCodec (openapi/schema.go) and must stay identical to it, or a body the spec describes as a date-time string would be walked here as an object. */
@@ -559,7 +576,7 @@ func refusesValidationObjectBody(structType reflect.Type) (refuses bool) {
     return nil != json.Unmarshal([]byte("{}"), reflect.New(structType).Interface())
 }
 
-/* promotedValidationMarshalerOrigin mirrors the openapi mirror's promotedMarshalerOrigin (openapi/schema.go) and must stay identical to it, or a body the spec describes as a date-time string would be walked here as an object: it reports which type declares the MarshalJSON in structType's value method set, and at what embedding depth, by the selector rule the method set is built by — the candidate at the shallowest depth wins, two candidates tied at that depth promote nothing, and a non-struct embed is a candidate like any other. Unresolved (false) leaves the caller walking the struct, which is the direction that keeps constraints enforced: an embed whose codec has a pointer receiver, and a cycle reached through a pointer embed. A MarshalJSON declared on structType itself while an embed also carries one is out of reach, reflect.Method carrying no declaring type, and resolves to the embed. */
+/* promotedValidationMarshalerOrigin mirrors the openapi mirror's promotedMarshalerOrigin (openapi/schema.go) and must stay identical to it, or a body the spec describes as a date-time string would be walked here as an object: it reports which type declares the MarshalJSON in structType's value method set, and at what embedding depth, by the selector rule the method set is built by: the candidate at the shallowest depth wins, two candidates tied at that depth promote nothing, and a non-struct embed is a candidate like any other. Unresolved (false) leaves the caller walking the struct, which is the direction that keeps constraints enforced: an embed whose codec has a pointer receiver, and a cycle reached through a pointer embed. A MarshalJSON declared on structType itself while an embed also carries one is out of reach, reflect.Method carrying no declaring type, and resolves to the embed. */
 func promotedValidationMarshalerOrigin(targetType reflect.Type, path map[reflect.Type]bool) (reflect.Type, int, bool) {
     if validationTimeType == targetType {
         return validationTimeType, 0, true
@@ -652,7 +669,7 @@ func (instance *Validator) validateSequence(value reflect.Value, path string, de
 
     if reflect.Slice == value.Kind() {
         if reflect.Uint8 == value.Type().Elem().Kind() {
-            /* @important a byte slice is a scalar payload (the openapi mirror emits it as a string/byte), never a sequence of validatable elements, so it carries no nested tags to enforce. */
+            /* a byte slice is a scalar payload (the openapi mirror emits it as a string/byte), never a sequence of validatable elements, so it carries no nested tags to enforce */
             return errors
         }
 
@@ -703,21 +720,28 @@ func (instance *Validator) validateRule(value any, fieldName string, rule valida
         )
     }
 
-    constraint, paramsOk := instance.createConstraintWithParams(rule.name, rule.params)
+    constraint, paramsOk, refusalCause := instance.createConstraintWithParams(rule.name, rule.params)
     if false == paramsOk {
+        context := map[string]any{
+            "rule":   rule.name,
+            "params": copyValidationRuleParams(rule.params),
+        }
+
+        if "" != refusalCause {
+            context["cause"] = refusalCause
+        }
+
         return NewValidationError(
             fieldName,
             "invalid validation rule parameter",
             ErrorInvalidRuleSyntax,
-            map[string]any{
-                "rule":   rule.name,
-                "params": copyValidationRuleParams(rule.params),
-            },
+            context,
         )
     }
 
     err := constraint.Validate(value, fieldName)
-    if nil == err {
+    /* IsNilInterface rather than a plain nil comparison: a custom constraint written with a concrete error variable returns a typed nil on its success path, and dereferencing it below would panic inside Validate */
+    if true == internal.IsNilInterface(err) {
         return nil
     }
 
@@ -760,13 +784,23 @@ func constraintCacheKey(name string, params map[string]string) string {
     return builder.String()
 }
 
-func (instance *Validator) createConstraintWithParams(name string, params map[string]string) (validationcontract.Constraint, bool) {
+func (instance *Validator) createConstraintWithParams(name string, params map[string]string) (validationcontract.Constraint, bool, string) {
     instance.mutex.RLock()
     constraint := instance.constraints[name]
     instance.mutex.RUnlock()
 
+    /* the registry is append-only today, so a name that passed the existence check cannot be missing here; the guard keeps a future removal or replacement path from turning this into a Validate call on a nil interface */
+    if true == internal.IsNilInterface(constraint) {
+        return nil, false, "constraint is not registered"
+    }
+
     if 0 == len(params) {
-        return constraint, true
+        /* a parameterized rule named without parameters fails closed: the registered instance is the template WithParams is called on, not a fallback, so a bare `regex` or a bare `lessThan` declares nothing the validator could enforce */
+        if _, parameterized := constraint.(validationcontract.ParameterizedConstraint); true == parameterized {
+            return nil, false, "constraint requires parameters"
+        }
+
+        return constraint, true, ""
     }
 
     cacheKey := constraintCacheKey(name, params)
@@ -774,35 +808,35 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
     if cached, exists := instance.constructedConstraints.Load(cacheKey); true == exists {
         constructed := cached.(constructedConstraint)
 
-        return constructed.constraint, constructed.ok
+        return constructed.constraint, constructed.ok, constructed.refusalCause
     }
 
-    configured, configuredOk := buildConstraintWithParams(constraint, params)
+    configured, configuredOk, refusalCause := buildConstraintWithParams(constraint, params)
 
-    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE constraint: the contract lets the winner be shared for the process lifetime, and a losing caller validating against its own copy would be an unadvertised second instance. A rejected parameter set is cached alongside the accepted ones — WithParams is a pure function of its parameters by contract, so the outcome cannot change, and leaving failures out would re-attempt the construction for every value a permanently invalid tag reaches while freezing the successes. */
-    stored, _ := instance.constructedConstraints.LoadOrStore(cacheKey, constructedConstraint{constraint: configured, ok: configuredOk})
+    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE constraint: the contract lets the winner be shared for the process lifetime, and a losing caller validating against its own copy would be an unadvertised second instance. A rejected parameter set is cached alongside the accepted ones — WithParams is required by contract to be a pure function of its parameters, so the outcome cannot change, and leaving failures out would re-attempt the construction for every value a permanently invalid tag reaches while freezing the successes. */
+    stored, _ := instance.constructedConstraints.LoadOrStore(cacheKey, constructedConstraint{constraint: configured, ok: configuredOk, refusalCause: refusalCause})
     constructed := stored.(constructedConstraint)
 
-    return constructed.constraint, constructed.ok
+    return constructed.constraint, constructed.ok, constructed.refusalCause
 }
 
-func buildConstraintWithParams(constraint validationcontract.Constraint, params map[string]string) (validationcontract.Constraint, bool) {
+func buildConstraintWithParams(constraint validationcontract.Constraint, params map[string]string) (validationcontract.Constraint, bool, string) {
     parameterized, ok := constraint.(validationcontract.ParameterizedConstraint)
     if false == ok {
-        /* @important fail closed when the tag carries parameters the registered constraint cannot consume: validating with the unparameterized singleton would silently enforce a different configuration than the tag declares (a custom `between(min=1,max=5)` would validate with whatever the singleton was built with) */
-        return nil, false
+        /* a tag that carries parameters the registered constraint cannot consume fails closed: the unparameterized instance enforces a different configuration than the tag declares */
+        return nil, false, "constraint does not accept parameters"
     }
 
     /* the parameter map belongs to the memoized parse of the tag, so a constraint that kept or mutated it would poison every later lookup */
-    /* @info the copy is the barrier between the process-wide memo and userland: the cached rules share this map's identity, so a constraint that retained or mutated what WithParams received would poison every later validation */
     configured, withParamsErr := parameterized.WithParams(copyValidationRuleParams(params))
     if nil != withParamsErr {
-        return nil, false
+        /* the refusal reason travels with the verdict, so a malformed tag, a rejected parameter value and a constraint that takes no parameters are told apart */
+        return nil, false, withParamsErr.Error()
     }
 
     if true == internal.IsNilInterface(configured) {
-        return nil, false
+        return nil, false, "constraint construction returned nil"
     }
 
-    return configured, true
+    return configured, true, ""
 }

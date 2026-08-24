@@ -18,6 +18,86 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
+### Validation: the string-form constraints operate on strings
+
+**What changed.** `regex`, `email`, `alpha`, `alphanumeric` and `numeric` refuse a value that is not a string instead of silently passing it, and `min`, `max` and `notBlank` no longer measure the fmt rendering of a non-string — all three refuse the type. A nil pointer and the empty string still pass the five format constraints, so optional-field composition is unchanged.
+
+**Symptom.** A string-form rule on a non-string field — `regex` on `[]byte`, `max=10` on an `int`, `notBlank` on a `bool` — now rejects every value with `value must be a string`. It previously either passed everything (the format five, and `notBlank` on `false`/`0`/empty collections) or measured the Go rendering: an empty slice passed `min=1` as the two runes of `[]`, and a five-byte `[]byte` failed `max=5` at a rendered width of twenty-one.
+
+**Remedy.** Move the rule to a string field, or use the constraint built for the type: [`greaterThan`/`lessThan`](../validation/constraint_greater_than.go) for numeric ranges, [`notEmpty`](../validation/constraint_not_empty.go) for collections. A rule that must inspect a non-string type is a custom [`contract.Constraint`](../validation/contract/constraint.go).
+
+### Validation: a parameterized rule needs its parameters, whole and non-negative
+
+**What changed.** Three related refusals in how rule parameters are read. A parameterized rule named without parameters (`regex`, `regex()`, `max()`, `lessThan`) fails closed instead of validating with the registered singleton — the bare `regex` validated with the match-everything `.*` default, the bare `lessThan` meant "less than 0", the bare `max` meant the constructor's 100. A numeric bound must be an integer in its entirety: the parse previously accepted a valid leading integer and dropped the rest, so `lessThan=-0.5` became a bound of 0 and accepted `-0.2`, which the tag as written refuses. And [`Regex.WithParams`](../validation/constraint_regex.go) refuses an empty pattern, while [`MinLength`](../validation/constraint_min_length.go) and [`MaxLength`](../validation/constraint_max_length.go) refuse a negative bound.
+
+**Symptom.** A tag of any of these shapes now reports `invalidRuleSyntax` on every value it reaches, where it previously enforced a configuration nobody wrote — or nothing at all. The refusal reason travels in the error context under `cause`, and because `invalidRuleSyntax` is one of the rule-wiring codes the kernel already classifies, the 400 is recorded at error level and that context stays out of the response body.
+
+**Remedy.** Write the parameter the rule needs: `regex(pattern=^[a-z]+$)`, `max=100`, `lessThan=0`. A pattern genuinely meant to match everything says so explicitly. The contract on [`ParameterizedConstraint`](../validation/contract/constraint.go) now states that the registered instance is a template for `WithParams` and never a fallback configuration.
+
+### Validation: a negative length bound is refused at construction
+
+**What changed.** [`validation.NewMinLength`](../validation/constraint_min_length.go) and [`validation.NewMaxLength`](../validation/constraint_max_length.go) panic on a negative bound, naming it. The tag door (`validate:"min=-1"`) refuses the same value with a parse error rather than a panic, because a tag is data a request path reads while a constructor argument is a declaration.
+
+**Symptom.** A call passing a negative bound — almost always a computed value that came out wrong — now fails at construction instead of returning a constraint.
+
+**Remedy.** Clamp the value at the call site if it can legitimately be negative: `max(0, bound)`. What the refusal replaces is worse than a panic in both directions — `NewMinLength(-1)` built a rule that accepted every value in silence, reading as enforced while validating nothing and leaving no record anywhere, and `NewMaxLength(-1)` built one that refused every value including the empty string with `this field must not exceed -1 characters`, which the client was handed.
+
+### Validation: a tag that parses to no rule at all is a syntax error
+
+**What changed.** A `validate` tag that survives the empty and skip-marker guards and then yields no rule — `validate:","` is the plain case — reports `invalidRuleSyntax` instead of being accepted as a request to validate nothing. The empty tag and the explicit skip marker `-` are unchanged and still skip the field.
+
+**Symptom.** A field whose tag is malformed in this particular way now rejects every value, where it previously declared validation and enforced none.
+
+**Remedy.** Write the rules the field needs, or write the skip marker `-` if the field is deliberately unvalidated.
+
+### Logging: `LogError` anchors the record on the error it was handed
+
+**What changed.** [`LogError`](../logging/logger.go) reads the level, message and context of the error the caller passed in, and reads the already-logged mark at the depth [`exception.MarkLogged`](../exception/utility.go) writes it — the nearest `AlreadyLogged` implementer in the chain. It used to search the chain for the nearest `*exception.Error` for both, which disagreed with the writer on every chain whose markable link is a different type, and anchored the record on whatever exception sat deepest. An error that is not a top-level `*exception.Error` now carries the context of the nearest context provider in its chain plus the cause chain walked from its own wrap link, where it used to be logged with no context at all.
+
+**Symptom.** Records change level and content. An `HttpException` at 500 wrapping an info-level cause used to be filed at info and dropped whole by a production threshold; it is now filed at error with the wrapper's own message. A wrapped-then-marked error stops producing two records. Records for foreign errors gain `cause`, `causeChain` and `causeContextChain`.
+
+**Remedy.** None; tooling that parses log records should expect the richer shape. An alert tuned to the volume of info-level records from wrapped http exceptions will see that volume move to error, which is where those failures always belonged.
+
+### Logging: a record whose level is not one of the five weighs as an error
+
+**What changed.** The json logger gives a record with an unrecognised level the priority of `error` instead of the default lowest priority. The label still carries the raw level, so the record says what it was handed.
+
+**Symptom.** Records that used to vanish under any threshold at or above info now appear at error. The case that produced them is the zero-value `&exception.Error{}` a recovery handler can carry: its level is the empty string, it was filed as debug, and its fatal record was dropped by every production configuration.
+
+**Remedy.** None. A deployment that was unknowingly discarding these records will see them; each one names a value constructed without a level, which is worth finding.
+
+### Logging: the json timestamp carries nanosecond precision, and its order is the write order
+
+**What changed.** The `time` field is `RFC3339Nano` rather than `RFC3339`, and the stamp is taken inside the write mutex together with the encoding, so the order of the stamps is the order of the writes. Taken above the lock, the stamp said when the record was FORMED, and the two orders diverged by however long the encoding took.
+
+**Symptom.** The `time` field gains a fractional part. Whole-second stamps made every record of a busy second indistinguishable; the fraction parses under the RFC 3339 layouts a consumer already uses, so a parser reading `time.RFC3339` is unaffected. Concurrent writers pay for the ordering: the encoding is now serialized across them.
+
+**Remedy.** None for a consumer that parses RFC 3339. A test asserting a whole-second stamp by string equality compares a prefix instead.
+
+### Logging: the json logger reports its own failed write, once, on stderr
+
+**What changed.** When a write to the logger's output fails, the first such failure of that logger's life is echoed to stderr. It is echoed directly rather than through the emergency logger, which is itself a json logger and would re-enter the write that just failed, and it stays silent when this logger's own output already is stderr.
+
+**Symptom.** A new line on stderr — `melody: the json logger failed to write a record to its output: ...` — from a process whose log destination is full, read-only, or on a vanished mount. Previously the entire journal went silent with no signal on any channel and the operator read a healthy-looking empty file.
+
+**Remedy.** None; the echo is once per logger, so a destination that fails on every record does not move the flood from one channel to the other.
+
+### Logging: label maps are copied at every door that takes one
+
+**What changed.** [`NewJsonLoggerWithLabels`](../logging/json_logger.go), [`NewDefaultLoggerWithLabels`](../logging/default_logger.go), [`NewLoggingConfiguration`](../logging/logging_config.go) and `LoggingConfiguration.LevelLabels` copy the label map instead of sharing it by reference.
+
+**Symptom.** A caller that built a logger and then mutated the map it still holds no longer changes that logger's labels.
+
+**Remedy.** Build the map before handing it over. What the copy replaces is a fatal concurrent map access no recover reaches: the map is read lock-free on every `Log` call, so a write after construction raced every record being written.
+
+### Logging: a plain-text record is one line, whatever the payload says
+
+**What changed.** The default logger and `LogError`'s process-logger fallback escape the control characters of the message and of the rendered context before writing them.
+
+**Symptom.** A message or a context value containing a line break, a carriage return or an escape sequence renders escaped rather than being obeyed. Text of unknown origin — a header, a form field, a url — regularly reaches these lines.
+
+**Remedy.** None. What the escaping replaces is a record that could be ended early by its own payload, with a fully-formed fake record started after it at whatever level the payload named; the json sibling has always had the same guarantee from its encoder.
+
 ### Cache: the manager no longer closes a backend it was handed
 
 **What changed.** [`NewManager`](../cache/manager.go) builds a manager that does not own its backend: `Close` leaves the backend open, because on the container path both are registered services and the container closes each one itself — the cascade closed the backend twice, which a backend wrapping a connection typically reports as a failure on the second call. `NewManagerOwningBackend` keeps the cascade for the caller that builds both by hand.
