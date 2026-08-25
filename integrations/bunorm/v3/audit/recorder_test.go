@@ -2,11 +2,17 @@ package audit
 
 import (
     "context"
+    "database/sql"
     "errors"
     "fmt"
+    "os"
     "strings"
     "sync"
     "testing"
+
+    _ "github.com/go-sql-driver/mysql"
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
 
     "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -225,4 +231,66 @@ func TestRecorder_WithLoggerDoesNotRaceTheDeadLetterRead(t *testing.T) {
     }
 
     wait.Wait()
+}
+
+type widget struct {
+    Id       int64  `bun:"id,pk"`
+    Name     string `bun:"name"`
+    Quantity int    `bun:"quantity"`
+}
+
+func TestBunormAudit_RecordsFieldLevelChangeSet(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm audit integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    auditDatabase := bun.NewDB(sqlDb, mysqldialect.New())
+
+    auditDatabase.ExecContext(ctx, "DROP TABLE IF EXISTS melody_audit")
+    if _, createErr := auditDatabase.NewCreateTable().Model((*Entry)(nil)).Exec(ctx); nil != createErr {
+        t.Fatalf("create melody_audit: %v", createErr)
+    }
+
+    recorder := NewRecorder(auditDatabase, "melody_audit")
+    actorCtx := WithActor(ctx, "alice")
+
+    before := widget{Id: 1, Name: "bolt", Quantity: 5}
+    after := widget{Id: 1, Name: "bolt", Quantity: 9}
+
+    if recordErr := recorder.RecordUpdate(actorCtx, "widget", "1", before, after); nil != recordErr {
+        t.Fatalf("record update: %v", recordErr)
+    }
+
+    var operation string
+    var actor string
+    var changes string
+    selectErr := sqlDb.QueryRowContext(ctx, "SELECT operation, actor, changes FROM melody_audit ORDER BY id DESC LIMIT 1").Scan(&operation, &actor, &changes)
+    if nil != selectErr {
+        t.Fatalf("audit select: %v", selectErr)
+    }
+
+    if "UPDATE" != operation {
+        t.Fatalf("expected UPDATE operation, got %q", operation)
+    }
+
+    if "alice" != actor {
+        t.Fatalf("expected actor alice, got %q", actor)
+    }
+
+    if false == strings.Contains(changes, "\"quantity\"") {
+        t.Fatalf("expected quantity in change-set, got %q", changes)
+    }
+
+    if false == strings.Contains(changes, "\"old\":5") || false == strings.Contains(changes, "\"new\":9") {
+        t.Fatalf("expected old/new values in change-set, got %q", changes)
+    }
 }

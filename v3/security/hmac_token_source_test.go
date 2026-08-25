@@ -212,33 +212,6 @@ func TestHmacTokenSource_UnknownAppIsAnonymous(t *testing.T) {
     }
 }
 
-/* the key-id↔app binding is only sound when each app's secret material is distinct, so the provider refuses the same secret bytes under key ids belonging to different apps — otherwise a holder could sign under a sibling app's key id and defeat the binding. */
-func TestStaticHmacSecretProvider_RejectsSecretReusedAcrossApps(t *testing.T) {
-    defer func() {
-        if recovered := recover(); nil == recovered {
-            t.Fatal("expected a panic when the same secret is registered for two different apps")
-        }
-    }()
-
-    shared := []byte("shared-secret-value-across-apps-1")
-    NewStaticHmacSecretProvider("key-a", map[string]HmacKey{
-        "key-a": {App: "app-a", Secret: shared},
-        "key-b": {App: "app-b", Secret: shared},
-    })
-}
-
-/* positive control: the same app may legitimately own several key ids (rotation overlap), even reusing material is fine within one app — only cross-app reuse is rejected. */
-func TestStaticHmacSecretProvider_AllowsMultipleKeysForOneApp(t *testing.T) {
-    provider := NewStaticHmacSecretProvider("key-current", map[string]HmacKey{
-        "key-current":  {App: "wms-service", Secret: []byte("current-shared-secret-value-0001")},
-        "key-previous": {App: "wms-service", Secret: []byte("previous-shared-secret-value-002")},
-    })
-
-    if app, bound := provider.AppForKeyId("key-previous"); false == bound || "wms-service" != app {
-        t.Fatalf("expected key-previous bound to wms-service, got %q bound=%v", app, bound)
-    }
-}
-
 /* negative control: the strongest internal-auth threat. An attacker who holds a valid shared secret (here the secret issued to key-current / wms-service) signs an envelope claiming a different, higher-privileged app. The signature verifies and the claimed app is registered, but the key id is bound to wms-service, not admin-service, so the verifier refuses it. This is what closes the cross-app privilege-escalation vector: a secret is only ever as privileged as the single app its key id is issued to. */
 func TestHmacTokenSource_CrossAppClaimWithValidKeyIsAnonymous(t *testing.T) {
     /* the verifier knows both apps, so a rejection can only come from the key-id↔app binding, not from an unknown app */

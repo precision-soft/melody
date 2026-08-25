@@ -187,3 +187,12 @@ func (instance fakeRuntime) Scope() containercontract.Scope {
 func (instance fakeRuntime) Container() containercontract.Container {
     return nil
 }
+
+/* newRampKey is the 32-byte ramp key the live mysql suites seal with; the sibling newKey fills every byte alike, and the two must stay distinguishable because a rotation test needs two keys that differ in every position. */
+func newRampKey() []byte {
+    key := make([]byte, 32)
+    for index := range key {
+        key[index] = byte(index + 1)
+    }
+    return key
+}

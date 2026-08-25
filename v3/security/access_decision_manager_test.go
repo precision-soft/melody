@@ -71,3 +71,23 @@ func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
         t.Fatalf("expected denied")
     }
 }
+
+func TestAccessDecisionManager_DecideAllRefusesAnEmptyAttributeList(t *testing.T) {
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter())
+
+    err := manager.DecideAll(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}), []string{}, nil)
+    if nil == err {
+        t.Fatalf("expected DecideAll over an empty attribute list to refuse, as DecideAny does")
+    }
+}
+
+func TestNewAccessDecisionManager_CopiesTheCallersVoters(t *testing.T) {
+    voters := []securitycontract.Voter{NewRoleVoter()}
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, voters...)
+
+    voters[0] = &securityTestVoter{attribute: "ROLE_X", result: securitycontract.VoteGranted}
+
+    if _, isRoleVoter := manager.Voters()[0].(*RoleVoter); false == isRoleVoter {
+        t.Fatalf("expected the manager to keep its own copy of the voters, not the caller's mutated slice")
+    }
+}

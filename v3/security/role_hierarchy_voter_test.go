@@ -33,3 +33,14 @@ func TestRoleHierarchyVoter_ExpandsRolesBeforeVoting(t *testing.T) {
         t.Fatalf("expected granted")
     }
 }
+
+func TestRoleHierarchyVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
+    hierarchy := NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
+    voter := NewRoleHierarchyVoter(hierarchy, NewRoleVoter())
+
+    result := voter.Vote(&unauthenticatedRoledToken{roles: []string{"ROLE_ADMIN"}}, "ROLE_USER", nil)
+
+    if securitycontract.VoteDenied != result {
+        t.Fatalf("expected an unauthenticated token carrying the role to be denied, got %v", result)
+    }
+}

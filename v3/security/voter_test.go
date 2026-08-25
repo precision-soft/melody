@@ -32,3 +32,13 @@ func TestRoleVoter_GrantsWhenRolePresent(t *testing.T) {
         t.Fatalf("expected granted")
     }
 }
+
+func TestRoleVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
+    voter := NewRoleVoter()
+
+    result := voter.Vote(&unauthenticatedRoledToken{roles: []string{"ROLE_ADMIN"}}, "ROLE_ADMIN", nil)
+
+    if securitycontract.VoteDenied != result {
+        t.Fatalf("expected an unauthenticated token carrying the role to be denied, got %v", result)
+    }
+}

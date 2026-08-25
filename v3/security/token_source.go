@@ -5,6 +5,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -27,7 +28,9 @@ func (instance *ResolverTokenSource) Name() string {
 
 func (instance *ResolverTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     token := instance.resolver(request)
-    if nil == token {
+
+    /* the resolver is the application's function, and a nil pointer of its own token type reaches here as a non-nil interface: read as a live token it is published into the security context, where the first Roles() call panics */
+    if true == internal.IsNilInterface(token) {
         return NewAnonymousToken(), nil
     }
 

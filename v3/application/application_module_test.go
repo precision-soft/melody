@@ -5,6 +5,8 @@ import (
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     securityconfig "github.com/precision-soft/melody/v3/security/config"
@@ -430,4 +432,49 @@ func TestApplicationRegisterModuleProvider_RefusesATypedNilProvider(t *testing.T
         },
         "module provider may not be nil",
     )
+}
+
+type scopedServiceFakeModule struct {
+    fakeModule
+    registered bool
+}
+
+func (instance *scopedServiceFakeModule) RegisterScopedServices(registrar applicationcontract.ScopedServiceRegistrar) {
+    instance.registered = true
+
+    container.MustRegisterScoped(
+        registrar,
+        "app.request.probe",
+        func(resolver containercontract.Resolver) (*scopedRequestProbe, error) {
+            return &scopedRequestProbe{value: "request"}, nil
+        },
+    )
+}
+func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *testing.T) {
+    kernelInstance := newTestKernel()
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    moduleInstance := &scopedServiceFakeModule{fakeModule: fakeModule{name: "scoped"}}
+    applicationInstance.RegisterModule(moduleInstance)
+
+    applicationInstance.bootModulesPostConfigurationResolve()
+
+    if false == moduleInstance.registered {
+        t.Fatalf("expected the scoped registration hook to run")
+    }
+
+    scopeInstance := kernelInstance.ServiceContainer().NewScope()
+
+    value, getErr := scopeInstance.Get("app.request.probe")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if "request" != value.(*scopedRequestProbe).value {
+        t.Fatalf("unexpected scoped service value: %#v", value)
+    }
+
+    if true == kernelInstance.ServiceContainer().Has("app.request.probe") {
+        t.Fatalf("expected the container to stay blind to a scoped registration")
+    }
 }

@@ -7,14 +7,18 @@ import (
     "errors"
     "fmt"
     "io"
+    "os"
+    "strconv"
     "strings"
     "sync"
     "testing"
 
+    _ "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
 func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T) {
@@ -677,5 +681,448 @@ func TestClassifyRunError_NamesAnInterruptedRun(t *testing.T) {
     logContext := exception.LogContext(classified)
     if 7 != logContext["processed"] {
         t.Fatalf("expected the interruption to carry how far the run got, got: %v", logContext["processed"])
+    }
+}
+
+type normalisingCipher struct {
+    Cipher
+
+    ctx         context.Context
+    database    *bun.DB
+    table       string
+    column      string
+    normalising string
+    stored      string
+    updateErr   error
+}
+
+/* the seam fires only for the ROW's value: MigrateEncrypt now runs its own capacity check first, whose width probe seals filler strings through this same Encrypt — an unconditional trigger normalised the row BEFORE the run's SELECT, the run then read the already-normalised value, and the guard had no race left to catch. The race this test builds is the one between the run's SELECT and its guarded UPDATE, and only the row's own encrypt call sits in that window. */
+func (instance *normalisingCipher) Encrypt(plaintext string) (string, error) {
+    if plaintext == instance.stored {
+        _, execErr := instance.database.ExecContext(
+            instance.ctx,
+            "UPDATE "+instance.table+" SET "+instance.column+" = "+instance.normalising,
+        )
+        if nil != execErr {
+            instance.updateErr = execErr
+        }
+    }
+
+    return instance.Cipher.Encrypt(plaintext)
+}
+
+func TestEncryptMigrate_ConcurrentNormalisationIsSkippedUnderTheDefaultCollation(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm encrypt migrate integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    database := bun.NewDB(sqlDb, mysqldialect.New())
+
+    table := "migrate_collation_record"
+
+    cases := []struct {
+        name        string
+        collation   string
+        stored      string
+        normalising string
+        normalised  string
+    }{
+        /* the 8.x default is accent- and case-insensitive, so a casing normalisation still matches the value that was read */
+        {
+            name:        "utf8mb4_0900_ai_ci case normalisation",
+            collation:   "utf8mb4_0900_ai_ci",
+            stored:      "Bob@Example.com",
+            normalising: "LOWER(email)",
+            normalised:  "bob@example.com",
+        },
+        /* a PAD SPACE collation ignores trailing whitespace, so trimming it matches too */
+        {
+            name:        "utf8mb4_general_ci whitespace trim",
+            collation:   "utf8mb4_general_ci",
+            stored:      "bob@example.com  ",
+            normalising: "TRIM(TRAILING ' ' FROM email)",
+            normalised:  "bob@example.com",
+        },
+    }
+
+    for _, testCase := range cases {
+        database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
+
+        createSql := "CREATE TABLE " + table + " (" +
+            "id BIGINT NOT NULL PRIMARY KEY, " +
+            "email VARCHAR(255) CHARACTER SET utf8mb4 COLLATE " + testCase.collation + " NOT NULL" +
+            ") CHARACTER SET utf8mb4 COLLATE " + testCase.collation
+        if _, createErr := database.ExecContext(ctx, createSql); nil != createErr {
+            t.Fatalf("%s: create %s: %v", testCase.name, table, createErr)
+        }
+
+        if _, insertErr := database.ExecContext(ctx, "INSERT INTO "+table+" (id, email) VALUES (1, ?)", testCase.stored); nil != insertErr {
+            t.Fatalf("%s: insert: %v", testCase.name, insertErr)
+        }
+
+        cipher := &normalisingCipher{
+            Cipher:      NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()})),
+            ctx:         ctx,
+            database:    database,
+            table:       table,
+            column:      "email",
+            normalising: testCase.normalising,
+            stored:      testCase.stored,
+        }
+
+        /* the normalisation writes the value the run is about to overwrite; the guard must notice and leave the row alone */
+        if _, updateErr := database.ExecContext(ctx, "UPDATE "+table+" SET email = ? WHERE id = 1", testCase.stored); nil != updateErr {
+            t.Fatalf("%s: reset: %v", testCase.name, updateErr)
+        }
+
+        migrator := NewMigrator(database, cipher)
+
+        processed, runErr := migrator.MigrateEncrypt(ctx, TableSpec{
+            Table:      table,
+            PrimaryKey: "id",
+            Columns:    []string{"email"},
+        })
+
+        if nil != cipher.updateErr {
+            t.Fatalf("%s: concurrent normalisation: %v", testCase.name, cipher.updateErr)
+        }
+
+        var stored string
+        if scanErr := sqlDb.QueryRowContext(ctx, "SELECT email FROM "+table+" WHERE id = 1").Scan(&stored); nil != scanErr {
+            t.Fatalf("%s: raw select: %v", testCase.name, scanErr)
+        }
+
+        if nil == runErr {
+            t.Fatalf(
+                "%s: expected the row that changed under the run to be skipped and reported; the run reported processed=%d with no error and stored %q",
+                testCase.name,
+                processed,
+                stored,
+            )
+        }
+
+        if false == strings.Contains(runErr.Error(), "untouched") {
+            t.Fatalf("%s: expected the skip to be reported, got %v", testCase.name, runErr)
+        }
+
+        if 0 != processed {
+            t.Fatalf("%s: expected the skipped row not to be counted as processed, got %d", testCase.name, processed)
+        }
+
+        if testCase.normalised != stored {
+            t.Fatalf("%s: expected the concurrent normalisation to survive as %q, got %q", testCase.name, testCase.normalised, stored)
+        }
+    }
+
+    database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
+}
+
+func TestEncryptMigrate_RefusesATargetColumnTooNarrowForTheCiphertext(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm encrypt migrate integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    /* the non-strict sql_mode below is a session setting, so the run has to land on the same connection */
+    sqlDb.SetMaxOpenConns(1)
+
+    database := bun.NewDB(sqlDb, mysqldialect.New())
+
+    table := "migrate_width_record"
+
+    database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
+    defer database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
+
+    createSql := "CREATE TABLE " + table + " (" +
+        "id BIGINT NOT NULL PRIMARY KEY, " +
+        "secret VARCHAR(255) NOT NULL" +
+        ")"
+    if _, createErr := database.ExecContext(ctx, createSql); nil != createErr {
+        t.Fatalf("create %s: %v", table, createErr)
+    }
+
+    plaintext := strings.Repeat("s", 200)
+    if _, insertErr := database.ExecContext(ctx, "INSERT INTO "+table+" (id, secret) VALUES (1, ?)", plaintext); nil != insertErr {
+        t.Fatalf("insert: %v", insertErr)
+    }
+
+    if _, modeErr := database.ExecContext(ctx, "SET SESSION sql_mode = ''"); nil != modeErr {
+        t.Fatalf("relax sql_mode: %v", modeErr)
+    }
+    defer database.ExecContext(ctx, "SET SESSION sql_mode = DEFAULT")
+
+    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()}))
+    migrator := NewMigrator(database, cipher)
+
+    spec := TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"secret"}}
+
+    capacityErr := migrator.EnsureColumnCapacity(ctx, spec)
+    if nil == capacityErr {
+        processed, runErr := migrator.MigrateEncrypt(ctx, spec)
+
+        var truncated string
+        sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&truncated)
+
+        decrypted, decryptErr := cipher.Decrypt(truncated)
+
+        t.Fatalf(
+            "expected a 255 character column to be refused for a %d byte plaintext; the run reported processed=%d err=%v, left %d characters at rest, and reading them back (err=%v) yields %d characters, plaintext recovered=%t",
+            len(plaintext),
+            processed,
+            runErr,
+            len(truncated),
+            decryptErr,
+            len(decrypted),
+            plaintext == decrypted,
+        )
+    }
+
+    contextProvider, carriesContext := capacityErr.(exceptioncontract.ContextProvider)
+    if false == carriesContext {
+        t.Fatalf("expected the refusal to carry a diagnostic context, got %T", capacityErr)
+    }
+
+    diagnostic := contextProvider.Context()
+    if table != diagnostic["table"] || "secret" != diagnostic["column"] {
+        t.Fatalf("expected the refusal to name the table and the column, got %v", diagnostic)
+    }
+
+    /* 11 marker characters, a two character key id, a colon and the base64 of a 12 byte nonce, 200 plaintext bytes and a 16 byte tag */
+    if 255 != diagnostic["width"] || 318 != diagnostic["requiredWidth"] {
+        t.Fatalf("expected the refusal to report width 255 and required width 318, got %v", diagnostic)
+    }
+
+    var untouched string
+    if scanErr := sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&untouched); nil != scanErr {
+        t.Fatalf("raw select: %v", scanErr)
+    }
+    if plaintext != untouched {
+        t.Fatalf("expected the refused run to leave the row untouched, got %d characters", len(untouched))
+    }
+
+    /* the width the refusal named must be the width that lets the run through */
+    if _, widenErr := database.ExecContext(ctx, "ALTER TABLE "+table+" MODIFY secret VARCHAR(318) NOT NULL"); nil != widenErr {
+        t.Fatalf("widen column: %v", widenErr)
+    }
+
+    if recheckErr := migrator.EnsureColumnCapacity(ctx, spec); nil != recheckErr {
+        t.Fatalf("expected the widened column to be accepted, got %v", recheckErr)
+    }
+
+    processed, runErr := migrator.MigrateEncrypt(ctx, spec)
+    if nil != runErr {
+        t.Fatalf("migrate the widened column: %v", runErr)
+    }
+    if 1 != processed {
+        t.Fatalf("expected one migrated row, got %d", processed)
+    }
+
+    var sealed string
+    if scanErr := sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&sealed); nil != scanErr {
+        t.Fatalf("raw select: %v", scanErr)
+    }
+
+    decrypted, decryptErr := cipher.Decrypt(sealed)
+    if nil != decryptErr {
+        t.Fatalf("decrypt the migrated value: %v", decryptErr)
+    }
+    if plaintext != decrypted {
+        t.Fatalf("expected the migrated value to decrypt to the original plaintext, got %d characters", len(decrypted))
+    }
+
+    /* a second run over the already-sealed column must not read the ciphertext as a plaintext to be sealed again and demand a wider column for it */
+    if rerunErr := migrator.EnsureColumnCapacity(ctx, spec); nil != rerunErr {
+        t.Fatalf("expected a re-run over an already-migrated column to be accepted, got %v", rerunErr)
+    }
+}
+
+func TestEncryptMigrate_RefusesARotationToALongerKeyId(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm encrypt rotate integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    /* the non-strict sql_mode below is a session setting, so the run has to land on the same connection */
+    sqlDb.SetMaxOpenConns(1)
+
+    database := bun.NewDB(sqlDb, mysqldialect.New())
+
+    table := "migrate_rotate_width_record"
+
+    database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
+    defer database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
+
+    rotationKey := make([]byte, 32)
+    for index := range rotationKey {
+        rotationKey[index] = byte(255 - index)
+    }
+
+    targetKeyId := "2026-07-rotated"
+
+    cipher := NewCipher(NewStaticKeyProvider(
+        "v1",
+        map[string][]byte{"v1": newRampKey(), targetKeyId: rotationKey},
+    ))
+
+    plaintext := strings.Repeat("s", 100)
+
+    sealed, sealErr := cipher.EncryptWithKeyId(plaintext, "v1")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    /* the column is sized to exactly what it already holds, which is what a schema written for the current key looks like */
+    createSql := "CREATE TABLE " + table + " (" +
+        "id BIGINT NOT NULL PRIMARY KEY, " +
+        "secret VARCHAR(" + strconv.Itoa(len(sealed)) + ") NOT NULL" +
+        ")"
+    if _, createErr := database.ExecContext(ctx, createSql); nil != createErr {
+        t.Fatalf("create %s: %v", table, createErr)
+    }
+
+    /* the driver handle rather than bun: bun renders a string argument into the statement itself and drops the nul bytes the marker is glued with, which would store a value that no longer reads as sealed at all */
+    if _, insertErr := sqlDb.ExecContext(ctx, "INSERT INTO "+table+" (id, secret) VALUES (1, ?)", sealed); nil != insertErr {
+        t.Fatalf("insert the sealed row: %v", insertErr)
+    }
+
+    /* a column mid-migration still holds plaintext, and a rotation seals that under the target key too */
+    shortPlaintext := strings.Repeat("p", 10)
+    if _, insertErr := sqlDb.ExecContext(ctx, "INSERT INTO "+table+" (id, secret) VALUES (2, ?)", shortPlaintext); nil != insertErr {
+        t.Fatalf("insert the plaintext row: %v", insertErr)
+    }
+
+    if _, modeErr := database.ExecContext(ctx, "SET SESSION sql_mode = ''"); nil != modeErr {
+        t.Fatalf("relax sql_mode: %v", modeErr)
+    }
+    defer database.ExecContext(ctx, "SET SESSION sql_mode = DEFAULT")
+
+    migrator := NewMigrator(database, cipher)
+
+    spec := TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"secret"}}
+
+    capacityErr := migrator.EnsureColumnCapacityForReencrypt(ctx, spec, targetKeyId)
+    if nil == capacityErr {
+        processed, runErr := migrator.MigrateReencrypt(ctx, spec, targetKeyId)
+
+        var truncated string
+        sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&truncated)
+
+        decrypted, decryptErr := cipher.Decrypt(truncated)
+
+        t.Fatalf(
+            "expected a %d character column to be refused for a rotation from %q to %q; the run reported processed=%d err=%v, left %d characters at rest, and reading them back (err=%v) yields %d characters, plaintext recovered=%t",
+            len(sealed),
+            "v1",
+            targetKeyId,
+            processed,
+            runErr,
+            len(truncated),
+            decryptErr,
+            len(decrypted),
+            plaintext == decrypted,
+        )
+    }
+
+    contextProvider, carriesContext := capacityErr.(exceptioncontract.ContextProvider)
+    if false == carriesContext {
+        t.Fatalf("expected the refusal to carry a diagnostic context, got %T", capacityErr)
+    }
+
+    diagnostic := contextProvider.Context()
+    if table != diagnostic["table"] || "secret" != diagnostic["column"] {
+        t.Fatalf("expected the refusal to name the table and the column, got %v", diagnostic)
+    }
+
+    /* every stored value grows by exactly the difference between the two key ids */
+    requiredWidth := len(sealed) + len(targetKeyId) - len("v1")
+    if len(sealed) != diagnostic["width"] || requiredWidth != diagnostic["requiredWidth"] {
+        t.Fatalf("expected the refusal to report width %d and required width %d, got %v", len(sealed), requiredWidth, diagnostic)
+    }
+
+    if targetKeyId != diagnostic["targetKeyId"] {
+        t.Fatalf("expected the refusal to name the key id it was asked to rotate to, got %v", diagnostic)
+    }
+
+    var untouched string
+    if scanErr := sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&untouched); nil != scanErr {
+        t.Fatalf("raw select: %v", scanErr)
+    }
+    if sealed != untouched {
+        t.Fatalf("expected the refused rotation to leave the ciphertext untouched, got %d characters", len(untouched))
+    }
+
+    var untouchedPlaintext string
+    if scanErr := sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 2").Scan(&untouchedPlaintext); nil != scanErr {
+        t.Fatalf("raw select: %v", scanErr)
+    }
+    if shortPlaintext != untouchedPlaintext {
+        t.Fatalf("expected the refused rotation to leave the plaintext row untouched, got %q", untouchedPlaintext)
+    }
+
+    /* the width the refusal named must be the width that lets the rotation through */
+    if _, widenErr := database.ExecContext(
+        ctx,
+        "ALTER TABLE "+table+" MODIFY secret VARCHAR("+strconv.Itoa(requiredWidth)+") NOT NULL",
+    ); nil != widenErr {
+        t.Fatalf("widen column: %v", widenErr)
+    }
+
+    if recheckErr := migrator.EnsureColumnCapacityForReencrypt(ctx, spec, targetKeyId); nil != recheckErr {
+        t.Fatalf("expected the widened column to be accepted, got %v", recheckErr)
+    }
+
+    processed, runErr := migrator.MigrateReencrypt(ctx, spec, targetKeyId)
+    if nil != runErr {
+        t.Fatalf("rotate the widened column: %v", runErr)
+    }
+    if 2 != processed {
+        t.Fatalf("expected two rotated rows, got %d", processed)
+    }
+
+    var rotated string
+    if scanErr := sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&rotated); nil != scanErr {
+        t.Fatalf("raw select: %v", scanErr)
+    }
+
+    if false == strings.Contains(rotated, targetKeyId) {
+        t.Fatalf("expected the rotated value to carry the target key id, got %q", rotated)
+    }
+
+    decrypted, decryptErr := cipher.Decrypt(rotated)
+    if nil != decryptErr {
+        t.Fatalf("decrypt the rotated value: %v", decryptErr)
+    }
+    if plaintext != decrypted {
+        t.Fatalf("expected the rotated value to decrypt to the original plaintext, got %d characters", len(decrypted))
+    }
+
+    /* a rotation that changes no key id lengthens nothing, so a column that already holds the result must not be refused */
+    if rerunErr := migrator.EnsureColumnCapacityForReencrypt(ctx, spec, targetKeyId); nil != rerunErr {
+        t.Fatalf("expected a re-run of the same rotation to be accepted, got %v", rerunErr)
     }
 }

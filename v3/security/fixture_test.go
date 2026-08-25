@@ -24,6 +24,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 type recordedLogRecord struct {
@@ -353,4 +354,41 @@ func bearerRequest(tokenString string) httpcontract.Request {
     }
 
     return testhelper.NewHttpTestRequestFromHttpRequest(request)
+}
+
+/* unauthenticatedRoledToken carries roles while answering IsAuthenticated false — the shape a "remembered" or half-logged-in token takes. It is what proves the voters refuse a token that reports roles it has not authenticated for; the in-package tokens never combine the two. */
+type unauthenticatedRoledToken struct {
+    roles []string
+}
+
+func (instance *unauthenticatedRoledToken) UserIdentifier() string     { return "u1" }
+func (instance *unauthenticatedRoledToken) Roles() []string            { return instance.roles }
+func (instance *unauthenticatedRoledToken) IsAuthenticated() bool      { return false }
+func (instance *unauthenticatedRoledToken) Scope() map[string]any      { return map[string]any{} }
+func (instance *unauthenticatedRoledToken) Attributes() map[string]any { return map[string]any{} }
+
+var _ securitycontract.Token = (*unauthenticatedRoledToken)(nil)
+
+func newTestCompiledFirewallWithRoleHierarchy(name string, roleHierarchy *RoleHierarchy) *CompiledFirewall {
+    return NewCompiledFirewall(
+        name,
+        NewPathPrefixMatcher("/"),
+        "prefix /",
+        nil,
+        nil,
+        nil,
+        nil,
+        roleHierarchy,
+        nil,
+        nil,
+        "",
+        "",
+        nil,
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
 }

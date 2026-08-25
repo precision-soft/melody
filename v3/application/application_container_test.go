@@ -705,3 +705,72 @@ func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollid
         t.Fatalf("expected the application's own default serializer to be served")
     }
 }
+
+type scopedRequestProbe struct {
+    value string
+}
+func newScopedServiceApplication(kernelInstance *testKernel) *Application {
+    return &Application{
+        ctx:                 context.Background(),
+        configuration:       nil,
+        runtimeFlags:        NewRuntimeFlags(config.ModeHttp),
+        kernel:              kernelInstance,
+        embeddedPublicFiles: nil,
+        modules:             nil,
+        cliCommands:         nil,
+        httpRouteRegistrars: nil,
+        httpMiddlewares:     nil,
+    }
+}
+func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.Boot()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterScopedService(
+            "app.request.probe",
+            func(resolver containercontract.Resolver) (*os.File, error) {
+                return nil, nil
+            },
+        )
+    }, "may not register scoped services after boot")
+}
+
+/* A name claimed at both lifetimes is a wiring mistake, and it has to join the aggregated boot report rather than end the boot on its own — the report exists so a consolidation that produced several collisions surfaces them all at once. */
+func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t *testing.T) {
+    kernelInstance := newTestKernel()
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    applicationInstance.RegisterService(
+        "app.thing",
+        func(resolver containercontract.Resolver) (*scopedRequestProbe, error) {
+            return &scopedRequestProbe{value: "container"}, nil
+        },
+        container.WithoutTypeRegistration(),
+    )
+
+    applicationInstance.RegisterScopedService(
+        "app.thing",
+        func(resolver containercontract.Resolver) (*scopedRequestProbe, error) {
+            return &scopedRequestProbe{value: "scoped"}, nil
+        },
+        container.WithoutTypeRegistration(),
+    )
+
+    if 1 != len(applicationInstance.bootCollisions) {
+        t.Fatalf("expected exactly one recorded collision, got %d", len(applicationInstance.bootCollisions))
+    }
+
+    if bootCollisionKindScopedService != applicationInstance.bootCollisions[0].kind {
+        t.Fatalf("expected the collision to name the scoped lifetime, got %q", applicationInstance.bootCollisions[0].kind)
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.panicOnBootCollisions()
+    }, "duplicate registrations detected at boot")
+}

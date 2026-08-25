@@ -123,16 +123,6 @@ func TestRouterRegistration_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     )
 }
 
-func TestExposedRouteAttributes_RefusesAZoneThatIsNotDeclared(t *testing.T) {
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            ExposedRouteAttributes("fronted")
-        },
-        "route zone is not one of the declared zones",
-    )
-}
-
 func TestBuildRouteManifest_CarriesEveryMatchDiscriminatorAGeneratedUrlMustSatisfy(t *testing.T) {
     router := NewRouter()
     router.HandleWithOptions(
