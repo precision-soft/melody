@@ -326,13 +326,33 @@ run_e2e_live_checks() {
 # re-running the gate while git holds an open connection the server times out. The stamp names the tree
 # hash of the exact worktree content this run validated — any byte changed afterwards computes a different
 # hash and the stamp stops matching, so the hook can never pass on content the gate did not see. Only the
-# full --all run writes it: --skip-live and the partial modes prove less than what a push claims.
+# full --all run writes it: --skip-live and the partial modes prove less than what a push claims. The hash
+# is taken at the START of the run and checked again at the END: a run takes long enough to edit under,
+# and an edit made mid-run was validated by no lane before it — stamping the end-state would certify
+# content the gate never saw, so a run whose worktree moved finishes green and stamps nothing.
 VALIDATION_STAMP_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-stamp"
+VALIDATION_START_TREE_HASH_STRING=""
+
+record_validation_start_tree_hash() {
+    if ! VALIDATION_START_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
+        VALIDATION_START_TREE_HASH_STRING=""
+        warning "could not compute the worktree hash at the start of the run — no validation stamp will be written"
+    fi
+}
 
 write_validation_stamp() {
+    if [[ "" = "${VALIDATION_START_TREE_HASH_STRING}" ]]; then
+        return 0
+    fi
+
     local WORKTREE_TREE_HASH_STRING
     if ! WORKTREE_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
         warning "could not compute the worktree hash — no validation stamp written, the pre-push hook will ask for a fresh full run"
+        return 0
+    fi
+
+    if [[ "${VALIDATION_START_TREE_HASH_STRING}" != "${WORKTREE_TREE_HASH_STRING}" ]]; then
+        warning "the worktree changed while the run validated it (${VALIDATION_START_TREE_HASH_STRING} at start, ${WORKTREE_TREE_HASH_STRING} now) — no validation stamp written, run the full gate again on the settled tree"
         return 0
     fi
 
@@ -488,6 +508,10 @@ main() {
     fi
 
     if [[ "all" = "${MODE_STRING}" ]]; then
+        if [[ "true" != "${SKIP_LIVE_BOOLEAN}" ]]; then
+            record_validation_start_tree_hash
+        fi
+
         run_go_checks "${ROOT_DIRECTORY_STRING}" "melody framework (root module)"
 
         if [[ -f "${ROOT_DIRECTORY_STRING}/.example/go.mod" ]]; then

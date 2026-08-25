@@ -41,16 +41,36 @@ if [[ "" = "$(git config --get core.sshCommand || true)" ]]; then
 fi
 
 VALIDATION_STAMP_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-stamp"
+VALIDATION_RUN_LOG_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-run.log"
+
+# a push without a valid proof is refused — that part is not negotiable, the gate cannot run inside the
+# push window — but the refusal STARTS the gate instead of only naming it, so the worst case is pushing
+# twice: the first push kicks the full run off in the background and the second one, after it reports
+# green, passes on the stamp it wrote. One gate at a time: two concurrent runs would fight over the same
+# service containers, so a refusal while one is already running says wait rather than starting another.
+refuse_and_start_validation() {
+    local REASON_STRING="${1:?}"
+
+    if pgrep -f '\.dev/validate/all\.sh' >/dev/null 2>&1; then
+        fail "${REASON_STRING} — the full gate is ALREADY RUNNING; push again when it reports green (its log: the shell it was started from, or ${VALIDATION_RUN_LOG_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/} if this hook started it)"
+    fi
+
+    mkdir -p "$(dirname "${VALIDATION_RUN_LOG_FILE_PATH}")"
+    nohup bash "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/all.sh" --all > "${VALIDATION_RUN_LOG_FILE_PATH}" 2>&1 < /dev/null &
+    disown 2>/dev/null || true
+
+    fail "${REASON_STRING} — the full gate was STARTED in the background (log: ${VALIDATION_RUN_LOG_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/}); push again when it finishes green"
+}
 
 if [[ ! -f "${VALIDATION_STAMP_FILE_PATH}" ]]; then
-    fail "no validation stamp: run '.dev/validate/all.sh --all' to a green finish, then push — the full gate cannot run inside the push window, the server times the connection out"
+    refuse_and_start_validation "no validation stamp"
 fi
 
 STAMPED_TREE_HASH_STRING="$(cut -d' ' -f1 < "${VALIDATION_STAMP_FILE_PATH}")"
 STAMPED_AT_STRING="$(cut -d' ' -f2 < "${VALIDATION_STAMP_FILE_PATH}")"
 
 if [[ ! "${STAMPED_TREE_HASH_STRING}" =~ ^[0-9a-f]{40}$ ]]; then
-    fail "malformed validation stamp (${VALIDATION_STAMP_FILE_PATH}): run '.dev/validate/all.sh --all' to a green finish, then push"
+    refuse_and_start_validation "malformed validation stamp (${VALIDATION_STAMP_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/})"
 fi
 
 if ! CURRENT_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
@@ -58,7 +78,7 @@ if ! CURRENT_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
 fi
 
 if [[ "${STAMPED_TREE_HASH_STRING}" != "${CURRENT_TREE_HASH_STRING}" ]]; then
-    fail "the worktree changed since the last full validation (stamped ${STAMPED_TREE_HASH_STRING} at ${STAMPED_AT_STRING}, current ${CURRENT_TREE_HASH_STRING}): run '.dev/validate/all.sh --all' to a green finish, then push"
+    refuse_and_start_validation "the worktree changed since the last full validation (stamped ${STAMPED_TREE_HASH_STRING} at ${STAMPED_AT_STRING}, current ${CURRENT_TREE_HASH_STRING})"
 fi
 
 success "pre-push: worktree matches the full validation stamped at ${STAMPED_AT_STRING}"
