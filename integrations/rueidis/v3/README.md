@@ -39,7 +39,7 @@ Every refusal the provider writes carries the deadlines that governed the attemp
 
 ### Owning the client
 
-`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes what answers `Close() error` and nothing else. [`NewConnection`](./connection.go) wraps it in that shape: register the [`Connection`](./connection.go) as the service that owns the client and resolve the client through it, and the container closes the one owner, once, in dependency order. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
+`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes what answers `Close() error` and nothing else. [`NewConnection`](./connection.go) wraps it in that shape, and [`RegisterConnectionService`](./service_resolver.go) (or [`ModuleConfig.Connection`](./module.go)) registers it as the service that owns the client. Every client-backed provider in this package — the client itself, the locker, the token store, the cache backend — resolves the registered connection as its dependency, so whichever run resolves one of them orders the connection's close after it; a run that resolves none leaves the connection the composition root's to close, since the container closes only what was resolved at least once. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
 
 ### Connection retry
 

@@ -519,6 +519,10 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
 /* ownershipMarkerReadLimit bounds what is read to decide ownership: the marker rides in the header block every rendered destination opens with, and a file large enough to push it past this is not one this generator wrote. */
 const ownershipMarkerReadLimit = 8 * 1024
 
+/* ownershipMarkerLineLimit bounds WHERE in that head the marker may stand: every builtin template renders it inside the leading comment block, within the first few lines. The old check was a substring search over the whole 8KiB head, and emptying is irreversible — an operator's README or commented backup that merely QUOTED the marker anywhere in its opening kilobytes was emptied as if this generator had written it. */
+const ownershipMarkerLineLimit = 10
+
+/* fileCarriesOwnershipMarker recognises ownership by an EXACT marker line among the file's leading lines. Exactness is what keeps two markers apart when one extends the other: a custom dialect that declares its own marker by suffixing the builtin one documents its files as its own, and a substring match read the builtin marker inside the longer line and emptied the custom dialect's files from a builtin run. The builtin dialects share one identical marker line, so the deliberate cross-dialect reconciliation between them is untouched. */
 func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
     fileInstance, openErr := os.Open(path)
     if nil != openErr {
@@ -541,7 +545,18 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
         )
     }
 
-    return strings.Contains(string(head[:read]), marker), nil
+    lines := strings.SplitN(string(head[:read]), "\n", ownershipMarkerLineLimit+1)
+    if ownershipMarkerLineLimit < len(lines) {
+        lines = lines[:ownershipMarkerLineLimit]
+    }
+
+    for _, line := range lines {
+        if marker == strings.TrimSpace(line) {
+            return true, nil
+        }
+    }
+
+    return false, nil
 }
 
 /* reportWrites is the generator's one report door, reached from the run's defer on every path: the written summary as text lines, or as the single machine-readable document under --format=json — the failure inside it, beside whatever the run had already written before it stopped. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it.

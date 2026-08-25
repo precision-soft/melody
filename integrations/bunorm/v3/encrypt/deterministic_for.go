@@ -9,6 +9,8 @@ import (
 /* EncryptedDeterministicStringFor is EncryptedDeterministicString bound to the named cipher selected by the CipherRef marker R — the searchable (equality-preserving) variant of EncryptedStringFor; see that type for the compartment semantics. */
 type EncryptedDeterministicStringFor[R CipherRef] string
 
+func (instance EncryptedDeterministicStringFor[R]) encryptedColumn() {}
+
 func (instance EncryptedDeterministicStringFor[R]) String() string {
     return redactedPlaceholder
 }

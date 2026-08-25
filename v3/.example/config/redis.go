@@ -35,5 +35,8 @@ func (instance *Module) buildRedis() {
     }
 
     instance.redisClient = client
+
+    /* the raw client's Close returns nothing, so on its own it can never join the container's ordered teardown; the Connection wrapper is registered through the rueidis module as the service that owns it, and the first resolved client-backed service (the token store, the cache backend, the locker) records the edge that closes the connection after it */
+    instance.redisConnection = melodyrueidis.NewConnection(client)
     instance.serverSentEventBackplane = melodyrueidis.NewServerSentEventBackplane(client, instance.serverSentEventHub)
 }

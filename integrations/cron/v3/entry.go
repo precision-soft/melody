@@ -9,7 +9,7 @@ type Entry struct {
     Command         []string
     LogPath         string
     DestinationFile string
-    /* @info instance discriminator for commands expanded into several parallel runs; InstanceCount > 1 makes the k8s template suffix the resource name with InstanceIndex so each CronJob is unique. Both stay 0 for single-instance commands and are ignored by the crontab template */
+    /* instance discriminator for commands expanded into several parallel runs; InstanceCount > 1 makes the k8s template suffix the resource name with InstanceIndex so each CronJob is unique. Both stay 0 for single-instance commands and are ignored by the crontab template */
     InstanceIndex int
     InstanceCount int
 }

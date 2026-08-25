@@ -48,11 +48,25 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
     return &Migrator{db: db, cipher: cipher}
 }
 
+/* MigrateEncrypt runs its own EnsureColumnCapacity first: the check used to live only in the CLI command, so the programmatic caller — the path the package README recommends for composition — ran with no width check at all and met exactly the truncation the check exists to prevent. The standalone Ensure* doors remain for a caller that wants the answer without the run. */
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
+    if capacityErr := instance.ensureColumnCapacity(ctx, spec, ""); nil != capacityErr {
+        return 0, capacityErr
+    }
+
     return instance.run(ctx, spec, instance.encryptTransform(spec))
 }
 
+/* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. */
 func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
+    if "" == targetKeyId {
+        return 0, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
+    }
+
+    if capacityErr := instance.ensureColumnCapacity(ctx, spec, targetKeyId); nil != capacityErr {
+        return 0, capacityErr
+    }
+
     return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
 }
 
@@ -62,25 +76,33 @@ func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (i
     })
 }
 
+/* encryptTransform reads STORED values, so it takes the read side of the cipher's asymmetry, not the write side: on the application's write path a marker-shaped string can genuinely be application data, but a marker that comes back OUT of the column was written by this cipher, and a body behind it that no longer decrypts is damage (the truncated write) or a missing key (one retired while its ciphertexts remained). Sealing either on top — which is what routing them through the lenient Encrypt used to do whenever the damage still parsed but failed authentication — destroyed the only copy; the run stops on them instead, naming the row. A value that decrypts is already sealed: the non-deterministic mode hands it back unchanged, the deterministic mode converts it in place under the key it already carries, so mode=encrypt never doubles as a key rotation. */
 func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string, error) {
     return func(value string) (string, error) {
-        if false == spec.Deterministic {
-            return instance.cipher.Encrypt(value)
-        }
-
-        /* a value already sealed with a random nonce authenticates, so the deterministic seal would pass it through untouched: the column would stay randomized — every CiphertextCandidates equality lookup on it finding nothing — while the run reported the row as processed. Convert it in place, under the key it already carries so mode=encrypt never doubles as a key rotation. A value that authenticates under no key in the set is ordinary plaintext (marker-shaped or not) and is sealed under the current key, as the cipher does. A value carrying the marker whose payload no longer parses is a different case entirely — that shape is only ever produced by a truncated write, never by an application — and it stops the run rather than being sealed on top of the damage. */
         keyId, markerShaped, keyIdErr := keyIdOf(value)
         if nil != keyIdErr {
             return "", keyIdErr
         }
 
         if false == markerShaped {
+            if false == spec.Deterministic {
+                return instance.cipher.Encrypt(value)
+            }
+
             return instance.cipher.EncryptDeterministic(value)
         }
 
         plaintext, decryptErr := instance.cipher.Decrypt(value)
         if nil != decryptErr {
-            return instance.cipher.EncryptDeterministic(value)
+            return "", exception.NewError(
+                "migrate found a stored encrypted value that no longer decrypts; restore the key or repair the row before re-running",
+                map[string]any{"keyId": keyId},
+                decryptErr,
+            )
+        }
+
+        if false == spec.Deterministic {
+            return value, nil
         }
 
         return instance.cipher.EncryptDeterministicWithKeyId(plaintext, keyId)
@@ -124,7 +146,7 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
 
 Sealing expands. A value comes back wrapped in a marker, a key id, a nonce and an authentication tag, base64 encoded — roughly 1.34 characters per plaintext byte plus 52, so a VARCHAR(255) stops being able to hold its own contents at 153 bytes of plaintext. Under the strict sql_mode MySQL ships with, the UPDATE that overflows fails and the run stops with the row intact. Under sql_mode='' it SUCCEEDS with a warning: the column keeps a truncated ciphertext, the row is counted as migrated and the command exits zero. The plaintext is gone at that point and a truncated ciphertext can never authenticate again, so nothing is recoverable from it — and nothing in this module pins sql_mode.
 
-The requirement is therefore established before the first row is written, by sealing a probe as long as the longest value the column actually holds with the very cipher the run will use, so it cannot drift from what seal produces. Values already sealed are left out of that measurement: the transform hands them back unchanged and they are already stored in the column, so they fit by definition — measuring them would make a second run over a migrated column demand a column wide enough to seal the ciphertext. A column with nothing left to seal is not measured at all.
+The requirement is therefore established before the first row is written, by sealing a probe as long as the longest value the column actually holds with the very cipher the run will use, so it cannot drift from what seal produces. Values already sealed are left out of that measurement: the transform hands them back unchanged and they are already stored in the column, so they fit by definition — measuring them would make a second run over a migrated column demand a column wide enough to seal the ciphertext. The exclusion cannot hide a damaged one: a marker-shaped value that no longer decrypts stops the run inside the transform before anything is written over it. A column with nothing left to seal is not measured at all.
 
 What it cannot promise is a value written after it ran: a longer one inserted concurrently is still bounded only by the server's sql_mode. This catches the sizing mistake before it is applied to a whole table; it does not make a non-strict server safe.
 
@@ -277,15 +299,18 @@ func (instance *Migrator) longestSealedLengthWithoutKeyId(ctx context.Context, t
     return int(longest.Int64), true, nil
 }
 
+/* columnWidth answers the column's capacity for the pure-ASCII output a seal produces. The unit depends on the column family: a VARCHAR(n) enforces its limit in CHARACTERS, and n ASCII bytes are n characters, so CHARACTER_MAXIMUM_LENGTH is the capacity; the TEXT family enforces its limit in BYTES, and CHARACTER_MAXIMUM_LENGTH reports the worst-case character count under the column's charset — 16383 for a TEXT under utf8mb4, a quarter of the 65535 bytes the column actually holds — so reading it as the capacity refused migrations that fit with room to spare, with a diagnostic naming a width nobody configured. CHARACTER_OCTET_LENGTH is the byte capacity and is what an ASCII payload is bounded by there. */
 func (instance *Migrator) columnWidth(ctx context.Context, table string, column string) (int, error) {
+    var dataType sql.NullString
     var width sql.NullInt64
+    var octetWidth sql.NullInt64
 
     scanErr := instance.db.DB.QueryRowContext(
         ctx,
-        "SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+        "SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
         table,
         column,
-    ).Scan(&width)
+    ).Scan(&dataType, &width, &octetWidth)
 
     if nil != scanErr {
         if true == errors.Is(scanErr, sql.ErrNoRows) {
@@ -300,7 +325,24 @@ func (instance *Migrator) columnWidth(ctx context.Context, table string, column 
         return 0, exception.NewError("migrate target column is not a character column", map[string]any{"table": table, "column": column}, nil)
     }
 
-    return int(width.Int64), nil
+    switch strings.ToLower(dataType.String) {
+    case "tinytext", "text", "mediumtext", "longtext":
+        if true == octetWidth.Valid {
+            return clampWidthToInt(octetWidth.Int64), nil
+        }
+    }
+
+    return clampWidthToInt(width.Int64), nil
+}
+
+/* clampWidthToInt keeps a LONGTEXT's 4GiB-1 octet capacity from overflowing a 32-bit int into a negative width every comparison would then read as "too narrow". */
+func clampWidthToInt(width int64) int {
+    maxInt := int64(^uint(0) >> 1)
+    if width > maxInt {
+        return int(maxInt)
+    }
+
+    return int(width)
 }
 
 /* sealedProbeFiller is one ASCII byte, so a probe of n of them is exactly n plaintext bytes. */
@@ -384,14 +426,14 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
         var rows *sql.Rows
         var queryErr error
 
-        /* @important the first page must not be keyset-filtered: WHERE pk > '' coerces to pk > 0 on an integer key and would silently skip rows whose primary key is zero or negative. */
+        /* the first page must not be keyset-filtered: WHERE pk > '' coerces to pk > 0 on an integer key and would silently skip rows whose primary key is zero or negative. */
         if false == hasCursor {
             rows, queryErr = instance.db.DB.QueryContext(ctx, firstSelectSql, batchSize)
         } else {
             rows, queryErr = instance.db.DB.QueryContext(ctx, nextSelectSql, cursor, batchSize)
         }
         if nil != queryErr {
-            return processed, exception.NewError("migrate select failed", map[string]any{"table": spec.Table}, queryErr)
+            return processed, instance.classifyRunError(spec, processed, "migrate select failed", queryErr)
         }
 
         batch, scanErr := scanMigrateRows(rows, len(spec.Columns))
@@ -410,7 +452,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
 
             applied, updateErr := instance.applyRow(ctx, spec, row, transform)
             if nil != updateErr {
-                return processed, updateErr
+                return processed, instance.classifyRunError(spec, processed, "", updateErr)
             }
 
             if false == applied {
@@ -430,7 +472,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
         }
     }
 
-    /* @important a guarded update that matched no row left the column in its original state, so reporting success would let a deployment gated on the exit code proceed over values that were never migrated; the run is reported as incomplete and a re-run picks the rows up under their new values */
+    /* a guarded update that matched no row left the column in its original state, so reporting success would let a deployment gated on the exit code proceed over values that were never migrated; the run is reported as incomplete and a re-run picks the rows up under their new values */
     if 0 < skippedCount {
         return processed, exception.NewError(
             "migrate left rows untouched because they changed under the run; re-run to pick them up",
@@ -444,6 +486,23 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
     }
 
     return processed, nil
+}
+
+/* classifyRunError separates the run the operator stopped from the run that broke: a SIGTERM mid-bulk used to surface as "migrate select failed", indistinguishable from a missing column, so a deployment gated on the diagnostic could not tell "we interrupted it" from "it is broken". Both remain errors — the column is partially migrated either way — but the interruption names itself and carries how far the run got. An empty message hands a pre-wrapped error through unchanged. */
+func (instance *Migrator) classifyRunError(spec TableSpec, processed int, message string, cause error) error {
+    if true == errors.Is(cause, context.Canceled) || true == errors.Is(cause, context.DeadlineExceeded) {
+        return exception.NewError(
+            "migrate was interrupted by the caller's context; the run is incomplete and a re-run picks up the remaining rows",
+            map[string]any{"table": spec.Table, "processed": processed},
+            cause,
+        )
+    }
+
+    if "" == message {
+        return cause
+    }
+
+    return exception.NewError(message, map[string]any{"table": spec.Table}, cause)
 }
 
 func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migrateRow, transform func(string) (string, error)) (bool, error) {
@@ -482,7 +541,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
     arguments = append(arguments, row.primaryKey)
     arguments = append(arguments, valueArguments...)
 
-    /* @important guard each assignment on the value read for this row so a concurrent application write between the select and this update is not silently reverted; a row that changed under us matches zero rows and is re-encrypted on the next run. The comparison is byte-exact, which is what makes the guard hold at all — see binaryComparison. */
+    /* guard each assignment on the value read for this row so a concurrent application write between the select and this update is not silently reverted; a row that changed under us matches zero rows and is re-encrypted on the next run. The comparison is byte-exact, which is what makes the guard hold at all — see binaryComparison. */
     whereClause := quoteIdentifier(spec.PrimaryKey) + " = ?"
     for _, predicate := range valuePredicates {
         whereClause += " AND " + predicate
@@ -500,7 +559,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
         return false, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "id": row.primaryKey}, execErr)
     }
 
-    /* @important a driver that cannot report the affected count is treated as having applied the update: reporting a false skip would fail a run that in fact completed */
+    /* a driver that cannot report the affected count is treated as having applied the update: reporting a false skip would fail a run that in fact completed */
     affected, affectedErr := result.RowsAffected()
     if nil != affectedErr {
         return true, nil
@@ -529,6 +588,11 @@ func scanMigrateRows(rows *sql.Rows, columnCount int) ([]migrateRow, error) {
 
         if scanErr := rows.Scan(targets...); nil != scanErr {
             return nil, exception.NewError("migrate row scan failed", nil, scanErr)
+        }
+
+        /* a NULL cursor value cannot drive the keyset: rendered as "", the next page's `pk > ''` coerces to `pk > 0` on an integer column — exactly the first-page hazard, one page later — so a nullable or wrong --primary-key column is refused the moment it shows */
+        if false == primaryKey.Valid {
+            return nil, exception.NewError("migrate read a NULL primary key value; the --primary-key column cannot serve as the pagination cursor", nil, nil)
         }
 
         batch = append(batch, migrateRow{primaryKey: primaryKey.String, values: values})

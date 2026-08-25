@@ -119,7 +119,6 @@ func TestModule_RegisterCliCommandsPanicsOnInvalidContext(t *testing.T) {
     })
 }
 
-/* @info database factory wiring */
 
 func newFakeKernel() *fakeKernel {
     return &fakeKernel{serviceContainer: container.NewContainer()}
@@ -423,4 +422,27 @@ type factoryError struct{}
 
 func (instance *factoryError) Error() string {
     return "factory failed"
+}
+
+/* a kernel answering no service container used to be captured silently into the closure and explode at the first command run, far from the registration that produced it */
+func TestModule_RefusesAKernelWithoutAServiceContainer(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the missing service container to be refused at registration")
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "no service container") {
+            t.Fatalf("expected the panic to name the missing container, got %v", recovered)
+        }
+    }()
+
+    module := NewModule(ModuleConfig{
+        Cipher: NewFakeCipher(),
+        DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+            return newMysqlDatabase(), nil
+        },
+    })
+
+    module.RegisterCliCommands(&fakeKernel{})
 }

@@ -5,6 +5,7 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "fmt"
     "io"
     "strings"
     "sync"
@@ -12,6 +13,8 @@ import (
 
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T) {
@@ -117,8 +120,8 @@ func TestEncryptTransform_DeterministicIsIdempotent(t *testing.T) {
     }
 }
 
-/* a marker-shaped value that authenticates under no key in the set is ordinary plaintext, and the cipher seals it rather than storing it verbatim; the conversion path must not turn that into a run-killing decrypt error. */
-func TestEncryptTransform_DeterministicSealsAMarkerShapedPlaintext(t *testing.T) {
+/* inverted from the form that expected the value to be sealed as plaintext: the migrator reads STORED values, where a marker is the cipher's own claim of provenance, so a stored value that fails to decrypt is a missing key or a truncated write — sealing it destroyed the only remaining copy. The write-path leniency (an application string that merely looks like a marker) stays with the cipher's Encrypt; the bulk conversion stops and names the key instead. */
+func TestEncryptTransform_StopsOnAStoredValueThatNoLongerDecrypts(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
@@ -128,13 +131,15 @@ func TestEncryptTransform_DeterministicSealsAMarkerShapedPlaintext(t *testing.T)
         t.Fatalf("foreign encrypt: %v", foreignErr)
     }
 
-    converted, convertErr := migrator.encryptTransform(TableSpec{Deterministic: true})(foreign)
-    if nil != convertErr {
-        t.Fatalf("deterministic encrypt transform: %v", convertErr)
-    }
+    for _, deterministic := range []bool{false, true} {
+        _, convertErr := migrator.encryptTransform(TableSpec{Deterministic: deterministic})(foreign)
+        if nil == convertErr {
+            t.Fatalf("expected the stored undecryptable value to stop the run (deterministic=%v)", deterministic)
+        }
 
-    if false == deterministicCandidateMatches(t, cipher, foreign, converted) {
-        t.Fatalf("expected the unauthenticated value to be sealed as plaintext under the current key")
+        if false == strings.Contains(convertErr.Error(), "no longer decrypts") {
+            t.Fatalf("expected the refusal to name the undecryptable value, got: %v", convertErr)
+        }
     }
 }
 
@@ -313,6 +318,8 @@ func (instance *stubMigrateRows) Next(destination []driver.Value) error {
 func newStubMigrator(t *testing.T, driverName string, rowsAffected int64) *Migrator {
     t.Helper()
 
+    /* the registration carries a per-call sequence suffix: sql.Register panics on a repeated name, so a fixed name held every one of these tests to a single run and go test -count=N died on the second repetition */
+    driverName = fmt.Sprintf("%s-%d", driverName, scriptedSqlSequence.Add(1))
     sql.Register(driverName, &stubMigrateDriver{rowsAffected: rowsAffected})
 
     sqlDatabase, openErr := sql.Open(driverName, "stub")
@@ -334,6 +341,9 @@ func newRecordingStubMigrator(t *testing.T, driverName string, rowsAffected int6
     t.Helper()
 
     stub := &stubMigrateDriver{rowsAffected: rowsAffected}
+
+    /* the same per-call sequence suffix as newStubMigrator, for the same repeated-run reason */
+    driverName = fmt.Sprintf("%s-%d", driverName, scriptedSqlSequence.Add(1))
     sql.Register(driverName, stub)
 
     sqlDatabase, openErr := sql.Open(driverName, "stub")
@@ -351,7 +361,7 @@ func newRecordingStubMigrator(t *testing.T, driverName string, rowsAffected int6
     }, stub
 }
 
-/* @info the update is guarded on the value read for the row, so a row that changed under the run matches zero rows and keeps its plaintext; counting it as processed and exiting zero let a deployment gated on the exit code proceed over values that were never migrated */
+/* the update is guarded on the value read for the row, so a row that changed under the run matches zero rows and keeps its plaintext; counting it as processed and exiting zero let a deployment gated on the exit code proceed over values that were never migrated */
 func TestMigrate_ReportsRowsTheGuardedUpdateDidNotTouch(t *testing.T) {
     migrator := newStubMigrator(t, "zzMigrateSkipStub", 0)
 
@@ -505,7 +515,7 @@ func TestLongestUnsealedLength_ExcludesValuesThatAreAlreadySealed(t *testing.T) 
     }
 }
 
-/* @info The width is computed from a probe of at most two bytes plus arithmetic, and it has to agree with what the cipher actually emits for every plaintext length — not on average, exactly, since the number decides whether a column is declared wide enough. Sealing the full length to find out was the old way and is unusable at the widths this is asked about: `longest` comes from SELECT MAX(LENGTH(col)), so a 64 MiB row cost hundreds of megabytes resident, and LONGTEXT reaches 4 GiB. Every residue class mod three is covered, together with the boundaries where base64 rounds. */
+/* The width is computed from a probe of at most two bytes plus arithmetic, and it has to agree with what the cipher actually emits for every plaintext length — not on average, exactly, since the number decides whether a column is declared wide enough. Sealing the full length to find out was the old way and is unusable at the widths this is asked about: `longest` comes from SELECT MAX(LENGTH(col)), so a 64 MiB row cost hundreds of megabytes resident, and LONGTEXT reaches 4 GiB. Every residue class mod three is covered, together with the boundaries where base64 rounds. */
 func TestSealedProbeLength_AgreesWithASealOfTheFullPlaintext(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
     cipher := NewCipher(provider)
@@ -544,7 +554,7 @@ func TestSealedProbeLength_AgreesWithASealOfTheFullPlaintext(t *testing.T) {
     }
 }
 
-/* @info the point of the rewrite: a width that a column could actually hold must be answerable without allocating it. LONGTEXT reaches 4 GiB, and the old measurement sealed the whole thing. */
+/* the point of the rewrite: a width that a column could actually hold must be answerable without allocating it. LONGTEXT reaches 4 GiB, and the old measurement sealed the whole thing. */
 func TestSealedProbeLength_AnswersAHugeWidthWithoutAllocatingIt(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
     migrator := &Migrator{cipher: NewCipher(provider)}
@@ -556,5 +566,116 @@ func TestSealedProbeLength_AnswersAHugeWidthWithoutAllocatingIt(t *testing.T) {
 
     if computed <= 512*1024*1024 {
         t.Fatalf("a sealed value is wider than its plaintext; got %d for 512 MiB", computed)
+    }
+}
+
+/* the TEXT family enforces its limit in BYTES while CHARACTER_MAXIMUM_LENGTH reports the worst-case character count; reading the character count as the capacity refused ASCII migrations that fit with room to spare */
+func TestColumnWidth_ReadsTheTextFamilyInBytes(t *testing.T) {
+    migrator, _ := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment: "information_schema.COLUMNS",
+            columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+            rows:     [][]driver.Value{{"text", int64(16383), int64(65535)}},
+        },
+    })
+
+    width, widthErr := migrator.columnWidth(context.Background(), "accounts", "iban")
+    if nil != widthErr {
+        t.Fatalf("width: %v", widthErr)
+    }
+
+    if 65535 != width {
+        t.Fatalf("expected the byte capacity for a text column, got %d", width)
+    }
+}
+
+func TestColumnWidth_ReadsAVarcharInCharacters(t *testing.T) {
+    migrator, _ := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment: "information_schema.COLUMNS",
+            columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+            rows:     [][]driver.Value{{"varchar", int64(255), int64(1020)}},
+        },
+    })
+
+    width, widthErr := migrator.columnWidth(context.Background(), "accounts", "iban")
+    if nil != widthErr {
+        t.Fatalf("width: %v", widthErr)
+    }
+
+    if 255 != width {
+        t.Fatalf("expected the character capacity for a varchar column, got %d", width)
+    }
+}
+
+/* the capacity check used to live only in the CLI command, so the programmatic caller ran with none at all */
+func TestMigrateEncrypt_RefusesANarrowColumnBeforeWritingARow(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment: "NOT LIKE",
+            columns:  []string{"longest"},
+            rows:     [][]driver.Value{{int64(300)}},
+        },
+        {
+            fragment: "information_schema.COLUMNS",
+            columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+            rows:     [][]driver.Value{{"varchar", int64(255), int64(1020)}},
+        },
+    })
+
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}})
+    if nil == runErr {
+        t.Fatalf("expected the narrow column to refuse the run")
+    }
+
+    if false == strings.Contains(runErr.Error(), "too narrow") {
+        t.Fatalf("expected the width refusal, got: %v", runErr)
+    }
+
+    for _, query := range stub.recorded() {
+        if true == strings.Contains(query, "ORDER BY") {
+            t.Fatalf("expected the refusal to land before the first page was read, saw: %s", query)
+        }
+    }
+}
+
+/* rendered as "", a NULL cursor value coerces the next page's keyset predicate to pk > 0 on an integer column — the first-page hazard one page later */
+func TestMigrateRun_RefusesANullPrimaryKeyCursor(t *testing.T) {
+    migrator, _ := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment: "NOT LIKE",
+            columns:  []string{"longest"},
+            rows:     [][]driver.Value{{nil}},
+        },
+        {
+            fragment: "ORDER BY",
+            columns:  []string{"id", "iban"},
+            rows:     [][]driver.Value{{nil, "plaintext"}},
+        },
+    })
+
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}})
+    if nil == runErr {
+        t.Fatalf("expected the NULL cursor value to stop the run")
+    }
+
+    if false == strings.Contains(runErr.Error(), "NULL primary key") {
+        t.Fatalf("expected the cursor refusal, got: %v", runErr)
+    }
+}
+
+/* a SIGTERM mid-bulk used to surface as "migrate select failed", indistinguishable from a broken column */
+func TestClassifyRunError_NamesAnInterruptedRun(t *testing.T) {
+    migrator := &Migrator{}
+
+    classified := migrator.classifyRunError(TableSpec{Table: "accounts"}, 7, "migrate select failed", fmt.Errorf("query: %w", context.Canceled))
+
+    if false == strings.Contains(classified.Error(), "interrupted") {
+        t.Fatalf("expected the interruption to name itself, got: %v", classified)
+    }
+
+    logContext := exception.LogContext(classified)
+    if 7 != logContext["processed"] {
+        t.Fatalf("expected the interruption to carry how far the run got, got: %v", logContext["processed"])
     }
 }

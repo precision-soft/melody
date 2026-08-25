@@ -1,6 +1,8 @@
 package encrypt
 
 import (
+    "fmt"
+    "strings"
     "testing"
 )
 
@@ -70,4 +72,22 @@ func TestUseCipher_NilResetsTheEntry(t *testing.T) {
     if _, cipherErr := cipherByName(defaultCipherName); nil == cipherErr {
         t.Fatalf("expected the default entry to be reset")
     }
+}
+
+/* a bare nil is the documented deinstall door; a TYPED nil is a failed resolution installed anyway, and stored it would be handed out with a nil error and dereferenced inside database/sql at the first column write */
+func TestUseCipher_RefusesATypedNilCipher(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil cipher to be refused at the door")
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "typed nil") {
+            t.Fatalf("expected the panic to name the typed nil, got %v", recovered)
+        }
+    }()
+
+    var cipherInstance *fakeCipher
+
+    UseCipher(cipherInstance)
 }

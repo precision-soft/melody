@@ -106,6 +106,7 @@ func Configure(app *melodyapplication.Application) {
     if nil != moduleInstance.redisClient {
         app.RegisterModule(melodyrueidis.NewModule(melodyrueidis.ModuleConfig{
             Client:       moduleInstance.redisClient,
+            Connection:   moduleInstance.redisConnection,
             AsTokenStore: true,
             TokenStoreOptions: []melodyrueidis.TokenStoreOption{
                 melodyrueidis.WithTokenStorePrefix(redisTokenStoreKeyPrefix),

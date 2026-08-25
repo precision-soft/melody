@@ -509,7 +509,7 @@ func (instance *GenerateCommand) writeDestinations(
 
 /* pruneStaleDestinations empties the destinations this generator wrote earlier and this run no longer produces. Without it a version that retires an entry leaves its file untouched and crond keeps running the retired job forever, and a version that MOVES an entry to another destination leaves it live in both — the double execution the runner refuses at construction, produced silently by the generator.
 
-Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose first bytes carry the ownership marker of the template generating now, so a file this generator cannot prove it wrote is left exactly as it is.
+Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose leading lines carry the ownership marker of the template generating now as an exact line of their own, so a file this generator cannot prove it wrote — one that merely quotes the marker included — is left exactly as it is.
 
 Emptying means rendering the template with no entries: the destination keeps its header and with it the marker, so it stays recognizable to the next run rather than becoming an unowned file the sweep would refuse to touch ever again. */
 func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]string, error) {
@@ -587,6 +587,10 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
 /* ownershipMarkerReadLimit bounds what is read to decide ownership: the marker rides in the header block every rendered destination opens with, and a file large enough to push it past this is not one this generator wrote. */
 const ownershipMarkerReadLimit = 8 * 1024
 
+/* ownershipMarkerLineLimit bounds WHERE in that head the marker may stand: every builtin template renders it inside the leading comment block, within the first few lines. The old check was a substring search over the whole 8KiB head, and emptying is irreversible — an operator's README, playbook or commented backup that merely QUOTED the marker anywhere in its opening kilobytes was emptied as if this generator had written it. */
+const ownershipMarkerLineLimit = 10
+
+/* fileCarriesOwnershipMarker recognises ownership by an EXACT marker line among the file's leading lines. Exactness is what keeps two markers apart when one extends the other: a custom dialect that declares its own marker by suffixing the builtin one (the ansible example does) documents its files as its own, and a substring match read the builtin marker inside the longer line and emptied the custom dialect's files from a builtin run. The builtin dialects share one identical marker line, so the deliberate cross-dialect reconciliation between them is untouched. */
 func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
     fileInstance, openErr := os.Open(path)
     if nil != openErr {
@@ -609,7 +613,18 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
         )
     }
 
-    return strings.Contains(string(head[:read]), marker), nil
+    lines := strings.SplitN(string(head[:read]), "\n", ownershipMarkerLineLimit+1)
+    if ownershipMarkerLineLimit < len(lines) {
+        lines = lines[:ownershipMarkerLineLimit]
+    }
+
+    for _, line := range lines {
+        if marker == strings.TrimSpace(line) {
+            return true, nil
+        }
+    }
+
+    return false, nil
 }
 
 /* reportWrites is the generator's one report door, reached from the run's defer on every path: the written summary as text lines, or as the single machine-readable document under --format=json — the failure inside it, beside whatever the run had already written before it stopped. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it.

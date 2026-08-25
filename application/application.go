@@ -5,6 +5,7 @@ import (
     "errors"
     "io/fs"
     "os"
+    "sync"
     "sync/atomic"
 
     applicationcontract "github.com/precision-soft/melody/application/contract"
@@ -48,6 +49,10 @@ type Application struct {
     defaultInMemorySessionStorage bool
     /* claimed by the one close that performs the teardown: the container's own closedness cannot answer "was it me", because two concurrent closes both probe it open before either enters Close, and both would then report the single failure as their own incident */
     closePerformerClaimed atomic.Bool
+
+    /* closed by the performer once its teardown has finished, so a losing sibling can wait for the whole teardown instead of racing the container's own Close: a sibling that entered the container first USED to be the one whose call ran the actual teardown, and the performer then read the closedness probe as "somebody else's close" and suppressed the report — the one failure reported by nobody, and an exit path proceeding over it. Lazily built, because tests construct the Application by literal. */
+    closeDoneOnce sync.Once
+    closeDone     chan struct{}
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {

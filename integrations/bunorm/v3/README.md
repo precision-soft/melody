@@ -146,6 +146,8 @@ writer, _ := splitter.Writer()  // always the primary
 reader, _ := splitter.Reader()  // a replica (or the primary if none configured)
 ```
 
+`Reader` round-robins the replicas and falls back to the primary only when a replica fails to **open** — a transient outage, where reading from the primary is the availability trade the splitter exists to make. A replica name the registry does not know, an empty name and a closed registry are refused instead of absorbed: each is a wiring error, permanent by nature, and folding it into the fallback would route every read to the primary forever with no signal. When the primary then fails too, the error carries the primary failure as its cause and names the replica failure beside it. An empty replica name is refused at construction.
+
 ## Dialect providers
 
 * MySQL provider: [`../mysql/v3/`](../mysql/v3/)

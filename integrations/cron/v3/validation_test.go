@@ -62,7 +62,7 @@ func TestValidateNoForbiddenCharsEmptyTokensReturnsNil(t *testing.T) {
     }
 }
 
-/* @info crond treats one out-of-range field as a parse error and refuses the whole crontab file with it, so generation must fail on the same bounds the in-process matcher enforces */
+/* crond treats one out-of-range field as a parse error and refuses the whole crontab file with it, so generation must fail on the same bounds the in-process matcher enforces */
 func TestValidateScheduleFieldsRejectsOutOfRangeValues(t *testing.T) {
     cases := []struct {
         field    string
@@ -93,7 +93,7 @@ func TestValidateScheduleFieldsRejectsOutOfRangeValues(t *testing.T) {
     }
 }
 
-/* @info day of week 7 is the Sunday alias vixie crond accepts, while the robfig scheduler behind the k8s template bounds the field at 6 */
+/* day of week 7 is the Sunday alias vixie crond accepts, while the robfig scheduler behind the k8s template bounds the field at 6 */
 func TestValidateScheduleFieldsDayOfWeekSevenPerDialect(t *testing.T) {
     entry := Entry{Name: "job", Schedule: &Schedule{DayOfWeek: "7"}}
 
@@ -106,7 +106,7 @@ func TestValidateScheduleFieldsDayOfWeekSevenPerDialect(t *testing.T) {
     }
 }
 
-/* @info the robfig scheduler reads a whole-field "?" as the wildcard (the Quartz day-field convention); crond has no "?" and the crontab dialect must keep refusing it */
+/* the robfig scheduler reads a whole-field "?" as the wildcard (the Quartz day-field convention); crond has no "?" and the crontab dialect must keep refusing it */
 func TestValidateScheduleFieldsQuestionMarkPerDialect(t *testing.T) {
     for _, schedule := range []*Schedule{
         {DayOfMonth: "?"},

@@ -2025,7 +2025,7 @@ func TestRunRendersK8sTemplateWithImageAndNamespaceFlags(t *testing.T) {
 }
 
 func TestRunK8sTemplateRejectsResourceNameCollisionAcrossDestinationFiles(t *testing.T) {
-    /* @info the namespace is one global flag, so two commands that sanitize to the same resource name collide on kubectl apply even when split across distinct destination files; Render only sees one destination, so the CLI must reject the clash across the whole set */
+    /* the namespace is one global flag, so two commands that sanitize to the same resource name collide on kubectl apply even when split across distinct destination files; Render only sees one destination, so the CLI must reject the clash across the whole set */
     tempDir := t.TempDir()
     defaultOutputPath := filepath.Join(tempDir, "cron.yaml")
 
@@ -2094,7 +2094,7 @@ func TestRunK8sTemplateWarnsWhenHeartbeatConfigured(t *testing.T) {
 }
 
 func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
-    /* @info the k8s template declares heartbeat options ignored (it never emits a heartbeat CronJob), so a --heartbeat-destination that matches no written destination must not hard-fail the command the way it does for the crontab template */
+    /* the k8s template declares heartbeat options ignored (it never emits a heartbeat CronJob), so a --heartbeat-destination that matches no written destination must not hard-fail the command the way it does for the crontab template */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2135,7 +2135,7 @@ func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
 }
 
 func TestRunK8sTemplateWithHeartbeatAndEmptyConfigurationWritesNothing(t *testing.T) {
-    /* @info heartbeat is crontab-only; with the k8s template an empty Configuration must not synthesize a heartbeat-only destination, so no file is written and the missing image is never demanded */
+    /* heartbeat is crontab-only; with the k8s template an empty Configuration must not synthesize a heartbeat-only destination, so no file is written and the missing image is never demanded */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2275,7 +2275,7 @@ func TestRunK8sTemplateSuffixesNamesForMultiInstanceCommand(t *testing.T) {
 }
 
 func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
-    /* @info the k8s template ignores the heartbeat, so a heartbeat-configured k8s run with no --user must not fail with ErrHeartbeatUserMissing (a crontab-only requirement); it succeeds and warns that the heartbeat is dropped */
+    /* the k8s template ignores the heartbeat, so a heartbeat-configured k8s run with no --user must not fail with ErrHeartbeatUserMissing (a crontab-only requirement); it succeeds and warns that the heartbeat is dropped */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2310,7 +2310,7 @@ func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
 }
 
 func TestRunK8sTemplateSucceedsWithoutLogsDir(t *testing.T) {
-    /* @info the k8s template logs to container stdout and never reads Entry.LogPath, so a k8s run must not inherit the crontab-only logs-dir requirement (ErrNoLogsDir) */
+    /* the k8s template logs to container stdout and never reads Entry.LogPath, so a k8s run must not inherit the crontab-only logs-dir requirement (ErrNoLogsDir) */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
 
@@ -2556,7 +2556,7 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
     }
 }
 
-/* @info The crontab-no-user dialect renders no user column at all, so the heartbeat line needs no user to place. Demanding --user turned a valid busybox-crond configuration into a hard error. */
+/* The crontab-no-user dialect renders no user column at all, so the heartbeat line needs no user to place. Demanding --user turned a valid busybox-crond configuration into a hard error. */
 func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -3748,5 +3748,90 @@ func TestRunK8sTemplateDoesNotAutoDeriveAHeartbeat(t *testing.T) {
 
     if true == strings.Contains(stdout, "the k8s template ignores them") {
         t.Fatalf("expected no heartbeat to be derived for the k8s template, got: %q", stdout)
+    }
+}
+
+/* the emptying is irreversible, so ownership must not be a substring question: a file that QUOTES the marker inside a longer line, or past the leading lines, is not one this generator wrote — and a custom dialect that suffixes the builtin marker (the ansible example) declares files of its own, which a substring match claimed for the builtin run */
+func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) {
+    tempDir := t.TempDir()
+
+    owned := filepath.Join(tempDir, "owned")
+    if writeErr := os.WriteFile(owned, []byte("# GENERATED FILE\n# DO NOT EDIT LOCALLY\n"+CrontabOwnershipMarker+"\n0 3 * * * job\n"), 0o644); nil != writeErr {
+        t.Fatalf("write owned: %v", writeErr)
+    }
+
+    quoting := filepath.Join(tempDir, "quoting")
+    if writeErr := os.WriteFile(quoting, []byte("# deployment notes\n# files carrying `"+CrontabOwnershipMarker+"` are managed\n"), 0o644); nil != writeErr {
+        t.Fatalf("write quoting: %v", writeErr)
+    }
+
+    late := filepath.Join(tempDir, "late")
+    lateContent := strings.Repeat("# filler line\n", ownershipMarkerLineLimit) + CrontabOwnershipMarker + "\n"
+    if writeErr := os.WriteFile(late, []byte(lateContent), 0o644); nil != writeErr {
+        t.Fatalf("write late: %v", writeErr)
+    }
+
+    suffixed := filepath.Join(tempDir, "suffixed")
+    if writeErr := os.WriteFile(suffixed, []byte(CrontabOwnershipMarker+" (ansible-cron)\n---\n"), 0o644); nil != writeErr {
+        t.Fatalf("write suffixed: %v", writeErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(owned, CrontabOwnershipMarker); nil != checkErr || false == carries {
+        t.Fatalf("expected the generated header to prove ownership, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(quoting, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected the quoting file to stay the operator's, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(late, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected a marker past the leading lines to prove nothing, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(suffixed, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected the suffixed custom marker to stay the custom dialect's, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(suffixed, CrontabOwnershipMarker+" (ansible-cron)"); nil != checkErr || false == carries {
+        t.Fatalf("expected the custom marker to prove its own files, got carries=%v err=%v", carries, checkErr)
+    }
+}
+
+func TestGenerateCommand_PruneLeavesABystanderFileThatQuotesTheMarker(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    bystander := filepath.Join(tempDir, "README")
+    bystanderContent := "# deployment notes\n# files carrying `" + CrontabOwnershipMarker + "` are managed by the generator\n"
+    if writeErr := os.WriteFile(bystander, []byte(bystanderContent), 0o644); nil != writeErr {
+        t.Fatalf("write bystander: %v", writeErr)
+    }
+
+    _, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--prune",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("generation failed: %v", runErr)
+    }
+
+    surviving, readErr := os.ReadFile(bystander)
+    if nil != readErr {
+        t.Fatalf("read bystander: %v", readErr)
+    }
+
+    if bystanderContent != string(surviving) {
+        t.Fatalf("expected the quoting bystander to survive the sweep byte-identical, got: %s", surviving)
     }
 }

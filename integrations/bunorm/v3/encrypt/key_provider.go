@@ -10,6 +10,7 @@ import (
 
 var keyIdPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
 
+/* KeyProvider hands the cipher its keys. The contract has three obligations the compiler cannot see. Every id CurrentKeyId or ActiveKeyIds answers must stay resolvable through Key for as long as it is answered — the cipher reads in two steps (the id, then the key), so a provider that retires an id between the two fails a write that should have succeeded. Every id must match the key id grammar (`^[A-Za-z0-9_.-]{1,32}$`): the id is written into the stored value in front of a ":" separator, and seal refuses one that would corrupt the wire format. And a retired key must STAY in the set until every value sealed under it has been re-encrypted — the cipher treats a marker-shaped value under an unknown id as ordinary plaintext and seals it, so dropping a key while its ciphertexts remain makes them unrecoverable at the next write that touches them. */
 type KeyProvider interface {
     CurrentKeyId() string
 

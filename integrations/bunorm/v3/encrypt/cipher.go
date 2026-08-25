@@ -20,6 +20,9 @@ const (
     deterministicNonceLabel = "melody/encrypt/deterministic-nonce/v1"
 
     minNonceSize = 12
+
+    /* gcmTagOverhead is what gcm.Seal appends beyond the plaintext: a stored payload is nonce + ciphertext + tag, so anything shorter than nonce + tag cannot be a seal of even the empty string — a shortfall there is structural damage, not an authentication failure to be blamed on a key */
+    gcmTagOverhead = 16
 )
 
 var markerPrefix = encryptionMarker + markerGlue + formatGcmV1 + markerGlue
@@ -123,10 +126,7 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
         return "", gcmErr
     }
 
-    if len(payload) < gcm.NonceSize() {
-        return "", exception.NewError("encrypted value is too short", nil, nil)
-    }
-
+    /* no length re-check here: decodeEncrypted floors the payload at nonce + tag, and gcmForKey pins the nonce at exactly minNonceSize, so a second floor on the nonce alone was a dead branch no test could ever reach */
     nonce := payload[:gcm.NonceSize()]
     ciphertext := payload[gcm.NonceSize():]
 
@@ -138,7 +138,7 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     return string(plaintext), nil
 }
 
-/* @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a key currently in the key set. A retired key stays in the set (still decryptable) until re-encryption completes and is only then removed, so a value sealed under it is not destroyed by double encryption; a marker-shaped value bearing an unknown key id, or one whose payload does not parse at all, is treated as ordinary plaintext and sealed under the current key instead of being stored verbatim.
+/* a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a key currently in the key set. A retired key stays in the set (still decryptable) until re-encryption completes and is only then removed, so a value sealed under it is not destroyed by double encryption; a marker-shaped value bearing an unknown key id, or one whose payload does not parse at all, is treated as ordinary plaintext and sealed under the current key instead of being stored verbatim.
 
 This is the write side, and it is deliberately the lenient one: what arrives here is application data, and an application is free to hold a string that merely looks like a marker. Sealing it is the safe answer. Reading is the strict side — a marker that comes back OUT of the database was put there by this cipher, so a payload that no longer parses is reported rather than passed off as plaintext. */
 func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
@@ -152,6 +152,11 @@ func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
 }
 
 func (instance *aes256Cipher) seal(plaintext string, keyId string, deterministic bool) (string, error) {
+    /* the key id is written into the stored value in front of a ":" separator, so its grammar is part of the wire format: an empty id, or one carrying a colon, produces a value decodeEncrypted can never split back apart — the write succeeds and the loss surfaces only at the next read, permanently. StaticKeyProvider enforces this grammar at construction, but KeyProvider is a public interface and a custom provider's id reaches this door unchecked. */
+    if false == keyIdPattern.MatchString(keyId) {
+        return "", exception.NewError("encryption key id must match "+keyIdPattern.String(), map[string]any{"keyId": keyId}, nil)
+    }
+
     key, keyErr := instance.keys.Key(keyId)
     if nil != keyErr {
         return "", keyErr
@@ -231,7 +236,7 @@ func hasEncryptionMarker(value string) bool {
 
 /* decodeEncrypted splits the body behind the marker into its key id and its raw payload, and refuses a body that is no longer one.
 
-The caller must have established the marker first: this reads the body positionally and says nothing about values that carry no marker, which are ordinary plaintext and belong to no key. Every failure here means the same thing — a value this cipher wrote came back changed — so each is reported rather than absorbed. The length floor is the nonce: a payload shorter than one cannot even be split into nonce and ciphertext, so a shortfall is structural damage and not an authentication failure to be blamed on a key. */
+The caller must have established the marker first: this reads the body positionally and says nothing about values that carry no marker, which are ordinary plaintext and belong to no key. Every failure here means the same thing — a value this cipher wrote came back changed — so each is reported rather than absorbed. The length floor is the nonce plus the authentication tag: a seal of even the empty string is never shorter, so a shortfall is structural damage and not an authentication failure to be blamed on a key. */
 func decodeEncrypted(value string) (string, []byte, error) {
     body := value[len(markerPrefix):]
 
@@ -242,12 +247,13 @@ func decodeEncrypted(value string) (string, []byte, error) {
 
     keyId := body[:separator]
 
-    payload, decodeErr := base64.RawStdEncoding.DecodeString(body[separator+1:])
+    /* Strict rejects a final base64 quantum with non-zero discarded bits: the lenient decoder maps several spellings onto the same bytes, so an altered last character still authenticated while CiphertextCandidates only ever emits the canonical spelling — a deterministic equality lookup missed a row whose plaintext it held. Everything seal writes is canonical, so Strict refuses only what this cipher never produced. */
+    payload, decodeErr := base64.RawStdEncoding.Strict().DecodeString(body[separator+1:])
     if nil != decodeErr {
         return "", nil, exception.NewError("encrypted value is not valid base64", map[string]any{"keyId": keyId}, decodeErr)
     }
 
-    if len(payload) < minNonceSize {
+    if len(payload) < minNonceSize+gcmTagOverhead {
         return "", nil, exception.NewError(
             "encrypted value is too short",
             map[string]any{"keyId": keyId, "payloadBytes": len(payload)},

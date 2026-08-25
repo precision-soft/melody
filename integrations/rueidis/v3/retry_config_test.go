@@ -7,7 +7,7 @@ import (
     "time"
 )
 
-/* @info the default retry budget is a small, bounded backoff, not an unbounded loop. */
+/* the default retry budget is a small, bounded backoff, not an unbounded loop. */
 func TestDefaultRetryConfig(t *testing.T) {
     config := DefaultRetryConfig()
 
@@ -25,7 +25,7 @@ func TestDefaultRetryConfig(t *testing.T) {
     }
 }
 
-/* @info a cold-start dial failure (connection refused / no such host / timeout) is transient and retried;
+/* a cold-start dial failure (connection refused / no such host / timeout) is transient and retried;
 an unrelated error is not, so a real misconfiguration still fails fast. */
 func TestIsTransientError(t *testing.T) {
     provider := &Provider{retryConfig: DefaultRetryConfig()}
@@ -56,7 +56,7 @@ func TestIsTransientError(t *testing.T) {
     }
 }
 
-/* @info the backoff grows geometrically from the initial delay and is capped at the max delay. */
+/* the backoff grows geometrically from the initial delay and is capped at the max delay. */
 func TestComputeBackoffDelay(t *testing.T) {
     provider := &Provider{retryConfig: NewRetryConfig(10, time.Second, 5*time.Second, 2.0)}
 
@@ -77,7 +77,7 @@ func TestComputeBackoffDelay(t *testing.T) {
     }
 }
 
-/* @info negative delays and a sub-1 multiplier are degenerate (an immediate sleep, a decaying delay) and
+/* negative delays and a sub-1 multiplier are degenerate (an immediate sleep, a decaying delay) and
 resolve to the defaults instead of collapsing the backoff. */
 func TestComputeBackoffDelayDegenerateValuesFallBackToDefaults(t *testing.T) {
     provider := &Provider{retryConfig: NewRetryConfig(3, -time.Second, -time.Second, 0.5)}
@@ -95,7 +95,7 @@ func TestComputeBackoffDelayDegenerateValuesFallBackToDefaults(t *testing.T) {
     }
 }
 
-/* @info NaN fails every comparison, so a NaN multiplier would slip through a `1 > x` clamp, poison the float-space growth and convert to a negative duration — an immediate re-dial storm; the not-at-least-1 clamp resolves it to the default. */
+/* NaN fails every comparison, so a NaN multiplier would slip through a `1 > x` clamp, poison the float-space growth and convert to a negative duration — an immediate re-dial storm; the not-at-least-1 clamp resolves it to the default. */
 func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
     provider := &Provider{retryConfig: NewRetryConfig(3, -time.Second, -time.Second, math.NaN())}
 

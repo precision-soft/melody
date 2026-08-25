@@ -10,7 +10,14 @@ import (
 
 const redactedPlaceholder = "<redacted>"
 
+/* EncryptedColumn marks every encrypted column type — the two default-cipher forms and every instantiation of the two compartment-bound generic forms. A consumer that must recognise "a value of an encrypted column type" (the audit trail's auto-redaction) matches this interface rather than comparing types by identity, because each generic instantiation is a distinct reflect.Type and an identity list could never enumerate them. */
+type EncryptedColumn interface {
+    encryptedColumn()
+}
+
 type EncryptedString string
+
+func (instance EncryptedString) encryptedColumn() {}
 
 func (instance EncryptedString) String() string {
     return redactedPlaceholder

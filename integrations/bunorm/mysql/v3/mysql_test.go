@@ -224,16 +224,20 @@ type normalisingCipher struct {
     table       string
     column      string
     normalising string
+    stored      string
     updateErr   error
 }
 
+/* the seam fires only for the ROW's value: MigrateEncrypt now runs its own capacity check first, whose width probe seals filler strings through this same Encrypt — an unconditional trigger normalised the row BEFORE the run's SELECT, the run then read the already-normalised value, and the guard had no race left to catch. The race this test builds is the one between the run's SELECT and its guarded UPDATE, and only the row's own encrypt call sits in that window. */
 func (instance *normalisingCipher) Encrypt(plaintext string) (string, error) {
-    _, execErr := instance.database.ExecContext(
-        instance.ctx,
-        "UPDATE "+instance.table+" SET "+instance.column+" = "+instance.normalising,
-    )
-    if nil != execErr {
-        instance.updateErr = execErr
+    if plaintext == instance.stored {
+        _, execErr := instance.database.ExecContext(
+            instance.ctx,
+            "UPDATE "+instance.table+" SET "+instance.column+" = "+instance.normalising,
+        )
+        if nil != execErr {
+            instance.updateErr = execErr
+        }
     }
 
     return instance.Cipher.Encrypt(plaintext)
@@ -305,6 +309,7 @@ func TestEncryptMigrate_ConcurrentNormalisationIsSkippedUnderTheDefaultCollation
             table:       table,
             column:      "email",
             normalising: testCase.normalising,
+            stored:      testCase.stored,
         }
 
         /* the normalisation writes the value the run is about to overwrite; the guard must notice and leave the row alone */

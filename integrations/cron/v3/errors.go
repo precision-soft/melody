@@ -22,6 +22,7 @@ var (
     ErrK8sInvalidName                     = errors.New("cron: command name does not yield a valid k8s resource name")
     ErrK8sDuplicateName                   = errors.New("cron: two commands map to the same k8s resource name")
     ErrK8sInvalidRestartPolicy            = errors.New("cron: k8s restartPolicy must be OnFailure or Never")
+    ErrK8sInvalidNamespace                = errors.New("cron: k8s namespace is not a valid RFC 1123 label")
     ErrInvalidSchedule                    = errors.New("cron: schedule field is not a valid cron expression")
     ErrUnknownScheduledCommand            = errors.New("cron: scheduled command has no matching registered command")
     ErrUnsupportedRunnerEntry             = errors.New("cron: the in-process runner supports only name-scheduled single-instance entries")

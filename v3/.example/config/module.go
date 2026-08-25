@@ -57,6 +57,9 @@ type Module struct {
 
     redisClient rueidis.Client
 
+    /* redisConnection owns the eagerly opened client; registered through the rueidis module, it is what lets the container teardown close the connection the raw client cannot answer for */
+    redisConnection *melodyrueidis.Connection
+
     /* catalogWriteThrottle is nil when the environment gave the example no redis: there is then no shared counter, and the nomenclature's writes go through unthrottled rather than being refused. */
     catalogWriteThrottle melodyhttpcontract.Middleware
 

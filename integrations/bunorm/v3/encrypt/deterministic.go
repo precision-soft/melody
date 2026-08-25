@@ -8,6 +8,8 @@ import (
 
 type EncryptedDeterministicString string
 
+func (instance EncryptedDeterministicString) encryptedColumn() {}
+
 func (instance EncryptedDeterministicString) String() string {
     return redactedPlaceholder
 }

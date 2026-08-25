@@ -29,6 +29,11 @@ type boundDatabase struct {
    binding is honoured unconditionally, so it is the caller's statement that the handle can carry the
    audit rows. */
 func WithDatabase(ctx context.Context, database bun.IDB) context.Context {
+    /* a nil handle — typed or bare — is a wiring error, and bound it would either be ignored in silence (losing the atomicity the caller asked for) or dereferenced inside the caller's own transaction; it is refused where it is written */
+    if true == isNilInterface(database) {
+        exception.Panic(exception.NewError("audit context database handle is nil", nil, nil))
+    }
+
     return context.WithValue(ctx, databaseContextKey{}, &boundDatabase{handle: database})
 }
 
@@ -72,8 +77,9 @@ func (instance *BunStorage) Save(ctx context.Context, table string, entries ...E
         return nil
     }
 
-    if "" == table {
-        table = DefaultTable
+    /* Save is a public door and the table flows unquoted through ModelTableExpr as raw SQL: the Registry validates the names IT hands out, but a direct caller bypasses the Registry entirely, so the same grammar is enforced here — as an error rather than a panic, because this is the request path. The empty table is refused with the rest: silently substituting the default hid the caller that forgot which table it was writing. */
+    if false == auditTableNamePattern.MatchString(table) {
+        return exception.NewError("audit table name is not a valid identifier", map[string]any{"table": table}, nil)
     }
 
     rows := make([]Entry, len(entries))

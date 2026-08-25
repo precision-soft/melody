@@ -8,9 +8,9 @@ models. Go-native equivalent of a Doctrine unit-of-work audit listener.
 `ChangeSet(before, after)` diffs two struct values by `bun` column name, recording only changed fields (relations and `bun.BaseModel` are skipped; the exported fields of other embedded structs are flattened in, matching how bun promotes their columns). Sensitive fields are recorded as changed but masked to `<redacted>`:
 
 - tag a field `audit:"redact"`, or
-- type it `encrypt.EncryptedString` (auto-redacted).
+- type it as any encrypted column type — `encrypt.EncryptedString`, `encrypt.EncryptedDeterministicString`, or the compartment-bound `encrypt.EncryptedStringFor[R]` / `EncryptedDeterministicStringFor[R]` forms — all recognised through the `encrypt.EncryptedColumn` marker interface (auto-redacted).
 
-Additional fields can be dropped globally or per entity via the `Registry` (see below).
+Additional fields can be dropped globally or per entity via the `Registry` (see below). Ignored fields are matched by **bun column name** (the first tag segment, or the Go field name where no tag names one) — the same name the change-set records.
 
 ## Recording
 
@@ -41,7 +41,9 @@ Pass `""` as the id to let the `Tracker` derive it from the model's bun primary 
 > is never committed without its audit record. The lower-level `Recorder.Record{Insert,Update,Delete}` API
 > is available when you already hold before/after yourself; wrap the context in `audit.WithDatabase(ctx, tx)`
 > to have those calls write the audit entry through your own unit-of-work transaction, keeping it atomic
-> with the data change.
+> with the data change. The two doors are **alternatives**: a `Tracker` refuses a context that carries a
+> caller-made `WithDatabase` binding, because running its own transaction inside yours does not compose —
+> it deadlocks the pool — and the refusal names the `Recorder` path to take instead.
 
 ### Actor
 
@@ -58,8 +60,10 @@ recorder = recorder.WithLogger(logger) // dead-letter: entries that fail to stor
 
 - `NewBunStorage(db)` — rows in an audit table (default).
 - `NewFileStorage(path)` — JSON-lines append (fsynced per batch).
-- `NewAsyncStorage(delegate, bufferSize)` — wraps any of the above to persist on a background worker so an audited write never blocks the request path; overflow/backend failures dead-letter to the logger and `Close` drains the queue. Wrap a pool-backed store (not a request transaction).
+- `NewAsyncStorage(delegate, bufferSize)` — wraps any of the above to persist on a background worker so an audited write never blocks the request path; overflow/backend failures dead-letter to the logger and `Close` drains the queue, bounded by a five-second grace after which the wedged save is cancelled and the remainder dead-lettered. A save whose context carries a database binding — a `Tracker`'s unit of work, or a `WithDatabase` caller — goes through the delegate **synchronously**, so the atomicity promise above survives the async wrapper; only the unbound path is queued. Without a `WithLogger` the drops are silent — the `Dropped()`/`Failed()` counters are then the only signal.
 - any custom `Storage` implementation.
+
+A recorder built by hand over an `AsyncStorage` should use `NewRecorderOwningStorage`, whose `Close` closes the storage — the drain goroutine ends nowhere else. The default `NewRecorderWithStorage` does **not** own the storage: on the container path both are registered services and the container closes each one itself.
 
 > Table names registered via `NewRegistry`/`Registry.Register` must be plain SQL identifiers
 > (`^[A-Za-z_][A-Za-z0-9_]*$`) — they flow unquoted through `ModelTableExpr` into DDL/DML, so an invalid

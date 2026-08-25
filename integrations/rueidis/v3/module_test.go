@@ -87,3 +87,29 @@ func TestModule_RegisterServicesAllEnabled(t *testing.T) {
         t.Fatalf("expected the token store service, got %v", registrar.names)
     }
 }
+
+func TestModule_RegisterServicesRegistersTheConnectionOwner(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+    client := fakeClient{}
+
+    NewModule(ModuleConfig{Client: client, Connection: NewConnection(client)}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceConnection) {
+        t.Fatalf("expected the connection owner service, got %v", registrar.names)
+    }
+
+    if false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the client service beside the owner, got %v", registrar.names)
+    }
+}
+
+/* handing in only the Connection is enough: the client is read off it, so the composition root does not have to carry both */
+func TestModule_RegisterServicesDerivesTheClientFromTheConnection(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+
+    NewModule(ModuleConfig{Connection: NewConnection(fakeClient{})}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the client service derived from the connection, got %v", registrar.names)
+    }
+}

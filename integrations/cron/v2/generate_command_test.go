@@ -3265,3 +3265,49 @@ func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
         t.Fatal("expected the created log path to be a directory")
     }
 }
+
+/* the emptying is irreversible, so ownership must not be a substring question: a file that QUOTES the marker inside a longer line, or past the leading lines, is not one this generator wrote — and a custom dialect that suffixes the builtin marker declares files of its own, which a substring match claimed for the builtin run */
+func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) {
+    tempDir := t.TempDir()
+
+    owned := filepath.Join(tempDir, "owned")
+    if writeErr := os.WriteFile(owned, []byte("# GENERATED FILE\n# DO NOT EDIT LOCALLY\n"+CrontabOwnershipMarker+"\n0 3 * * * job\n"), 0o644); nil != writeErr {
+        t.Fatalf("write owned: %v", writeErr)
+    }
+
+    quoting := filepath.Join(tempDir, "quoting")
+    if writeErr := os.WriteFile(quoting, []byte("# deployment notes\n# files carrying `"+CrontabOwnershipMarker+"` are managed\n"), 0o644); nil != writeErr {
+        t.Fatalf("write quoting: %v", writeErr)
+    }
+
+    late := filepath.Join(tempDir, "late")
+    lateContent := strings.Repeat("# filler line\n", ownershipMarkerLineLimit) + CrontabOwnershipMarker + "\n"
+    if writeErr := os.WriteFile(late, []byte(lateContent), 0o644); nil != writeErr {
+        t.Fatalf("write late: %v", writeErr)
+    }
+
+    suffixed := filepath.Join(tempDir, "suffixed")
+    if writeErr := os.WriteFile(suffixed, []byte(CrontabOwnershipMarker+" (custom-dialect)\n---\n"), 0o644); nil != writeErr {
+        t.Fatalf("write suffixed: %v", writeErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(owned, CrontabOwnershipMarker); nil != checkErr || false == carries {
+        t.Fatalf("expected the generated header to prove ownership, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(quoting, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected the quoting file to stay the operator's, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(late, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected a marker past the leading lines to prove nothing, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(suffixed, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected the suffixed custom marker to stay the custom dialect's, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(suffixed, CrontabOwnershipMarker+" (custom-dialect)"); nil != checkErr || false == carries {
+        t.Fatalf("expected the custom marker to prove its own files, got carries=%v err=%v", carries, checkErr)
+    }
+}

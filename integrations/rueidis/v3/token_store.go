@@ -257,7 +257,7 @@ func WithTokenStoreClock(clockInstance clockcontract.Clock) TokenStoreOption {
 
 func WithTokenStoreMaximumClockSkew(skew time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
-        /* @important a negative skew is refused rather than silently ignored: ignored, the operator who configured it believes a tighter policy is in force while the default runs — and had the value been carried instead, it would have NARROWED every revocation boundary, a bypass. */
+        /* a negative skew is refused rather than silently ignored: ignored, the operator who configured it believes a tighter policy is in force while the default runs — and had the value been carried instead, it would have NARROWED every revocation boundary, a bypass. */
         if 0 > skew {
             exception.Panic(exception.NewError(
                 "redis token store maximum clock skew may not be negative",
@@ -272,7 +272,7 @@ func WithTokenStoreMaximumClockSkew(skew time.Duration) TokenStoreOption {
 
 func WithRevocationEpochRetention(retention time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
-        /* @important a negative retention is refused rather than silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass, and the silent fallback told the operator nothing. A zero keeps the default retention, the "no override" spelling. */
+        /* a negative retention is refused rather than silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass, and the silent fallback told the operator nothing. A zero keeps the default retention, the "no override" spelling. */
         if 0 > retention {
             exception.Panic(exception.NewError(
                 "redis token store revocation epoch retention may not be negative",
@@ -304,7 +304,7 @@ func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract
 }
 
 func (instance *RedisTokenStore) PutWithTtl(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
-    /* @important a non-positive ttl is refused instead of falling through to the store-forever spelling: the likeliest caller of a ttl <= 0 computed a remaining lifetime that had already elapsed, and storing that token with no expiry is the exact inversion of what was asked. The token string never joins the context — it is the credential. */
+    /* a non-positive ttl is refused instead of falling through to the store-forever spelling: the likeliest caller of a ttl <= 0 computed a remaining lifetime that had already elapsed, and storing that token with no expiry is the exact inversion of what was asked. The token string never joins the context — it is the credential. */
     if 0 >= ttl {
         exception.Panic(exception.NewError(
             "redis token store ttl must be positive",

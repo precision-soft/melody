@@ -170,7 +170,7 @@ func (instance emptyNameCipherRef) CipherName() string {
     return ""
 }
 
-/* @info A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
+/* A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
 func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     UseCipher(NewFakeCipher())
     defer UseCipher(nil)
@@ -187,7 +187,7 @@ func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     }
 }
 
-/* @info fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
+/* fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
 func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
     const plaintext = "RO49-SECRET-IBAN"
 
@@ -202,5 +202,25 @@ func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
         if true == strings.Contains(rendering, plaintext) {
             t.Fatalf("the plaintext leaked through %%#v: %s", rendering)
         }
+    }
+}
+
+type pointerFormRef struct{}
+
+func (instance pointerFormRef) CipherName() string {
+    return "pointer-form"
+}
+
+/* the pointer form compiles whenever the value form does, and its zero value is a nil pointer whose CipherName() dereferences nil from inside database/sql; it must answer as an error naming the marker */
+func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
+    column := EncryptedStringFor[*pointerFormRef]("plaintext")
+
+    _, valueErr := column.Value()
+    if nil == valueErr {
+        t.Fatalf("expected the pointer-form marker to be refused")
+    }
+
+    if false == strings.Contains(valueErr.Error(), "pointer type") {
+        t.Fatalf("expected the refusal to name the pointer form, got: %v", valueErr)
     }
 }
