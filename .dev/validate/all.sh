@@ -16,13 +16,14 @@ SKIP_LIVE_BOOLEAN="false"
 if [[ "" = "${1-}" ]]; then
     :
 elif [[ "-h" = "${1-}" ]]; then
-    println "usage: all.sh [-h] [--all | --staged | --live | --e2e] [--skip-live]"
+    println "usage: all.sh [-h] [--all | --staged | --live | --e2e | --vulncheck] [--skip-live]"
     println ""
     println "  -h           show this help and exit"
     println "  --all        validate all modules, the live integration suites and the live e2e run (default)"
-    println "  --staged     validate only modules with staged changes"
+    println "  --staged     validate only modules with staged changes (the vulnerability check runs only when a go.mod or go.sum is staged)"
     println "  --live       run only the live integration suites (mirrors the ci live job)"
     println "  --e2e        run only the live e2e harness and stack checks (mirrors the ci e2e job)"
+    println "  --vulncheck  run only the govulncheck lane against the vulncheck baseline"
     println "  --skip-live  leave the live suites and the e2e run out of --all, for a hand run with no backends"
     exit 0
 elif [[ "--staged" = "${1-}" ]]; then
@@ -33,6 +34,8 @@ elif [[ "--live" = "${1-}" ]]; then
     MODE_STRING="live"
 elif [[ "--e2e" = "${1-}" ]]; then
     MODE_STRING="e2e"
+elif [[ "--vulncheck" = "${1-}" ]]; then
+    MODE_STRING="vulncheck"
 elif [[ "--skip-live" = "${1-}" ]]; then
     MODE_STRING="all"
     SKIP_LIVE_BOOLEAN="true"
@@ -261,6 +264,23 @@ run_changelog_checks() {
         "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/changelog.sh"
 }
 
+# govulncheck over every module, gated on the REACHABLE findings against .dev/validate/vulncheck.baseline.
+# No other lane asks the question: vet, the tests and the race detector judge the code this repository
+# writes, and the documentary bands judge what it claims — none of them reads a security advisory, so a
+# vulnerable function this code actually calls is green everywhere else by construction. Needs the dev
+# container (the scan runs against the toolchain that builds) and the network for the vulnerability
+# database, which is why the staged mode below runs it only when a staged change moves a go.mod or go.sum
+# — the one commit class that can change the answer from the tree's side; the toolchain side moves with
+# the image, and --all always asks.
+run_vulncheck_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.sh" ]]; then
+        fail "the vulnerability check is missing or not executable: .dev/validate/vulncheck.sh. It is not optional — it is the only lane that reads a security advisory at all; restore it or chmod +x it"
+    fi
+
+    run_section "melody govulncheck over every module against the vulncheck baseline" "${TAG_VALIDATE}" "vulncheck" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.sh"
+}
+
 # the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
 # actually drives a booted application over the wire, and that is the only place a whole class of defect shows
 # up at all — a middleware ordering that only matters once a real request traverses the chain, a route the
@@ -300,6 +320,25 @@ run_e2e_live_checks() {
 
     run_section "melody e2e stack checks (.dev/e2e/stack.sh)" "${TAG_VALIDATE}" "e2e" -- \
         "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/stack.sh"
+}
+
+# the proof a FULL green run leaves behind, for the pre-push hook to verify in milliseconds instead of
+# re-running the gate while git holds an open connection the server times out. The stamp names the tree
+# hash of the exact worktree content this run validated — any byte changed afterwards computes a different
+# hash and the stamp stops matching, so the hook can never pass on content the gate did not see. Only the
+# full --all run writes it: --skip-live and the partial modes prove less than what a push claims.
+VALIDATION_STAMP_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-stamp"
+
+write_validation_stamp() {
+    local WORKTREE_TREE_HASH_STRING
+    if ! WORKTREE_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
+        warning "could not compute the worktree hash — no validation stamp written, the pre-push hook will ask for a fresh full run"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "${VALIDATION_STAMP_FILE_PATH}")"
+    printf '%s %s\n' "${WORKTREE_TREE_HASH_STRING}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${VALIDATION_STAMP_FILE_PATH}"
+    info "validation stamp written for worktree tree ${WORKTREE_TREE_HASH_STRING}"
 }
 
 get_versioned_module_directory_list() {
@@ -441,6 +480,13 @@ main() {
         return 0
     fi
 
+    if [[ "vulncheck" = "${MODE_STRING}" ]]; then
+        run_vulncheck_checks
+
+        success "validation completed"
+        return 0
+    fi
+
     if [[ "all" = "${MODE_STRING}" ]]; then
         run_go_checks "${ROOT_DIRECTORY_STRING}" "melody framework (root module)"
 
@@ -468,13 +514,16 @@ main() {
 
         run_changelog_checks
 
+        run_vulncheck_checks
+
         run_race_go_suites
 
         if [[ "true" = "${SKIP_LIVE_BOOLEAN}" ]]; then
-            info "skip live integration suites and live e2e run (--skip-live)"
+            info "skip live integration suites and live e2e run (--skip-live) — no validation stamp, the pre-push hook accepts only the full run"
         else
             run_live_go_suites
             run_e2e_live_checks
+            write_validation_stamp
         fi
 
         success "validation completed"
@@ -540,6 +589,15 @@ main() {
     # then judge against the section it was just dropped into. The whole point is to catch the entry the
     # moment it is filed, not a cycle later.
     run_changelog_checks
+
+    # gated, unlike the four documentary lanes above, because it is not free: it needs the container and
+    # the network. The gate is on the one staged change class that can move the answer from the tree's
+    # side — a go.mod or go.sum. The toolchain side moves with the image, and --all always asks.
+    if git diff --cached --name-only 2>/dev/null | grep -qE '(^|/)go\.(mod|sum)$'; then
+        run_vulncheck_checks
+    else
+        info "skip vulnerability check (no staged go.mod or go.sum change)"
+    fi
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"
     success "validation completed"

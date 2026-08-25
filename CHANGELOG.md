@@ -4,9 +4,14 @@ All notable changes to `precision-soft/melody` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**v1 is feature-frozen.** The major is stabilized: no new feature lands here, while security fixes and critical correctness fixes still do. New development continues on [v3](v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
+**v1 is feature-frozen.** The major is stabilized: no new feature lands here, while patch-level defect fixes and security fixes still do, until v4 is released. New development continues on [v3](v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
 
 ## [Unreleased]
+
+### Added
+
+- tooling: `.dev/validate/vulncheck.sh` and `.dev/validate/vulncheck.baseline` run govulncheck over every Go module in the tree and gate on the REACHABLE findings, which nothing here had ever read — a vulnerable function this code actually calls was green in every other lane by construction. The baseline is bidirectional like the citation band's: a reachable finding with no row fails the check, and a row whose finding no longer occurs fails it just as loudly, which is what makes a toolchain bump visible instead of letting the rows rot into a suppression list. `all.sh` runs the lane under `--all`, gains a `--vulncheck` mode, and in `--staged` runs it exactly when a staged change moves a `go.mod` or `go.sum`; the ci mirror runs the same entry point
+- tooling: the pre-push hook verifies a proof of validation instead of running the gate inside the push. `git push` opens the connection and negotiates refs BEFORE the hook runs, so the full gate held the connection idle for its whole duration and the server's receive-pack timed out — git then died with SIGPIPE right after the hook reported success, a push that looked green and delivered nothing, and no transport keepalive can feed the remote process. A green `all.sh --all` now stamps the tree hash of the exact worktree content it validated into `.temp/validate-stamp`, and the hook recomputes and compares that hash in milliseconds: a match proves the pushed content is byte-identical to what the full gate saw, any later edit is refused by name, and the stamp's age is deliberately not judged because content identity is the guarantee. This also closes the hook's older gap of validating "the worktree" as a moving target — the stamp pins the exact tree the run proved
 
 ### Fixed
 
@@ -22,10 +27,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: a serializer resolution failure that is not the not-acceptable refusal is recorded at warning before the result handler's fallback serves the default representation — it was dropped whole, so a client that named an available type and received another had no diagnostic anywhere
 - http: the abort sentinel no longer leaks the response it aborts. `http.ErrAbortHandler` was re-raised ten lines before the kernel captured the response in flight and seventy before either close ran, so a deliberate abort raised by a middleware after its `next()` returned dropped the only reference to a file-backed response — `FileResponse`, `ServeReader` — and leaked one descriptor per aborted request. The comment on `invokeErrorHandlerSafely` already refused to honour the sentinel for exactly this reason
 - exception: a foreign error whose `Context()` panics no longer takes down the recovery that is reporting it. `renderErrorText` already contained a panicking `Error()`, but the provider's context ran bare in five places — at `LogContext`'s top provider, in its cause-context walk, and in the three `FromError*` constructors that run on the same recovery paths — so the panic unwound through the recovery defer as a second panic while the first was being rendered. The context is read under a recover, and a panicking one costs the context alone, with the panic value kept in its place
+- documentation: the policy documents state the back-port rule the frozen majors actually follow — v1 and v2 receive any defect fix that fits a patch release (no new public symbols, no signature changes, nothing breaking) plus security fixes, until v4 is released. `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, the pull request template, this changelog's banner and `.documentation/UPGRADE.md` all limited back-ports to security and critical correctness fixes — narrower than the rule applied, so a reporter reading them could conclude a reproducible defect on a frozen major would not be repaired
 
 ### Security
 
 - http: the access log and the kernel's 405 and no-route records keep the query parameter NAMES and redact every value. A query string is the one part of a request line that routinely carries a credential — an api key, a one-time token, a signed link — and one access-log line is written per request, so a token in a url was copied into the journal on every call, where it is read by more people than the request was
+- tooling: the e2e harness requires `golang.org/x/net` at v0.55.0, the fix for [GO-2026-5026](https://pkg.go.dev/vuln/GO-2026-5026), which govulncheck reports as reachable from the harness; the indirect `golang.org/x/*` set moves with it
 
 ## [v1.19.0] - 2026-08-18 - Stabilization Sweep, Hardened Failure Paths and Feature Freeze
 

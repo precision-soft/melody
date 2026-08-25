@@ -12,7 +12,7 @@ Melody ships as three parallel Go module lines (see the [`README.md`](./README.m
 Rules for contributions:
 
 - **New features:** v3 only. Do not add features to v1 or v2.
-- **Bug fixes:** apply to v3. **Back-port to v1 and v2 only when the fix is security-related or a critical correctness issue.** Other fixes stay on v3.
+- **Bug fixes:** apply to v3. **Back-port to v1 and v2 whenever the defect is observable there and the fix fits a patch release** — no new public symbols, no signature changes, nothing breaking. A fix that needs new API surface stays on v3, and a capability gap is not a defect: behavior that is merely poorer on a frozen line does not qualify. v1 and v2 receive such patch-level fixes until v4 is released.
 - **Breaking changes:** instead of changing a v3 API in place, mark the old form with a `/* Deprecated: ... */`
   doc comment and keep it working; breaking changes accumulate toward a future v4.
 - The three versions are **intentionally duplicated** so each binds to one framework version. Do not try to consolidate or de-duplicate them — such pull requests will not be accepted.
@@ -25,7 +25,7 @@ When a change touches multiple version lines, keep each line's edit self-contain
 Prerequisites:
 
 - Go (this repository is a Go workspace of several modules; see [`go.work`](./go.work) — the root [`go.mod`](./go.mod) is the v1 framework module)
-- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke it on commit and push)
+- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke the staged checks on commit; on push the hook verifies that a green full run has stamped the exact worktree content being pushed — run `.dev/validate/all.sh --all` before pushing, because the gate cannot run inside the push window without the server timing the connection out)
 
 The quickest way into the development shell is the [`./dc`](./dc) wrapper, which also installs the repository git hooks:
 

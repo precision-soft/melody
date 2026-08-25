@@ -65,7 +65,7 @@ For a realistic, fully wired application — modules, services, security, sessio
 
 ## Project status
 
-v3 is the actively maintained version. All new features land on v3; v1 and v2 are feature-frozen and receive security and critical correctness fixes only. Within v3, APIs that need to change are first marked with a `/* Deprecated: ... */` doc comment and kept working, with a future v4 cut once enough breaking changes accumulate. See the repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+v3 is the actively maintained version. All new features land on v3; v1 and v2 are feature-frozen and receive patch-level defect and security fixes until v4 is released. Within v3, APIs that need to change are first marked with a `/* Deprecated: ... */` doc comment and kept working, with a future v4 cut once enough breaking changes accumulate. See the repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Why Melody
 

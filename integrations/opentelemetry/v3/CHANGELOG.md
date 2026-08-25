@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `otlp/tracer_provider.go` — a negative or NaN `SampleRatio` is refused at construction instead of silently inverting to `AlwaysSample`. A negative value is the natural "tracing off" sentinel and NaN is the shape of a failed parse; both fell outside the documented `(0,1)` window check and produced 100% export exactly when the operator asked for none
 - a hijacked connection is recorded as `101 Switching Protocols` instead of the default `200`, so a websocket upgrade that lives for hours no longer lands in the same request-duration series as an ordinary request and skews the latency distribution
 
+### Security
+
+- `go.mod` — `google.golang.org/grpc` is required at v1.82.1, the fix for [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061), which govulncheck reports as reachable from this module through the otlp exporter path. The dependency pinning policy keeps the oldest version that compiles, and a reachable advisory is the exception that policy exists to admit
+
 ## [v3.1.0] - 2026-07-06 - Lifecycle Handler Decorator and OTLP Trace Export
 
 ### Added

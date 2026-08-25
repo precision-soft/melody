@@ -25,18 +25,40 @@ cleanup() {
 trap cleanup EXIT
 
 # git opened the connection to the remote before it ran this hook — it had to, because the remote sha below on
-# stdin comes from that connection's ref advertisement. The validation then holds it idle for minutes and the
-# server closes it, so git dies with SIGPIPE while sending the pack, right after this hook reports success.
+# stdin comes from that connection's ref advertisement. Anything long-running here therefore kills the push:
+# the server's receive-pack times out waiting for the pack while the gate runs, and git dies with SIGPIPE
+# right after the hook reports success — keepalives do not feed the remote process, so no transport tuning
+# fixes it. The full gate cannot run inside this window, and it does not need to: it runs BEFORE the push,
+# and what runs here is the proof that it did.
 #
-# Keepalives are the remedy and they cannot be applied to a push already under way, so this only arms the next
-# one. ./dc does the same on every invocation; this is here for whoever pushes from a fresh clone without
-# having run the wrapper first, and it says so rather than fixing it silently.
+# A green `.dev/validate/all.sh --all` stamps the tree hash of the exact worktree content it validated into
+# `.temp/validate-stamp`. This hook recomputes that hash and compares — milliseconds. A match means the
+# content being pushed is byte-identical to what the full gate proved; any edit after the run computes a
+# different hash and is refused by name. The stamp's age is deliberately not judged: identity of content is
+# the guarantee, and a clock would only refuse pushes the gate already covers.
 if [[ "" = "$(git config --get core.sshCommand || true)" ]]; then
     git config core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20"
-    info "armed ssh keepalives for the next push (core.sshCommand); if this push dies without a message, that is why — run it again"
 fi
 
-info "running full validations (unconditional)"
-bash "${ROOT_DIR}/.dev/validate/all.sh" --all
+VALIDATION_STAMP_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-stamp"
 
-success "pre-push validation passed"
+if [[ ! -f "${VALIDATION_STAMP_FILE_PATH}" ]]; then
+    fail "no validation stamp: run '.dev/validate/all.sh --all' to a green finish, then push — the full gate cannot run inside the push window, the server times the connection out"
+fi
+
+STAMPED_TREE_HASH_STRING="$(cut -d' ' -f1 < "${VALIDATION_STAMP_FILE_PATH}")"
+STAMPED_AT_STRING="$(cut -d' ' -f2 < "${VALIDATION_STAMP_FILE_PATH}")"
+
+if [[ ! "${STAMPED_TREE_HASH_STRING}" =~ ^[0-9a-f]{40}$ ]]; then
+    fail "malformed validation stamp (${VALIDATION_STAMP_FILE_PATH}): run '.dev/validate/all.sh --all' to a green finish, then push"
+fi
+
+if ! CURRENT_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
+    fail "could not compute the worktree hash to check against the validation stamp"
+fi
+
+if [[ "${STAMPED_TREE_HASH_STRING}" != "${CURRENT_TREE_HASH_STRING}" ]]; then
+    fail "the worktree changed since the last full validation (stamped ${STAMPED_TREE_HASH_STRING} at ${STAMPED_AT_STRING}, current ${CURRENT_TREE_HASH_STRING}): run '.dev/validate/all.sh --all' to a green finish, then push"
+fi
+
+success "pre-push: worktree matches the full validation stamped at ${STAMPED_AT_STRING}"

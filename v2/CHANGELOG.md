@@ -4,7 +4,7 @@ All notable changes to `precision-soft/melody/v2` will be documented in this fil
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**v2 is feature-frozen.** The major is stabilized: no new feature lands here, while security fixes and critical correctness fixes still do. New development continues on [v3](../v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
+**v2 is feature-frozen.** The major is stabilized: no new feature lands here, while patch-level defect fixes and security fixes still do, until v4 is released. New development continues on [v3](../v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
 
 ## [Unreleased]
 
@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: a serializer resolution failure that is not the not-acceptable refusal is recorded at warning before the result handler's fallback serves the default representation — it was dropped whole, so a client that named an available type and received another had no diagnostic anywhere
 - http: the abort sentinel no longer leaks the response it aborts. `http.ErrAbortHandler` was re-raised ten lines before the kernel captured the response in flight and seventy before either close ran, so a deliberate abort raised by a middleware after its `next()` returned dropped the only reference to a file-backed response — `FileResponse`, `ServeReader` — and leaked one descriptor per aborted request. The comment on `invokeErrorHandlerSafely` already refused to honour the sentinel for exactly this reason
 - exception: a foreign error whose `Context()` panics no longer takes down the recovery that is reporting it. `renderErrorText` already contained a panicking `Error()`, but the provider's context ran bare in five places — at `LogContext`'s top provider, in its cause-context walk, and in the three `FromError*` constructors that run on the same recovery paths — so the panic unwound through the recovery defer as a second panic while the first was being rendered. The context is read under a recover, and a panicking one costs the context alone, with the panic value kept in its place
+- documentation: the maintenance banner of `README.md`, this changelog's banner and `.documentation/UPGRADE.md` state the back-port rule the frozen majors actually follow — v2 receives any defect fix that fits a patch release (no new public symbols, no signature changes, nothing breaking) plus security fixes, until v4 is released. All three limited the promise to security and critical correctness fixes — narrower than the rule applied
 
 ### Security
 
