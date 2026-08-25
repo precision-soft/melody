@@ -52,14 +52,26 @@ refuse_and_start_validation() {
     local REASON_STRING="${1:?}"
 
     if pgrep -f '\.dev/validate/all\.sh' >/dev/null 2>&1; then
-        fail "${REASON_STRING} — the full gate is ALREADY RUNNING; push again when it reports green (its log: the shell it was started from, or ${VALIDATION_RUN_LOG_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/} if this hook started it)"
+        # a progress snapshot from the run's log, so the refusal answers "how far along" instead of only
+        # "wait" — but only when the log is demonstrably the RUNNING gate's (written in the last two
+        # minutes): a hand-started run logs to its own terminal, and quoting a stale file as its progress
+        # would report a finished run as the live one.
+        local PROGRESS_STRING="its log: the shell it was started from"
+        if [[ -f "${VALIDATION_RUN_LOG_FILE_PATH}" ]] && [[ -n "$(find "${VALIDATION_RUN_LOG_FILE_PATH}" -mmin -2 2>/dev/null)" ]]; then
+            local GREEN_SECTION_COUNT_NUMBER
+            GREEN_SECTION_COUNT_NUMBER="$(grep -ac "end \].*success" "${VALIDATION_RUN_LOG_FILE_PATH}" || true)"
+            local CURRENT_SECTION_STRING
+            CURRENT_SECTION_STRING="$(tail -1 "${VALIDATION_RUN_LOG_FILE_PATH}" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | cut -c1-90)"
+            PROGRESS_STRING="${GREEN_SECTION_COUNT_NUMBER} section(s) green so far, now at: ${CURRENT_SECTION_STRING} — follow it with 'tail -f ${VALIDATION_RUN_LOG_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/}'"
+        fi
+        fail "${REASON_STRING} — the full gate is ALREADY RUNNING (${PROGRESS_STRING}); push again when it reports green, or run './dc push' to follow it and push automatically"
     fi
 
     mkdir -p "$(dirname "${VALIDATION_RUN_LOG_FILE_PATH}")"
     nohup bash "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/all.sh" --all > "${VALIDATION_RUN_LOG_FILE_PATH}" 2>&1 < /dev/null &
     disown 2>/dev/null || true
 
-    fail "${REASON_STRING} — the full gate was STARTED in the background (log: ${VALIDATION_RUN_LOG_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/}); push again when it finishes green"
+    fail "${REASON_STRING} — the full gate was STARTED in the background (log: ${VALIDATION_RUN_LOG_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/}); push again when it finishes green, or run './dc push' to follow it and push automatically"
 }
 
 if [[ ! -f "${VALIDATION_STAMP_FILE_PATH}" ]]; then

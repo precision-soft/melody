@@ -25,7 +25,7 @@ When a change touches multiple version lines, keep each line's edit self-contain
 Prerequisites:
 
 - Go (this repository is a Go workspace of several modules; see [`go.work`](./go.work) — the root [`go.mod`](./go.mod) is the v1 framework module)
-- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke the staged checks on commit; on push the hook verifies that a green full run has stamped the exact worktree content being pushed — the gate cannot run inside the push window without the server timing the connection out, so a push without that proof is refused and the hook starts `.dev/validate/all.sh --all` in the background instead: push again when it reports green, or run the gate yourself before pushing)
+- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke the staged checks on commit; on push the hook verifies that a green full run has stamped the exact worktree content being pushed — the gate cannot run inside the push window without the server timing the connection out, so a push without that proof is refused and the hook starts `.dev/validate/all.sh --all` in the background instead: push again when it reports green, run the gate yourself before pushing, or use `./dc push` — the one-gesture form that runs the gate in the foreground when the proof is missing and pushes automatically on green)
 
 The quickest way into the development shell is the [`./dc`](./dc) wrapper, which also installs the repository git hooks:
 

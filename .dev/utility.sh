@@ -534,3 +534,32 @@ compute_worktree_tree_hash() {
 
     printf '%s' "${WORKTREE_TREE_HASH_STRING}"
 }
+
+# does the validation stamp cover the worktree as it stands right now — the yes/no form of the question
+# the pre-push hook answers with its per-case refusals. The wrapper's push flow needs only the boolean:
+# a missing, malformed or mismatched stamp all mean the same thing there — run the full gate first.
+validation_stamp_matches_worktree() {
+    local REPOSITORY_ROOT_PATH_STRING
+    REPOSITORY_ROOT_PATH_STRING="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ "" = "${REPOSITORY_ROOT_PATH_STRING}" ]]; then
+        return 1
+    fi
+
+    local STAMP_FILE_PATH_STRING="${REPOSITORY_ROOT_PATH_STRING}/.temp/validate-stamp"
+    if [[ ! -f "${STAMP_FILE_PATH_STRING}" ]]; then
+        return 1
+    fi
+
+    local STAMPED_TREE_HASH_STRING
+    STAMPED_TREE_HASH_STRING="$(cut -d' ' -f1 < "${STAMP_FILE_PATH_STRING}")"
+    if [[ ! "${STAMPED_TREE_HASH_STRING}" =~ ^[0-9a-f]{40}$ ]]; then
+        return 1
+    fi
+
+    local CURRENT_TREE_HASH_STRING
+    if ! CURRENT_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
+        return 1
+    fi
+
+    [[ "${STAMPED_TREE_HASH_STRING}" = "${CURRENT_TREE_HASH_STRING}" ]]
+}
