@@ -53,3 +53,6 @@ func TestEncryptedDeterministicStringFor_RedactsString(t *testing.T) {
         t.Fatalf("expected String to redact, got %q", value.String())
     }
 }
+
+/* the searchable compartment-bound column carries the same marker, pinned here for the reason written on its EncryptedStringFor sibling. */
+var _ EncryptedColumn = EncryptedDeterministicStringFor[crmCipherRef]("")

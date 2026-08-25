@@ -47,7 +47,7 @@ func newScopedServiceApplication(kernelInstance *testKernel) *Application {
     }
 }
 
-/* @info Without the hook a module has no way to declare a request-lifetime service at all, and the only mechanism left is the override the framework installs for its own logger and request context. */
+/* Without the hook a module has no way to declare a request-lifetime service at all, and the only mechanism left is the override the framework installs for its own logger and request context. */
 func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)
@@ -77,7 +77,7 @@ func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *te
     }
 }
 
-/* @info The boot seal has to cover both lifetimes: a scoped registration accepted after boot would reach the scopes created next while every scope already running keeps the plan it started with, so the same process would answer the same name two different ways depending on when the request arrived. */
+/* The boot seal has to cover both lifetimes: a scoped registration accepted after boot would reach the scopes created next while every scope already running keeps the plan it started with, so the same process would answer the same name two different ways depending on when the request arrived. */
 func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -97,7 +97,7 @@ func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
     }, "may not register scoped services after boot")
 }
 
-/* @info A name claimed at both lifetimes is a wiring mistake, and it has to join the aggregated boot report rather than end the boot on its own — the report exists so a consolidation that produced several collisions surfaces them all at once. */
+/* A name claimed at both lifetimes is a wiring mistake, and it has to join the aggregated boot report rather than end the boot on its own — the report exists so a consolidation that produced several collisions surfaces them all at once. */
 func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)

@@ -68,3 +68,4 @@ func (instance *EncryptedDeterministicString) Scan(source any) error {
 }
 
 var _ driver.Valuer = EncryptedDeterministicString("")
+var _ EncryptedColumn = EncryptedDeterministicString("")

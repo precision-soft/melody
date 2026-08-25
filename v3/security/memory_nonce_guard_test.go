@@ -46,7 +46,7 @@ func TestMemoryNonceGuard_NonPositiveTtlNotRecorded(t *testing.T) {
     }
 }
 
-/* @info the expired-entry sweep is amortized: a second Remember within the purge interval must not run another O(n) sweep, so a high volume of distinct nonces does not pay an O(n) sweep on every call. */
+/* the expired-entry sweep is amortized: a second Remember within the purge interval must not run another O(n) sweep, so a high volume of distinct nonces does not pay an O(n) sweep on every call. */
 func TestMemoryNonceGuard_PurgeIsAmortizedWithinInterval(t *testing.T) {
     guard := NewMemoryNonceGuard()
 

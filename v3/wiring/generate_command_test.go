@@ -143,7 +143,7 @@ func appBindSet() *BindSet {
     return bindSet
 }
 
-/* @info without the tag the gated constructor is absent from the generated source and the file that holds it is named on request, so a service missing from the wiring traces back to the tag it needs */
+/* without the tag the gated constructor is absent from the generated source and the file that holds it is named on request, so a service missing from the wiring traces back to the tag it needs */
 func TestGenerateCommand_WithoutTheTagTheGatedConstructorIsAbsentAndItsFileIsNamedExcluded(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -170,7 +170,7 @@ func TestGenerateCommand_WithoutTheTagTheGatedConstructorIsAbsentAndItsFileIsNam
     }
 }
 
-/* @important this pins the plumbing of the tags flag into the scan: with the tag dropped on the way to GenerateRequest the gated constructor stays missing from the generated wiring, strict still reports success, and nothing else in the command fails */
+/* this pins the plumbing of the tags flag into the scan: with the tag dropped on the way to GenerateRequest the gated constructor stays missing from the generated wiring, strict still reports success, and nothing else in the command fails */
 func TestGenerateCommand_ThreadsTheTagsFlagIntoTheScan(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -199,7 +199,7 @@ func TestGenerateCommand_ThreadsTheTagsFlagIntoTheScan(t *testing.T) {
     }
 }
 
-/* @info the rejection of a constraint expression has to reach the caller as a failed command, not as a scan that quietly matched no file */
+/* the rejection of a constraint expression has to reach the caller as a failed command, not as a scan that quietly matched no file */
 func TestGenerateCommand_RejectsAConstraintExpressionInTheTagsFlag(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -213,7 +213,7 @@ func TestGenerateCommand_RejectsAConstraintExpressionInTheTagsFlag(t *testing.T)
     }
 }
 
-/* @info a skipped constructor is coverage the wiring lost; it is always reported and strict turns it into a failure */
+/* a skipped constructor is coverage the wiring lost; it is always reported and strict turns it into a failure */
 func TestGenerateCommand_StrictFailsOnASkippedConstructor(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -242,7 +242,7 @@ func TestGenerateCommand_StrictFailsOnASkippedConstructor(t *testing.T) {
     }
 }
 
-/* @info a relative out path is resolved against the project directory, and the source goes to the file instead of the writer */
+/* a relative out path is resolved against the project directory, and the source goes to the file instead of the writer */
 func TestGenerateCommand_WritesTheGeneratedSourceToTheOutPath(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -295,7 +295,7 @@ func TestGenerateCommand_WritesTheGeneratedSourceToTheOutPath(t *testing.T) {
     }
 }
 
-/* @info a vendor tree cannot contribute services, so naming it is opt-in noise rather than part of every report */
+/* a vendor tree cannot contribute services, so naming it is opt-in noise rather than part of every report */
 func TestGenerateCommand_NamesTheVendorDirectoryOnlyOnRequest(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -319,7 +319,7 @@ func TestGenerateCommand_NamesTheVendorDirectoryOnlyOnRequest(t *testing.T) {
     }
 }
 
-/* @info a build context carries plain tag identifiers; a constraint expression handed to it matches no file, so the scan would behave as if nothing had been passed and strict would still report success */
+/* a build context carries plain tag identifiers; a constraint expression handed to it matches no file, so the scan would behave as if nothing had been passed and strict would still report success */
 func TestSplitBuildTags_RejectsAConstraintExpression(t *testing.T) {
     for _, tags := range []string{"!postgres", "postgres,!mysql", "postgres mysql", "post-gres", "(postgres)"} {
         buildTags, splitErr := splitBuildTags(tags)
@@ -334,7 +334,7 @@ func TestSplitBuildTags_RejectsAConstraintExpression(t *testing.T) {
     }
 }
 
-/* @info the accepted forms follow the go tool's own tag syntax, and surrounding spaces and empty entries stay tolerated */
+/* the accepted forms follow the go tool's own tag syntax, and surrounding spaces and empty entries stay tolerated */
 func TestSplitBuildTags_AcceptsPlainIdentifiers(t *testing.T) {
     buildTags, splitErr := splitBuildTags(" with_postgres , go1.22,, Integration2 ")
     if nil != splitErr {
@@ -364,7 +364,7 @@ func TestSplitBuildTags_EmptyInputYieldsNoTags(t *testing.T) {
     }
 }
 
-/* @info the run is inspected through its exit and its error record; a refusal naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary — strict carries every violation in one refusal. */
+/* the run is inspected through its exit and its error record; a refusal naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary — strict carries every violation in one refusal. */
 func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -400,7 +400,7 @@ func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
     }
 }
 
-/* @info a generated file inside a scanned directory is read back by the next scan with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out. */
+/* a generated file inside a scanned directory is read back by the next scan with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out. */
 func TestGenerateCommand_RefusesAnOutPathInsideAScannedDirectory(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -420,7 +420,7 @@ func TestGenerateCommand_RefusesAnOutPathInsideAScannedDirectory(t *testing.T) {
     }
 }
 
-/* @info the write truncates before it writes, so a mistyped --out pointing at a hand-written file must be refused: only a file opening with the generated marker — or an absent or empty one — is this command's to replace. */
+/* the write truncates before it writes, so a mistyped --out pointing at a hand-written file must be refused: only a file opening with the generated marker — or an absent or empty one — is this command's to replace. */
 func TestGenerateCommand_RefusesToOverwriteAFileWithoutTheGeneratedMarker(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -447,7 +447,7 @@ func TestGenerateCommand_RefusesToOverwriteAFileWithoutTheGeneratedMarker(t *tes
     }
 }
 
-/* @info a file carrying the marker is a previous output of this command and is replaced in place, which is what every regeneration does. */
+/* a file carrying the marker is a previous output of this command and is replaced in place, which is what every regeneration does. */
 func TestGenerateCommand_ReplacesAPreviousGeneratedFile(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -466,7 +466,7 @@ func TestGenerateCommand_ReplacesAPreviousGeneratedFile(t *testing.T) {
     }
 }
 
-/* @info the atomic write lands through a temp file and a rename: the artifact keeps the 0644 mode a direct write gave it, and no temp file survives a successful run beside it. */
+/* the atomic write lands through a temp file and a rename: the artifact keeps the 0644 mode a direct write gave it, and no temp file survives a successful run beside it. */
 func TestGenerateCommand_AtomicWriteLeavesTheModeAndNoResidue(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -500,7 +500,7 @@ func TestGenerateCommand_AtomicWriteLeavesTheModeAndNoResidue(t *testing.T) {
     }
 }
 
-/* @info without strict an unused exclude is not fatal, but it is named on the writer the way an unused bind is — the silent alternative registers the very constructor the pattern was declared to keep out. */
+/* without strict an unused exclude is not fatal, but it is named on the writer the way an unused bind is — the silent alternative registers the very constructor the pattern was declared to keep out. */
 func TestGenerateCommand_ReportsAnUnusedExcludeOnTheWriter(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 

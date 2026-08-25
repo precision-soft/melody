@@ -15,7 +15,7 @@ import (
    route metadata to the browser rather than dumping every route's pattern, requirements and defaults —
    internal routes stay server-side.
 
-   @important the ZONE gate is applied here too, and it is applied against the caller. The zone gate
+   the ZONE gate is applied here too, and it is applied against the caller. The zone gate
    used to live only inside the cli command, so the in-process door carried every zone to every page —
    and the frontend zone is the admin surface (the product and user api routes, each behind
    RoleEditor/RoleAdmin), enumerated with its patterns and methods into the anonymous login page. The

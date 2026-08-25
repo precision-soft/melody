@@ -9,7 +9,7 @@ import (
     "unicode"
 )
 
-/* @important the provider bodies spell these identifiers — the closure parameters, the fixed locals, the conversion type names, the scalar element types a pointer argument renders verbatim, the error of every signature, the string and any of every guard's error context, and the nil/true/false literals; an import alias or a generated local claiming one would shadow it inside every closure, so the alias suffix loop and the variable namer both step over them. */
+/* the provider bodies spell these identifiers — the closure parameters, the fixed locals, the conversion type names, the scalar element types a pointer argument renders verbatim, the error of every signature, the string and any of every guard's error context, and the nil/true/false literals; an import alias or a generated local claiming one would shadow it inside every closure, so the alias suffix loop and the variable namer both step over them. */
 var emittedBodyIdentifiers = []string{
     "resolver",
     "registrar",

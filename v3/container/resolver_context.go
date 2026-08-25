@@ -754,4 +754,5 @@ func (instance *resolverContext) isResolvingReference(reference containercontrac
 var (
     _ containercontract.Resolver   = (*resolverContext)(nil)
     _ containercontract.TypeLister = (*resolverContext)(nil)
+    _ referenceResolutionChecker   = (*resolverContext)(nil)
 )

@@ -520,7 +520,7 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     }
 }
 
-/* @info the resolution key is unique per type identity, not the type's String() which two same-named types from different packages share, so the creation guard and cycle detection cannot alias two distinct types onto one key */
+/* the resolution key is unique per type identity, not the type's String() which two same-named types from different packages share, so the creation guard and cycle detection cannot alias two distinct types onto one key */
 func TestTypeIdentityKey_DistinguishesSameStringTypesFromDifferentPackages(t *testing.T) {
     interfaceType := reflect.TypeOf((*collectableHandler)(nil)).Elem()
     pointerType := reflect.TypeOf(&invoiceHandler{})

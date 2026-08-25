@@ -213,7 +213,7 @@ func TestVerifyAt_StillRejectsWrongAndShortCodes(t *testing.T) {
     }
 }
 
-/* @info NormalizeCode is the single normalization Verify applies; callers that key a replay guard on an accepted code must use it, so it is exported and must stay in step with VerifyAt. */
+/* NormalizeCode is the single normalization Verify applies; callers that key a replay guard on an accepted code must use it, so it is exported and must stay in step with VerifyAt. */
 func TestNormalizeCode_StripsEveryWhitespaceForm(t *testing.T) {
     /* the last variant carries a real non-breaking space (U+00A0), the separator a mobile copy/paste of a displayed code keeps */
     for _, variant := range []string{"123456", "123 456", " 123456 ", "1 2 3 4 5 6", "123\t456", "123 456"} {

@@ -46,7 +46,7 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         exception.Panic(exception.NewError("jwt secret is empty", nil, nil))
     }
 
-    /* @important a negative skew is refused rather than carried: RevocationEpochSkew widens a boundary to absorb clock skew, and a negative value moves the boundary BACKWARDS instead — tokens issued before the revocation verify again, a revocation bypass reachable from a config typo. */
+    /* a negative skew is refused rather than carried: RevocationEpochSkew widens a boundary to absorb clock skew, and a negative value moves the boundary BACKWARDS instead — tokens issued before the revocation verify again, a revocation bypass reachable from a config typo. */
     if 0 > config.RevocationEpochSkew {
         exception.Panic(exception.NewError(
             "jwt revocation epoch skew may not be negative",
@@ -153,7 +153,7 @@ func (instance *JwtTokenValidator) Validate(
         )
     }
 
-    /* @important domain separation from every other HS256 credential melody mints — the internal-auth envelope above all, which is byte-identical in shape and signs through the same primitive under its own "melody-internal" type. An absent typ is accepted (RFC 7519 makes it optional) and "JWT" is compared case-insensitively as §5.1 recommends; anything else is refused, so a credential of another type verifying under a shared or reused secret cannot be replayed here even with SubjectClaim re-pointed at one of its fields. */
+    /* domain separation from every other HS256 credential melody mints — the internal-auth envelope above all, which is byte-identical in shape and signs through the same primitive under its own "melody-internal" type. An absent typ is accepted (RFC 7519 makes it optional) and "JWT" is compared case-insensitively as §5.1 recommends; anything else is refused, so a credential of another type verifying under a shared or reused secret cannot be replayed here even with SubjectClaim re-pointed at one of its fields. */
     if "" != header.Type && false == strings.EqualFold("JWT", header.Type) {
         return securitycontract.Claims{}, exception.NewError(
             "jwt type is not accepted",

@@ -222,7 +222,7 @@ func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
     }
 }
 
-/* @important a cyclic impersonator chain (reachable in-process through the exported ActorData.Impersonator field) must terminate via the depth bound rather than recurse until the goroutine stack overflows — a fatal error no recover() can catch. The test completing (Put and Lookup both return) is the assertion; without the bound cloneActorData would SIGSEGV. */
+/* a cyclic impersonator chain (reachable in-process through the exported ActorData.Impersonator field) must terminate via the depth bound rather than recurse until the goroutine stack overflows — a fatal error no recover() can catch. The test completing (Put and Lookup both return) is the assertion; without the bound cloneActorData would SIGSEGV. */
 func TestInMemoryTokenStore_CyclicImpersonatorChainTerminates(t *testing.T) {
     store := NewInMemoryTokenStore()
     rt := tokenStoreRuntime()

@@ -997,4 +997,5 @@ var (
     _ containercontract.ScopedRegistrar            = (*scope)(nil)
     _ containercontract.OverrideServiceWithOptions = (*scope)(nil)
     _ containercontract.TypeLister                 = (*scope)(nil)
+    _ closedScopeChecker                           = (*scope)(nil)
 )

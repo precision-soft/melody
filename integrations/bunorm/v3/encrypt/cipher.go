@@ -263,3 +263,5 @@ func decodeEncrypted(value string) (string, []byte, error) {
 
     return keyId, payload, nil
 }
+
+var _ Cipher = (*aes256Cipher)(nil)

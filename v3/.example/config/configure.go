@@ -21,7 +21,7 @@ import (
 func Configure(app *melodyapplication.Application) {
     moduleInstance := NewExampleModule(app.Configuration())
 
-    /* @info observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
+    /* observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
     app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{
         Middlewares:      []melodyhttpcontract.Middleware{moduleInstance.metricsMiddleware},
         MetricsHandler:   moduleInstance.metricsHandler,
@@ -31,7 +31,7 @@ func Configure(app *melodyapplication.Application) {
 
     app.RegisterModule(moduleInstance)
 
-    /* @info opt-in OTLP tracing: when OTEL_EXPORTER_OTLP_ENDPOINT is set (see .env) the otlp module builds
+    /* opt-in OTLP tracing: when OTEL_EXPORTER_OTLP_ENDPOINT is set (see .env) the otlp module builds
        a TracerProvider, adds the tracing middleware and flushes spans on shutdown — plug-and-play, exactly
        like the other integration module facades. Unset ⇒ no tracing, no OTLP dependency cost at runtime. */
     if otelEndpoint := moduleInstance.environmentValue(environmentKeyOtelExporterEndpoint); "" != otelEndpoint {
@@ -46,7 +46,7 @@ func Configure(app *melodyapplication.Application) {
         }))
     }
 
-    /* @info the encrypt bulk command resolves its database through the factory at the first run — after
+    /* the encrypt bulk command resolves its database through the factory at the first run — after
        Boot — so registering the command costs nothing in http or worker mode, and a boot without MYSQL_HOST
        stays clean (the first run then reports the missing database service). */
     app.RegisterModule(melodyencrypt.NewModule(melodyencrypt.ModuleConfig{
@@ -54,7 +54,7 @@ func Configure(app *melodyapplication.Application) {
         Cipher:          moduleInstance.cipher,
     }))
 
-    /* @info transactional-outbox module in the factory shape: the store and relay are registered as service
+    /* transactional-outbox module in the factory shape: the store and relay are registered as service
        providers that resolve the shared *bun.DB from the container at first use, and the module contributes
        the melody:outbox:relay command over the same lazily-resolved relay. */
     if nil != moduleInstance.database {
@@ -76,7 +76,7 @@ func Configure(app *melodyapplication.Application) {
         },
     }))
 
-    /* @info cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
+    /* cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
     app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
         ConfigurationFactory: newCronConfiguration,
         RunnerCommands:       cronRunnerCommands(),
@@ -89,7 +89,7 @@ func Configure(app *melodyapplication.Application) {
         Hub:       moduleInstance.serverSentEventHub,
         Path:      "/ws",
         RouteName: "example.websocket",
-        /* @info IdleTimeout is required: the keepalive ping is the only thing that reaps a browser tab that went away without a fin, and 30s is a comfortable interval for one. */
+        /* IdleTimeout is required: the keepalive ping is the only thing that reaps a browser tab that went away without a fin, and 30s is a comfortable interval for one. */
         Options: melodywebsocket.Options{
             OriginPatterns: []string{"*"},
             IdleTimeout:    30 * time.Second,

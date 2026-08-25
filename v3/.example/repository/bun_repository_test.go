@@ -21,7 +21,7 @@ func (instance stubResult) RowsAffected() (int64, error) {
 
 var _ sql.Result = stubResult{}
 
-/* @info the answer feeds a caller that has to tell a write which landed from one that found no row, so
+/* the answer feeds a caller that has to tell a write which landed from one that found no row, so
 a driver that will not report a count must read as "nothing changed" rather than as a change nobody
 can confirm */
 

@@ -31,7 +31,7 @@ func generateWiring(t *testing.T) (string, *melodywiring.GenerateReport) {
     return source, report
 }
 
-/* @info the committed file is what the application registers, so it has to stay what the generator produces; without this check a constructor gains an argument and the wiring silently keeps building the old one */
+/* the committed file is what the application registers, so it has to stay what the generator produces; without this check a constructor gains an argument and the wiring silently keeps building the old one */
 func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
     source, _ := generateWiring(t)
 
@@ -61,7 +61,7 @@ func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
     }
 }
 
-/* @info a bind that matches nothing is the misspelling this reporting exists to catch, and it must stay empty for the example */
+/* a bind that matches nothing is the misspelling this reporting exists to catch, and it must stay empty for the example */
 func TestWiring_DeclaresNoUnusedBinds(t *testing.T) {
     _, report := generateWiring(t)
 

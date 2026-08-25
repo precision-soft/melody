@@ -92,7 +92,7 @@ func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmac
         )
     }
 
-    /* @important the typ is REQUIRED, not merely accepted when present: a JSON web token carries no typ (or "JWT"), so requiring the envelope's own type refuses a JWT presented on the internal-auth header even under a custom secret provider that resolves the empty key id — the structural half of the domain separation, the other half being the JWT validator refusing this type. */
+    /* the typ is REQUIRED, not merely accepted when present: a JSON web token carries no typ (or "JWT"), so requiring the envelope's own type refuses a JWT presented on the internal-auth header even under a custom secret provider that resolves the empty key id — the structural half of the domain separation, the other half being the JWT validator refusing this type. */
     if hmacEnvelopeType != header.Type {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth type is not accepted",

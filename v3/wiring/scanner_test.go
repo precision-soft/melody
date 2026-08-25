@@ -64,7 +64,7 @@ func TestScan_ClassifiesArgumentsAsScalarsOrServices(t *testing.T) {
     }
 }
 
-/* @info a time.Duration is a named type from another package but behaves as a scalar for wiring: it can only come from configuration, never from the container */
+/* a time.Duration is a named type from another package but behaves as a scalar for wiring: it can only come from configuration, never from the container */
 func TestScan_TreatsDurationAsAScalar(t *testing.T) {
     constructor := constructorByName(scanFixture(t), "NewUserService")
 
@@ -99,7 +99,7 @@ func TestScan_RecordsWhetherTheConstructorReturnsAnError(t *testing.T) {
     }
 }
 
-/* @info a nested directory is its own package, so its import path has to be derived rather than inherited from the declared root */
+/* a nested directory is its own package, so its import path has to be derived rather than inherited from the declared root */
 func TestScan_DerivesTheImportPathOfANestedPackage(t *testing.T) {
     constructor := constructorByName(scanFixture(t), "NewUserService")
 
@@ -143,7 +143,7 @@ func TestScan_SkipsTheIgnoreDirective(t *testing.T) {
     }
 }
 
-/* @info a shape the generator cannot wire has to be named, otherwise the run silently covers less than it appears to */
+/* a shape the generator cannot wire has to be named, otherwise the run silently covers less than it appears to */
 func TestScan_ReportsUnwireableShapesWithTheirLocation(t *testing.T) {
     scanResult := scanFixture(t)
 
@@ -210,7 +210,7 @@ func TestScan_ReportsAMissingDirectory(t *testing.T) {
     }
 }
 
-/* @info a plain prefix match would also claim a longer word — //melody:serviceFoo — and read a name out of what is not the directive at all */
+/* a plain prefix match would also claim a longer word — //melody:serviceFoo — and read a name out of what is not the directive at all */
 func TestDirectiveRemainder_MatchesTheDirectiveExactly(t *testing.T) {
     cases := []struct {
         text      string
@@ -267,7 +267,7 @@ func TestPackageNameCandidates_CoverTheConventionalShapes(t *testing.T) {
     }
 }
 
-/* @info the qualifier a file uses is the package name, which the last path segment does not always spell; without the fallbacks a constructor depending on such a package is skipped */
+/* the qualifier a file uses is the package name, which the last path segment does not always spell; without the fallbacks a constructor depending on such a package is skipped */
 func TestCollectImports_ResolvesAQualifierThePathBaseDoesNotSpell(t *testing.T) {
     source := `package sample
 
@@ -299,7 +299,7 @@ import (
     }
 }
 
-/* @info the go tool skips a vendor tree in its package walks and refuses to import a main package, so neither may contribute constructors to the generated wiring */
+/* the go tool skips a vendor tree in its package walks and refuses to import a main package, so neither may contribute constructors to the generated wiring */
 func TestScan_SkipsVendorDirectoriesAndMainPackages(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -362,7 +362,7 @@ func TestScan_SkipsVendorDirectoriesAndMainPackages(t *testing.T) {
     }
 }
 
-/* @info a constructor gated on a build tag the binary carries is dropped by the default build; the scan must be told the tag through --tags to include it, and name it as excluded otherwise so a missing service is traceable */
+/* a constructor gated on a build tag the binary carries is dropped by the default build; the scan must be told the tag through --tags to include it, and name it as excluded otherwise so a missing service is traceable */
 func TestScan_BuildTaggedConstructorIsExcludedUntilTagIsPassed(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -429,7 +429,7 @@ func scanScopedFixture(t *testing.T) *ScanResult {
     return scanResult
 }
 
-/* @info the lifetime a constructor declares is the whole of what the generator has to carry into the emitted call; losing it makes a per-request service register as a process singleton, which never fails and never gets closed with the request. */
+/* the lifetime a constructor declares is the whole of what the generator has to carry into the emitted call; losing it makes a per-request service register as a process singleton, which never fails and never gets closed with the request. */
 func TestScan_RecordsTheScopedDirective(t *testing.T) {
     scanResult := scanScopedFixture(t)
 
@@ -456,7 +456,7 @@ func TestScan_RecordsTheScopedDirective(t *testing.T) {
     }
 }
 
-/* @info a plain prefix match would claim a longer word — //melody:scopedLater — and silently move a process singleton to a per-request lifetime on the strength of a comment that says something else; and reading it as no directive at all is the other silent cell, a constructor registered under the lifetime the comment says it does not have. The longer word is therefore refused as an unknown directive, naming where it was written. */
+/* a plain prefix match would claim a longer word — //melody:scopedLater — and silently move a process singleton to a per-request lifetime on the strength of a comment that says something else; and reading it as no directive at all is the other silent cell, a constructor registered under the lifetime the comment says it does not have. The longer word is therefore refused as an unknown directive, naming where it was written. */
 func TestScan_ScopedDirectiveDoesNotMatchALongerWordAndRefusesIt(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -483,7 +483,7 @@ type NearlyScoped struct {
     }
 }
 
-/* @info path.Match answers ErrBadPattern for a malformed pattern on every name, so the exclusion the operator declared would match nothing and the constructor it names would be registered anyway, with no trace; the pattern is refused before anything is walked. */
+/* path.Match answers ErrBadPattern for a malformed pattern on every name, so the exclusion the operator declared would match nothing and the constructor it names would be registered anyway, with no trace; the pattern is refused before anything is walked. */
 func TestScan_RefusesAMalformedExcludePattern(t *testing.T) {
     bindSet := NewBindSet()
     binding := bindSet.Package(fixtureImportPath, "wiring/internal/fixture/domain").Exclude("[Fixture")
@@ -498,7 +498,7 @@ func TestScan_RefusesAMalformedExcludePattern(t *testing.T) {
     }
 }
 
-/* @info an exclusion that stopped matching — a renamed type, a typo — silently registers the constructor it was declared to keep out; the pattern that matched nothing is reported, and the one that matched is not. */
+/* an exclusion that stopped matching — a renamed type, a typo — silently registers the constructor it was declared to keep out; the pattern that matched nothing is reported, and the one that matched is not. */
 func TestScan_ReportsAnExcludeThatMatchedNothing(t *testing.T) {
     bindSet := NewBindSet()
     binding := bindSet.Package(fixtureImportPath, "wiring/internal/fixture/domain").
@@ -515,7 +515,7 @@ func TestScan_ReportsAnExcludeThatMatchedNothing(t *testing.T) {
     }
 }
 
-/* @info a bind spelled without the equals sign, or with an empty half, would fall back to a broader bind — or to none — and the override written right beside the constructor would silently not be the one in effect. */
+/* a bind spelled without the equals sign, or with an empty half, would fall back to a broader bind — or to none — and the override written right beside the constructor would silently not be the one in effect. */
 func TestScan_RefusesAMalformedBindDirective(t *testing.T) {
     for _, malformed := range []string{"//melody:bind dsn app.dsn", "//melody:bind dsn="} {
         projectDirectory := t.TempDir()
@@ -543,7 +543,7 @@ type Repository struct {
     }
 }
 
-/* @info //melody:ignore kept as a test double is the natural spelling of an acknowledgement; demanding the bare form would silently register the constructor the comment says to leave out. */
+/* //melody:ignore kept as a test double is the natural spelling of an acknowledgement; demanding the bare form would silently register the constructor the comment says to leave out. */
 func TestScan_IgnoreDirectiveAcceptsAReason(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -572,7 +572,7 @@ type Double struct {
     }
 }
 
-/* @info the walk does not follow symlinks, so a symlinked root would be read as an empty package — no constructors, no error, nothing to report — and every service under it would silently leave the generated wiring; the root is resolved before the walk instead. */
+/* the walk does not follow symlinks, so a symlinked root would be read as an empty package — no constructors, no error, nothing to report — and every service under it would silently leave the generated wiring; the root is resolved before the walk instead. */
 func TestScan_ResolvesASymlinkedRootDirectory(t *testing.T) {
     projectDirectory := t.TempDir()
 

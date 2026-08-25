@@ -308,7 +308,7 @@ func (instance *blockingRefreshLock) Refresh(runtimeInstance runtimecontract.Run
     return exception.NewError("refresh aborted", nil, runtimeInstance.Context().Err())
 }
 
-/* @info A lease-style backend rewrites the lease to now+ttl on Refresh. Handing it the probe interval itself would renew the lease exactly as it expires, so every probe races its own expiry: callback is cancelled spuriously and the lapsed lease lets a second instance run alongside it. The probe must renew for a multiple of its own cadence, and the derived interval must never reach time.NewTicker as zero. */
+/* A lease-style backend rewrites the lease to now+ttl on Refresh. Handing it the probe interval itself would renew the lease exactly as it expires, so every probe races its own expiry: callback is cancelled spuriously and the lapsed lease lets a second instance run alongside it. The probe must renew for a multiple of its own cadence, and the derived interval must never reach time.NewTicker as zero. */
 func TestResolveRefreshSchedule(t *testing.T) {
     for _, testCase := range []struct {
         name             string
@@ -345,7 +345,7 @@ func TestResolveRefreshSchedule(t *testing.T) {
     }
 }
 
-/* @info A ttl of a few nanoseconds makes ttl/2 == 0 and time.NewTicker(0) panics on the refresh goroutine — a panic no recover can reach. The derived interval must be floored. */
+/* A ttl of a few nanoseconds makes ttl/2 == 0 and time.NewTicker(0) panics on the refresh goroutine — a panic no recover can reach. The derived interval must be floored. */
 func TestRunExclusive_TinyTtlDoesNotPanicTheRefreshGoroutine(t *testing.T) {
     ran := false
 
@@ -370,7 +370,7 @@ func TestRunExclusive_TinyTtlDoesNotPanicTheRefreshGoroutine(t *testing.T) {
     _ = runErr
 }
 
-/* @info A Refresh already blocked on an unresponsive backend when callback returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the child context before Wait unblocks it, and the resulting error must read as shutdown, not as a lost lease. */
+/* A Refresh already blocked on an unresponsive backend when callback returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the child context before Wait unblocks it, and the resulting error must read as shutdown, not as a lost lease. */
 func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     entered := make(chan struct{})
     locker := &blockingRefreshLocker{entered: entered}
@@ -403,7 +403,7 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     }
 }
 
-/* @info A SIGTERM cancels the runtime the refresh loop calls the backend with, so a refresh in flight fails with that cancellation. That is the shutdown itself, not a lost lease: reporting it turns every graceful stop of a long-running exclusive command into an error a cron fleet reads as a failed run. */
+/* A SIGTERM cancels the runtime the refresh loop calls the backend with, so a refresh in flight fails with that cancellation. That is the shutdown itself, not a lost lease: reporting it turns every graceful stop of a long-running exclusive command into an error a cron fleet reads as a failed run. */
 func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
     parentContext, cancelParent := context.WithCancel(context.Background())
     defer cancelParent()
@@ -510,7 +510,7 @@ func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance runtimecontra
     }
 }
 
-/* @info A renewal that ANSWERS, inside the lease it is renewing, renewed it — however long the store took to say so. Demoting on the latency of one call instead of on the lease clock cancels work that was never in danger and, under a LeaderGate, drops a term that was never lost. The delay here sits above the old per-call verdict (a quarter of the ttl) and below the lease, which is exactly the band that used to report a lost lock. */
+/* A renewal that ANSWERS, inside the lease it is renewing, renewed it — however long the store took to say so. Demoting on the latency of one call instead of on the lease clock cancels work that was never in danger and, under a LeaderGate, drops a term that was never lost. The delay here sits above the old per-call verdict (a quarter of the ttl) and below the lease, which is exactly the band that used to report a lost lock. */
 func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T) {
     ttl := 200 * time.Millisecond
     locker := &slowSucceedingRefreshLocker{delay: 80 * time.Millisecond}
@@ -543,7 +543,7 @@ func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T)
     }
 }
 
-/* @info the other half of the invariant: a renewal that keeps failing must still demote, and must do so before the lease it last wrote can be acquired by anyone else rather than after. */
+/* the other half of the invariant: a renewal that keeps failing must still demote, and must do so before the lease it last wrote can be acquired by anyone else rather than after. */
 func TestRunExclusive_APersistentlyFailingRenewalStillLosesTheLease(t *testing.T) {
     ttl := 200 * time.Millisecond
     locker := &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
@@ -607,7 +607,7 @@ func (instance *intermittentRefreshLock) Refresh(runtimeInstance runtimecontract
     return nil
 }
 
-/* @info One failed renewal is not a lost lease. The renewal cadence is half the ttl precisely so that a lost attempt still leaves a whole second attempt before the lease lapses; a policy that demotes on the first failure throws that margin away and turns every dropped connection into cancelled work and, under a LeaderGate, a dropped term. What must demote is the lease clock — the attempt after the failure lands, rewrites the lease, and nothing was ever in danger. */
+/* One failed renewal is not a lost lease. The renewal cadence is half the ttl precisely so that a lost attempt still leaves a whole second attempt before the lease lapses; a policy that demotes on the first failure throws that margin away and turns every dropped connection into cancelled work and, under a LeaderGate, a dropped term. What must demote is the lease clock — the attempt after the failure lands, rewrites the lease, and nothing was ever in danger. */
 func TestRunExclusive_ASingleFailedRenewalIsSurvivedByTheNextOne(t *testing.T) {
     ttl := 200 * time.Millisecond
     locker := &intermittentRefreshLocker{}

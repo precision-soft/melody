@@ -58,7 +58,7 @@ func newTestTrail(journalRepository repository.CatalogJournalRepository, request
     return trail
 }
 
-/* @info nothing may reach the journal before the flush: the whole reason the trail exists is that the
+/* nothing may reach the journal before the flush: the whole reason the trail exists is that the
 write happens once, at a point the request can still be failed at */
 
 func TestRequestReportTrailWritesNothingBeforeFlush(t *testing.T) {
@@ -77,7 +77,7 @@ func TestRequestReportTrailWritesNothingBeforeFlush(t *testing.T) {
     }
 }
 
-/* @info one request's changes go out as ONE batch, and every entry carries the request that caused it —
+/* one request's changes go out as ONE batch, and every entry carries the request that caused it —
 a per-entry write would cost a round trip per change and an entry without the request id could not be
 traced back to it */
 
@@ -112,7 +112,7 @@ func TestRequestReportTrailFlushesOneBatchStampedWithTheRequest(t *testing.T) {
     }
 }
 
-/* @info a second flush must not write the same changes again: the flush middleware and the scope's Close
+/* a second flush must not write the same changes again: the flush middleware and the scope's Close
 both call it on the ordinary path, and a trail that re-wrote what it already wrote would double every
 journal entry in the application */
 
@@ -137,7 +137,7 @@ func TestRequestReportTrailFlushIsIdempotent(t *testing.T) {
     }
 }
 
-/* @info a flush nobody made must not be reported as one either: a read-only request resolves the trail
+/* a flush nobody made must not be reported as one either: a read-only request resolves the trail
 too, and it may not pay a query for having changed nothing */
 
 func TestRequestReportTrailFlushOfAnEmptyTrailTouchesNothing(t *testing.T) {
@@ -153,7 +153,7 @@ func TestRequestReportTrailFlushOfAnEmptyTrailTouchesNothing(t *testing.T) {
     }
 }
 
-/* @info a failed flush keeps the entries staged so Close can try again. Dropping them would lose the
+/* a failed flush keeps the entries staged so Close can try again. Dropping them would lose the
 record of a change that DID happen, and re-trying cannot duplicate anything because the batch is written
 in one statement and fails as a whole */
 
@@ -182,7 +182,7 @@ func TestRequestReportTrailKeepsEntriesStagedWhenTheFlushFails(t *testing.T) {
     }
 }
 
-/* @info the trail reads BOTH container levels: the request context of its own scope and the formatter
+/* the trail reads BOTH container levels: the request context of its own scope and the formatter
 singleton. A summary that named no request would mean the scoped registration handed it the wrong one */
 
 func TestRequestReportTrailSummaryNamesItsOwnRequest(t *testing.T) {

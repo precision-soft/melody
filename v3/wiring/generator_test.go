@@ -47,7 +47,7 @@ func generateFixture(t *testing.T, bindSet *BindSet) (string, *GenerateReport) {
     return source, report
 }
 
-/* @info the committed fixture output is compiled by the ordinary build, so comparing against it is what proves the generator still emits type-correct Go rather than merely well-formed text */
+/* the committed fixture output is compiled by the ordinary build, so comparing against it is what proves the generator still emits type-correct Go rather than merely well-formed text */
 func TestGenerate_MatchesTheCommittedFixtureOutput(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -70,7 +70,7 @@ func TestGenerate_ProducesParsableSource(t *testing.T) {
     }
 }
 
-/* @info the project indents with four spaces rather than tabs, and the generated file is read and reviewed like every other one */
+/* the project indents with four spaces rather than tabs, and the generated file is read and reviewed like every other one */
 func TestGenerate_IndentsWithSpaces(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -121,7 +121,7 @@ func TestGenerate_HonoursDirectivesAndExcludes(t *testing.T) {
     }
 }
 
-/* @info a bind that matches no argument is the common misspelling, and the failure it causes otherwise surfaces far from its cause */
+/* a bind that matches no argument is the common misspelling, and the failure it causes otherwise surfaces far from its cause */
 func TestGenerate_ReportsBindsThatMatchedNothing(t *testing.T) {
     bindSet := newFixtureBindSet()
     bindSet.Name("airbnbClientID", "fixture.airbnb_client_id")
@@ -140,7 +140,7 @@ func TestGenerate_ReportsBindsThatMatchedNothing(t *testing.T) {
     }
 }
 
-/* @info a global bind silently reaches every constructor declaring an argument of that name, which is the footgun the reach report exists to expose */
+/* a global bind silently reaches every constructor declaring an argument of that name, which is the footgun the reach report exists to expose */
 func TestGenerate_ReportsTheReachOfEveryGlobalBind(t *testing.T) {
     _, report := generateFixture(t, newFixtureBindSet())
 
@@ -172,7 +172,7 @@ func TestGenerate_FailsWhenAScalarArgumentHasNoBind(t *testing.T) {
     }
 }
 
-/* @info checking the bind target against the declared parameters turns a typo in a parameter name into a generation failure instead of a panic at boot */
+/* checking the bind target against the declared parameters turns a typo in a parameter name into a generation failure instead of a panic at boot */
 func TestGenerate_FailsWhenABindTargetsAnUndeclaredParameter(t *testing.T) {
     _, _, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: fixtureProjectDir,
@@ -201,7 +201,7 @@ func TestGenerate_RequiresABindSet(t *testing.T) {
     }
 }
 
-/* @info nil is not a value of a struct type, so the error paths of a non-pointer provider have to return a declared zero value or the generated file does not compile */
+/* nil is not a value of a struct type, so the error paths of a non-pointer provider have to return a declared zero value or the generated file does not compile */
 func TestGenerate_ReturnsADeclaredZeroValueForANonPointerConstructor(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -214,7 +214,7 @@ func TestGenerate_ReturnsADeclaredZeroValueForANonPointerConstructor(t *testing.
     }
 }
 
-/* @info a Go conversion wraps silently, so a parameter of -1 handed to a uint8 argument would otherwise become 255 instead of an error naming the parameter */
+/* a Go conversion wraps silently, so a parameter of -1 handed to a uint8 argument would otherwise become 255 instead of an error naming the parameter */
 func TestGenerate_GuardsANarrowingScalarConversion(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -227,7 +227,7 @@ func TestGenerate_GuardsANarrowingScalarConversion(t *testing.T) {
     }
 }
 
-/* @info the framework config package is imported under a fixed alias by every provider body, so a scanned dependency living in that same package must render through that alias instead of claiming "config" for itself */
+/* the framework config package is imported under a fixed alias by every provider body, so a scanned dependency living in that same package must render through that alias instead of claiming "config" for itself */
 func TestGenerate_RendersAFrameworkConfigDependencyThroughTheReservedAlias(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -250,7 +250,7 @@ func TestGenerate_ExcludesAFileTheBuildExcludes(t *testing.T) {
     }
 }
 
-/* @info a function with no providers still has to compile: an import block naming the container package that no body uses would fail the build of an application whose scan found nothing yet */
+/* a function with no providers still has to compile: an import block naming the container package that no body uses would fail the build of an application whose scan found nothing yet */
 func TestGenerate_EmptyScanEmitsACompilableFile(t *testing.T) {
     bindSet := NewBindSet()
     bindSet.Package(
@@ -307,7 +307,7 @@ func TestResolveArguments_ReportsADirectiveBindThatMatchedNoArgument(t *testing.
     }
 }
 
-/* @info a directive bind on a service argument is the same silent loss: the bind is dead because only a scalar is filled from a parameter */
+/* a directive bind on a service argument is the same silent loss: the bind is dead because only a scalar is filled from a parameter */
 func TestResolveArguments_ReportsADirectiveBindOnAServiceArgument(t *testing.T) {
     bindSet := NewBindSet()
     packageBinding := bindSet.Package("example.com/domain", "domain")
@@ -340,7 +340,7 @@ func TestResolveArguments_ReportsADirectiveBindOnAServiceArgument(t *testing.T) 
     }
 }
 
-/* @info both names land verbatim in the generated source, so a non-identifier, a keyword, a name the generated file already spells, or an identifier the spec refuses in that position (the blank identifier, init) fails generation at its cause instead of emitting a file that cannot parse, compile, or be called */
+/* both names land verbatim in the generated source, so a non-identifier, a keyword, a name the generated file already spells, or an identifier the spec refuses in that position (the blank identifier, init) fails generation at its cause instead of emitting a file that cannot parse, compile, or be called */
 func TestGenerate_RejectsAFunctionNameTheGeneratedFileCannotCarry(t *testing.T) {
     for _, functionName := range []string{"melodycontainer", "error", "func", "foo bar", "3services", "a.b", "Register(", "Register//", "_", "init"} {
         _, _, generateErr := Generate(&GenerateRequest{
@@ -406,7 +406,7 @@ func generateScopedFixture(t *testing.T, functionName string, scopedFunctionName
     })
 }
 
-/* @info the committed scoped fixture output is compiled by the ordinary build, so comparing against it is what proves the scoped emission is type-correct Go — that MustRegisterScoped really takes a ScopedRegistrar, and that the two functions can coexist in one file */
+/* the committed scoped fixture output is compiled by the ordinary build, so comparing against it is what proves the scoped emission is type-correct Go — that MustRegisterScoped really takes a ScopedRegistrar, and that the two functions can coexist in one file */
 func TestGenerate_MatchesTheCommittedScopedFixtureOutput(t *testing.T) {
     source, report, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "")
     if nil != generateErr {
@@ -431,7 +431,7 @@ func TestGenerate_MatchesTheCommittedScopedFixtureOutput(t *testing.T) {
     }
 }
 
-/* @info a scoped constructor emitted into the container function would be registered as a process singleton, which is the silent half of the lifetime mistake: it would be built once and never closed with the request it was written for. */
+/* a scoped constructor emitted into the container function would be registered as a process singleton, which is the silent half of the lifetime mistake: it would be built once and never closed with the request it was written for. */
 func TestGenerate_EmitsScopedRegistrationsInTheirOwnFunction(t *testing.T) {
     source, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "")
     if nil != generateErr {
@@ -464,7 +464,7 @@ func TestGenerate_EmitsScopedRegistrationsInTheirOwnFunction(t *testing.T) {
     }
 }
 
-/* @info a project that declares nothing scoped must keep regenerating the file it already had, or every consumer of the generator sees a spurious diff and a function nobody calls. */
+/* a project that declares nothing scoped must keep regenerating the file it already had, or every consumer of the generator sees a spurious diff and a function nobody calls. */
 func TestGenerate_OmitsTheScopedFunctionWhenNothingIsScoped(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -473,7 +473,7 @@ func TestGenerate_OmitsTheScopedFunctionWhenNothingIsScoped(t *testing.T) {
     }
 }
 
-/* @info the two functions share one file, so one name for both would declare the same function twice and not compile; which lifetime survived would be whichever the renderer wrote last. */
+/* the two functions share one file, so one name for both would declare the same function twice and not compile; which lifetime survived would be whichever the renderer wrote last. */
 func TestGenerate_RefusesAScopedFunctionNameEqualToTheFunctionName(t *testing.T) {
     _, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "RegisterScopedFixtureServices")
     if nil == generateErr {
@@ -485,7 +485,7 @@ func TestGenerate_RefusesAScopedFunctionNameEqualToTheFunctionName(t *testing.T)
     }
 }
 
-/* @info the scoped name lands verbatim in the generated source exactly as the container one does, so it needs the same refusal for a name the file cannot declare. */
+/* the scoped name lands verbatim in the generated source exactly as the container one does, so it needs the same refusal for a name the file cannot declare. */
 func TestGenerate_RefusesAScopedFunctionNameTheGeneratedFileCannotCarry(t *testing.T) {
     _, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "func")
     if nil == generateErr {
@@ -497,7 +497,7 @@ func TestGenerate_RefusesAScopedFunctionNameTheGeneratedFileCannotCarry(t *testi
     }
 }
 
-/* @info two constructors that claim one container key panic at the first boot of the generated file, far from the generation that reported success; the collision fails here, naming both sites. */
+/* two constructors that claim one container key panic at the first boot of the generated file, far from the generation that reported success; the collision fails here, naming both sites. */
 func TestGenerate_RefusesTwoConstructorsRegisteringOneType(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -530,7 +530,7 @@ type UserRepository struct {
     }
 }
 
-/* @info the same key rule holds for named registrations: two constructors naming one exported constant register under one service name. */
+/* the same key rule holds for named registrations: two constructors naming one exported constant register under one service name. */
 func TestGenerate_RefusesTwoConstructorsNamingOneServiceConstant(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -569,7 +569,7 @@ type BackupMailer struct {
     }
 }
 
-/* @info the two lifetimes register through different registrars, and a scoped registration of a type is what deliberately shadows the container one inside a scope — one type across the two lifetimes is not a collision. */
+/* the two lifetimes register through different registrars, and a scoped registration of a type is what deliberately shadows the container one inside a scope — one type across the two lifetimes is not a collision. */
 func TestGenerate_AllowsOneTypeAcrossTheTwoLifetimes(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -602,7 +602,7 @@ type Clock struct {
     }
 }
 
-/* @info an empty import path renders an import of "", and an empty directory joins to the project root and silently scans the whole tree as one package. */
+/* an empty import path renders an import of "", and an empty directory joins to the project root and silently scans the whole tree as one package. */
 func TestGenerate_RefusesAPackageBindingWithAnEmptyHalf(t *testing.T) {
     for _, testCase := range []struct {
         importPath string
@@ -626,7 +626,7 @@ func TestGenerate_RefusesAPackageBindingWithAnEmptyHalf(t *testing.T) {
     }
 }
 
-/* @info the generator's contract is to say when it could not check the bind targets rather than silently assume every target exists; the flag is raised only when a bind actually went unchecked. */
+/* the generator's contract is to say when it could not check the bind targets rather than silently assume every target exists; the flag is raised only when a bind actually went unchecked. */
 func TestGenerate_ReportsUncheckedBindTargets(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -670,7 +670,7 @@ type Repository struct {
     }
 }
 
-/* @info an unused exclude reaches the report carrying its package's import path, the way an unused bind does, so the strict refusal names where the dead pattern was declared. */
+/* an unused exclude reaches the report carrying its package's import path, the way an unused bind does, so the strict refusal names where the dead pattern was declared. */
 func TestGenerate_ReportsAnUnusedExcludeWithItsImportPath(t *testing.T) {
     bindSet := newFixtureBindSet()
     bindSet.Packages()[0].Exclude("*Respository")

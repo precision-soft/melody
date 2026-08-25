@@ -14,7 +14,7 @@ func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
     return instance.values, nil
 }
 
-/* @info environmentValue returns a .env-registered parameter fully resolved — NewConfiguration expands
+/* environmentValue returns a .env-registered parameter fully resolved — NewConfiguration expands
 %env(X)%/%name% indirection and unescapes %% at construction (before this composition root runs), so a
 "pa%%ss" value reads back as "pa%ss" without environmentValue doing anything itself; a missing key returns ""
 so an unset integration variable keeps its "skip this integration" behaviour. */

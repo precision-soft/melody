@@ -81,7 +81,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* @important bound by the openapi descriptor in config; keep it exported */
+/* bound by the openapi descriptor in config; keep it exported */
 type ProductResponse struct {
     Id          string  `json:"id"`
     Name        string  `json:"name"`

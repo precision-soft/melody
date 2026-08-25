@@ -210,3 +210,4 @@ func (instance *recordingResponseWriter) Unwrap() nethttp.ResponseWriter {
 
 var _ headerCommitRecorder = (*recordingResponseWriter)(nil)
 var _ sessionPersistenceRecorder = (*recordingResponseWriter)(nil)
+var _ committedStatusRecorder = (*recordingResponseWriter)(nil)

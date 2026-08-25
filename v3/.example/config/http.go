@@ -33,7 +33,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
 
-    /* @info the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
+    /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
     router.HandleWithOptions(
         "/health",
         handler.HealthHandler(),
@@ -50,7 +50,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed("example.messagebus.dispatch", "POST", "/messagebus/dispatch", handler.WelcomeEmailDispatchHandler())
 
-    /* @info the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
+    /* the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
 
     router.HandleNamed("example.encrypt.roundtrip", "GET", "/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher))
 
@@ -65,7 +65,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
 
-    /* @info login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the
+    /* login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the
        frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the
        nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
     router.HandleWithOptions(
@@ -90,7 +90,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(instance.twoFactorStore))
     }
 
-    /* @info the outbox handlers hold container.Lazy handles built at route-registration time: the store and
+    /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and
        relay services (provided by the outbox module's factories, see configure.go) are resolved at the first
        request, so registering the routes never touches the outbox schema or the transport. */
     if nil != instance.database {
@@ -112,7 +112,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler(instance.serverSentEventHub))
     router.HandleNamed(route.EventsPublishName, "POST", route.EventsPublishPattern, handlerevent.PublishHandler(instance.messageBusDispatch))
 
-    /* @info every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of
+    /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of
        their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make
        the client throw "unknown route". */
     router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))

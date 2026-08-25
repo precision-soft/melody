@@ -18,7 +18,7 @@ type inMemoryUserRepository struct {
     users []*entity.User
 }
 
-/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
+/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
 repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryUserRepository) All(ctx context.Context) ([]*entity.User, error) {
     instance.mutex.RLock()

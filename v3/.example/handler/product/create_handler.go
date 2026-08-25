@@ -46,7 +46,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* @info the cause travels with the refusal, so the responder answers through ApiErrorWithErr rather
+/* the cause travels with the refusal, so the responder answers through ApiErrorWithErr rather
    than ApiError: the decoder's own diagnosis and the per-field validation collection reach the error
    context and the debug trace instead of dying at this boundary. Returning the response rather than
    nothing is what keeps the refusal a refusal — a responder that answers nothing leaves the framework's
@@ -62,7 +62,7 @@ func apiJsonErrorResponder(
     return presenter.ApiErrorWithErr(runtimeInstance, request, status, message, cause), nil
 }
 
-/* @important bound by the openapi descriptor in config; keep it exported */
+/* bound by the openapi descriptor in config; keep it exported */
 type CreateRequest struct {
     Id          string  `json:"id" validate:"max=60"`
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`

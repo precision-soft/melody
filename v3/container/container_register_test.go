@@ -46,9 +46,7 @@ func TestContainer_RegisterType_Interface_AndResolveByType(t *testing.T) {
     }
 }
 
-/* @info same-String() types from different packages */
-
-/* @info both same-string types can now be type-registered under their auto-derived names: the name is import-path-qualified, so "contract.Bus" from two packages no longer collides at registration */
+/* both same-string types can now be type-registered under their auto-derived names: the name is import-path-qualified, so "contract.Bus" from two packages no longer collides at registration */
 func TestRegisterType_SameStringTypesFromDifferentPackagesGetDistinctNames(t *testing.T) {
     serviceContainer := NewContainer()
 

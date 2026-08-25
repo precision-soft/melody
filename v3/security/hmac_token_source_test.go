@@ -661,7 +661,7 @@ func TestHmacTokenSource_EndToEndResolvesServiceWithActorThroughFirewall(t *test
     }
 }
 
-/* @info key ids carry no charset restriction, so the guard key must be injective: with a plain colon join, key "a" signing nonce "b:<n>" would pre-burn key "a:b"'s nonce "<n>" and force rejection of that key's legitimate requests */
+/* key ids carry no charset restriction, so the guard key must be injective: with a plain colon join, key "a" signing nonce "b:<n>" would pre-burn key "a:b"'s nonce "<n>" and force rejection of that key's legitimate requests */
 func TestHmacNonceGuardKey_ColonExtensionKeyIdsCannotCollide(t *testing.T) {
     if hmacNonceGuardKey("a", "b:nonce") == hmacNonceGuardKey("a:b", "nonce") {
         t.Fatalf("expected the guard keys of colon-extension key ids to differ")

@@ -1437,7 +1437,7 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
     }
 }
 
-/* @info a closed scope enumerates nothing, mirroring Has: the request is over and its collaborators are gone, so a late collection gets an empty set instead of reaching into a container the scope no longer holds */
+/* a closed scope enumerates nothing, mirroring Has: the request is over and its collaborators are gone, so a late collection gets an empty set instead of reaching into a container the scope no longer holds */
 func TestScope_TypesImplementingReturnsEmptyWhenClosed(t *testing.T) {
     serviceContainer := NewContainer()
 

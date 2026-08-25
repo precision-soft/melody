@@ -324,7 +324,7 @@ func TestNewAccessControlRule_LonePublicAccessIsAllowed(t *testing.T) {
     }
 }
 
-/* @info a rule whose attributes all normalize away still matches its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied; the blank attribute is refused at construction instead */
+/* a rule whose attributes all normalize away still matches its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied; the blank attribute is refused at construction instead */
 func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testing.T) {
     for _, attributes := range [][]string{
         {},

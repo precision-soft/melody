@@ -114,7 +114,7 @@ func runFlushMiddleware(
     return NewCatalogJournalFlushMiddleware()(next)(runtimeInstance, httptest.NewRecorder(), request)
 }
 
-/* @info the flush has to happen AFTER the handler ran and BEFORE the response leaves. The scope's own
+/* the flush has to happen AFTER the handler ran and BEFORE the response leaves. The scope's own
 Close runs from a deferred call in the http kernel, which is after the response has already gone to the
 client, so a caller reading the journal on receipt of its 201 would be racing the write */
 
@@ -165,7 +165,7 @@ func TestCatalogJournalFlushMiddlewareWritesAfterTheHandlerAndBeforeTheResponse(
     }
 }
 
-/* @info the middleware and the event listeners must reach the SAME instance. Were they not the same, the
+/* the middleware and the event listeners must reach the SAME instance. Were they not the same, the
 middleware would flush a trail nobody wrote to and the journal would stay empty while every response still
 looked correct — which is the whole claim the scoped registration makes */
 
@@ -200,7 +200,7 @@ func TestCatalogJournalFlushMiddlewareSharesTheTrailWithTheHandler(t *testing.T)
     }
 }
 
-/* @info a request that changed nothing must not pay a query. A read is the common case and it resolves
+/* a request that changed nothing must not pay a query. A read is the common case and it resolves
 the trail too */
 
 func TestCatalogJournalFlushMiddlewareWritesNothingForARequestThatChangedNothing(t *testing.T) {
@@ -227,7 +227,7 @@ func TestCatalogJournalFlushMiddlewareWritesNothingForARequestThatChangedNothing
     }
 }
 
-/* @info a journal write that fails has to fail the REQUEST. The change to the nomenclature already
+/* a journal write that fails has to fail the REQUEST. The change to the nomenclature already
 happened; a caller told it succeeded while the record of it was lost has been told something untrue */
 
 func TestCatalogJournalFlushMiddlewareFailsTheRequestWhenTheJournalWriteFails(t *testing.T) {

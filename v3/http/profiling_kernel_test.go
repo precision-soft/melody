@@ -14,7 +14,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* @info profiling listener must emit a profile even when Attributes() is nil, as long as RequestContext() is present */
+/* profiling listener must emit a profile even when Attributes() is nil, as long as RequestContext() is present */
 func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreNil(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)

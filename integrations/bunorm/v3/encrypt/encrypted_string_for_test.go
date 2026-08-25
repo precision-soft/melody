@@ -224,3 +224,6 @@ func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
         t.Fatalf("expected the refusal to name the pointer form, got: %v", valueErr)
     }
 }
+
+/* the compartment-bound column carries the EncryptedColumn marker its non-generic sibling carries, which is what the auto-redaction type walk recognises it by. The assertion lives here rather than beside the type because instantiating a generic column needs a CipherRef marker, and the package deliberately ships none — a marker is the integrator's, minted per compartment. */
+var _ EncryptedColumn = EncryptedStringFor[crmCipherRef]("")

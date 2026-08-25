@@ -96,3 +96,4 @@ func errCipherNotConfigured() error {
 }
 
 var _ driver.Valuer = EncryptedString("")
+var _ EncryptedColumn = EncryptedString("")

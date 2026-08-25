@@ -32,7 +32,7 @@ type RetryPolicy struct {
     FailureTransport    messagebuscontract.Transport
     MaxDelay            time.Duration
     FailureRequeueDelay time.Duration
-    /* @important bound on requeues of an exhausted message after the FailureTransport rejects it; 0 keeps the default no-loss behavior (requeue until it recovers), a positive value nacks without requeue after that many failed routings so a transport-native dead-letter (AMQP DLX) can claim it instead of looping forever */
+    /* bound on requeues of an exhausted message after the FailureTransport rejects it; 0 keeps the default no-loss behavior (requeue until it recovers), a positive value nacks without requeue after that many failed routings so a transport-native dead-letter (AMQP DLX) can claim it instead of looping forever */
     MaxDeadLetterAttempts int
 }
 
@@ -444,7 +444,7 @@ func (instance *consumeSession) dispatchSafely(
             return
         }
 
-        /* @important a panicking handler must flow into the retry/dead-letter pipeline like a returned error; otherwise the worker dies with the delivery unacked, the broker redelivers with an unchanged count, MaxRetries never trips and one poison message crash-loops every replica. Mirrors the http kernel's recover-to-error contract. */
+        /* a panicking handler must flow into the retry/dead-letter pipeline like a returned error; otherwise the worker dies with the delivery unacked, the broker redelivers with an unchanged count, MaxRetries never trips and one poison message crash-loops every replica. Mirrors the http kernel's recover-to-error contract. */
         recoveredErr, ok := recoveredValue.(error)
         if true == ok && nil != recoveredErr {
             dispatchErr = exception.NewError(

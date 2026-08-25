@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* @info every repository is a process-wide singleton and net/http serves each request on its own
+/* every repository is a process-wide singleton and net/http serves each request on its own
 goroutine, so a listing request and a deleting request overlap; the writer here always removes a
 non-terminal element, which is what makes DeleteById compact the backing array under the reader */
 
@@ -81,7 +81,7 @@ func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     }
 }
 
-/* @info usernames are matched without regard to case in both implementations, so the comparison is
+/* usernames are matched without regard to case in both implementations, so the comparison is
 normalised in the example rather than left to a database collation */
 
 func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
