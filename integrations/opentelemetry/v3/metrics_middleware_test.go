@@ -2,10 +2,13 @@ package opentelemetry
 
 import (
     "errors"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
     "testing"
+
+    "github.com/prometheus/client_golang/prometheus"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -109,4 +112,96 @@ func TestMetricsMiddleware_RecordsServerErrorStatusWhenHandlerReturnsError(t *te
     if "500" != statusFound {
         t.Fatalf("expected the status_code label to be 500 for an errored request, got %q", statusFound)
     }
+}
+
+func TestMetricsMiddleware_ReadsTheStatusADirectWriterCommitted(t *testing.T) {
+    meter, registry, meterErr := NewPrometheusMeter("melody-direct-writer-test")
+    if nil != meterErr {
+        t.Fatalf("meter: %v", meterErr)
+    }
+
+    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    if nil != middlewareErr {
+        t.Fatalf("middleware: %v", middlewareErr)
+    }
+
+    directWriter := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        writer.WriteHeader(nethttp.StatusServiceUnavailable)
+
+        return nil, nil
+    }
+
+    request, runtimeInstance := testRequestAndRuntime()
+
+    if _, handlerErr := middleware(directWriter)(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+        t.Fatalf("handler: %v", handlerErr)
+    }
+
+    if false == gatheredStatusLabels(t, registry)["503"] {
+        t.Fatalf("expected the directly committed 503 to be recorded instead of the constructor's 200, got %v", gatheredStatusLabels(t, registry))
+    }
+}
+
+/* typedNilProneResponse exists so a test can hand the middleware the typed-nil shape a userland error branch produces. Its accessors DEREFERENCE the receiver, like every real response's do: a method body that ignores the receiver would run happily on a nil pointer, and the guard's mutant would survive against a fixture that cannot reproduce the panic it guards against. */
+type typedNilProneResponse struct {
+    statusCode int
+    headers    nethttp.Header
+    body       io.Reader
+}
+
+func (instance *typedNilProneResponse) StatusCode() int                   { return instance.statusCode }
+func (instance *typedNilProneResponse) SetStatusCode(statusCode int)      { instance.statusCode = statusCode }
+func (instance *typedNilProneResponse) Headers() nethttp.Header           { return instance.headers }
+func (instance *typedNilProneResponse) SetHeaders(headers nethttp.Header) { instance.headers = headers }
+func (instance *typedNilProneResponse) BodyReader() io.Reader             { return instance.body }
+func (instance *typedNilProneResponse) SetBodyReader(reader io.Reader)    { instance.body = reader }
+
+func TestMetricsMiddleware_ATypedNilResponseIsReadAsAbsentInsteadOfPanicking(t *testing.T) {
+    meter, registry, meterErr := NewPrometheusMeter("melody-typed-nil-test")
+    if nil != meterErr {
+        t.Fatalf("meter: %v", meterErr)
+    }
+
+    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    if nil != middlewareErr {
+        t.Fatalf("middleware: %v", middlewareErr)
+    }
+
+    typedNilHandler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        var response *typedNilProneResponse
+
+        return response, nil
+    }
+
+    request, runtimeInstance := testRequestAndRuntime()
+
+    if _, handlerErr := middleware(typedNilHandler)(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+        t.Fatalf("handler: %v", handlerErr)
+    }
+
+    if false == gatheredStatusLabels(t, registry)["200"] {
+        t.Fatalf("expected the typed-nil response to be read as absent and the committed 200 recorded, got %v", gatheredStatusLabels(t, registry))
+    }
+}
+
+func gatheredStatusLabels(t *testing.T, registry *prometheus.Registry) map[string]bool {
+    t.Helper()
+
+    families, gatherErr := registry.Gather()
+    if nil != gatherErr {
+        t.Fatalf("gather: %v", gatherErr)
+    }
+
+    statuses := map[string]bool{}
+    for _, family := range families {
+        for _, metricInstance := range family.GetMetric() {
+            for _, label := range metricInstance.GetLabel() {
+                if "http_response_status_code" == label.GetName() {
+                    statuses[label.GetValue()] = true
+                }
+            }
+        }
+    }
+
+    return statuses
 }

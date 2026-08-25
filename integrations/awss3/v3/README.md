@@ -52,7 +52,7 @@ Register the S3 backend under the core `storage.ServiceStorage` service name in 
 awss3.RegisterStorageService(registrar, client, "documents")
 ```
 
-Or bundle it as a self-registering application module — one `RegisterModule` call registers the storage service (skipped when the client is nil):
+Or bundle it as a self-registering application module — one `RegisterModule` call registers the storage service (skipped when the client is nil; a configured client with an empty bucket is refused at boot):
 
 ```go
 app.RegisterModule(awss3.NewModule(awss3.ModuleConfig{Client: client, Bucket: "documents"}))
@@ -60,6 +60,9 @@ app.RegisterModule(awss3.NewModule(awss3.ModuleConfig{Client: client, Bucket: "d
 
 ## Footguns & caveats
 
+- `NewClient` refuses an empty `AccessKey` or `SecretKey`: minio reads either empty credential as a request for **anonymous** access rather than an error, so a missing env var would boot cleanly and fail much later with a bare `AccessDenied`. Build the minio client directly if anonymous access is genuinely what you want.
+- `EnsureBucket` treats a lost creation race as success once a re-check confirms the bucket is usable — two replicas booting together no longer fail the loser — while a name owned by another account keeps failing.
+- Neither `*minio.Client` nor `Storage` expose a `Close`: minio-go offers none, so the client's pooled connections live until idle timeout or process exit. This is a property of the underlying SDK, not a forgotten teardown door.
 - `Put` enforces the size you declare. A seekable body (`*bytes.Reader`, `*strings.Reader`, `multipart.File`, `*os.File`) is measured before the upload; a non-seekable one (an `http.Request.Body`) is checked as it streams and the upload is cut off before its last byte if the body turns out to be longer, so a wrong size never leaves a truncated object at the key. Memory does not scale with the body: a declared size at or below 16 MiB (MinIO's part size) is buffered so it can be rejected before any request, anything larger streams and is aborted mid-upload. Pass `-1` when the size is unknown and the client streams the object with no size check.
 - `Get` returns the object's reader after a `Stat`, so a missing object fails fast instead of erroring only on first read. Close the reader.
 - `PresignedUrl` issues a presigned GET URL valid for the given expiry.

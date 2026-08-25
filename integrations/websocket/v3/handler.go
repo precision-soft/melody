@@ -28,7 +28,7 @@ type Options struct {
 
     ReadLimit int64
 
-    /* @info the interval at which the handler pings a silent peer and the window it allows for the pong; a peer that misses it has its connection closed, so an idle or half-open client cannot hold a descriptor, a hub subscription and three goroutines indefinitely. It is REQUIRED and must be positive — NewStreamHandler refuses a zero. An actively-subscribed client that only receives stays connected regardless, because RFC 6455 obliges it to answer the ping and every browser answers it inside the protocol stack, where the page's JavaScript never sees it. 30s suits a browser client. */
+    /* the interval at which the handler pings a silent peer and the window it allows for the pong; a peer that misses it has its connection closed, so an idle or half-open client cannot hold a descriptor, a hub subscription and three goroutines indefinitely. It is REQUIRED and must be positive — NewStreamHandler refuses a zero. An actively-subscribed client that only receives stays connected regardless, because RFC 6455 obliges it to answer the ping and every browser answers it inside the protocol stack, where the page's JavaScript never sees it. 30s suits a browser client. */
     IdleTimeout time.Duration
 }
 
@@ -38,6 +38,11 @@ A zero IdleTimeout is refused rather than defaulted, because nothing else in the
 
 Refusing it is a wiring error and panics at construction, the way the framework reports every other unusable configuration: it surfaces at boot rather than as an unbounded leak in production. */
 func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
+    /* the hub is dereferenced on every accepted connection, so a nil one must fail the boot the way the missing IdleTimeout does — not the first request */
+    if nil == hub {
+        exception.Panic(exception.NewError("websocket stream handler hub is nil", nil, nil))
+    }
+
     if 0 >= options.IdleTimeout {
         exception.Panic(
             exception.NewError(
@@ -53,6 +58,19 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
 
 func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        /* the topic is resolved BEFORE the upgrade so a resolver that comes up empty refuses the request outright. An empty topic is only ever an extraction that failed — the nil-resolver default is the distinct "default" — and subscribing such connections anyway would pool every mis-resolved client from every tenant on one shared "" topic, reported to each of them as an established stream. */
+        topic := "default"
+        if nil != options.TopicResolver {
+            topic = options.TopicResolver(request)
+            if "" == topic {
+                return nil, exception.NewError(
+                    "websocket topic resolver returned an empty topic: refusing the connection rather than subscribing it to a shared degenerate topic",
+                    map[string]any{"path": request.HttpRequest().URL.Path},
+                    nil,
+                )
+            }
+        }
+
         connection, acceptErr := coderwebsocket.Accept(writer, request.HttpRequest(), &coderwebsocket.AcceptOptions{
             OriginPatterns: options.OriginPatterns,
         })
@@ -62,13 +80,9 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
         }
         defer connection.CloseNow()
 
-        if 0 < options.ReadLimit {
+        /* a positive limit caps the frame size; a NEGATIVE one is passed through as coder/websocket's documented "no limit", which the old positive-only guard silently discarded — leaving the library's 32 KiB default armed for exactly the payloads the option was set to allow */
+        if 0 != options.ReadLimit {
             connection.SetReadLimit(options.ReadLimit)
-        }
-
-        topic := "default"
-        if nil != options.TopicResolver {
-            topic = options.TopicResolver(request)
         }
 
         subscriber := hub.Subscribe(topic, subscribeBuffer(options))
@@ -129,6 +143,8 @@ func readLoop(
     for {
         messageType, payload, readErr := connection.Read(ctx)
         if nil != readErr {
+            /* debug, not error: most read failures are ordinary disconnects — but a peer killed for exceeding the read limit or for a protocol violation used to vanish with no record at any level, indistinguishable from a clean goodbye */
+            logDebug(runtimeInstance, "websocket read loop ended", readErr)
             cancel()
             return
         }
@@ -231,7 +247,7 @@ func (instance *connectionLiveness) cannotAnswer(
     return now-time.Duration(instance.lastActivityOffset.Load()) < window
 }
 
-/* @important keepalive ping loop: a half-open or silently-stalled client cannot be detected by reads alone on a broadcast stream that never expects client frames, so without this an idle connection would pin a goroutine forever. Each tick sends a ping bounded by the same interval; the read loop delivers the pong, so a still-connected client keeps the connection alive while an unresponsive one trips the timeout and cancels the connection context, unwinding the handler and read loop.
+/* keepalive ping loop: a half-open or silently-stalled client cannot be detected by reads alone on a broadcast stream that never expects client frames, so without this an idle connection would pin a goroutine forever. Each tick sends a ping bounded by the same interval; the read loop delivers the pong, so a still-connected client keeps the connection alive while an unresponsive one trips the timeout and cancels the connection context, unwinding the handler and read loop.
 
 A pong is only ever processed inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback; a ping is also serialised behind whatever data frame the handler is flushing at the moment it is issued, which is why that is sampled before the ping rather than after it. A ping issued in either window therefore times out no matter how healthy the peer is. A timed-out ping is treated as death only when nothing excuses it and the peer has been silent for two intervals; a write failure needs no such grace, since the socket itself is gone.
 
@@ -252,7 +268,7 @@ func pingLoop(
         case <-ctx.Done():
             return
         case <-ticker.C:
-            /* @important sampled BEFORE the ping, not inside the timeout branch below: only at this instant can a data frame put the ping behind itself. Reading it after the ping has expired inverts the rule both ways — the frame that actually blocked the ping has finished, so its excuse is lost and a slow client draining one large frame is disconnected, while a frame that started later grants an excuse it never earned and a dead peer survives for as long as broadcasts keep starting. */
+            /* sampled BEFORE the ping, not inside the timeout branch below: only at this instant can a data frame put the ping behind itself. Reading it after the ping has expired inverts the rule both ways — the frame that actually blocked the ping has finished, so its excuse is lost and a slow client draining one large frame is disconnected, while a frame that started later grants an excuse it never earned and a dead peer survives for as long as broadcasts keep starting. */
             writeInFlight := liveness.writeInFlight()
 
             pingContext, pingCancel := context.WithTimeout(ctx, interval)
@@ -280,7 +296,7 @@ func pingLoop(
     }
 }
 
-/* @important the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. */
+/* the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. */
 func dispatchOnMessage(
     runtimeInstance runtimecontract.Runtime,
     options Options,
@@ -290,10 +306,11 @@ func dispatchOnMessage(
     defer func() {
         recovered := recover()
         if nil != recovered {
+            /* PanicCause preserves an error panic value whole — its cause chain and context included — where flattening through %v kept only its message; a non-error value still renders through the message */
             logError(
                 runtimeInstance,
                 "websocket OnMessage panicked",
-                exception.NewError(fmt.Sprintf("%v", recovered), nil, nil),
+                exception.NewError(fmt.Sprintf("websocket OnMessage panicked: %v", recovered), nil, exception.PanicCause(recovered)),
             )
             panicked = true
         }
@@ -309,7 +326,9 @@ const closeHandshakeGrace = 1 * time.Second
 
 /* closeConnection tears the socket down and then holds, bounded by closeHandshakeGrace, until the read loop has exited before the handler returns to the kernel.
 
-The wait keeps the request scope alive. The runtime handed to a synchronous OnMessage callback is built over that scope, and the kernel closes the scope the instant the handler returns; a healthy in-flight callback would then resolve a service against a closed scope and panic. Holding until the read loop — and therefore the callback — has finished removes that race, unless the callback outruns the grace, the stuck-callback case the ping reaper already accepts.
+The wait keeps the request scope alive. The runtime handed to a synchronous OnMessage callback is built over that scope, and the kernel closes the scope the instant the handler returns; a healthy in-flight callback would then resolve a service against a closed scope and panic. Holding until the read loop — and therefore the callback — has finished removes that race for every callback that finishes inside the grace.
+
+The bound is DELIBERATELY much shorter than the grace the ping reaper grants a running callback, and the two serve different masters: the reaper's generosity keeps a live connection open while its callback works, but this wait runs on the teardown path, where one wedged callback holding an unbounded (or reaper-sized, minutes-long) wait would stall hub shutdown and process exit for its whole duration, once per such connection. A callback that crosses teardown and outruns this grace is therefore abandoned: its next scope resolution panics, dispatchOnMessage recovers and logs it, and the message is lost — the bounded-shutdown cost this handler accepts by design.
 
 The teardown path is chosen by whether a callback is in flight. When one is, the read loop is not inside connection.Read, so a graceful Close can never complete its handshake: it wins coder/websocket's close CAS and then holds the transport for the library's full five-second timeout, while the handler's deferred CloseNow loses that CAS and blocks the same span. CloseNow taken here wins the CAS and closes the transport at once, freeing the descriptor and the goroutines when the grace lapses rather than seconds later. With no callback in flight the read loop is blocked in Read (or already gone), so a graceful Close exchanges a close frame and the read loop's own cancel frees the transport promptly. */
 func closeConnection(connection *coderwebsocket.Conn, liveness *connectionLiveness, readLoopDone <-chan struct{}) {

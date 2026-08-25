@@ -3,6 +3,9 @@ package outbox
 import (
     "context"
     "errors"
+    "fmt"
+    "reflect"
+    "strings"
     "testing"
     "time"
 
@@ -237,4 +240,77 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
     if "melody:outbox:relay" != command.Name() {
         t.Fatalf("unexpected command name %q", command.Name())
     }
+}
+
+/* nilYieldingResolver models a userland decorating resolver that answers nil with no error — the shape the container's own door refuses, which is exactly why the command carries its own guard as latent defense, mirroring lazyRepository.resolveStore. */
+type nilYieldingResolver struct{}
+
+func (instance nilYieldingResolver) Get(serviceName string) (any, error) {
+    return (*Relay)(nil), nil
+}
+func (instance nilYieldingResolver) MustGet(serviceName string) any             { return nil }
+func (instance nilYieldingResolver) GetByType(targetType reflect.Type) (any, error) {
+    return nil, nil
+}
+func (instance nilYieldingResolver) MustGetByType(targetType reflect.Type) any { return nil }
+func (instance nilYieldingResolver) Has(serviceName string) bool               { return true }
+func (instance nilYieldingResolver) HasType(targetType reflect.Type) bool      { return true }
+
+func TestRelayCommand_ANilRelayYieldIsAnErrorNotAPanic(t *testing.T) {
+    relayCommand := NewRelayCommandFromResolver(nilYieldingResolver{})
+
+    relay, resolveErr := relayCommand.resolveRelay()
+
+    if nil != relay {
+        t.Fatalf("expected no relay, got %v", relay)
+    }
+
+    if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "resolved to nil") {
+        t.Fatalf("expected the nil yield reported as an error the run loop can back off on, got %v", resolveErr)
+    }
+}
+
+func TestRelayCommand_AGenuineFailureCoincidingWithAParentDeadlineIsNotSwallowed(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    cancelParent()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+
+    repository := &failingClaimRepository{failuresLeft: 1}
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    runErr := runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"})
+
+    if nil == runErr || false == strings.Contains(runErr.Error(), "repository down") {
+        t.Fatalf("expected the repository failure surfaced despite the done parent context, got %v", runErr)
+    }
+}
+
+func TestRelayCommand_ACancellationExplainedErrorStillExitsClean(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    cancelParent()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+
+    repository := &cancellationEchoRepository{}
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    if runErr := runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"}); nil != runErr {
+        t.Fatalf("expected the cancellation-explained failure to exit clean, got %v", runErr)
+    }
+}
+
+/* cancellationEchoRepository answers the claim with the context's own cancellation, the way a driver does mid-drain. */
+type cancellationEchoRepository struct {
+    fakeRepository
+}
+
+func (instance *cancellationEchoRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+    if nil != ctx.Err() {
+        return nil, fmt.Errorf("claim aborted: %w", ctx.Err())
+    }
+
+    return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
 }

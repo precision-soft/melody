@@ -2,6 +2,7 @@ package amqp
 
 import (
     "context"
+    "errors"
     "math"
     "reflect"
     "strconv"
@@ -36,7 +37,8 @@ const (
     forwardChannelLost
 )
 
-var errReconnectInProgress = exception.NewError("amqp reconnect already in progress", nil, nil)
+/* errReconnectInProgress is a PLAIN sentinel, matched with errors.Is, and every return wraps it in a FRESH melody error: a package-level *exception.Error carries the already-logged mark and a mutable context map on the instance itself, so one shared singleton, once logged anywhere, would silence every later occurrence process-wide — on every transport — and cross-instance context writes would race on it. */
+var errReconnectInProgress = errors.New("amqp reconnect already in progress")
 
 func NewTransport(config TransportConfig) *Transport {
     return newTransport(config, nil)
@@ -195,9 +197,10 @@ func (instance *Transport) Ack(
 
     channel, generation := instance.consumeChannelForAck()
     if nil == channel {
-        return exception.NewError("amqp consume channel is not open", nil, nil)
+        return exception.NewError("amqp consume channel is not open", map[string]any{"queue": instance.queue}, nil)
     }
 
+    /* a stamp from an older generation answers success on purpose: its channel is gone, so the broker already re-owns the delivery and will redeliver it whole — the at-least-once direction — and there is nothing left this call could ack */
     if stamp.Generation != generation {
         return nil
     }
@@ -217,9 +220,10 @@ func (instance *Transport) Nack(
 
     channel, generation := instance.consumeChannelForAck()
     if nil == channel {
-        return exception.NewError("amqp consume channel is not open", nil, nil)
+        return exception.NewError("amqp consume channel is not open", map[string]any{"queue": instance.queue}, nil)
     }
 
+    /* same deliberate success as Ack: an older generation's delivery is already the broker's again */
     if stamp.Generation != generation {
         return nil
     }
@@ -231,7 +235,7 @@ func (instance *Transport) Nack(
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
 }
 
-/* @important closeJoinTimeout bounds how long Close waits for the consume goroutine. The loop observes closeSignal at every blocking point, so a healthy join costs microseconds; the one stretch it cannot observe it is inside the caller-supplied dialer, and connect rechecks closing the moment that dial returns — so the wait is one dial attempt, not an open-ended one. The window is sized to a full amqp handshake so the join completes for every dialer that carries a timeout; a dialer with none would otherwise hang teardown for good, which is why the wait is bounded at all rather than open. */
+/* closeJoinTimeout bounds how long Close waits for the consume goroutine. The loop observes closeSignal at every blocking point, so a healthy join costs microseconds; the one stretch it cannot observe it is inside the caller-supplied dialer, and connect rechecks closing the moment that dial returns — so the wait is one dial attempt, not an open-ended one. The window is sized to a full amqp handshake so the join completes for every dialer that carries a timeout; a dialer with none would otherwise hang teardown for good, which is why the wait is bounded at all rather than open. */
 const closeJoinTimeout = 30 * time.Second
 
 func (instance *Transport) Close() error {
@@ -247,26 +251,37 @@ func (instance *Transport) Close() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    /* the signature promises an error and the old body could never produce one: every underlying close was discarded and teardown reporting read success whatever happened. A channel or connection already torn down by the broker answers amqp091.ErrClosed, which is the state Close exists to reach — not a failure. */
+    var closeErrs []error
+
     if nil != instance.consumeChannel {
-        instance.consumeChannel.Close()
+        closeErrs = append(closeErrs, ignoringAlreadyClosed(instance.consumeChannel.Close()))
         instance.consumeChannel = nil
     }
 
     if nil != instance.publishChannel {
-        instance.publishChannel.Close()
+        closeErrs = append(closeErrs, ignoringAlreadyClosed(instance.publishChannel.Close()))
         instance.publishChannel = nil
         instance.publishReturns = nil
     }
 
     if true == instance.ownsConnection && nil != instance.connection {
-        instance.connection.Close()
+        closeErrs = append(closeErrs, ignoringAlreadyClosed(instance.connection.Close()))
         instance.connection = nil
     }
 
-    return nil
+    return errors.Join(closeErrs...)
 }
 
-/* @important the consume goroutine's own helpers (isClosing, currentGeneration, resetConsumeChannel) take instance.mutex, so the join must run with that mutex released or Close deadlocks against the goroutine it is waiting for. */
+func ignoringAlreadyClosed(closeErr error) error {
+    if true == errors.Is(closeErr, amqp091.ErrClosed) {
+        return nil
+    }
+
+    return closeErr
+}
+
+/* the consume goroutine's own helpers (isClosing, currentGeneration, resetConsumeChannel) take instance.mutex, so the join must run with that mutex released or Close deadlocks against the goroutine it is waiting for. */
 func (instance *Transport) awaitConsumeLoop() {
     joined := make(chan struct{})
 
@@ -311,13 +326,13 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     if true == instance.reconnecting {
         instance.mutex.Unlock()
 
-        return nil, errReconnectInProgress
+        return nil, exception.NewError("amqp reconnect already in progress", map[string]any{"queue": instance.queue}, errReconnectInProgress)
     }
 
     instance.reconnecting = true
     instance.mutex.Unlock()
 
-    connection, dialErr := instance.dialer()
+    connection, dialErr := instance.dialInterruptibly()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -341,6 +356,34 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     instance.consumeChannel = nil
 
     return connection, nil
+}
+
+/* dialInterruptibly runs the caller-supplied dialer under the close signal, mirroring the backplane's dialWithContext: the dial used to be the one blocking stretch Close could not interrupt, so a dialer without its own timeout held teardown for the full closeJoinTimeout and the consume goroutine past it. A dial that completes after the interrupt is closed by the drain goroutine, so the late connection cannot leak. */
+func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
+    type dialOutcome struct {
+        connection *amqp091.Connection
+        err        error
+    }
+
+    outcome := make(chan dialOutcome, 1)
+    go func() {
+        connection, dialErr := instance.dialer()
+        outcome <- dialOutcome{connection: connection, err: dialErr}
+    }()
+
+    select {
+    case result := <-outcome:
+        return result.connection, result.err
+    case <-instance.closeSignal:
+        go func() {
+            result := <-outcome
+            if nil != result.connection {
+                _ = result.connection.Close()
+            }
+        }()
+
+        return nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
 }
 
 func (instance *Transport) ackChannel(channel *amqp091.Channel, tag uint64) error {
@@ -452,7 +495,11 @@ func (instance *Transport) publishRecoverable(
         return false, nil
     }
 
-    /* only a channel-level failure is worth a second attempt on a fresh channel; a broker-semantic rejection (an unroutable return or a nack) is a permanent condition that a retry would only silently re-drop */
+    /* only a channel-level failure is worth a second attempt on a fresh channel; a broker-semantic rejection (an unroutable return or a nack) is a permanent condition that a retry would only silently re-drop. A failure the CALLER's context explains is neither: the channel other publishers share did nothing wrong, so it is not torn down, and a retry against the same dead context could only fail the same way. */
+    if nil != ctx.Err() {
+        return false, publishErr
+    }
+
     if false == retryable || false == instance.publishRetryable() {
         return false, publishErr
     }
@@ -467,7 +514,7 @@ func (instance *Transport) publishRecoverable(
     return true == retryRetryable && true == instance.publishRetryable(), retryErr
 }
 
-/* @important the channel runs in publisher-confirm mode and the publish is serialized with its confirmation wait: a message is reported sent only after the broker acked it and no basic.return arrived, so republish-then-ack cannot drop a message the broker silently discarded (reject-publish policy, deleted queue). */
+/* the channel runs in publisher-confirm mode and the publish is serialized with its confirmation wait: a message is reported sent only after the broker acked it and no basic.return arrived, so republish-then-ack cannot drop a message the broker silently discarded (reject-publish policy, deleted queue). */
 func (instance *Transport) publishOnce(
     ctx context.Context,
     exchange string,
@@ -486,12 +533,12 @@ func (instance *Transport) publishOnce(
 
     confirmation, publishErr := channel.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, true, false, publishing)
     if nil != publishErr {
-        return channel, true, exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue}, publishErr)
+        return channel, true, exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, publishErr)
     }
 
     acked, waitErr := confirmation.WaitContext(ctx)
     if nil != waitErr {
-        return channel, true, exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue}, waitErr)
+        return channel, true, exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, waitErr)
     }
 
     /* an unroutable return and a nack are the broker's verdict on the message, not a channel fault: they must never be retried, or the retry would silently re-drop the message on a fresh channel */
@@ -516,7 +563,7 @@ func (instance *Transport) publishOnce(
     return channel, false, nil
 }
 
-/* @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. A nil failed channel (the caller never obtained one, e.g. ensurePublishChannel itself failed) identifies no specific channel, so it is a no-op rather than closing whatever channel is currently cached — a stale/closed cached channel is re-detected by ensurePublishChannel's IsClosed guard on the next publish. */
+/* closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. A nil failed channel (the caller never obtained one, e.g. ensurePublishChannel itself failed) identifies no specific channel, so it is a no-op rather than closing whatever channel is currently cached — a stale/closed cached channel is re-detected by ensurePublishChannel's IsClosed guard on the next publish. */
 func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -534,16 +581,24 @@ func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.publishReturns = nil
 }
 
-func (instance *Transport) resetConsumeChannel() {
+/* resetConsumeChannel closes the cached consume channel only when it is still the one the caller lost, mirroring resetPublishChannel: without the identity guard, two Receive loops on one transport could repeatedly tear down each other's freshly reopened subscriptions — each teardown bumping the generation and silently voiding the acks of deliveries already handed to workers, which the broker then redelivers as duplicates. A nil failed channel identifies no specific channel and is a no-op. */
+func (instance *Transport) resetConsumeChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    if nil != instance.consumeChannel {
-        instance.consumeChannel.Close()
-        instance.consumeChannel = nil
+    if nil == instance.consumeChannel {
+        return
     }
+
+    if nil == failed || instance.consumeChannel != failed {
+        return
+    }
+
+    instance.consumeChannel.Close()
+    instance.consumeChannel = nil
 }
 
+/* subscribe returns the channel even when Consume refuses, so the retry path can reset exactly the channel it failed on rather than whatever is cached by then. */
 func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Delivery, error) {
     channel, channelErr := instance.ensureConsumeChannel()
     if nil != channelErr {
@@ -552,13 +607,13 @@ func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Deliver
 
     deliveries, consumeErr := channel.Consume(instance.queue, "", false, false, false, false, nil)
     if nil != consumeErr {
-        return nil, nil, exception.NewError("amqp consume failed", map[string]any{"queue": instance.queue}, consumeErr)
+        return channel, nil, exception.NewError("amqp consume failed", map[string]any{"queue": instance.queue}, consumeErr)
     }
 
     return channel, deliveries, nil
 }
 
-/* @important the Add and the Done live together here so consumeLoop carries no precondition a caller must remember, and Close joins whatever this started. The Add is taken under the mutex Close sets closing under, so a loop can never be started after Close observed the count — which would both escape the join and race the Wait already in flight. */
+/* the Add and the Done live together here so consumeLoop carries no precondition a caller must remember, and Close joins whatever this started. The Add is taken under the mutex Close sets closing under, so a loop can never be started after Close observed the count — which would both escape the join and race the Wait already in flight. */
 func (instance *Transport) startConsumeLoop(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
@@ -624,7 +679,7 @@ func (instance *Transport) consumeLoop(
             exception.NewError("amqp deliveries channel closed", map[string]any{"queue": instance.queue}, nil),
         )
 
-        instance.resetConsumeChannel()
+        instance.resetConsumeChannel(channel)
 
         if true == reconnectBackoffShouldReset(instance.reconnect, time.Since(startedAt)) {
             backoff = clampedInitialBackoff(instance.reconnect)
@@ -691,6 +746,20 @@ func resolveDelayBuckets(buckets []time.Duration) []time.Duration {
             )
         }
 
+        /* the queue-level ttl is clamped at the wire's 32-bit millisecond limit and the queue NAME carries the unclamped milliseconds, so a bucket past the limit would deliver ~49.7 days early under a name promising the full delay; a sub-millisecond bucket truncates to a "0ms" name and a 1ms ttl, collapsing distinct declared tiers onto one queue. Both are misconfigurations the constructor refuses, the way it already refuses a descending pair. */
+        if time.Millisecond > bucket || bucket.Milliseconds() > maxDelayExpirationMilliseconds {
+            exception.Panic(
+                exception.NewError(
+                    "amqp transport delay buckets must be between 1ms and the 32-bit millisecond wire limit",
+                    map[string]any{
+                        "bucket":              bucket.String(),
+                        "maximumMilliseconds": maxDelayExpirationMilliseconds,
+                    },
+                    nil,
+                ),
+            )
+        }
+
         resolved = append(resolved, bucket)
         previous = bucket
     }
@@ -736,8 +805,11 @@ func (instance *Transport) waitForRetry(
     runtimeInstance runtimecontract.Runtime,
     backoff time.Duration,
 ) bool {
+    timer := time.NewTimer(backoff)
+    defer timer.Stop()
+
     select {
-    case <-time.After(backoff):
+    case <-timer.C:
         return true
     case <-runtimeInstance.Context().Done():
         return false
@@ -769,7 +841,7 @@ func (instance *Transport) retrySubscribe(
         instance.logError(runtimeInstance, logMessage, subscribeErr)
 
         if true == resetEachAttempt {
-            instance.resetConsumeChannel()
+            instance.resetConsumeChannel(channel)
         }
 
         if false == instance.waitForRetry(runtimeInstance, *backoff) {
@@ -918,7 +990,7 @@ func (instance *Transport) consumeChannelForAck() (*amqp091.Channel, uint64) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* @important treat a non-nil but already-closed consume channel as absent, matching ensureConsumeChannel and ensurePublishChannel: when the broker closes the channel between delivery and Ack/Nack but before the consume loop resets it, returning the closed channel would attempt an Ack on it; returning nil instead surfaces a clean "channel not open" error and lets the message redeliver on the next generation. */
+    /* treat a non-nil but already-closed consume channel as absent, matching ensureConsumeChannel and ensurePublishChannel: when the broker closes the channel between delivery and Ack/Nack but before the consume loop resets it, returning the closed channel would attempt an Ack on it; returning nil instead surfaces a clean "channel not open" error and lets the message redeliver on the next generation. */
     if nil != instance.consumeChannel && true == instance.consumeChannel.IsClosed() {
         return nil, instance.consumeGeneration
     }
@@ -954,7 +1026,7 @@ func (instance *Transport) publishRetryable() bool {
     return instance.connectionAlive()
 }
 
-/* @important a lost consume channel on a live static connection (no dialer) is recoverable: connect() still hands back the live connection and a fresh channel can be opened on it, mirroring server_sent_event_backplane.go liveConnection. Only give up when the connection itself is gone and no dialer can redial — there a re-subscribe can never recover. */
+/* a lost consume channel on a live static connection (no dialer) is recoverable: connect() still hands back the live connection and a fresh channel can be opened on it, mirroring server_sent_event_backplane.go liveConnection. Only give up when the connection itself is gone and no dialer can redial — there a re-subscribe can never recover. */
 func (instance *Transport) subscribeRetryable() bool {
     if true == instance.isClosing() {
         return false
@@ -1023,14 +1095,14 @@ func (instance *Transport) forwardDeliveries(
 func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) (messagebuscontract.Envelope, error) {
     typeName, _ := delivery.Headers[headerMessageType].(string)
     if "" == typeName {
-        return nil, exception.NewError("amqp delivery is missing the message type header", nil, nil)
+        return nil, exception.NewError("amqp delivery is missing the message type header", map[string]any{"queue": instance.queue}, nil)
     }
 
     target, exists := instance.registry.New(typeName)
     if false == exists {
         return nil, exception.NewError(
             "amqp message type is not registered",
-            map[string]any{"messageType": typeName},
+            map[string]any{"messageType": typeName, "queue": instance.queue},
             nil,
         )
     }
@@ -1071,6 +1143,7 @@ func deadLetterAttemptCountFromHeader(headers amqp091.Table) int {
     return intFromHeader(headers, headerDeadLetterAttemptCount)
 }
 
+/* intFromHeader clamps into [0, math.MaxInt] instead of converting blindly: a foreign producer (or a management-UI republish) can put any number in these headers, and an out-of-range uint64 or float used to WRAP to a negative int — read as count zero by every caller's `0 < count` guard, silently resetting the retry accounting and bypassing the caps built on it. Clamping high keeps the fail-closed direction: an absurd count dead-letters, it does not restart the counter. */
 func intFromHeader(headers amqp091.Table, key string) int {
     raw, exists := headers[key]
     if false == exists {
@@ -1079,32 +1152,65 @@ func intFromHeader(headers amqp091.Table, key string) int {
 
     switch typed := raw.(type) {
     case int:
-        return typed
+        return clampHeaderCount(int64(typed))
     case int8:
-        return int(typed)
+        return clampHeaderCount(int64(typed))
     case int16:
-        return int(typed)
+        return clampHeaderCount(int64(typed))
     case int32:
-        return int(typed)
+        return clampHeaderCount(int64(typed))
     case int64:
-        return int(typed)
+        return clampHeaderCount(typed)
     case uint:
-        return int(typed)
+        return clampHeaderUnsigned(uint64(typed))
     case uint8:
-        return int(typed)
+        return clampHeaderCount(int64(typed))
     case uint16:
-        return int(typed)
+        return clampHeaderCount(int64(typed))
     case uint32:
-        return int(typed)
+        return clampHeaderCount(int64(typed))
     case uint64:
-        return int(typed)
+        return clampHeaderUnsigned(typed)
     case float32:
-        return int(typed)
+        return clampHeaderFloat(float64(typed))
     case float64:
-        return int(typed)
+        return clampHeaderFloat(typed)
     default:
         return 0
     }
+}
+
+func clampHeaderCount(value int64) int {
+    if 0 > value {
+        return 0
+    }
+
+    if value > int64(math.MaxInt) {
+        return math.MaxInt
+    }
+
+    return int(value)
+}
+
+func clampHeaderUnsigned(value uint64) int {
+    if value > uint64(math.MaxInt) {
+        return math.MaxInt
+    }
+
+    return int(value)
+}
+
+/* a NaN compares false against everything, so both range checks fall through and it reads as zero — absence, the only honest reading of a number that is not one. */
+func clampHeaderFloat(value float64) int {
+    if false == (0 <= value) {
+        return 0
+    }
+
+    if value >= float64(math.MaxInt) {
+        return math.MaxInt
+    }
+
+    return int(value)
 }
 
 func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp091.Return, error) {
@@ -1129,7 +1235,7 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp
 
     channel, channelErr := connection.Channel()
     if nil != channelErr {
-        return nil, nil, exception.NewError("amqp channel open failed", nil, channelErr)
+        return nil, nil, exception.NewError("amqp channel open failed", map[string]any{"queue": instance.queue}, channelErr)
     }
 
     if topologyErr := instance.declareTopology(channel); nil != topologyErr {
@@ -1184,7 +1290,7 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
 
     channel, channelErr := connection.Channel()
     if nil != channelErr {
-        return nil, exception.NewError("amqp channel open failed", nil, channelErr)
+        return nil, exception.NewError("amqp channel open failed", map[string]any{"queue": instance.queue}, channelErr)
     }
 
     if topologyErr := instance.declareTopology(channel); nil != topologyErr {
@@ -1194,7 +1300,7 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
 
     if qosErr := channel.Qos(instance.prefetch, 0, false); nil != qosErr {
         channel.Close()
-        return nil, exception.NewError("amqp qos failed", nil, qosErr)
+        return nil, exception.NewError("amqp qos failed", map[string]any{"queue": instance.queue}, qosErr)
     }
 
     instance.mutex.Lock()
@@ -1225,17 +1331,17 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
 
         exchangeErr := channel.ExchangeDeclare(deadLetterExchange, "fanout", true, false, false, false, nil)
         if nil != exchangeErr {
-            return exception.NewError("amqp dead-letter exchange declare failed", nil, exchangeErr)
+            return exception.NewError("amqp dead-letter exchange declare failed", map[string]any{"queue": instance.queue, "exchange": deadLetterExchange}, exchangeErr)
         }
 
         _, queueErr := channel.QueueDeclare(deadLetterQueue, true, false, false, false, nil)
         if nil != queueErr {
-            return exception.NewError("amqp dead-letter queue declare failed", nil, queueErr)
+            return exception.NewError("amqp dead-letter queue declare failed", map[string]any{"queue": deadLetterQueue}, queueErr)
         }
 
         bindErr := channel.QueueBind(deadLetterQueue, "", deadLetterExchange, false, nil)
         if nil != bindErr {
-            return exception.NewError("amqp dead-letter queue bind failed", nil, bindErr)
+            return exception.NewError("amqp dead-letter queue bind failed", map[string]any{"queue": deadLetterQueue, "exchange": deadLetterExchange}, bindErr)
         }
 
         queueArgs["x-dead-letter-exchange"] = deadLetterExchange
@@ -1244,7 +1350,7 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
     if "" != instance.exchange {
         exchangeErr := channel.ExchangeDeclare(instance.exchange, "direct", true, false, false, false, nil)
         if nil != exchangeErr {
-            return exception.NewError("amqp exchange declare failed", nil, exchangeErr)
+            return exception.NewError("amqp exchange declare failed", map[string]any{"exchange": instance.exchange}, exchangeErr)
         }
     }
 
@@ -1281,7 +1387,7 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
     if "" != instance.exchange {
         bindErr := channel.QueueBind(instance.queue, instance.routingKey, instance.exchange, false, nil)
         if nil != bindErr {
-            return exception.NewError("amqp queue bind failed", nil, bindErr)
+            return exception.NewError("amqp queue bind failed", map[string]any{"queue": instance.queue, "exchange": instance.exchange, "routingKey": instance.routingKey}, bindErr)
         }
     }
 

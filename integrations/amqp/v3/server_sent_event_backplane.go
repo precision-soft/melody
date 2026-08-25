@@ -11,14 +11,15 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
 const defaultServerSentEventBackplaneExchange = "melody.sse"
 
-/* @important sentinel returned when the connection is gone and no dialer is configured: the listen loop treats this as terminal (re-subscribing can never recover) instead of backing off forever. */
-var errServerSentEventBackplaneConnectionGone = exception.NewError("amqp sse backplane connection is closed and no dialer is configured", nil, nil)
+/* sentinel matched with errors.Is when the connection is gone and no dialer is configured: the listen loop treats this as terminal (re-subscribing can never recover) instead of backing off forever. It is a PLAIN sentinel wrapped in a fresh melody error at the return site, because a package-level *exception.Error carries the already-logged mark on the instance and one logged occurrence would silence every later one process-wide. */
+var errServerSentEventBackplaneConnectionGone = errors.New("amqp sse backplane connection is closed and no dialer is configured")
 
 type serverSentEventWireEvent struct {
     Origin string                     `json:"origin"`
@@ -97,6 +98,7 @@ func newServerSentEventBackplane(config ServerSentEventBackplaneConfig, general 
     return backplane
 }
 
+/* Publish is BEST-EFFORT by design, unlike the message transport's confirmed publish: the channel runs in no confirm mode and an event the broker discards after accepting the frame is gone with no error. A server-sent event is ephemeral fan-out state — a missed one is corrected by the next event or a client refresh — and a per-event broker round trip on the broadcast path would serialize every hub broadcast behind the confirmation wait. The hub's backplane-failure counter therefore counts LOCAL publish refusals, not broker-side outcomes, and the redis backplane behaves identically over pub/sub. */
 func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
     payload, marshalErr := json.Marshal(serverSentEventWireEvent{Origin: instance.origin, Topic: topic, Event: event})
     if nil != marshalErr {
@@ -125,14 +127,16 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
 func (instance *ServerSentEventBackplane) Close() error {
     instance.hub.SetBackplane(nil)
 
+    var closeErrs []error
+
     instance.mutex.Lock()
     instance.closing = true
     if nil != instance.consumeChannel {
-        instance.consumeChannel.Close()
+        closeErrs = append(closeErrs, ignoringAlreadyClosed(instance.consumeChannel.Close()))
         instance.consumeChannel = nil
     }
     if nil != instance.publishChannel {
-        instance.publishChannel.Close()
+        closeErrs = append(closeErrs, ignoringAlreadyClosed(instance.publishChannel.Close()))
         instance.publishChannel = nil
     }
     ownsConnection := instance.ownsConnection
@@ -140,13 +144,30 @@ func (instance *ServerSentEventBackplane) Close() error {
     instance.mutex.Unlock()
 
     instance.cancel()
-    instance.wait.Wait()
 
+    /* the owned connection is closed BEFORE the join, not after it: subscribe's RPCs (Channel, QueueDeclare, Consume) observe no context, so a listen goroutine wedged inside one was only ever unblocked by this very close — which the old ordering sequenced behind the wait that RPC was blocking. */
     if true == ownsConnection && nil != connection {
-        connection.Close()
+        closeErrs = append(closeErrs, ignoringAlreadyClosed(connection.Close()))
     }
 
-    return nil
+    /* the join is bounded like the transport's (same closeJoinTimeout): subscribe's AMQP RPCs do not observe the context, so a broker that wedges mid-RPC on a caller-owned connection — the one this Close cannot close to unblock them — would otherwise hold teardown for as long as the RPC blocks. */
+    joined := make(chan struct{})
+    go func() {
+        instance.wait.Wait()
+
+        close(joined)
+    }()
+
+    timer := time.NewTimer(closeJoinTimeout)
+    defer timer.Stop()
+
+    select {
+    case <-joined:
+    case <-timer.C:
+        /* a caller-owned wedged connection cannot be unblocked from here; the listen goroutine is left to end when its RPC does */
+    }
+
+    return errors.Join(closeErrs...)
 }
 
 func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.Channel, error) {
@@ -178,9 +199,9 @@ func (instance *ServerSentEventBackplane) listen() {
 
         deliveries, subscribeErr := instance.subscribe()
         if nil != subscribeErr {
-            /* @important the connection is gone and no dialer is configured, so re-subscribing can never recover: stop instead of backing off forever and spamming the log. A transient channel loss on a live static connection is recoverable and does not reach here, because liveConnection still hands back the live connection. */
+            /* the connection is gone and no dialer is configured, so re-subscribing can never recover: stop instead of backing off forever and spamming the log. A transient channel loss on a live static connection is recoverable and does not reach here, because liveConnection still hands back the live connection. */
             if true == errors.Is(subscribeErr, errServerSentEventBackplaneConnectionGone) {
-                instance.logError("amqp sse backplane connection lost and no dialer is configured, stopping", subscribeErr)
+                instance.logTerminal("amqp sse backplane connection lost and no dialer is configured, stopping: this node permanently stops receiving remote server-sent events", subscribeErr)
 
                 return
             }
@@ -396,7 +417,11 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     if nil == instance.dialer {
         instance.mutex.Unlock()
 
-        return nil, errServerSentEventBackplaneConnectionGone
+        return nil, exception.NewError(
+            "amqp sse backplane connection is closed and no dialer is configured",
+            map[string]any{"exchange": instance.exchange},
+            errServerSentEventBackplaneConnectionGone,
+        )
     }
 
     if true == instance.reconnecting {
@@ -440,7 +465,7 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     return connection, nil
 }
 
-/* @important closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down; a nil failed channel identifies no specific channel and is a no-op, mirroring the transport's resetPublishChannel. */
+/* closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down; a nil failed channel identifies no specific channel and is a no-op, mirroring the transport's resetPublishChannel. */
 func (instance *ServerSentEventBackplane) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -465,8 +490,11 @@ func (instance *ServerSentEventBackplane) isClosing() bool {
 }
 
 func (instance *ServerSentEventBackplane) sleep(backoff time.Duration) bool {
+    timer := time.NewTimer(backoff)
+    defer timer.Stop()
+
     select {
-    case <-time.After(backoff):
+    case <-timer.C:
         return true
     case <-instance.ctx.Done():
         return false
@@ -479,6 +507,17 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
     }
 
     instance.logger.Error(message, exception.LogContext(err))
+}
+
+/* logTerminal reports a PERMANENT capability loss even when no logger was configured: with the zero-value config the ordinary logError discards everything, and the receive half of the backplane used to die with zero signal on any channel — connected clients on this node just stopped seeing other nodes' events. The emergency logger is the same last-resort stderr channel the framework uses when the journal itself cannot be reached. */
+func (instance *ServerSentEventBackplane) logTerminal(message string, err error) {
+    if nil != instance.logger {
+        instance.logger.Error(message, exception.LogContext(err))
+
+        return
+    }
+
+    logging.EmergencyLogger().Emergency(message, exception.LogContext(err))
 }
 
 func newServerSentEventBackplaneOrigin() string {

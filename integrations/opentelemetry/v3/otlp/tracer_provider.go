@@ -25,7 +25,8 @@ const (
 
 /* Config describes how to export spans to an OTLP collector. Endpoint is host:port without a scheme (for
 example "otel-collector:4317"); the deployment owns these values, so an app typically fills them from a
-parameter / .env. SampleRatio in (0,1) keeps that fraction of traces; 0 or >=1 samples everything. */
+parameter / .env. SampleRatio in (0,1) keeps that fraction of traces; 0 or >=1 samples everything; a
+negative or NaN ratio is refused at construction, because both used to fall through to AlwaysSample. */
 type Config struct {
     Endpoint       string
     Protocol       string
@@ -43,6 +44,15 @@ play Module in this package does that for you by registering it as a container-m
 func NewTracerProvider(ctx context.Context, config Config) (*sdktrace.TracerProvider, error) {
     if "" == config.Endpoint {
         return nil, exception.NewError("otlp tracer provider endpoint is required", nil, nil)
+    }
+
+    /* the documented contract covers 0 (sample everything) and the open interval; a negative ratio — the natural "tracing off" sentinel — and a NaN from a failed parse both fell through samplerFor's window check to AlwaysSample, inverting "minimum tracing" into 100% export exactly when the operator asked for none. Both are refused at construction instead. */
+    if 0 > config.SampleRatio || config.SampleRatio != config.SampleRatio {
+        return nil, exception.NewError(
+            "otlp tracer provider sample ratio must not be negative or NaN: use a ratio in (0,1) to sample that fraction, or 0 / >=1 to sample everything",
+            map[string]any{"sampleRatio": config.SampleRatio},
+            nil,
+        )
     }
 
     exporter, exporterErr := newExporter(ctx, config)

@@ -1,6 +1,8 @@
 package outbox
 
 import (
+    "context"
+    "errors"
     "os"
     "os/signal"
     "syscall"
@@ -46,10 +48,19 @@ type RelayCommand struct {
     relayLazy *container.LazyService[*Relay]
 }
 
-/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. */
+/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. The nil-yield guard mirrors lazyRepository.resolveStore: LazyService.Resolve passes a nil yield through with a nil error, and the run loop would then dereference it and panic the relay process on what should have been one more retried failure. */
 func (instance *RelayCommand) resolveRelay() (*Relay, error) {
     if nil != instance.relayLazy {
-        return instance.relayLazy.Resolve()
+        relay, resolveErr := instance.relayLazy.Resolve()
+        if nil != resolveErr {
+            return nil, resolveErr
+        }
+
+        if nil == relay {
+            return nil, exception.NewError("outbox: the registered relay resolved to nil", nil, nil)
+        }
+
+        return relay, nil
     }
 
     return instance.relay, nil
@@ -119,8 +130,12 @@ func (instance *RelayCommand) Run(
 
         if nil != runErr {
             if nil != runContext.Err() {
-                /* the signal interrupted the batch mid-drain; the visibility timeout re-surfaces whatever stayed claimed, so exit cleanly rather than report the cancellation as a failure. */
-                return nil
+                /* a cancellation — signal or parent context — interrupted the batch mid-drain; the visibility timeout re-surfaces whatever stayed claimed, so exit cleanly rather than report the cancellation as a failure. Only an error the cancellation EXPLAINS is swallowed though: a genuine repository failure that merely coincided with a lapsing parent deadline used to ride this branch into exit 0, and a supervisor read the failed drain as success. */
+                if true == errors.Is(runErr, context.Canceled) || true == errors.Is(runErr, context.DeadlineExceeded) {
+                    return nil
+                }
+
+                return runErr
             }
 
             if 0 < limit && batches >= limit {

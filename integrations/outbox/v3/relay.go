@@ -2,8 +2,10 @@ package outbox
 
 import (
     "context"
+    "errors"
     "math"
     "strconv"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -25,6 +27,9 @@ const (
     defaultInitialBackoff    = 15 * time.Second
     defaultMaxBackoff        = 10 * time.Minute
     defaultBackoffFactor     = 2.0
+
+    /* maximumBatchSize bounds one claim; far above any sensible drain and far below what a mistyped configuration could ask a slice pre-allocation for. */
+    maximumBatchSize = 100000
 )
 
 /* the lease release must not ride the run context: a signal cancels it before the relay unwinds, the backend never sees the delete and the lease survives its whole LockTtl — during which every other replica's RunOnce returns without draining anything. */
@@ -90,6 +95,10 @@ func NewRelay(config RelayConfig) *Relay {
     if 0 >= resolved.BatchSize {
         resolved.BatchSize = defaultBatchSize
     }
+    /* the upper clamp is the twin of the zero clamp: the batch size flows into a slice pre-allocation, and a fat-fingered configuration (an env var pasted with too many zeroes) would ask the runtime for terabytes of capacity and panic the relay process before any query ran — a panic the command's error-driven backoff loop cannot catch. */
+    if maximumBatchSize < resolved.BatchSize {
+        resolved.BatchSize = maximumBatchSize
+    }
     if 0 >= resolved.MaxAttempts {
         resolved.MaxAttempts = defaultMaxAttempts
     }
@@ -132,16 +141,16 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
 
     defer release()
 
+    /* a large batch can outlive the lock ttl while sending; refresh the lease as work progresses so another instance does not take the lock mid-run and double-publish. Refresh twice per ttl so a single missed beat still leaves margin. The cadence is anchored at ACQUISITION, before the claim below: the lease's own clock started there, and a claim that blocks on a contended database consumes lease lifetime a later anchor would never account for — the first refresh would then land after the lease had already lapsed. */
+    refreshInterval := instance.config.LockTtl / 2
+    lastRefresh := time.Now()
+
     ctx := runtimeInstance.Context()
 
     due, dueErr := instance.config.Repository.ClaimDueMessages(ctx, instance.config.BatchSize, instance.config.VisibilityTimeout)
     if nil != dueErr {
         return 0, dueErr
     }
-
-    /* a large batch can outlive the lock ttl while sending; refresh the lease as work progresses so another instance does not take the lock mid-run and double-publish. Refresh twice per ttl so a single missed beat still leaves margin. */
-    refreshInterval := instance.config.LockTtl / 2
-    lastRefresh := time.Now()
 
     published := 0
     for _, pending := range due {
@@ -190,7 +199,12 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
     message, decodeErr := instance.config.Codec.Decode(pending.TypeName, pending.Payload)
     if nil != decodeErr {
         /* an undecodable row is poison and can never succeed, so it goes straight to the dead state rather than being retried forever */
-        return false, instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, "decode: "+decodeErr.Error(), pending.ClaimToken)
+        storedError := storedLastError("decode: ", decodeErr)
+
+        return false, resolutionWriteOutcome(
+            instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, storedError, pending.ClaimToken),
+            storedError,
+        )
     }
 
     /* stamp the outbox row id as the message id so the transport can carry it (for example as the AMQP message id) and a consumer can deduplicate: the outbox is at-least-once (a transport success followed by a crash before MarkSent redelivers the row), so the same logical message must always publish under the same id. */
@@ -201,14 +215,50 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
         return true, instance.config.Repository.MarkSent(ctx, pending.Id, pending.ClaimToken)
     }
 
+    storedError := storedLastError("", sendErr)
+
     attempts := pending.Attempts + 1
     if attempts >= instance.config.MaxAttempts {
-        return false, instance.config.Repository.MarkDead(ctx, pending.Id, attempts, sendErr.Error(), pending.ClaimToken)
+        return false, resolutionWriteOutcome(
+            instance.config.Repository.MarkDead(ctx, pending.Id, attempts, storedError, pending.ClaimToken),
+            storedError,
+        )
     }
 
     availableAt := time.Now().Add(instance.nextBackoff(attempts))
 
-    return false, instance.config.Repository.Reschedule(ctx, pending.Id, attempts, availableAt, sendErr.Error(), pending.ClaimToken)
+    return false, resolutionWriteOutcome(
+        instance.config.Repository.Reschedule(ctx, pending.Id, attempts, availableAt, storedError, pending.ClaimToken),
+        storedError,
+    )
+}
+
+/* maximumStoredErrorLength bounds what goes into the row's last_error column. The narrowest schema the store's own EnsureSchema can produce maps the field to a VARCHAR whose default length is 255, and a resolution write refused for an over-long diagnostic would lose the resolution itself — the row would silently re-surface after the visibility timeout with nothing recorded. */
+const maximumStoredErrorLength = 250
+
+/* storedLastError renders a delivery failure for the row's last_error column with its CAUSE CHAIN, not the message alone: the error string of a melody error is its message, so a dead-lettered row used to record "amqp publish failed" with no broker verdict, no reply code, nothing — and the one place an operator looks to diagnose a dead letter was undiagnosable. */
+func storedLastError(prefix string, err error) string {
+    parts := append([]string{prefix + err.Error()}, exception.BuildCauseChain(errors.Unwrap(err), 8)...)
+
+    rendered := strings.Join(parts, " <- ")
+    if maximumStoredErrorLength < len(rendered) {
+        rendered = rendered[:maximumStoredErrorLength]
+    }
+
+    return rendered
+}
+
+/* resolutionWriteOutcome reports a failed resolution write WITH the delivery failure it was recording: returning the write error alone dropped the decode/send cause entirely, so the operator learned the UPDATE hiccuped and never that the publish was failing — and the row re-surfaced after the visibility timeout with nothing recorded anywhere. */
+func resolutionWriteOutcome(writeErr error, deliveryError string) error {
+    if nil == writeErr {
+        return nil
+    }
+
+    return exception.NewError(
+        "outbox resolution write failed after a delivery failure - the row stays claimed and re-surfaces after the visibility timeout",
+        map[string]any{"deliveryError": deliveryError},
+        writeErr,
+    )
 }
 
 func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (func(), func(runtimecontract.Runtime) error, bool, error) {

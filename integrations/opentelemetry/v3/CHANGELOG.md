@@ -6,8 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `module.go` — **Behavioural change**: a nil entry in `ModuleConfig.Middlewares` or `ModuleConfig.HandlerDecorators` is refused at boot instead of skipped. A skipped observability middleware has no later consumer to fail loudly — the typical source is a discarded constructor error (`middleware, _ := NewMetricsMiddleware(meter)`), and the app then serves traffic uninstrumented while the operator reads an empty-but-healthy dashboard with nothing to distinguish "no traffic" from "not measured"
+
 ### Fixed
 
+- `metrics_middleware.go` — the per-route instruments read the status a handler commits directly to the response writer. A handler that returns a nil response after writing its own status — the streaming/proxy shape this package's own `MetricsRouteHandler` and the websocket bridge both use — recorded the constructor's `200` whatever was written, so a route failing 100% of the time could graph as 100% success under `http.server.request.*`; a hijacked connection on that path records `101` like the lifecycle seam does
+- `metrics_middleware.go`, `tracing_middleware.go` — a typed-nil concrete response no longer panics the observability layer: `nil != response` let a handler's `var resp *SomeResponse; return resp, nil` through to the `StatusCode()` dereference, and the panic was then charged to the middleware while the defect sat in the handler; the typed nil now reads as an absent response
+- `otlp/tracer_provider.go` — a negative or NaN `SampleRatio` is refused at construction instead of silently inverting to `AlwaysSample`. A negative value is the natural "tracing off" sentinel and NaN is the shape of a failed parse; both fell outside the documented `(0,1)` window check and produced 100% export exactly when the operator asked for none
 - a hijacked connection is recorded as `101 Switching Protocols` instead of the default `200`, so a websocket upgrade that lives for hours no longer lands in the same request-duration series as an ordinary request and skews the latency distribution
 
 ## [v3.1.0] - 2026-07-06 - Lifecycle Handler Decorator and OTLP Trace Export

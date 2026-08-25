@@ -4,6 +4,7 @@ import (
     "bufio"
     "bytes"
     "context"
+    "errors"
     "io"
     "path"
     "strings"
@@ -17,7 +18,7 @@ import (
     storagecontract "github.com/precision-soft/melody/v3/storage/contract"
 )
 
-/* @important normalizes a key the same way LocalStorage does (backslash to slash, clean dot segments, strip the leading slash) so a given key addresses the same object on both backends and a '..' segment cannot produce a presigned URL the client collapses into a different signed path. */
+/* normalizes a key the same way LocalStorage does (backslash to slash, clean dot segments, strip the leading slash) so a given key addresses the same object on both backends and a '..' segment cannot produce a presigned URL the client collapses into a different signed path. */
 func normalizeObjectKey(key string) (string, error) {
     normalized := strings.ReplaceAll(key, "\\", "/")
     cleaned := strings.TrimPrefix(path.Clean("/"+normalized), "/")
@@ -67,7 +68,7 @@ func (instance *Storage) Put(
         return bodyErr
     }
 
-    /* @important minio's single-shot putObject wraps an io.ReaderAt+io.Seeker reader (which *bytes.Reader, *strings.Reader and a non-stdio *os.File all satisfy) in an io.SectionReader and uploads the body via ReadAt. Hand minio an io.LimitReader instead: it is neither an io.ReaderAt nor an io.Seeker, so minio takes the sequential path and consumes exactly `size` bytes from `reader`; the cap also guarantees minio can never store more than the declared size on any path (single-shot or multipart). A negative size means "unknown length" and is streamed whole with no cap. */
+    /* minio's single-shot putObject wraps an io.ReaderAt+io.Seeker reader (which *bytes.Reader, *strings.Reader and a non-stdio *os.File all satisfy) in an io.SectionReader and uploads the body via ReadAt. Hand minio an io.LimitReader instead: it is neither an io.ReaderAt nor an io.Seeker, so minio takes the sequential path and consumes exactly `size` bytes from `reader`; the cap also guarantees minio can never store more than the declared size on any path (single-shot or multipart). A negative size means "unknown length" and is streamed whole with no cap. */
     _, putErr := instance.client.PutObject(
         runtimeInstance.Context(),
         instance.bucket,
@@ -84,7 +85,7 @@ func (instance *Storage) Put(
             return declaredSizeMismatchError(key, size)
         }
 
-        return exception.NewError("object storage put failed", map[string]any{"key": key}, putErr)
+        return exception.NewError("object storage put failed", map[string]any{"key": key, "bucket": instance.bucket}, putErr)
     }
 
     return nil
@@ -230,7 +231,7 @@ func (instance *sizeCheckedReader) Read(buffer []byte) (int, error) {
     return 0, nil
 }
 
-/* @important guardLastByte withholds the final declared byte until the body is known to end there. Withholding it IS the atomicity mechanism: an over-read leaves the upload short of the content length it announced, so a single-shot put is refused by the bucket and a multipart upload is aborted, and nothing ever appears at the key. It reads like an off-by-one and is not one. A peek that comes up empty is the body ending early, which minio refuses on its own. */
+/* guardLastByte withholds the final declared byte until the body is known to end there. Withholding it IS the atomicity mechanism: an over-read leaves the upload short of the content length it announced, so a single-shot put is refused by the bucket and a multipart upload is aborted, and nothing ever appears at the key. It reads like an off-by-one and is not one. A peek that comes up empty is the body ending early, which minio refuses on its own. */
 func (instance *sizeCheckedReader) guardLastByte() error {
     peeked, peekErr := instance.source.Peek(2)
     if 1 < len(peeked) {
@@ -244,10 +245,15 @@ func (instance *sizeCheckedReader) guardLastByte() error {
     return nil
 }
 
-/* endOfBody reports the body's end, or the size mismatch when it still yields data past the declared size — the state a zero-sized declaration lands in immediately. */
+/* endOfBody reports the body's end, or the size mismatch when it still yields data past the declared size — the state a zero-sized declaration lands in immediately. A probe that fails with anything but a clean end is surfaced rather than folded into io.EOF: reporting EOF there would fabricate an exact-match verdict for a body whose length past the boundary is unknown, which is the one question this reader exists to answer. */
 func (instance *sizeCheckedReader) endOfBody() error {
-    if peeked, _ := instance.source.Peek(1); 0 < len(peeked) {
+    peeked, peekErr := instance.source.Peek(1)
+    if 0 < len(peeked) {
         return instance.reject()
+    }
+
+    if nil != peekErr && false == errors.Is(peekErr, io.EOF) {
+        return peekErr
     }
 
     return io.EOF
@@ -304,7 +310,7 @@ func declaredSizeMismatchError(key string, size int64) error {
     )
 }
 
-/* @important boundedPutReader wraps the body handed to minio in an io.LimitReader capped at the declared size. The wrapper is neither an io.ReaderAt nor an io.Seeker, so it defeats minio's single-shot SectionReader/ReadAt optimization and forces the sequential path, which consumes the body one part buffer at a time and lets a size-checked body cut the upload off mid-flight. The cap also bounds what minio can store at exactly `size`. A negative size means "unknown length" and is streamed whole with no cap. */
+/* boundedPutReader wraps the body handed to minio in an io.LimitReader capped at the declared size. The wrapper is neither an io.ReaderAt nor an io.Seeker, so it defeats minio's single-shot SectionReader/ReadAt optimization and forces the sequential path, which consumes the body one part buffer at a time and lets a size-checked body cut the upload off mid-flight. The cap also bounds what minio can store at exactly `size`. A negative size means "unknown length" and is streamed whole with no cap. */
 func boundedPutReader(reader io.Reader, size int64) io.Reader {
     if 0 <= size {
         return io.LimitReader(reader, size)
@@ -324,17 +330,17 @@ func (instance *Storage) Get(
 
     object, getErr := instance.client.GetObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.GetObjectOptions{})
     if nil != getErr {
-        return nil, exception.NewError("object storage get failed", map[string]any{"key": key}, getErr)
+        return nil, exception.NewError("object storage get failed", map[string]any{"key": key, "bucket": instance.bucket}, getErr)
     }
 
     if _, statErr := object.Stat(); nil != statErr {
         object.Close()
 
         if "NoSuchKey" == minio.ToErrorResponse(statErr).Code {
-            return nil, exception.NewError("object storage object not found", map[string]any{"key": key}, statErr)
+            return nil, exception.NewError("object storage object not found", map[string]any{"key": key, "bucket": instance.bucket}, statErr)
         }
 
-        return nil, exception.NewError("object storage get failed", map[string]any{"key": key}, statErr)
+        return nil, exception.NewError("object storage get failed", map[string]any{"key": key, "bucket": instance.bucket}, statErr)
     }
 
     return object, nil
@@ -351,7 +357,7 @@ func (instance *Storage) Delete(
 
     removeErr := instance.client.RemoveObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.RemoveObjectOptions{})
     if nil != removeErr {
-        return exception.NewError("object storage delete failed", map[string]any{"key": key}, removeErr)
+        return exception.NewError("object storage delete failed", map[string]any{"key": key, "bucket": instance.bucket}, removeErr)
     }
 
     return nil
@@ -375,7 +381,7 @@ func (instance *Storage) Exists(
         return false, nil
     }
 
-    return false, exception.NewError("object storage stat failed", map[string]any{"key": key}, statErr)
+    return false, exception.NewError("object storage stat failed", map[string]any{"key": key, "bucket": instance.bucket}, statErr)
 }
 
 func (instance *Storage) PresignedUrl(
@@ -390,7 +396,7 @@ func (instance *Storage) PresignedUrl(
 
     presigned, presignErr := instance.client.PresignedGetObject(runtimeInstance.Context(), instance.bucket, normalizedKey, expiry, nil)
     if nil != presignErr {
-        return "", exception.NewError("object storage presign failed", map[string]any{"key": key}, presignErr)
+        return "", exception.NewError("object storage presign failed", map[string]any{"key": key, "bucket": instance.bucket}, presignErr)
     }
 
     return presigned.String(), nil

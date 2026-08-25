@@ -84,7 +84,7 @@ func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
     }
 }
 
-/* @info net/url parses "guest:guest@host" as scheme "guest" with no userinfo, so the redaction must fail closed rather than echo the input into the connection-failure log */
+/* net/url parses "guest:guest@host" as scheme "guest" with no userinfo, so the redaction must fail closed rather than echo the input into the connection-failure log */
 func TestRedactDsn_FailsClosedOnDsnWithoutParsableUserinfo(t *testing.T) {
     for _, dsn := range []string{
         "guest:secret@rabbitmq:5672",
@@ -103,7 +103,7 @@ func TestRedactDsn_FailsClosedOnDsnWithoutParsableUserinfo(t *testing.T) {
     }
 }
 
-/* @info amqp091.DialConfig surfaces a malformed dsn as a *url.Error whose Error() quotes the entire raw dsn, password included. Provider.Open must scrub that before wrapping it as the exception cause, or exception.LogContext prints the secret on every connection and reconnect failure. */
+/* amqp091.DialConfig surfaces a malformed dsn as a *url.Error whose Error() quotes the entire raw dsn, password included. Provider.Open must scrub that before wrapping it as the exception cause, or exception.LogContext prints the secret on every connection and reconnect failure. */
 func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
     const dsn = "amqp://user:sup3r%secret@rabbit:5672/"
 
@@ -134,7 +134,7 @@ func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
     }
 }
 
-/* @info net/url embeds dsn fragments inside the *url.Error cause, not just its URL field: a url.EscapeError carries the offending percent-escape triple — the two password characters that follow a literal '%' — and url.Error.Error() renders that value verbatim. Copying urlErr.Err through untouched leaks the password even after the URL field is redacted, so redactDialError must scrub the inner cause too. */
+/* net/url embeds dsn fragments inside the *url.Error cause, not just its URL field: a url.EscapeError carries the offending percent-escape triple — the two password characters that follow a literal '%' — and url.Error.Error() renders that value verbatim. Copying urlErr.Err through untouched leaks the password even after the URL field is redacted, so redactDialError must scrub the inner cause too. */
 func TestRedactDialError_ScrubsEscapeErrorPasswordFragment(t *testing.T) {
     dialErr := &neturl.Error{
         Op:  "parse",
@@ -160,7 +160,7 @@ func TestRedactDialError_ScrubsEscapeErrorPasswordFragment(t *testing.T) {
     }
 }
 
-/* @info A well-formed dsn keeps its shape so the log stays useful; only the password goes. */
+/* A well-formed dsn keeps its shape so the log stays useful; only the password goes. */
 func TestRedactDsn_KeepsWellFormedDsnWithoutThePassword(t *testing.T) {
     redacted := redactDsn("amqp://guest:secret@rabbitmq:5672/vhost")
 

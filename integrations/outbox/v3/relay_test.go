@@ -3,13 +3,16 @@ package outbox
 import (
     "context"
     "errors"
+    "fmt"
     "math"
+    "strings"
     "sync"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -81,17 +84,28 @@ func relayTestRuntime() runtimecontract.Runtime {
 }
 
 type repoCall struct {
-    kind     string
-    id       int64
-    attempts int
+    kind      string
+    id        int64
+    attempts  int
+    lastError string
 }
 
 type fakeRepository struct {
-    due   []Pending
-    calls []repoCall
+    due           []Pending
+    calls         []repoCall
+    claimLimits   []int
+    claimDelay    time.Duration
+    markDeadErr   error
+    rescheduleErr error
 }
 
-func (instance *fakeRepository) ClaimDueMessages(_ context.Context, _ int, _ time.Duration) ([]Pending, error) {
+func (instance *fakeRepository) ClaimDueMessages(_ context.Context, limit int, _ time.Duration) ([]Pending, error) {
+    instance.claimLimits = append(instance.claimLimits, limit)
+
+    if 0 < instance.claimDelay {
+        time.Sleep(instance.claimDelay)
+    }
+
     return instance.due, nil
 }
 
@@ -114,16 +128,16 @@ func (instance *fakeRepository) MarkSent(_ context.Context, id int64, _ string) 
     return nil
 }
 
-func (instance *fakeRepository) Reschedule(_ context.Context, id int64, attempts int, _ time.Time, _ string, _ string) error {
-    instance.calls = append(instance.calls, repoCall{kind: "reschedule", id: id, attempts: attempts})
+func (instance *fakeRepository) Reschedule(_ context.Context, id int64, attempts int, _ time.Time, lastError string, _ string) error {
+    instance.calls = append(instance.calls, repoCall{kind: "reschedule", id: id, attempts: attempts, lastError: lastError})
 
-    return nil
+    return instance.rescheduleErr
 }
 
-func (instance *fakeRepository) MarkDead(_ context.Context, id int64, attempts int, _ string, _ string) error {
-    instance.calls = append(instance.calls, repoCall{kind: "dead", id: id, attempts: attempts})
+func (instance *fakeRepository) MarkDead(_ context.Context, id int64, attempts int, lastError string, _ string) error {
+    instance.calls = append(instance.calls, repoCall{kind: "dead", id: id, attempts: attempts, lastError: lastError})
 
-    return nil
+    return instance.markDeadErr
 }
 
 type fakeTransport struct {
@@ -380,7 +394,7 @@ func TestRelay_UnreachedBatchMateIsNotChargedDeliveryAttempt(t *testing.T) {
     }
 }
 
-/* @info the count follows the broker: a message whose send succeeded but whose MarkSent failed was still published, so the run reports it even as it surfaces the bookkeeping error */
+/* the count follows the broker: a message whose send succeeded but whose MarkSent failed was still published, so the run reports it even as it surfaces the bookkeeping error */
 func TestRelay_CountsMessagePublishedWhenMarkSentFails(t *testing.T) {
     repository := &markSentFailingRepository{fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 0, DeliveryAttempts: 0},
@@ -635,5 +649,111 @@ func TestRelay_NextBackoffCapsAtMax(t *testing.T) {
 
     if 5*time.Second != relay.nextBackoff(10) {
         t.Fatalf("expected backoff to cap at max, got %v", relay.nextBackoff(10))
+    }
+}
+
+/* failingCauseTransport fails every send with a wrapped error whose CAUSE carries the broker verdict. */
+type failingCauseTransport struct {
+    fakeTransport
+    cause error
+}
+
+func (instance *failingCauseTransport) Send(_ runtimecontract.Runtime, _ messagebuscontract.Envelope) error {
+    return exception.NewError("amqp publish failed", nil, instance.cause)
+}
+
+func TestRelay_DeadLetterRecordsTheCauseChainNotTheMessageAlone(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 7, TypeName: "string", Payload: []byte("x"), Attempts: 0}}}
+    transport := &failingCauseTransport{cause: errors.New("NO_ROUTE to queue welcome_email")}
+
+    relay := NewRelay(RelayConfig{
+        Repository:  repository,
+        Transport:   transport,
+        Codec:       &stringCodec{},
+        MaxAttempts: 1,
+    })
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if 1 != len(repository.calls) || "dead" != repository.calls[0].kind {
+        t.Fatalf("expected the row dead-lettered, got %v", repository.calls)
+    }
+
+    stored := repository.calls[0].lastError
+    if false == strings.Contains(stored, "amqp publish failed") || false == strings.Contains(stored, "NO_ROUTE to queue welcome_email") {
+        t.Fatalf("expected last_error to carry the cause chain, not the message alone; got %q", stored)
+    }
+}
+
+func TestRelay_AFailedResolutionWriteStillCarriesTheDeliveryFailure(t *testing.T) {
+    markDeadErr := errors.New("update refused: read-only replica")
+    repository := &fakeRepository{
+        due:         []Pending{{Id: 8, TypeName: "string", Payload: []byte("x"), Attempts: 0}},
+        markDeadErr: markDeadErr,
+    }
+    transport := &failingCauseTransport{cause: errors.New("NO_ROUTE to queue welcome_email")}
+
+    relay := NewRelay(RelayConfig{
+        Repository:  repository,
+        Transport:   transport,
+        Codec:       &stringCodec{},
+        MaxAttempts: 1,
+    })
+
+    _, runErr := relay.RunOnce(relayTestRuntime())
+
+    if nil == runErr || false == errors.Is(runErr, markDeadErr) {
+        t.Fatalf("expected the failed resolution write surfaced with its cause, got %v", runErr)
+    }
+
+    rendered := fmt.Sprintf("%v", exception.LogContext(runErr))
+    if false == strings.Contains(rendered, "NO_ROUTE to queue welcome_email") {
+        t.Fatalf("expected the delivery failure to survive beside the write failure instead of being replaced by it; got %q", rendered)
+    }
+}
+
+func TestRelay_ClampsAnAbsurdBatchSizeBeforeItReachesAnAllocation(t *testing.T) {
+    repository := &fakeRepository{}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{},
+        Codec:      &stringCodec{},
+        BatchSize:  1 << 40,
+    })
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if 1 != len(repository.claimLimits) || maximumBatchSize != repository.claimLimits[0] {
+        t.Fatalf("expected the fat-fingered batch size clamped to %d, got %v", maximumBatchSize, repository.claimLimits)
+    }
+}
+
+func TestRelay_LeaseRefreshCadenceIsAnchoredAtAcquisitionNotAfterTheClaim(t *testing.T) {
+    lock := &fakeLock{acquire: true}
+    repository := &fakeRepository{
+        due:        []Pending{{Id: 9, TypeName: "string", Payload: []byte("x"), Attempts: 0}},
+        claimDelay: 70 * time.Millisecond,
+    }
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{},
+        Codec:      &stringCodec{},
+        Locker:     &fakeLocker{acquire: true, lock: lock},
+        LockTtl:    100 * time.Millisecond,
+    })
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    /* the claim consumed 70ms of a 100ms lease whose refresh interval is 50ms: anchored at acquisition the first row must refresh; anchored after the claim the whole run would end with zero refreshes and the lease 20ms from lapsing */
+    if 0 == lock.refreshCalls {
+        t.Fatal("expected the slow claim to count against the refresh cadence, so the first row refreshes the lease")
     }
 }

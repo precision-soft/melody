@@ -4,10 +4,13 @@ import (
     "context"
     "errors"
     "os"
+    "strings"
+    "sync"
     "testing"
     "time"
 
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -304,4 +307,78 @@ func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *t
     if second == first {
         t.Fatalf("expected the stale closed channel to be replaced, got the same channel")
     }
+}
+
+func TestBackplane_TerminalStopIsReportedThroughTheConfiguredLogger(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    connection, dialErr := amqp091.Dial(dsn)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+
+    /* a static connection closed under the backplane, with no dialer: the terminal receive-death this report exists for */
+    logger := &recordingBackplaneLogger{}
+    hub := melodyhttp.NewServerSentEventHub()
+
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Connection: connection,
+        Hub:        hub,
+        Logger:     logger,
+    })
+    defer backplane.Close()
+
+    _ = connection.Close()
+
+    deadline := time.Now().Add(5 * time.Second)
+    for false == logger.sawTerminalStop() {
+        if true == time.Now().After(deadline) {
+            t.Fatal("expected the terminal listen stop to be reported: the receive half died and the operator must see it")
+        }
+        time.Sleep(10 * time.Millisecond)
+    }
+}
+
+/* recordingBackplaneLogger captures error records so a test can read what the backplane reported. */
+type recordingBackplaneLogger struct {
+    mutex    sync.Mutex
+    messages []string
+}
+
+func (instance *recordingBackplaneLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.messages = append(instance.messages, message)
+}
+func (instance *recordingBackplaneLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *recordingBackplaneLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *recordingBackplaneLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *recordingBackplaneLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *recordingBackplaneLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func (instance *recordingBackplaneLogger) sawTerminalStop() bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for _, message := range instance.messages {
+        if true == strings.Contains(message, "permanently stops receiving") {
+            return true
+        }
+    }
+
+    return false
 }

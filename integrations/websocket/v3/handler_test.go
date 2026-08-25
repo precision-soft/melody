@@ -2,6 +2,8 @@ package websocket
 
 import (
     "context"
+    "errors"
+    "fmt"
     "io"
     "net"
     nethttp "net/http"
@@ -14,8 +16,12 @@ import (
     coderwebsocket "github.com/coder/websocket"
 
     "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -434,7 +440,7 @@ func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
     }
 }
 
-/* @info A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
+/* A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
 func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -501,7 +507,7 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
     connection.Close(coderwebsocket.StatusNormalClosure, "")
 }
 
-/* @info A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
+/* A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
 func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -556,7 +562,7 @@ func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     }
 }
 
-/* @info A synchronous OnMessage callback holds the scope-backed runtime handed to it. If the handler returns to the kernel while the callback is still running, the kernel's deferred scope teardown races the callback and its next service resolution hits a closed scope. The handler must wait for the read loop — hence the callback — before returning. */
+/* A synchronous OnMessage callback holds the scope-backed runtime handed to it. If the handler returns to the kernel while the callback is still running, the kernel's deferred scope teardown races the callback and its next service resolution hits a closed scope. The handler must wait for the read loop — hence the callback — before returning. */
 func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -634,7 +640,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     }
 }
 
-/* @info A connection reaped while wedged in a callback must free its descriptor and handler goroutine when the close grace lapses, not seconds later. An abandoned graceful close otherwise wins coder/websocket's close CAS and holds the transport for the library's full handshake timeout, while the deferred CloseNow loses that CAS and blocks the same span. */
+/* A connection reaped while wedged in a callback must free its descriptor and handler goroutine when the close grace lapses, not seconds later. An abandoned graceful close otherwise wins coder/websocket's close CAS and holds the transport for the library's full handshake timeout, while the deferred CloseNow loses that CAS and blocks the same span. */
 func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -703,7 +709,7 @@ func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *
     }
 }
 
-/* @info leaveCallback must refresh the activity mark before it clears the running-callback count. If it clears the count first, a ping loop sampling cannotAnswer in that window sees no callback running yet still reads the stale pre-callback activity mark, and reaps a healthy connection at the instant its callback returns. */
+/* leaveCallback must refresh the activity mark before it clears the running-callback count. If it clears the count first, a ping loop sampling cannotAnswer in that window sees no callback running yet still reads the stale pre-callback activity mark, and reaps a healthy connection at the instant its callback returns. */
 func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback(t *testing.T) {
     previousProcs := goruntime.GOMAXPROCS(0)
     if previousProcs < 2 {
@@ -770,7 +776,7 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
     close(stop)
 }
 
-/* @info The liveness windows must be measured against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
+/* The liveness windows must be measured against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
 func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
     liveness := newConnectionLiveness()
 
@@ -875,5 +881,160 @@ func assertStreamHandlerRefusesIdleTimeout(t *testing.T, idleTimeout time.Durati
 func TestNewStreamHandler_AcceptsAPositiveIdleTimeout(t *testing.T) {
     if nil == NewStreamHandler(melodyhttp.NewServerSentEventHub(), Options{IdleTimeout: time.Second}) {
         t.Fatal("expected a handler for a positive IdleTimeout")
+    }
+}
+
+func TestNewStreamHandler_RefusesANilHub(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a nil hub to be refused at construction, not dereferenced on the first request")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == strings.Contains(recoveredErr.Error(), "hub is nil") {
+            t.Fatalf("expected the refusal to name the nil hub, got %v", recovered)
+        }
+    }()
+
+    NewStreamHandler(nil, Options{IdleTimeout: time.Second})
+}
+
+func TestStreamHandler_RefusesAnEmptyResolvedTopicBeforeTheUpgrade(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+
+    handler := NewStreamHandler(hub, Options{
+        IdleTimeout:   time.Second,
+        TopicResolver: func(request httpcontract.Request) string { return "" },
+    })
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
+    recorder := httptest.NewRecorder()
+
+    _, handlerErr := handler(runtimeInstance, recorder, request)
+
+    if nil == handlerErr {
+        t.Fatal("expected the empty resolved topic to refuse the connection")
+    }
+
+    if 0 != hub.SubscriberCount("") {
+        t.Fatalf("expected no subscription on the shared degenerate topic, got %d", hub.SubscriberCount(""))
+    }
+
+    if nethttp.StatusSwitchingProtocols == recorder.Code {
+        t.Fatal("expected the refusal to land before the upgrade, not after a 101")
+    }
+}
+
+/* capturingLogger records every entry so a test can read what the handler reported. */
+type capturingLogger struct {
+    contexts []loggingcontract.Context
+}
+
+func (instance *capturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.contexts = append(instance.contexts, context)
+}
+func (instance *capturingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *capturingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *capturingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *capturingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *capturingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func TestDispatchOnMessage_PreservesThePanickedErrorsCauseChain(t *testing.T) {
+    logger := &capturingLogger{}
+
+    serviceContainer := container.NewContainer()
+    if registerErr := serviceContainer.Register(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    }); nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    rootCause := errors.New("db down")
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic(exception.NewError("user failure", nil, rootCause))
+        },
+    }
+
+    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"))
+
+    if false == panicked {
+        t.Fatal("expected the panic to be recovered and reported")
+    }
+
+    if 0 == len(logger.contexts) {
+        t.Fatal("expected the panic to be logged")
+    }
+
+    rendered := fmt.Sprintf("%v", logger.contexts[len(logger.contexts)-1])
+    if false == strings.Contains(rendered, "db down") {
+        t.Fatalf("expected the panicked error's cause chain to survive into the record - the old %%v flatten kept only the message; got %q", rendered)
+    }
+}
+
+func TestStreamHandler_ANegativeReadLimitDisablesTheDefaultCap(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+    defer hub.Shutdown()
+
+    received := make(chan int, 1)
+
+    handler := NewStreamHandler(hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "large" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
+        ReadLimit:      -1,
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, payload []byte) {
+            select {
+            case received <- len(payload):
+            default:
+            }
+        },
+    })
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
+        handler(runtimeInstance, writer, melodyRequest)
+    }))
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    /* larger than coder/websocket's 32 KiB default read limit: the old positive-only guard discarded the -1 and this frame killed the connection with 1009 instead of reaching the callback */
+    oversized := make([]byte, 40*1024)
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageBinary, oversized); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    select {
+    case size := <-received:
+        if len(oversized) != size {
+            t.Fatalf("expected the whole %d-byte frame, got %d", len(oversized), size)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the oversized frame to reach OnMessage with the read limit disabled")
     }
 }

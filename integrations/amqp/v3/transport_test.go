@@ -676,8 +676,9 @@ func TestConnect_SingleFlight(t *testing.T) {
 
     <-entered
 
+    /* errors.Is instead of identity: the sentinel is wrapped in a fresh melody error per return, so one logged occurrence cannot mark them all as already logged */
     _, secondErr := instance.connect()
-    if errReconnectInProgress != secondErr {
+    if false == errors.Is(secondErr, errReconnectInProgress) {
         t.Fatalf("expected a concurrent connect to report reconnect-in-progress, got %v", secondErr)
     }
 
@@ -730,7 +731,7 @@ func TestConsumeLoop_NoDialerClosesOut(t *testing.T) {
     }
 }
 
-/* @important a consumer that can never re-subscribe must say why it is stopping: the loop returns and closes out either way, so without the log a consumer dies silently in production and the queue simply stops being drained. */
+/* a consumer that can never re-subscribe must say why it is stopping: the loop returns and closes out either way, so without the log a consumer dies silently in production and the queue simply stops being drained. */
 func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
     runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
 
@@ -754,7 +755,7 @@ func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
     }
 }
 
-/* @important the mirror of the record above: a stop the transport itself asked for is expected, so it must stay silent — otherwise every deploy floods the error dashboards from each consumer that shuts down. */
+/* the mirror of the record above: a stop the transport itself asked for is expected, so it must stay silent — otherwise every deploy floods the error dashboards from each consumer that shuts down. */
 func TestConsumeLoop_ClosingTransportStopsWithoutLogging(t *testing.T) {
     runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
 
@@ -806,7 +807,7 @@ func TestConnectionAlive_ReportsLiveAndGone(t *testing.T) {
     }
 }
 
-/* @info a failed publish on a live static connection (no dialer) must be retried on a fresh channel — the live connection can still carry it — while a no-dialer transport whose connection is gone, or a closing transport, must not retry. */
+/* a failed publish on a live static connection (no dialer) must be retried on a fresh channel — the live connection can still carry it — while a no-dialer transport whose connection is gone, or a closing transport, must not retry. */
 func TestPublishRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T) {
     liveStatic := &Transport{queue: "orders", connection: &amqp091.Connection{}}
     if false == liveStatic.publishRetryable() {
@@ -829,7 +830,7 @@ func TestPublishRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T)
     }
 }
 
-/* @info a transient subscribe failure on a live static connection (no dialer) must be retried on a fresh channel — the live connection can still carry the subscription — while a no-dialer transport whose connection is gone, or a closing transport, must give up. */
+/* a transient subscribe failure on a live static connection (no dialer) must be retried on a fresh channel — the live connection can still carry the subscription — while a no-dialer transport whose connection is gone, or a closing transport, must give up. */
 func TestSubscribeRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T) {
     liveStatic := &Transport{queue: "orders", connection: &amqp091.Connection{}}
     if false == liveStatic.subscribeRetryable() {
@@ -852,7 +853,7 @@ func TestSubscribeRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.
     }
 }
 
-/* @info a consumer built on a live static connection with no dialer must recover from a channel-only loss (queue deleted, broker basic.cancel, a PRECONDITION_FAILED that closes only the channel): the live connection can still open a fresh channel, so the loop must re-subscribe instead of closing out and stopping. */
+/* a consumer built on a live static connection with no dialer must recover from a channel-only loss (queue deleted, broker basic.cancel, a PRECONDITION_FAILED that closes only the channel): the live connection can still open a fresh channel, so the loop must re-subscribe instead of closing out and stopping. */
 func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -946,7 +947,7 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
         t.Fatalf("build publishing: %v", buildErr)
     }
 
-    /* @important a requeued exhausted message must carry its dead-letter attempt count across the broker round-trip; MaxDeadLetterAttempts re-reads the count on every consume, so dropping it resets the counter to 0 on each requeue and the bound is never reached for a value >= 2, looping forever — the very loop the feature was added to break */
+    /* a requeued exhausted message must carry its dead-letter attempt count across the broker round-trip; MaxDeadLetterAttempts re-reads the count on every consume, so dropping it resets the counter to 0 on each requeue and the bound is never reached for a value >= 2, looping forever — the very loop the feature was added to break */
     delivery := amqp091.Delivery{Headers: publishing.Headers, Body: publishing.Body}
     decoded, decodeErr := instance.decode(delivery, 1)
     if nil != decodeErr {
@@ -1171,7 +1172,7 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     }
 }
 
-/* @important Close must join the consume goroutine, not merely signal it. While it returned early the loop was still inside decode and went on to hand an envelope to the application AFTER Close returned — an envelope that can never be acked, because consumeChannelForAck reports the torn-down channel as gone, so the broker redelivers it; a decode failure racing the same window nacks on the channel Close has already closed. */
+/* Close must join the consume goroutine, not merely signal it. While it returned early the loop was still inside decode and went on to hand an envelope to the application AFTER Close returned — an envelope that can never be acked, because consumeChannelForAck reports the torn-down channel as gone, so the broker redelivers it; a decode failure racing the same window nacks on the channel Close has already closed. */
 func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[closeJoinMessage](registry, "amqp.test.close-join")
@@ -1241,9 +1242,8 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
     }
 }
 
-/* @important the join is bounded: closeSignal is out of the loop's sight only while it is parked inside the caller-supplied dialer, and Close must not inherit that dialer's timeout — teardown that never blocked before has to keep not blocking. */
-/* @info the one stretch the loop cannot observe closeSignal is inside the caller-supplied dialer, and Close waits through it rather than tearing the channels down under a running loop */
-func TestClose_WaitsForALoopStuckInTheDialer(t *testing.T) {
+/* inverted from the old "Close waits out the dial" pin: the dial now runs under the close signal, so Close returns promptly however long a caller-supplied dialer blocks, and a connection the dial yields afterwards is closed by the drain goroutine instead of leaking. */
+func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     dialing := make(chan struct{})
     release := make(chan struct{})
 
@@ -1290,16 +1290,12 @@ func TestClose_WaitsForALoopStuckInTheDialer(t *testing.T) {
     instance.Close()
     elapsed := time.Since(start)
 
-    if elapsed < dialDuration {
-        t.Fatalf("Close returned after %s without waiting for the dial to finish", elapsed)
-    }
-
-    if closeJoinTimeout < elapsed {
-        t.Fatalf("Close blocked for %s, past the %s bound", elapsed, closeJoinTimeout)
+    if elapsed >= dialDuration {
+        t.Fatalf("Close blocked %s on a dialer it can now interrupt through the close signal", elapsed)
     }
 }
 
-/* @important the same join through the public path: Receive is what registers the goroutine, so a consumer started there must be joined too. */
+/* the same join through the public path: Receive is what registers the goroutine, so a consumer started there must be joined too. */
 func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
@@ -1649,7 +1645,7 @@ func TestMessageTypeName_ReportsConcreteType(t *testing.T) {
     }
 }
 
-/* @info delay buckets */
+/* delay buckets */
 
 func TestResolveDelayBuckets_DefaultsWhenEmpty(t *testing.T) {
     buckets := resolveDelayBuckets(nil)
@@ -1761,7 +1757,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         t.Fatalf("receive: %v", receiveErr)
     }
 
-    /* @important the queues are durable, so a message parked in a bucket queue by a crashed or older run dead-letters back into the main queue and would corrupt the identity assertions below — drain any leftovers before producing this run's messages */
+    /* the queues are durable, so a message parked in a bucket queue by a crashed or older run dead-letters back into the main queue and would corrupt the identity assertions below — drain any leftovers before producing this run's messages */
     for draining := true; true == draining; {
         select {
         case leftover := <-queue:
@@ -1790,7 +1786,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
         WithStamp(melodymessagebus.DelayStamp{Delay: 2 * time.Second})
 
-    /* @important requeue the LONG delay first: on the single-delay-queue topology it parks at the head with the longer per-message ttl and RabbitMQ's head-of-queue-only expiry stalls the 2s message behind it for the full 8s — the bucketed topology parks them in separate uniform-ttl queues, so the short one must come back well before the long one */
+    /* requeue the LONG delay first: on the single-delay-queue topology it parks at the head with the longer per-message ttl and RabbitMQ's head-of-queue-only expiry stalls the 2s message behind it for the full 8s — the bucketed topology parks them in separate uniform-ttl queues, so the short one must come back well before the long one */
     start := time.Now()
     if nackErr := transport.Nack(runtimeInstance, longDelayed, true); nil != nackErr {
         t.Fatalf("nack long: %v", nackErr)
@@ -1806,7 +1802,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         t.Fatalf("short delay stalled behind the long one for %s", elapsed)
     }
 
-    /* @important assert the IDENTITY of the redelivered message, not just its timing: a bucket-misrouting regression (short delay parked in the long bucket and vice versa) would otherwise still deliver A message within the window */
+    /* assert the IDENTITY of the redelivered message, not just its timing: a bucket-misrouting regression (short delay parked in the long bucket and vice versa) would otherwise still deliver A message within the window */
     shortMessage, isShort := redelivered.Message().(testMessage)
     if false == isShort || "short" != shortMessage.Name {
         t.Fatalf("expected the short-delayed message first, got %+v", redelivered.Message())
@@ -1816,7 +1812,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         t.Fatalf("ack: %v", ackErr)
     }
 
-    /* @important drain the long-delayed message too, so the durable bucket queue is left empty for the next run instead of leaking one parked message per run */
+    /* drain the long-delayed message too, so the durable bucket queue is left empty for the next run instead of leaking one parked message per run */
     longRedelivered := receiveWithin(t, queue, 12*time.Second)
 
     longMessage, isLong := longRedelivered.Message().(testMessage)
@@ -2022,7 +2018,7 @@ func purgeQueue(t *testing.T, connection *amqp091.Connection, queueName string) 
     _, _ = channel.QueuePurge(queueName, false)
 }
 
-/* @info A re-publish that the broker refuses leaves the original delivery on the channel, and what happens to it is the transport's at-least-once guarantee. With a dead-letter queue bound, refusing without requeue routes it there: kept, visible, recoverable. Without one, the same refusal DESTROYS it — the broker has nowhere to route it — so the delivery goes back on the queue instead. The triggers are exactly the conditions that produce a refused re-publish: a max-length policy with overflow=reject-publish, an unroutable return, a queue that filled. A message is worth more than an accurate redelivery count. */
+/* A re-publish that the broker refuses leaves the original delivery on the channel, and what happens to it is the transport's at-least-once guarantee. With a dead-letter queue bound, refusing without requeue routes it there: kept, visible, recoverable. Without one, the same refusal DESTROYS it — the broker has nowhere to route it — so the delivery goes back on the queue instead. The triggers are exactly the conditions that produce a refused re-publish: a max-length policy with overflow=reject-publish, an unroutable return, a queue that filled. A message is worth more than an accurate redelivery count. */
 func TestRequeueOnRejectedRepublish_KeepsTheMessageWhenNothingElseWould(t *testing.T) {
     if false == requeueOnRejectedRepublish(false) {
         t.Fatal("without a dead-letter queue a refusal discards the message, so it must be requeued instead: at-least-once becomes at-most-once otherwise")
@@ -2030,5 +2026,157 @@ func TestRequeueOnRejectedRepublish_KeepsTheMessageWhenNothingElseWould(t *testi
 
     if true == requeueOnRejectedRepublish(true) {
         t.Fatal("with a dead-letter queue the refusal routes the message there, which keeps it and preserves the counts; requeuing instead would loop it")
+    }
+}
+
+func TestResetConsumeChannel_ANilFailedChannelIdentifiesNothingAndIsANoOp(t *testing.T) {
+    instance := &Transport{queue: "orders"}
+
+    /* no cached channel and a nil failed one: both halves of the identity guard answer no-op without a panic */
+    instance.resetConsumeChannel(nil)
+
+    if nil != instance.consumeChannel {
+        t.Fatal("expected no consume channel")
+    }
+}
+
+func TestIntFromHeader_ClampsOutOfRangeCountsInsteadOfWrapping(t *testing.T) {
+    headers := amqp091.Table{
+        "wrapping-uint":  uint64(1) << 63,
+        "negative":       int64(-5),
+        "huge-float":     float64(1e30),
+        "nan":            math.NaN(),
+        "ordinary":       int64(7),
+        "negative-float": float64(-3.5),
+    }
+
+    if clamped := intFromHeader(headers, "wrapping-uint"); math.MaxInt != clamped {
+        t.Fatalf("expected the wrapping uint clamped high (fail-closed), got %d", clamped)
+    }
+
+    if clamped := intFromHeader(headers, "huge-float"); math.MaxInt != clamped {
+        t.Fatalf("expected the huge float clamped high, got %d", clamped)
+    }
+
+    for _, key := range []string{"negative", "nan", "negative-float"} {
+        if clamped := intFromHeader(headers, key); 0 != clamped {
+            t.Fatalf("expected %q read as absence, got %d", key, clamped)
+        }
+    }
+
+    if clamped := intFromHeader(headers, "ordinary"); 7 != clamped {
+        t.Fatalf("expected the ordinary count untouched, got %d", clamped)
+    }
+}
+
+func TestResolveDelayBuckets_RefusesABucketPastTheWireTtlLimit(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected a bucket past the 32-bit millisecond wire limit to be refused: its queue name would promise a delay its clamped ttl cannot honour")
+        }
+    }()
+
+    resolveDelayBuckets([]time.Duration{time.Minute, 60 * 24 * time.Hour})
+}
+
+func TestResolveDelayBuckets_RefusesASubMillisecondBucket(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected a sub-millisecond bucket to be refused: it truncates to a 0ms queue name and collapses declared tiers")
+        }
+    }()
+
+    resolveDelayBuckets([]time.Duration{500 * time.Microsecond, time.Second})
+}
+
+func TestPublishRecoverable_ACancelledCallerContextDoesNotRetryOrResetTheSharedChannel(t *testing.T) {
+    dialCalls := 0
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        dialer: func() (*amqp091.Connection, error) {
+            dialCalls++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    _, publishErr := instance.publishRecoverable(cancelledContext, "", "orders", amqp091.Publishing{})
+
+    if nil == publishErr {
+        t.Fatal("expected the publish to fail")
+    }
+
+    if 1 != dialCalls {
+        t.Fatalf("expected no retry against the dead context - the failure is the caller's, not the channel's; dialer ran %d times", dialCalls)
+    }
+}
+
+func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    dialing := make(chan struct{})
+    release := make(chan struct{})
+    dialed := make(chan *amqp091.Connection, 1)
+
+    var once sync.Once
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            once.Do(func() {
+                close(dialing)
+            })
+
+            <-release
+
+            connection, dialErr := amqp091.Dial(dsn)
+            if nil == dialErr {
+                dialed <- connection
+            }
+
+            return connection, dialErr
+        },
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    runtimeInstance := newReconnectRuntime(context.Background())
+    out := make(chan messagebuscontract.Envelope)
+
+    instance.startConsumeLoop(runtimeInstance, nil, deliveries, out)
+
+    <-dialing
+
+    closeDone := make(chan struct{})
+    go func() {
+        instance.Close()
+        close(closeDone)
+    }()
+
+    <-closeDone
+    close(release)
+
+    select {
+    case connection := <-dialed:
+        deadline := time.Now().Add(5 * time.Second)
+        for false == connection.IsClosed() {
+            if true == time.Now().After(deadline) {
+                t.Fatal("the connection the dial yielded after Close was never drained: it would leak a broker connection per interrupted dial")
+            }
+            time.Sleep(10 * time.Millisecond)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("the dialer never completed against the live broker")
     }
 }

@@ -4,6 +4,7 @@ import (
     nethttp "net/http"
     "testing"
 
+    applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
@@ -54,16 +55,31 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-func TestModule_RegisterHttpMiddlewaresSkipsNil(t *testing.T) {
+/* inverted from the old skip-the-nil pin: a skipped observability middleware has no later consumer to fail loudly, so the wiring mistake (typically a discarded constructor error) must be refused at boot rather than served as an empty-but-healthy dashboard. */
+func TestModule_RegisterHttpMiddlewaresRefusesANilEntryAtBoot(t *testing.T) {
     registrar := &spyMiddlewareRegistrar{}
+
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected a nil middleware entry to be refused at boot instead of silently disarming instrumentation")
+        }
+    }()
 
     NewModule(ModuleConfig{
         Middlewares: []httpcontract.Middleware{passthroughMiddleware, nil, passthroughMiddleware},
     }).RegisterHttpMiddlewares(nil, registrar)
+}
 
-    if 2 != registrar.count {
-        t.Fatalf("expected two middlewares registered, got %d", registrar.count)
-    }
+func TestModule_RegisterHttpHandlerDecoratorsRefusesANilEntryAtBoot(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected a nil handler decorator entry to be refused at boot instead of silently disarming instrumentation")
+        }
+    }()
+
+    NewModule(ModuleConfig{
+        HandlerDecorators: []applicationcontract.HttpHandlerDecorator{nil},
+    }).RegisterHttpHandlerDecorators(nil)
 }
 
 func TestModule_RegisterHttpRoutesNoHandler(t *testing.T) {

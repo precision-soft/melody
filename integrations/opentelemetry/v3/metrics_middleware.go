@@ -2,6 +2,7 @@ package opentelemetry
 
 import (
     nethttp "net/http"
+    "reflect"
     "strconv"
     "time"
 
@@ -14,7 +15,7 @@ import (
 )
 
 func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
-    /* @important fail fast on a nil meter at construction rather than nil-panicking on the first meter.Int64Counter call, matching NewHandlerDecorator which requires a non-nil Meter for its lifecycle instruments. */
+    /* fail fast on a nil meter at construction rather than nil-panicking on the first meter.Int64Counter call, matching NewHandlerDecorator which requires a non-nil Meter for its lifecycle instruments. */
     if nil == meter {
         return nil, exception.NewError("metrics middleware meter is nil", nil, nil)
     }
@@ -40,6 +41,9 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             startedAt := time.Now()
 
+            /* the wrapped writer captures the status a handler commits DIRECTLY — the nil-response streaming/proxy shape, which this package's own MetricsRouteHandler and the websocket bridge both use. Without it that shape recorded the constructor's 200 whatever the handler wrote, so a route failing 100% of the time could graph as 100% success on the per-route instruments. */
+            recorder := &statusRecordingResponseWriter{ResponseWriter: writer, statusCode: nethttp.StatusOK}
+
             var response httpcontract.Response
             var handlerErr error
             completed := false
@@ -47,8 +51,11 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
             defer func() {
                 statusCode := nethttp.StatusInternalServerError
                 if true == completed {
-                    statusCode = nethttp.StatusOK
-                    if nil != response {
+                    statusCode = recorder.statusCode
+                    if true == recorder.hijacked {
+                        statusCode = nethttp.StatusSwitchingProtocols
+                    }
+                    if false == isNilResponse(response) {
                         statusCode = response.StatusCode()
                     }
                     if nil != handlerErr {
@@ -66,7 +73,7 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
                 requestDuration.Record(runtimeInstance.Context(), float64(time.Since(startedAt).Microseconds())/1000.0, attributes)
             }()
 
-            handlerResponse, nextErr := next(runtimeInstance, writer, request)
+            handlerResponse, nextErr := next(runtimeInstance, recorder, request)
             response = handlerResponse
             handlerErr = nextErr
             completed = true
@@ -74,6 +81,21 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
             return handlerResponse, nextErr
         }
     }, nil
+}
+
+/* isNilResponse answers true for a nil interface AND for a typed-nil concrete response: `nil != response` alone lets a handler's `var resp *SomeResponse; return resp, nil` through, and the middleware's own StatusCode() dereference then panics — a panic charged to the observability layer while the defect sits in the handler. */
+func isNilResponse(response httpcontract.Response) bool {
+    if nil == response {
+        return true
+    }
+
+    value := reflect.ValueOf(response)
+    switch value.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+        return value.IsNil()
+    }
+
+    return false
 }
 
 func routeLabel(request httpcontract.Request) string {

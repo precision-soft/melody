@@ -91,7 +91,8 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
         return nil, tokenErr
     }
 
-    rows := make([]Message, 0, limit)
+    /* the limit is only an allocation HINT here, and it is capped: a caller driving the Store directly bypasses the relay's clamp, and an absurd limit would panic the process on `make` before any query ran. The query's own Limit below still honours the caller's value. */
+    rows := make([]Message, 0, max(0, min(limit, 1024)))
 
     claimErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         now := time.Now()
