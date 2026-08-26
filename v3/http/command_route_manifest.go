@@ -51,7 +51,7 @@ func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
    mode a raw print splices the document into the machine-readable stream. */
 func (instance *RouteManifestCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     zone := strings.TrimSpace(commandContext.String("zone"))
     if "" != zone && false == IsRouteZone(zone) {
@@ -87,7 +87,7 @@ func (instance *RouteManifestCommand) Run(
 
     out := commandContext.String("out")
     if "" == out {
-        fmt.Fprintln(commandContext.Writer, string(payload))
+        fmt.Fprintln(commandContext.Writer(), string(payload))
 
         return nil
     }
@@ -105,7 +105,7 @@ func (instance *RouteManifestCommand) Run(
         return writeErr
     }
 
-    fmt.Fprintln(commandContext.Writer, "wrote route manifest to", out)
+    fmt.Fprintln(commandContext.Writer(), "wrote route manifest to", out)
 
     return nil
 }

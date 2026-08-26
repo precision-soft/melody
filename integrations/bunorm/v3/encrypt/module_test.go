@@ -2,6 +2,7 @@ package encrypt
 
 import (
     "context"
+    "io"
     "database/sql"
     "database/sql/driver"
     "errors"
@@ -9,6 +10,7 @@ import (
     "strings"
     "testing"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
@@ -169,22 +171,19 @@ func runEncryptCommand(t *testing.T, command clicontract.Command, arguments []st
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    var runErr error
-    cliCommand := &clicontract.CommandContext{
-        Name:  command.Name(),
-        Flags: command.Flags(),
-        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-            runErr = command.Run(runtimeInstance, commandContext)
+    capturing := &capturingCommand{Command: command, runtimeInstance: runtimeInstance}
 
-            return nil
-        },
-    }
-
-    if executeErr := cliCommand.Run(context.Background(), arguments); nil != executeErr {
+    if executeErr := melodycli.DispatchCommand(
+        context.Background(),
+        capturing,
+        runtimeInstance,
+        arguments,
+        io.Discard,
+    ); nil != executeErr {
         t.Fatalf("cli command execution failed: %v", executeErr)
     }
 
-    return runErr
+    return capturing.capturedErr
 }
 
 func assertPanicsWithMessage(t *testing.T, expected string, callback func()) {

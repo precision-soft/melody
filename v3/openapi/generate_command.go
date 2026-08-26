@@ -50,7 +50,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
 
 func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     router := http.RouterMustFromContainer(runtimeInstance.Container())
 
@@ -62,7 +62,7 @@ func (instance *GenerateCommand) Run(
 
         /* the auto-registration gate reads the registry service alone, so a container carrying it without the info service reaches this command and the tolerant resolver answers an empty Info — a document whose required title and version are empty strings. The document is still written, since the info is declared optional metadata, but the run says what the success would otherwise conceal. */
         if false == runtimeInstance.Container().Has(ServiceOpenApiInfo) {
-            fmt.Fprint(commandContext.Writer, "no openapi info service is registered; the document's info block is empty\n")
+            fmt.Fprint(commandContext.Writer(), "no openapi info service is registered; the document's info block is empty\n")
         }
     }
 
@@ -81,7 +81,7 @@ func (instance *GenerateCommand) Run(
 
     out := commandContext.String("out")
     if "" == out {
-        fmt.Fprintln(commandContext.Writer, string(payload))
+        fmt.Fprintln(commandContext.Writer(), string(payload))
         return nil
     }
 
@@ -100,7 +100,7 @@ func (instance *GenerateCommand) Run(
         return writeErr
     }
 
-    fmt.Fprintln(commandContext.Writer, "wrote openapi document to", out)
+    fmt.Fprintln(commandContext.Writer(), "wrote openapi document to", out)
 
     return nil
 }

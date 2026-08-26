@@ -33,7 +33,7 @@ finds a warm answer.
 
 The service is resolved by type: it is one of the constructors melody:wiring:generate found in the reporting
 package, so it carries no service name of its own. */
-func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
     if nil != resolveErr {
         return resolveErr

@@ -2,6 +2,7 @@ package outbox
 
 import (
     "context"
+    "io"
     "errors"
     "fmt"
     "reflect"
@@ -9,6 +10,7 @@ import (
     "testing"
     "time"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -39,20 +41,13 @@ func runRelayCommand(t *testing.T, runtimeInstance runtimecontract.Runtime, rela
 
     relayCommand := NewRelayCommand(relay)
 
-    var runErr error
-    command := &clicontract.CommandContext{
-        Name:  relayCommand.Name(),
-        Flags: relayCommand.Flags(),
-        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-            runErr = relayCommand.Run(runtimeInstance, commandContext)
+    capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-            return nil
-        },
-    }
-
-    if commandErr := command.Run(context.Background(), append([]string{relayCommand.Name()}, arguments...)); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, append([]string{relayCommand.Name()}, arguments...), io.Discard); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
+
+    runErr := capturing.capturedErr
 
     return runErr
 }
@@ -147,20 +142,13 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
 
     relayCommand := NewRelayCommandFromResolver(serviceContainer)
 
-    var runErr error
-    command := &clicontract.CommandContext{
-        Name:  relayCommand.Name(),
-        Flags: relayCommand.Flags(),
-        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-            runErr = relayCommand.Run(runtimeInstance, commandContext)
+    capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-            return nil
-        },
-    }
-
-    if commandErr := command.Run(context.Background(), []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}, io.Discard); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
+
+    runErr := capturing.capturedErr
 
     if nil != runErr {
         t.Fatalf("expected the relay command to survive the resolution failures and drain, got %v", runErr)
@@ -313,4 +301,24 @@ func (instance *cancellationEchoRepository) ClaimDueMessages(ctx context.Context
     }
 
     return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
+}
+
+/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a
+refused command line — which the dispatch answers — from the command's own failure, which is what it
+is asserting. */
+type capturingCommand struct {
+    clicontract.Command
+    runtimeInstance runtimecontract.Runtime
+    capturedErr     error
+}
+
+var _ clicontract.Command = (*capturingCommand)(nil)
+
+func (instance *capturingCommand) Run(
+    dispatchedRuntime runtimecontract.Runtime,
+    commandContext clicontract.Context,
+) error {
+    instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)
+
+    return nil
 }

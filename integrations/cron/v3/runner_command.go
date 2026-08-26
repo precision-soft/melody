@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "io"
     "math"
     "reflect"
     "runtime/debug"
@@ -13,6 +14,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/application"
+    melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/exception"
@@ -72,7 +74,7 @@ type RunnerCommand struct {
 
 /* runReporting is the output posture one invocation of the scheduler loop reports under. */
 type runReporting struct {
-    commandContext *clicontract.CommandContext
+    commandContext clicontract.Context
     option         output.Option
     reportIdle     bool
 }
@@ -356,7 +358,7 @@ func (instance *RunnerCommand) Flags() []clicontract.Flag {
 
 func (instance *RunnerCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     if 0 < len(instance.userIgnoredCommands) {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
@@ -456,7 +458,7 @@ of its own — two minutes' documents may complete in any order and must not
 interleave inside one line.
 */
 func (instance *RunnerCommand) renderRunReport(
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     option output.Option,
     startedAt time.Time,
     report dueReport,
@@ -467,7 +469,7 @@ func (instance *RunnerCommand) renderRunReport(
 
     if false == output.IsJsonFormat(option.Format) {
         _, _ = fmt.Fprintf(
-            commandContext.Writer,
+            commandContext.Writer(),
             "%s  dispatched %d of %d configured entries%s\n",
             report.At.Format(time.RFC3339),
             len(report.Ran),
@@ -503,7 +505,7 @@ func (instance *RunnerCommand) renderRunReport(
         )
     }
 
-    renderErr := output.Render(commandContext.Writer, envelope, option)
+    renderErr := output.Render(commandContext.Writer(), envelope, option)
     if nil != runErr {
         return runErr
     }
@@ -867,21 +869,9 @@ func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, e
         instance.reportScheduledOutput(runtimeInstance, entry, runId, capturedOutput, invokeErr)
     }()
 
-    commandContext := &clicontract.CommandContext{
-        Name:      entry.commandName,
-        Flags:     entry.command.Flags(),
-        Writer:    capturedOutput,
-        ErrWriter: capturedOutput,
-        Action: func(actionContext context.Context, actionCommandContext *clicontract.CommandContext) error {
-            return normalizeScheduledRunError(entry.command.Run(childRuntime, actionCommandContext))
-        },
-        ExitErrHandler: func(handlerContext context.Context, handlerCommandContext *clicontract.CommandContext, handlerErr error) {
-        },
-    }
-
     completed := make(chan error, 1)
     go func() {
-        completed <- runScheduledCommand(childContext, commandContext, entry)
+        completed <- runScheduledCommand(childContext, entry, childRuntime, capturedOutput)
     }()
 
     /* the abandon signal sits one unwind grace PAST the deadline, so a command that honours its cancelled context always reports its own outcome and only a command that ignores it is abandoned. An entry that opted out of the deadline never abandons: a nil channel blocks forever. */
@@ -1147,8 +1137,9 @@ func commandContextOf(parent context.Context, timeout time.Duration) (context.Co
 /* runScheduledCommand dispatches one command and turns a panic inside it into an error. The recovery belongs on the goroutine that runs the command and nowhere else: a panic is only recoverable on the goroutine that raises it, so a recover left behind on invoke's goroutine would let a panicking job take the whole scheduler process down. */
 func runScheduledCommand(
     ctx context.Context,
-    commandContext *clicontract.CommandContext,
     entry *scheduledRunEntry,
+    childRuntime runtimecontract.Runtime,
+    capturedOutput io.Writer,
 ) (runErr error) {
     defer func() {
         if recovered := recover(); nil != recovered {
@@ -1185,16 +1176,13 @@ func runScheduledCommand(
     }()
 
     /* the entry's own arguments travel with the command name, so a job declaring Arguments: []string{"--format=json"} runs under the posture it asked for. The dispatch used to hand the child nothing but its name, which left every job on the declared defaults of its flags whatever the entry configured, and the generated manifest for the same entry ran a different command line. */
-    return commandContext.Run(ctx, append([]string{entry.commandName}, entry.arguments...))
-}
-
-/* normalizeScheduledRunError reads the command's result through the interface the way the cli entry point does before rendering: a command that returns its failure through a concrete error pointer hands back a typed nil boxed into a non-nil interface, and the runner would read it as the failure it is not — on the dispatch goroutine, which deliberately carries no recover, so the first Error() call on the nil receiver would take the scheduler down with every entry it drives. */
-func normalizeScheduledRunError(err error) error {
-    if true == isNilInterface(err) {
-        return nil
-    }
-
-    return err
+    return melodycli.DispatchCommand(
+        ctx,
+        entry.command,
+        childRuntime,
+        append([]string{entry.commandName}, entry.arguments...),
+        capturedOutput,
+    )
 }
 
 /* panicCause reads a recovered panic value as the cause of the error the recovery boundary fabricates in its place. It mirrors the PanicCause reading of the frozen majors' framework rather than calling a framework door, because melody/v3 exposes none for an integration to call. A typed nil answers no cause: its Error() would dereference a nil receiver at the first render. */

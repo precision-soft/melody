@@ -119,7 +119,7 @@ func (instance *EncryptDatabaseCommand) Flags() []clicontract.Flag {
 
 func (instance *EncryptDatabaseCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     /* a negative batch silently became the default of 500, so the operator who believed they had throttled the run had not; it is refused by name, while zero keeps selecting the default the flag documents */
     batchFlag := commandContext.Int("batch")

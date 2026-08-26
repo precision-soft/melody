@@ -55,7 +55,7 @@ func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *AuthTokenCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext *melodyclicontract.CommandContext,
+    commandContext melodyclicontract.Context,
 ) error {
     user := commandContext.String("user")
     if "" == user {

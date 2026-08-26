@@ -1,109 +1,109 @@
 package output
 
 import (
-    "context"
-    "io"
     "strings"
     "testing"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
-func runStandardFlagCommand(arguments []string) error {
-    commandContext := &clicontract.CommandContext{
-        Name:      "test",
-        Flags:     StandardFlags(),
-        Writer:    io.Discard,
-        ErrWriter: io.Discard,
-        ExitErrHandler: func(
-            handlerContext context.Context,
-            handlerCommandContext *clicontract.CommandContext,
-            handlerErr error,
-        ) {
-        },
-        Action: func(
-            actionContext context.Context,
-            actionCommandContext *clicontract.CommandContext,
-        ) error {
-            return nil
-        },
+/* the declared validator is called directly rather than through a driven command line: the flag set is what this source produces, and the validator is the guard it carries. That the validator survives the trip into the parsing engine — installed, and consulted on the value the engine parsed — is the adapter's guard and is proved in its own mirror. */
+func findStringFlagValidator(t *testing.T, flagName string) func(value string) error {
+    t.Helper()
+
+    for _, flag := range StandardFlags() {
+        stringFlag, isStringFlag := flag.(*clicontract.StringFlag)
+        if false == isStringFlag {
+            continue
+        }
+
+        if flagName != stringFlag.Name {
+            continue
+        }
+
+        if nil == stringFlag.Validator {
+            t.Fatalf("expected %q to carry a validator", flagName)
+        }
+
+        return stringFlag.Validator
     }
 
-    commandArguments := make([]string, 0, len(arguments)+1)
-    commandArguments = append(commandArguments, "test")
-    commandArguments = append(commandArguments, arguments...)
+    t.Fatalf("expected a string flag named %q", flagName)
 
-    return commandContext.Run(context.Background(), commandArguments)
+    return nil
 }
 
 func TestStandardFlags_RejectAnUnsupportedFormat(t *testing.T) {
+    validator := findStringFlagValidator(t, FlagNameFormat)
+
     for _, value := range []string{"JSON", "Table", "yaml", "jsonl", "text"} {
         t.Run(value, func(t *testing.T) {
-            runErr := runStandardFlagCommand([]string{"--format=" + value})
-            if nil == runErr {
+            validationErr := validator(value)
+            if nil == validationErr {
                 t.Fatalf("expected --format=%s to be rejected", value)
             }
-            if false == strings.Contains(runErr.Error(), "format") {
-                t.Fatalf("expected the error to name the format flag, got %q", runErr.Error())
+            if false == strings.Contains(validationErr.Error(), "format") {
+                t.Fatalf("expected the error to name the format flag, got %q", validationErr.Error())
             }
         })
     }
 }
 
 func TestStandardFlags_RejectAnUnsupportedOrder(t *testing.T) {
+    validator := findStringFlagValidator(t, FlagNameOrder)
+
     for _, value := range []string{"ASC", "ascending", "descending", "sideways"} {
         t.Run(value, func(t *testing.T) {
-            runErr := runStandardFlagCommand([]string{"--order=" + value})
-            if nil == runErr {
+            validationErr := validator(value)
+            if nil == validationErr {
                 t.Fatalf("expected --order=%s to be rejected", value)
             }
-            if false == strings.Contains(runErr.Error(), "order") {
-                t.Fatalf("expected the error to name the order flag, got %q", runErr.Error())
+            if false == strings.Contains(validationErr.Error(), "order") {
+                t.Fatalf("expected the error to name the order flag, got %q", validationErr.Error())
             }
         })
     }
 }
 
 func TestStandardFlags_AcceptTheSupportedFormatAndOrderValues(t *testing.T) {
-    accepted := [][]string{
-        {},
-        {"--format=table"},
-        {"--format=json"},
-        {"--order=asc"},
-        {"--order=desc"},
-        {"--format=json", "--order=desc"},
+    formatValidator := findStringFlagValidator(t, FlagNameFormat)
+    orderValidator := findStringFlagValidator(t, FlagNameOrder)
+
+    for _, value := range []string{string(FormatTable), string(FormatJson), string(FormatJsonPretty)} {
+        t.Run("format="+value, func(t *testing.T) {
+            if validationErr := formatValidator(value); nil != validationErr {
+                t.Fatalf("expected %q to be accepted, got %v", value, validationErr)
+            }
+        })
     }
 
-    for _, arguments := range accepted {
-        t.Run(strings.Join(arguments, " "), func(t *testing.T) {
-            runErr := runStandardFlagCommand(arguments)
-            if nil != runErr {
-                t.Fatalf("expected %v to be accepted, got %v", arguments, runErr)
+    for _, value := range []string{string(SortOrderAscending), string(SortOrderDescending)} {
+        t.Run("order="+value, func(t *testing.T) {
+            if validationErr := orderValidator(value); nil != validationErr {
+                t.Fatalf("expected %q to be accepted, got %v", value, validationErr)
             }
         })
     }
 }
 
+/* the withdrawn flags are refused by not being declared: an argument naming one reaches the parser as an unknown flag, which the parser refuses on its own. What this file owns is the absence, and asserting it here rather than through a driven command line keeps the guard where the declaration is. */
 func TestStandardFlags_RejectTheWithdrawnProjectionFlags(t *testing.T) {
-    for _, arguments := range [][]string{
-        {"--fields=name"},
-        {"--sort=name"},
-    } {
-        t.Run(strings.Join(arguments, " "), func(t *testing.T) {
-            runErr := runStandardFlagCommand(arguments)
-            if nil == runErr {
-                t.Fatalf("expected %v to be rejected as an unknown flag", arguments)
-            }
-        })
+    declared := map[string]bool{}
+    for _, flag := range StandardFlags() {
+        declared[flag.Definition().Name] = true
+    }
+
+    for _, withdrawnFlagName := range []string{"fields", "sort"} {
+        if true == declared[withdrawnFlagName] {
+            t.Fatalf("expected the withdrawn %q flag to be undeclared, declared: %v", withdrawnFlagName, declared)
+        }
     }
 }
 
 func TestStandardFlags_DeclareOnlyTheHonouredFlags(t *testing.T) {
     declared := map[string]struct{}{}
     for _, flag := range StandardFlags() {
-        for _, name := range flag.Names() {
-            declared[name] = struct{}{}
-        }
+        declared[flag.Definition().Name] = struct{}{}
     }
 
     expected := []string{

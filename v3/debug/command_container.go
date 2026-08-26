@@ -50,7 +50,7 @@ type serviceDescriptionReporter interface {
 
 func (instance *ContainerCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -60,7 +60,7 @@ func (instance *ContainerCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
@@ -72,8 +72,9 @@ func (instance *ContainerCommand) Run(
     serviceContainer := runtimeInstance.Container()
 
     serviceName := ""
-    if 0 < commandContext.Args().Len() {
-        serviceName = commandContext.Args().First()
+    arguments := commandContext.Arguments()
+    if 0 < len(arguments) {
+        serviceName = arguments[0]
     }
 
     if "" != serviceName {
@@ -87,7 +88,7 @@ func (instance *ContainerCommand) Run(
 
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-        return output.Render(commandContext.Writer, envelope, option)
+        return output.Render(commandContext.Writer(), envelope, option)
     }
 
     if true == commandContext.Bool(containerCommandBuildFlagName) {
@@ -107,7 +108,7 @@ func (instance *ContainerCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 type containerServiceDescriptionItem struct {

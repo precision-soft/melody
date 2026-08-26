@@ -61,7 +61,7 @@ The parameter names are exposed as constants:
 | _no parameter_                       | _no parameter_                  | `--heartbeat-command`     | repeatable; each value is one argv token of a custom heartbeat command. When set, overrides `--heartbeat-path`                                                                                                                                                                                                                   |
 | _no parameter_                       | _no parameter_                  | `--heartbeat-destination` | repeatable; restricts the heartbeat to the listed destinations. Values: `default` (the `--out` file), an absolute path, or a relative path matched against `dir(--out)`. When unset, the heartbeat goes to every destination                                                                                                     |
 
-A parameter is looked up when the matching CLI flag was not explicitly set (urfave's `IsSet`) **or** when it was set to an empty value: an explicit `--user=` carries no value to use, so it falls through to `melody.cron.user` rather than forcing an empty result. Only a flag that is both set and non-empty short-circuits the cascade ([`resolveDefault`](./generate_command.go)).
+A parameter is looked up when the matching CLI flag was not explicitly set (the command context's `IsSet`) **or** when it was set to an empty value: an explicit `--user=` carries no value to use, so it falls through to `melody.cron.user` rather than forcing an empty result. Only a flag that is both set and non-empty short-circuits the cascade ([`resolveDefault`](./generate_command.go)).
 
 `--heartbeat-command` and `--heartbeat-destination` are CLI-only — they have no container-parameter fallback. The other flags (`--out`, `--logs-dir`, `--user`, `--binary`, `--heartbeat-path`, `--template`) cascade through the parameter system as described above.
 
@@ -459,7 +459,7 @@ func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     return nil
 }
 

@@ -14,19 +14,11 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    urfavecli "github.com/urfave/cli/v3"
 )
 
-func NewCommandContext(applicationName string, applicationDescription string) *clicontract.CommandContext {
-    commandContext := &clicontract.CommandContext{
-        Name:  applicationName,
-        Usage: applicationDescription,
-    }
-
-    return commandContext
-}
-
-func Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
-    if nil == commandContext {
+func Register(root *Root, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
+    if nil == root {
         exception.Panic(
             exception.NewError("root cli command may not be nil", nil, nil),
         )
@@ -61,11 +53,8 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
         )
     }
 
-    for _, existing := range commandContext.Commands {
-        if nil == existing {
-            continue
-        }
-
+    /* the list is the tree's own and this is the only thing that writes into it, so every entry it holds was built four lines below and none of them can be nil */
+    for _, existing := range root.command.Commands {
         if normalizedCommandName == strings.TrimSpace(existing.Name) {
             exception.Panic(
                 exception.NewError(
@@ -79,17 +68,19 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
         }
     }
 
-    commandContext.Commands = append(
-        commandContext.Commands,
-        &clicontract.CommandContext{
+    root.command.Commands = append(
+        root.command.Commands,
+        &urfavecli.Command{
             Name:  normalizedCommandName,
             Usage: copied.Description(),
-            Flags: copied.Flags(),
-            Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-                writer := commandContext.Writer
-                if nil == writer {
-                    writer = io.Discard
-                }
+            Flags: newEngineFlags(copied.Flags()),
+            /* the tree's streams travel with the registration, because the engine defaults each command's own separately and a command registered after SetWriter would otherwise write past it */
+            Writer:    root.writer,
+            ErrWriter: root.errorWriter,
+            Action: func(ctx context.Context, actionCommand *urfavecli.Command) error {
+                commandContext := newEngineContext(actionCommand)
+
+                writer := commandContext.Writer()
 
                 /* in json mode the command writes one machine-readable document to this same stream, so the banner would make it unparseable from the first byte; nothing is lost because output.Meta already carries the command, arguments, start time and duration. The final status is the exit code, not the document: the scope and container are closed after the document was written, so a shutdown failure discovered there can no longer enter it. */
                 resolvedOption := output.NormalizeOption(
@@ -250,6 +241,21 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
             },
         },
     )
+}
+
+/* newEngineFlags converts a command's declared flags into the engine's own, one by one and in the order the command declared them, since a flag set is help output as well as a parser. */
+func newEngineFlags(flags []clicontract.Flag) []urfavecli.Flag {
+    if 0 == len(flags) {
+        return nil
+    }
+
+    engineFlags := make([]urfavecli.Flag, 0, len(flags))
+
+    for _, flag := range flags {
+        engineFlags = append(engineFlags, newEngineFlag(flag))
+    }
+
+    return engineFlags
 }
 
 /* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil boxed into a non-nil interface, which would be treated as the failure it is not — and would panic the first line that renders it. */

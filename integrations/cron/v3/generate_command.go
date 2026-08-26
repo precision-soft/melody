@@ -132,7 +132,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
 
 func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     configuration, configurationErr := configurationFromRuntime(runtimeInstance)
     if nil != configurationErr {
@@ -187,7 +187,7 @@ type reportWarning struct {
 }
 
 func (instance *GenerateCommand) runWithConfiguration(
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     configuration configcontract.Configuration,
 ) (runErr error) {
     startedAt := time.Now()
@@ -228,7 +228,7 @@ func (instance *GenerateCommand) runWithConfiguration(
 }
 
 func (instance *GenerateCommand) resolveRunOptions(
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     configuration configcontract.Configuration,
 ) (*runOptions, error) {
     options := &runOptions{}
@@ -631,7 +631,7 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
 
 The run's own failure stays the verdict the command returns; a rendering failure becomes one only when the run itself succeeded, which is the rule the sibling integration's exit door states in the same words. In text mode the failure travels alone, as it always has: the cli entry point prints it. */
 func (instance *GenerateCommand) reportWrites(
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     option output.Option,
     startedAt time.Time,
     writes []destinationWrite,
@@ -673,7 +673,7 @@ func (instance *GenerateCommand) reportWrites(
             )
         }
 
-        renderErr := output.Render(commandContext.Writer, envelope, option)
+        renderErr := output.Render(commandContext.Writer(), envelope, option)
         if nil != runErr {
             return runErr
         }
@@ -682,7 +682,7 @@ func (instance *GenerateCommand) reportWrites(
     }
 
     for _, warning := range warnings {
-        _, _ = fmt.Fprintln(commandContext.Writer, warning.message)
+        _, _ = fmt.Fprintln(commandContext.Writer(), warning.message)
     }
 
     /* a run that fails part way through still names what it already did, the way the json branch beside it does. Emptying a destination is irreversible and the sweep returns the destinations it emptied beside its failure, so returning here without printing them left the operator of a failed deploy with no record at all of which manifests had just been blanked — not one "pruned" line, not even the "wrote" lines of the writes that had succeeded. */
@@ -694,7 +694,7 @@ func (instance *GenerateCommand) reportWrites(
     }
 
     if "" != emptyMessage {
-        _, _ = fmt.Fprintln(commandContext.Writer, emptyMessage)
+        _, _ = fmt.Fprintln(commandContext.Writer(), emptyMessage)
 
         printPrunedDestinations(commandContext, pruned)
 
@@ -708,19 +708,19 @@ func (instance *GenerateCommand) reportWrites(
     return nil
 }
 
-func printDestinationWrites(commandContext *clicontract.CommandContext, writes []destinationWrite) {
+func printDestinationWrites(commandContext clicontract.Context, writes []destinationWrite) {
     for _, write := range writes {
         if true == write.HeartbeatOnly {
-            _, _ = fmt.Fprintf(commandContext.Writer, "wrote heartbeat-only crontab to %s\n", write.Destination)
+            _, _ = fmt.Fprintf(commandContext.Writer(), "wrote heartbeat-only crontab to %s\n", write.Destination)
         } else {
-            _, _ = fmt.Fprintf(commandContext.Writer, "wrote %d entries to %s\n", write.Entries, write.Destination)
+            _, _ = fmt.Fprintf(commandContext.Writer(), "wrote %d entries to %s\n", write.Entries, write.Destination)
         }
     }
 }
 
-func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned []string) {
+func printPrunedDestinations(commandContext clicontract.Context, pruned []string) {
     for _, destination := range pruned {
-        _, _ = fmt.Fprintf(commandContext.Writer, "pruned %s\n", destination)
+        _, _ = fmt.Fprintf(commandContext.Writer(), "pruned %s\n", destination)
     }
 }
 
@@ -1130,7 +1130,7 @@ func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configco
 }
 
 func resolveDefault(
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     configuration configcontract.Configuration,
     flagName string,
     parameterName string,
@@ -1154,7 +1154,7 @@ func resolveDefault(
 
 /* resolveDefaultPath is resolveDefault for a value that names a path, and it differs in one thing: a relative path that came from a PARAMETER is anchored at the project directory, while one typed as a cli FLAG stays relative to the working directory. The two sources answer to different conventions. A flag is typed in a shell, next to the paths that shell already resolves, and anchoring it elsewhere would surprise every operator. A parameter is part of the application's configuration and belongs to the project: melody resolves MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir against the project directory for exactly that reason, and cron was the one place where "melody.cron.logs_dir = var/log/cron" meant a different directory depending on where the binary was invoked from — under a supervisor that starts from /, the generated crontab baked /var/log/cron into itself. The shipped defaults hid it by carrying %kernel.project_dir% themselves. */
 func resolveDefaultPath(
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     configuration configcontract.Configuration,
     flagName string,
     parameterName string,

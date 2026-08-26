@@ -2,6 +2,7 @@ package encrypt
 
 import (
     "context"
+    "io"
     "strings"
     "sync"
     "sync/atomic"
@@ -9,8 +10,8 @@ import (
     "time"
 
     "github.com/uptrace/bun"
-    urfavecli "github.com/urfave/cli/v3"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
     "github.com/precision-soft/melody/v3/exception"
 )
 
@@ -69,22 +70,13 @@ func TestEncryptDatabaseCommand_ConcurrentRunsShareOneResolvedMigrator(t *testin
 func runEncryptDatabaseCommand(t *testing.T, command *EncryptDatabaseCommand, extraArgs []string) error {
     t.Helper()
 
-    subCommand := &urfavecli.Command{
-        Name:  command.Name(),
-        Flags: command.Flags(),
-        Action: func(ctx context.Context, parsedCommand *urfavecli.Command) error {
-            return command.Run(fakeRuntime{}, parsedCommand)
-        },
-    }
-
-    app := &urfavecli.Command{
-        Name:     "test-app",
-        Commands: []*urfavecli.Command{subCommand},
-    }
-
-    fullArgs := append([]string{"test-app", command.Name()}, extraArgs...)
-
-    return app.Run(context.Background(), fullArgs)
+    return melodycli.DispatchCommand(
+        context.Background(),
+        command,
+        fakeRuntime{},
+        append([]string{command.Name()}, extraArgs...),
+        io.Discard,
+    )
 }
 
 /* a negative batch silently became the default of 500, so the operator who believed they had throttled the run had not */

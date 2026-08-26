@@ -75,7 +75,7 @@ func (instance *ExclusiveCommand) Flags() []clicontract.Flag {
 
 func (instance *ExclusiveCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     ran, runErr := RunExclusive(
         runtimeInstance,

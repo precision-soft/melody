@@ -1,7 +1,6 @@
 package application
 
 import (
-    "context"
     "fmt"
     "io"
     "os"
@@ -197,11 +196,9 @@ func (instance *Application) runCli() error {
 
     loggerWithProcess.Info("starting cli application", nil)
 
-    rootCli := cli.NewCommandContext(configuration.Cli().Name(), configuration.Cli().Description())
-    rootCli.Writer = os.Stdout
-    rootCli.ErrWriter = os.Stderr
-    rootCli.ExitErrHandler = func(handlerContext context.Context, handlerCommandContext *clicontract.CommandContext, handlerErr error) {
-    }
+    rootCli := cli.NewRoot(configuration.Cli().Name(), configuration.Cli().Description())
+    rootCli.SetWriter(os.Stdout)
+    rootCli.SetErrorWriter(os.Stderr)
 
     availableCommands := make([]commandSuggestion, 0, len(instance.cliCommands))
 

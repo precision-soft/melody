@@ -9,7 +9,7 @@ import (
     "strings"
     "testing"
 
-    clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    melodycli "github.com/precision-soft/melody/v3/cli"
     "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/container"
@@ -121,17 +121,13 @@ func runGenerateCommand(
 
     output := &bytes.Buffer{}
 
-    commandContext := &clicontract.CommandContext{
-        Name:   command.Name(),
-        Usage:  command.Description(),
-        Flags:  command.Flags(),
-        Writer: output,
-        Action: func(actionContext context.Context, actionCommandContext *clicontract.CommandContext) error {
-            return command.Run(runtimeInstance, actionCommandContext)
-        },
-    }
-
-    runErr := commandContext.Run(context.Background(), append([]string{command.Name()}, arguments...))
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        command,
+        runtimeInstance,
+        append([]string{command.Name()}, arguments...),
+        output,
+    )
 
     return output.String(), runErr
 }

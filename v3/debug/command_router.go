@@ -30,7 +30,7 @@ func (instance *RouterCommand) Flags() []clicontract.Flag {
 
 func (instance *RouterCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -40,7 +40,7 @@ func (instance *RouterCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
@@ -184,7 +184,7 @@ func (instance *RouterCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 type routeListItem struct {

@@ -43,7 +43,7 @@ func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     limit := int(commandContext.Int(productListFlagLimit))
     fmt.Printf("product list: limit=%d\n", limit)
 

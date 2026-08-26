@@ -88,6 +88,7 @@ v1 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; 
 v2 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
 v2 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
 
+v3 ~ symbol ~ cli.NewCommandContext    ~ replaced by cli.NewRoot when the flag and context layer became melody's own; the upgrade note names it to say so
 v3 ~ symbol ~ debug.MiddlewareProvider ~ removed when NewMiddlewareCommand moved to a description provider and a build provider; the changelog Removed entry names it to say so
 v3 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
 v3 ~ symbol ~ security.Sha256Hex      ~ removed when the example moved its passwords to bcrypt; the changelog Security entry names it to say what it replaced

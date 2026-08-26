@@ -93,7 +93,7 @@ func (instance *RelayCommand) Flags() []clicontract.Flag {
 
 func (instance *RelayCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     interval, intervalErr := parseDurationFlag(commandContext.String("interval"), defaultPollInterval, "interval")
     if nil != intervalErr {

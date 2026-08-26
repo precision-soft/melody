@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking** — the relay command takes `clicontract.Context` where it took `*clicontract.CommandContext`, following the framework's melody-owned flag and context layer. Nothing else about the command changed — the framework's `UPGRADE.md` writes the rewrite out line by line
+
 ### Fixed
 
 - `relay.go` — a dead-lettered or rescheduled row's `last_error` records the failure's CAUSE CHAIN, not the message alone. The error string of a melody error is its message, so a dead letter used to read `amqp publish failed` with no broker verdict, no reply code, nothing — the one place an operator looks to diagnose a dead letter was undiagnosable. The rendering is capped so the narrowest default column the store's own schema can produce still accepts the write

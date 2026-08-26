@@ -48,7 +48,7 @@ func (instance *EventCommand) Flags() []clicontract.Flag {
 
 func (instance *EventCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -58,7 +58,7 @@ func (instance *EventCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
@@ -99,7 +99,7 @@ func (instance *EventCommand) Run(
 
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-        return output.Render(commandContext.Writer, envelope, option)
+        return output.Render(commandContext.Writer(), envelope, option)
     }
 
     registeredEvents := inspector.RegisteredEvents()
@@ -256,7 +256,7 @@ func (instance *EventCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 /* selectSortedRegisteredEvents keeps the listener detail on the same window as the event listing, otherwise --limit lists three events and every listener in the application, and orders it by event name the way the listing is ordered — the requested direction included, since --order=desc used to reverse the listing and leave the detail ascending, so the two halves of one document contradicted each other. The direction is applied to the EVENTS, never to the flattened listeners: inside one event the rows carry the dispatcher's own slice order, which IS the dispatch order, and reversing that would make the order column lie. */

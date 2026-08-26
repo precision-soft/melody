@@ -73,7 +73,7 @@ func (instance *MiddlewareCommand) Flags() []clicontract.Flag {
 
 func (instance *MiddlewareCommand) Run(
     _ runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -83,7 +83,7 @@ func (instance *MiddlewareCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
@@ -105,7 +105,7 @@ func (instance *MiddlewareCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 /* middlewareListItem is one shape serving three documents, and the reason is the field that used to appear and disappear with them: an active row omitted it, an inactive row carried it, and a consumer keying on it could not tell an active middleware from a malformed document. It is always present now, empty where there is nothing to say.

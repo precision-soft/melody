@@ -31,16 +31,21 @@ func (instance *CreateCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), []clicontract.Flag{instance.base.managerFlag()})
 }
 
-func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
+func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer, option)
+    outputInstance := newCommandOutput(commandContext.Writer(), option)
 
     startedAt := time.Now()
     defer func() {
         runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
     }()
 
-    migrationName := commandContext.Args().First()
+    migrationName := ""
+    arguments := commandContext.Arguments()
+    if 0 < len(arguments) {
+        migrationName = arguments[0]
+    }
+
     if "" == migrationName {
         err := errors.New("migration name is required (usage: db:create <name>)")
         return err

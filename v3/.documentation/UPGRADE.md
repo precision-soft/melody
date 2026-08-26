@@ -14,9 +14,38 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
-Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left.
+Every entry below but the first is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left. The first entry is the exception and says so: nothing behaved wrongly, and what it removes is a vendor's API from melody's public surface.
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
+
+### CLI: the flag and context layer is melody's own
+
+**What changed.** `cli/contract` no longer aliases `github.com/urfave/cli/v3`. A command's `Run` receives `clicontract.Context` — an interface with `String`, `Bool`, `Int`, `StringSlice`, `IsSet`, `Arguments` and `Writer` — instead of `*clicontract.CommandContext`, which was the engine's own command struct. The four flag types are melody structs with the same `Name`, `Usage`, `Value` and typed `Validator` fields; `Flag.Names()` is replaced by `Flag.Definition()`. The command tree is `*cli.Root`, built by `cli.NewRoot` instead of `cli.NewCommandContext`.
+
+**Symptom.** The build fails: `undefined: clicontract.CommandContext`, `undefined: cli.NewCommandContext`, `commandContext.Writer undefined (type clicontract.Context has no field or method Writer)` — the field is now a method — and `flag.Names undefined`.
+
+**Remedy.** The rewrite is mechanical and there is one form of each:
+
+| before | after |
+|---|---|
+| `Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error` | `Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error` |
+| `commandContext.Writer` | `commandContext.Writer()` |
+| `commandContext.Args().Slice()` | `commandContext.Arguments()` |
+| `commandContext.Args().Len()` | `len(commandContext.Arguments())` |
+| `commandContext.Args().First()` | the first element of `commandContext.Arguments()`, guarded on the length — the engine's `First()` answered `""` for no arguments |
+| `flag.Names()` | `flag.Definition().Name` — no flag melody ships declares an alias |
+| `cli.NewCommandContext(name, description)` | `cli.NewRoot(name, description)` |
+| `rootCli.Writer = w` / `rootCli.ErrWriter = w` | `rootCli.SetWriter(w)` / `rootCli.SetErrorWriter(w)` — and these now reach the registered commands too |
+| `rootCli.ExitErrHandler = func(...) {}` | delete it: `cli.NewRoot` installs the inert handler itself and offers no door to remove it |
+| `rootCli.Commands` | `rootCli.CommandNames()` for the names; the list itself is the tree's own |
+
+`String`, `Bool`, `Int`, `StringSlice` and `IsSet` keep their names and their meaning, so every flag read inside a command is unchanged.
+
+Two cases need more than a rename. A command built and driven by hand — a test harness, a scheduler — used to assemble the engine's command struct with a `Flags` set and an `Action`; that is now [`cli.DispatchCommand(ctx, command, runtimeInstance, arguments, writer)`](../cli/dispatch.go), which parses the arguments against the command's own flags and adds no banner and no scope close. A command's body tested without a command line used to be handed a parsed engine struct; that is now [`clicontract.StaticContext`](../cli/contract/static_context.go), whose answers are given rather than parsed.
+
+A flag kind melody does not ship — a duration, a float — has no alias to reach for any more. Implement `clicontract.Flag` over one of the four kinds, describing the flag in `Definition()`; the adapter refuses a kind it cannot build with a panic where the command is registered, rather than letting a command carry a flag that silently does not exist.
+
+**Why it is not a new major.** The change is a compile break in one signature, mechanical everywhere it lands, and it is what removes a vendor's API from melody's public surface — where it made the engine's own compatibility promise part of this major's. The versioning policy above covers it: a MINOR with a `**Breaking**` note.
 
 ### Validation: the string-form constraints operate on strings
 

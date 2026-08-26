@@ -71,7 +71,7 @@ func (instance *namedTestCommand) Flags() []clicontract.Flag {
 
 func (instance *namedTestCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     return nil
 }

@@ -52,7 +52,7 @@ func (instance *InternalSignCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *InternalSignCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext *melodyclicontract.CommandContext,
+    commandContext melodyclicontract.Context,
 ) error {
     method := commandContext.String("method")
     if "" == method {

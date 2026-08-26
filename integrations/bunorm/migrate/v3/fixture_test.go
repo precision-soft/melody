@@ -13,6 +13,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/integrations/bunorm/v3"
+    melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -73,23 +74,19 @@ func runMigrationCommand(
 
     buffer := &bytes.Buffer{}
 
-    var runErr error
-    commandContext := &clicontract.CommandContext{
-        Name:   command.Name(),
-        Flags:  command.Flags(),
-        Writer: buffer,
-        Action: func(ctx context.Context, innerContext *clicontract.CommandContext) error {
-            runErr = command.Run(runtimeInstance, innerContext)
+    capturing := &capturingCommand{Command: command, runtimeInstance: runtimeInstance}
 
-            return nil
-        },
-    }
-
-    if parseErr := commandContext.Run(context.Background(), append([]string{command.Name()}, arguments...)); nil != parseErr {
+    if parseErr := melodycli.DispatchCommand(
+        context.Background(),
+        capturing,
+        runtimeInstance,
+        append([]string{command.Name()}, arguments...),
+        buffer,
+    ); nil != parseErr {
         t.Fatalf("failed to parse command arguments: %s", parseErr.Error())
     }
 
-    return buffer.String(), runErr
+    return buffer.String(), capturing.capturedErr
 }
 
 func newSingleMigrationSet(name string, comment string, upCalls *int, downCalls *int) *migrate.Migrations {
@@ -354,3 +351,59 @@ var (
     _ driver.Connector      = (*fakeConnector)(nil)
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
+
+/* probeCommand is a melody command assembled in place: the tests below exercise a piece of the base
+command against a parsed command context, and the command contract is what carries a flag set to the
+dispatch that parses it. */
+type probeCommand struct {
+    nameValue   string
+    flagsValue  []clicontract.Flag
+    runCallback func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error
+}
+
+var _ clicontract.Command = (*probeCommand)(nil)
+
+func (instance *probeCommand) Name() string {
+    return instance.nameValue
+}
+
+func (instance *probeCommand) Description() string {
+    return instance.nameValue
+}
+
+func (instance *probeCommand) Flags() []clicontract.Flag {
+    return instance.flagsValue
+}
+
+func (instance *probeCommand) Run(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+) error {
+    return instance.runCallback(runtimeInstance, commandContext)
+}
+
+func dispatchProbeCommand(
+    command *probeCommand,
+    runtimeInstance runtimecontract.Runtime,
+    arguments []string,
+) error {
+    return melodycli.DispatchCommand(context.Background(), command, runtimeInstance, arguments, io.Discard)
+}
+
+/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a
+refused command line — which the dispatch answers — from the command's own failure, which is what it
+is asserting. */
+type capturingCommand struct {
+    clicontract.Command
+    runtimeInstance runtimecontract.Runtime
+    capturedErr     error
+}
+
+func (instance *capturingCommand) Run(
+    dispatchedRuntime runtimecontract.Runtime,
+    commandContext clicontract.Context,
+) error {
+    instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)
+
+    return nil
+}

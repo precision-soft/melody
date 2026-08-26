@@ -94,20 +94,20 @@ func main() {
         serviceContainer,
     )
 
-    commandContext := cli.NewCommandContext(
+    rootCli := cli.NewRoot(
         "example",
         "example application",
     )
 
     /* Register returns nothing: it fails fast through exception.Panic on a nil argument, an empty name or a duplicate name */
-    cli.Register(commandContext, &debug.ContainerCommand{}, runtimeInstance)
+    cli.Register(rootCli, &debug.ContainerCommand{}, runtimeInstance)
     /* the zero value leaves the deferred-listener provider nil, so data.servingProcessListeners is omitted; debug.NewEventCommand(provider) is what fills it, and is what the framework's own wiring uses */
-    cli.Register(commandContext, &debug.EventCommand{}, runtimeInstance)
-    cli.Register(commandContext, &debug.ParameterCommand{}, runtimeInstance)
-    cli.Register(commandContext, &debug.RouterCommand{}, runtimeInstance)
+    cli.Register(rootCli, &debug.EventCommand{}, runtimeInstance)
+    cli.Register(rootCli, &debug.ParameterCommand{}, runtimeInstance)
+    cli.Register(rootCli, &debug.RouterCommand{}, runtimeInstance)
 
     cli.Register(
-        commandContext,
+        rootCli,
         debug.NewMiddlewareCommand(
             func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
                 return []middlewarepipeline.MiddlewareDescription{}, nil, nil
@@ -120,13 +120,13 @@ func main() {
     )
 
     cli.Register(
-        commandContext,
+        rootCli,
         &debug.VersionCommand{ApplicationVersion: "v1.0.0"},
         runtimeInstance,
     )
 
     /* the registered command's action closes runtimeInstance.Scope() after it runs, and the exit handler closes the container, so there is nothing to shut down here */
-    runErr := commandContext.Run(
+    runErr := rootCli.Run(
         ctx,
         []string{"example", "debug:version"},
     )

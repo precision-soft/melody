@@ -87,7 +87,7 @@ func (instance *servingProbeApplicationCommand) Flags() []clicontract.Flag {
 
 func (instance *servingProbeApplicationCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     instance.ran = true
 
@@ -481,7 +481,7 @@ func (instance *panickingProbeApplicationCommand) Flags() []clicontract.Flag {
 
 func (instance *panickingProbeApplicationCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     exception.Panic(exception.NewError("the probe command exploded", nil, nil))
 

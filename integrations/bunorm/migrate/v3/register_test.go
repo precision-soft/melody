@@ -10,10 +10,8 @@ import (
 
 func flagsContainName(flags []clicontract.Flag, name string) bool {
     for _, flag := range flags {
-        for _, flagName := range flag.Names() {
-            if name == flagName {
-                return true
-            }
+        if name == flag.Definition().Name {
+            return true
         }
     }
 

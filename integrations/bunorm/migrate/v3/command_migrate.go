@@ -41,16 +41,16 @@ func (instance *MigrateCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
+func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer, option)
+    outputInstance := newCommandOutput(commandContext.Writer(), option)
 
     startedAt := time.Now()
     defer func() {
         runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
     }()
 
-    SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer, option))
+    SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer(), option))
 
     db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {

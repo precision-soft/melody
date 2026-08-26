@@ -36,7 +36,7 @@ func (instance *TotpCodeCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *TotpCodeCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext *melodyclicontract.CommandContext,
+    commandContext melodyclicontract.Context,
 ) error {
     secret := commandContext.String("secret")
     if "" == secret {

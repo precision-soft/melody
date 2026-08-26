@@ -27,7 +27,7 @@ func (instance *VersionCommand) Flags() []clicontract.Flag {
 
 func (instance *VersionCommand) Run(
     _ runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -37,7 +37,7 @@ func (instance *VersionCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
@@ -79,7 +79,7 @@ func (instance *VersionCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 var _ clicontract.Command = (*VersionCommand)(nil)

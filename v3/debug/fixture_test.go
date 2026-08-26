@@ -11,6 +11,7 @@ import (
     "strings"
     "testing"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -64,30 +65,11 @@ func runDebugCommand(
 ) (string, error) {
     buffer := &bytes.Buffer{}
 
-    commandContext := &clicontract.CommandContext{
-        Name:      command.Name(),
-        Flags:     command.Flags(),
-        Writer:    buffer,
-        ErrWriter: buffer,
-        ExitErrHandler: func(
-            handlerContext context.Context,
-            handlerCommandContext *clicontract.CommandContext,
-            handlerErr error,
-        ) {
-        },
-        Action: func(
-            actionContext context.Context,
-            actionCommandContext *clicontract.CommandContext,
-        ) error {
-            return command.Run(runtimeInstance, actionCommandContext)
-        },
-    }
-
     commandArguments := make([]string, 0, len(arguments)+1)
     commandArguments = append(commandArguments, command.Name())
     commandArguments = append(commandArguments, arguments...)
 
-    runErr := commandContext.Run(context.Background(), commandArguments)
+    runErr := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, commandArguments, buffer)
 
     return buffer.String(), runErr
 }

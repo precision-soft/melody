@@ -16,7 +16,9 @@ import (
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 
+    clicontract "github.com/precision-soft/melody/v3/cli/contract"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func newKey(filler byte) []byte {
@@ -195,4 +197,24 @@ func newRampKey() []byte {
         key[index] = byte(index + 1)
     }
     return key
+}
+
+/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a
+refused command line — which the dispatch answers — from the command's own failure, which is what it
+is asserting. */
+type capturingCommand struct {
+    clicontract.Command
+    runtimeInstance runtimecontract.Runtime
+    capturedErr     error
+}
+
+var _ clicontract.Command = (*capturingCommand)(nil)
+
+func (instance *capturingCommand) Run(
+    dispatchedRuntime runtimecontract.Runtime,
+    commandContext clicontract.Context,
+) error {
+    instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)
+
+    return nil
 }

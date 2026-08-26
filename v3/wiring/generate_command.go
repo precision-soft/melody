@@ -74,7 +74,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
 
 func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     if nil == instance.bindSet {
         return exception.NewError("the wiring generate command requires a bind set", nil, nil)
@@ -142,7 +142,7 @@ func (instance *GenerateCommand) Run(
 
     outputPath := commandContext.String("out")
     if "" == outputPath {
-        fmt.Fprint(commandContext.Writer, source)
+        fmt.Fprint(commandContext.Writer(), source)
 
         return nil
     }
@@ -198,7 +198,7 @@ func (instance *GenerateCommand) Run(
         return writeErr
     }
 
-    fmt.Fprintf(commandContext.Writer, "wiring written to %s\n", outputPath)
+    fmt.Fprintf(commandContext.Writer(), "wiring written to %s\n", outputPath)
 
     return nil
 }
@@ -290,18 +290,18 @@ func writeGeneratedFileAtomically(outputPath string, content string) error {
 
 /* writeReport prints what the generation covered and, more importantly, what it did not: a skipped constructor and an unmatched bind are both silent losses of coverage unless they are named. */
 func (instance *GenerateCommand) writeReport(
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     report *GenerateReport,
 ) {
-    fmt.Fprintf(commandContext.Writer, "registered %d constructors\n", report.ConstructorCount)
+    fmt.Fprintf(commandContext.Writer(), "registered %d constructors\n", report.ConstructorCount)
 
     if 0 < report.ScopedConstructorCount {
-        fmt.Fprintf(commandContext.Writer, "registered %d scoped constructors\n", report.ScopedConstructorCount)
+        fmt.Fprintf(commandContext.Writer(), "registered %d scoped constructors\n", report.ScopedConstructorCount)
     }
 
     for _, skipped := range report.Skipped {
         fmt.Fprintf(
-            commandContext.Writer,
+            commandContext.Writer(),
             "skipped %s (%s:%d): %s\n",
             skipped.Name,
             skipped.File,
@@ -313,28 +313,28 @@ func (instance *GenerateCommand) writeReport(
     /* vendor trees cannot contribute services, so naming them is opt-in: on a large project the list is noise, but a user wondering where a constructor went can ask for it */
     if true == commandContext.Bool("report-vendor") {
         for _, vendorDirectory := range report.SkippedVendorDirectories {
-            fmt.Fprintf(commandContext.Writer, "skipped vendor directory: %s\n", vendorDirectory)
+            fmt.Fprintf(commandContext.Writer(), "skipped vendor directory: %s\n", vendorDirectory)
         }
     }
 
     /* a build-excluded file holding a candidate is opt-in for the same reason: a foreign-GOOS variant is legitimate noise, but a user missing a service built under a tag can ask which files the scan left out and pass the tag through --tags */
     if true == commandContext.Bool("report-excluded") {
         for _, excludedFile := range report.ExcludedFiles {
-            fmt.Fprintf(commandContext.Writer, "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
+            fmt.Fprintf(commandContext.Writer(), "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
         }
     }
 
     for _, unused := range report.UnusedBinds {
-        fmt.Fprintf(commandContext.Writer, "bind %s matched no constructor argument\n", unused)
+        fmt.Fprintf(commandContext.Writer(), "bind %s matched no constructor argument\n", unused)
     }
 
     for _, unused := range report.UnusedExcludes {
-        fmt.Fprintf(commandContext.Writer, "exclude %s matched no constructor\n", unused)
+        fmt.Fprintf(commandContext.Writer(), "exclude %s matched no constructor\n", unused)
     }
 
     /* the generator's contract is to say when it could not check the bind targets; the command always hands over the running configuration, so this line names the degenerate case where that configuration declares nothing */
     if true == report.BindTargetsUnchecked {
-        fmt.Fprint(commandContext.Writer, "bind targets were not checked: the application declares no parameters\n")
+        fmt.Fprint(commandContext.Writer(), "bind targets were not checked: the application declares no parameters\n")
     }
 
     reachedNames := make([]string, 0, len(report.GlobalBindReach))
@@ -348,7 +348,7 @@ func (instance *GenerateCommand) writeReport(
         constructors := report.GlobalBindReach[argumentName]
 
         fmt.Fprintf(
-            commandContext.Writer,
+            commandContext.Writer(),
             "global bind %s reaches %d constructors: %s\n",
             argumentName,
             len(constructors),

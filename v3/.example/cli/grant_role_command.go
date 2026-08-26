@@ -44,7 +44,7 @@ func (instance *GrantRoleCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     role := commandContext.String("role")
     user := commandContext.String("user")
 

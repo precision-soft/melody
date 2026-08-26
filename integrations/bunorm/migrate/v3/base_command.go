@@ -54,7 +54,7 @@ func (instance *baseCommand) managerFlag() clicontract.Flag {
     }
 }
 
-func (instance *baseCommand) optionFromCommand(commandContext *clicontract.CommandContext) output.Option {
+func (instance *baseCommand) optionFromCommand(commandContext clicontract.Context) output.Option {
     return output.NormalizeOption(
         output.ParseOptionFromCommand(commandContext),
     )
@@ -88,7 +88,7 @@ touches, and one that failed before opening has nothing to end.
 */
 func (instance *baseCommand) resolveDatabase(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) (*bun.DB, string, func(), error) {
     noRelease := func() {}
 

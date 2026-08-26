@@ -35,7 +35,7 @@ func (instance *ParameterCommand) Flags() []clicontract.Flag {
 
 func (instance *ParameterCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -45,7 +45,7 @@ func (instance *ParameterCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
@@ -73,7 +73,7 @@ func (instance *ParameterCommand) Run(
 
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-        return output.Render(commandContext.Writer, envelope, option)
+        return output.Render(commandContext.Writer(), envelope, option)
     }
 
     keys := make([]string, 0, len(names))
@@ -209,7 +209,7 @@ func (instance *ParameterCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 /* redactedParameterValue keeps a parameter declared as a secret out of the rendered output while still reporting whether it carries a value at all, which is what an operator runs this command to find out. The length is withheld along with the value: on a short credential it narrows the search meaningfully. */

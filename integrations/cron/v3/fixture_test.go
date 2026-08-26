@@ -5,12 +5,15 @@ import (
     "context"
     "testing"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyconfig "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/runtime"
+    "io"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    urfavecli "github.com/urfave/cli/v3"
 )
 
 type fakePlainCommand struct {
@@ -33,7 +36,7 @@ func (instance *fakePlainCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *fakePlainCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *fakePlainCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
     return nil
 }
 
@@ -133,27 +136,7 @@ func runGenerateCommandWithRegistrar(
         registrar(generateCommand)
     }
 
-    var stdout bytes.Buffer
-
-    subCommand := &urfavecli.Command{
-        Name:  generateCommand.Name(),
-        Flags: generateCommand.Flags(),
-        Action: func(ctx context.Context, parsedCommand *urfavecli.Command) error {
-            parsedCommand.Writer = &stdout
-
-            return generateCommand.runWithConfiguration(parsedCommand, newStubConfiguration(nil))
-        },
-    }
-
-    app := &urfavecli.Command{
-        Name:     "test-app",
-        Commands: []*urfavecli.Command{subCommand},
-    }
-
-    fullArgs := append([]string{"test-app", generateCommand.Name()}, extraArgs...)
-    runErr := app.Run(context.Background(), fullArgs)
-
-    return stdout.String(), runErr
+    return dispatchGenerateCommand(generateCommand, nil, extraArgs)
 }
 
 func runGenerateCommandWithConfiguration(
@@ -166,32 +149,12 @@ func runGenerateCommandWithConfiguration(
 
     generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands(providedCommands))
 
-    var stdout bytes.Buffer
-
-    subCommand := &urfavecli.Command{
-        Name:  generateCommand.Name(),
-        Flags: generateCommand.Flags(),
-        Action: func(ctx context.Context, parsedCommand *urfavecli.Command) error {
-            parsedCommand.Writer = &stdout
-
-            return runWithInjectedConfiguration(generateCommand, parsedCommand, configuration)
-        },
-    }
-
-    app := &urfavecli.Command{
-        Name:     "test-app",
-        Commands: []*urfavecli.Command{subCommand},
-    }
-
-    fullArgs := append([]string{"test-app", generateCommand.Name()}, extraArgs...)
-    runErr := app.Run(context.Background(), fullArgs)
-
-    return stdout.String(), runErr
+    return dispatchGenerateCommand(generateCommand, configuration, extraArgs)
 }
 
 func runWithInjectedConfiguration(
     generateCommand *GenerateCommand,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     configuration configcontract.Configuration,
 ) error {
     if nil == configuration {
@@ -301,4 +264,75 @@ func newStubConfigurationWithProjectDirectory(values map[string]string, projectD
         stubConfiguration: newStubConfiguration(values),
         kernel:            &stubKernelConfiguration{projectDirectory: projectDirectory},
     }
+}
+
+/* the generate command is driven through the framework's own dispatch door, so the arguments are parsed against the flags the command declares and the command context it reads is the one production hands it. The injected configuration travels through a delegating command rather than through a hand-built parser, because the configuration seam sits inside runWithConfiguration and only the dispatch above it changed. */
+type configuredGenerateCommand struct {
+    *GenerateCommand
+    configuration configcontract.Configuration
+}
+
+var _ clicontract.Command = (*configuredGenerateCommand)(nil)
+
+func (instance *configuredGenerateCommand) Run(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+) error {
+    return runWithInjectedConfiguration(instance.GenerateCommand, commandContext, instance.configuration)
+}
+
+func dispatchGenerateCommand(
+    generateCommand *GenerateCommand,
+    configuration configcontract.Configuration,
+    extraArgs []string,
+) (string, error) {
+    var stdout bytes.Buffer
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    dispatched := &configuredGenerateCommand{
+        GenerateCommand: generateCommand,
+        configuration:   configuration,
+    }
+
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        dispatched,
+        runtimeInstance,
+        append([]string{generateCommand.Name()}, extraArgs...),
+        &stdout,
+    )
+
+    return stdout.String(), runErr
+}
+
+/* runnerDispatch drives the runner command through the framework's dispatch door while keeping the
+Run(ctx, argv) shape the tests around it were written against: the arguments are parsed against the
+flags the command declares, and the context it reads is the one production hands it. */
+type runnerDispatch struct {
+    runner          *RunnerCommand
+    runtimeInstance runtimecontract.Runtime
+    writer          io.Writer
+}
+
+func newRunnerDispatch(
+    runner *RunnerCommand,
+    runtimeInstance runtimecontract.Runtime,
+    writer io.Writer,
+) *runnerDispatch {
+    return &runnerDispatch{
+        runner:          runner,
+        runtimeInstance: runtimeInstance,
+        writer:          writer,
+    }
+}
+
+func (instance *runnerDispatch) Run(ctx context.Context, arguments []string) error {
+    runtimeInstance := instance.runtimeInstance
+    if nil == runtimeInstance {
+        runtimeInstance = newRunnerTestRuntime(ctx)
+    }
+
+    return melodycli.DispatchCommand(ctx, instance.runner, runtimeInstance, arguments, instance.writer)
 }

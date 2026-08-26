@@ -3129,7 +3129,7 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
 
 func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testing.T) {
     var stdout bytes.Buffer
-    commandContext := &clicontract.CommandContext{Writer: &stdout}
+    commandContext := &clicontract.StaticContext{WriterValue: &stdout}
 
     runErr := NewGenerateCommand(NewConfiguration()).reportWrites(
         commandContext,

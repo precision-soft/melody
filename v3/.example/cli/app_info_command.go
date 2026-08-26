@@ -30,7 +30,7 @@ func (instance *AppInfoCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *AppInfoCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *AppInfoCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     configuration := melodyconfig.ConfigMustFromContainer(runtimeInstance.Container())
     fmt.Println("env:", configuration.Kernel().Env())
 

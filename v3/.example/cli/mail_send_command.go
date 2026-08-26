@@ -41,7 +41,7 @@ func (instance *MailSendCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *MailSendCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext *melodyclicontract.CommandContext,
+    commandContext melodyclicontract.Context,
 ) error {
     to := commandContext.String("to")
     if "" == to {
