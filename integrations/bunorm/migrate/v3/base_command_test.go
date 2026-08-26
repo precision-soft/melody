@@ -61,7 +61,7 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
                 }
             }()
 
-            _, _, resolveErr = base.resolveDatabase(runtimeInstance, commandContext)
+            _, _, _, resolveErr = base.resolveDatabase(runtimeInstance, commandContext)
 
             return nil
         },
@@ -119,7 +119,7 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
         Name:  "migrate",
         Flags: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
         Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-            _, name, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            _, name, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %s", resolveErr.Error())
                 return nil
@@ -280,7 +280,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
         Name:  "migrate",
         Flags: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
         Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-            database, label, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            database, label, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %s", resolveErr.Error())
                 return nil
@@ -367,5 +367,155 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
         if true == strings.HasPrefix(query, "INSERT") && true == strings.Contains(query, "bun_migrations") {
             t.Fatalf("the failed migration was marked applied: %q", query)
         }
+    }
+}
+
+/* migrationCapableTestProvider hands out a SEPARATE database for the migration door, so a probe can tell the dedicated connection from the ordinary pool by identity rather than by trusting the flag beside it. */
+type migrationCapableTestProvider struct {
+    ordinaryDatabase  *bun.DB
+    migrationDatabase *bun.DB
+    migrationOpens    int
+}
+
+func (instance *migrationCapableTestProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.ordinaryDatabase, nil
+}
+
+func (instance *migrationCapableTestProvider) OpenForMigration(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.migrationOpens = instance.migrationOpens + 1
+
+    return instance.migrationDatabase, nil
+}
+
+var _ bunorm.MigrationProvider = (*migrationCapableTestProvider)(nil)
+
+/*
+TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection pins the half
+of the door a command defers. The dedicated connection deliberately lifts the
+driver's read and write deadlines and recycles nothing, which is right for a DDL
+statement that runs for minutes and wrong for anything that then sits idle; the
+registry memoizes it until the registry itself closes, so a migration run at the
+boot of a process that goes on to serve requests used to leave a deadline-less
+connection open for the life of that process.
+
+The proof is that the NEXT resolution dials again: the memo is really gone, not
+merely marked. Counting the provider's migration opens says that where checking
+the connection's own state could not — the same pointer answers both times.
+*/
+func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testing.T) {
+    ordinaryDatabase, _ := newFakeBunDatabase()
+    migrationDatabase, _ := newFakeBunDatabase()
+
+    provider := &migrationCapableTestProvider{
+        ordinaryDatabase:  ordinaryDatabase,
+        migrationDatabase: migrationDatabase,
+    }
+
+    registry, registryErr := bunorm.NewManagerRegistry(
+        logging.NewNopLogger(),
+        bunorm.ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    options := DefaultOptions()
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[*bunorm.ManagerRegistry](
+        serviceContainer,
+        options.ManagerRegistryServiceId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+    )
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    base := &baseCommand{options: options}
+
+    command := &clicontract.CommandContext{
+        Name:  "migrate",
+        Flags: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
+        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
+            database, label, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            if nil != resolveErr {
+                t.Errorf("unexpected resolve error: %s", resolveErr.Error())
+
+                return nil
+            }
+
+            if migrationDatabase != database {
+                t.Errorf("expected the dedicated migration connection, got the ordinary pool")
+            }
+
+            if false == strings.Contains(label, "dedicated migration connection") {
+                t.Errorf("expected the label to name the dedicated connection, got %q", label)
+            }
+
+            releaseDatabase()
+
+            /* the memo is gone, so this dials the provider a second time */
+            if _, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext); nil != secondErr {
+                t.Errorf("unexpected resolve error on the second call: %s", secondErr.Error())
+            }
+
+            return nil
+        },
+    }
+
+    if runErr := command.Run(context.Background(), []string{"migrate"}); nil != runErr {
+        t.Fatalf("unexpected command error: %s", runErr.Error())
+    }
+
+    if 2 != provider.migrationOpens {
+        t.Fatalf("expected the release to end the memoized connection so the next resolution dials again, got %d opens", provider.migrationOpens)
+    }
+}
+
+/* a provider with no migration capability ran on the ordinary POOL, which belongs to the application; the release must leave it alone, or a migration command would take the database away from everything else the process runs. */
+func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    options := DefaultOptions()
+    base := &baseCommand{options: options}
+
+    command := &clicontract.CommandContext{
+        Name:  "migrate",
+        Flags: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
+        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
+            resolved, label, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            if nil != resolveErr {
+                t.Errorf("unexpected resolve error: %s", resolveErr.Error())
+
+                return nil
+            }
+
+            if database != resolved {
+                t.Errorf("expected the ordinary pool for a provider with no migration capability")
+            }
+
+            if true == strings.Contains(label, "dedicated") {
+                t.Errorf("expected the label not to claim a dedicated connection, got %q", label)
+            }
+
+            releaseDatabase()
+
+            /* the same pool is still the answer, and still usable: nothing was ended */
+            secondResolved, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext)
+            if nil != secondErr {
+                t.Errorf("unexpected resolve error on the second call: %s", secondErr.Error())
+            }
+
+            if database != secondResolved {
+                t.Errorf("the release disturbed the ordinary pool")
+            }
+
+            return nil
+        },
+    }
+
+    if runErr := command.Run(context.Background(), []string{"migrate"}); nil != runErr {
+        t.Fatalf("unexpected command error: %s", runErr.Error())
     }
 }

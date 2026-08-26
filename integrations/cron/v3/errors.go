@@ -27,6 +27,7 @@ var (
     ErrUnknownScheduledCommand            = errors.New("cron: scheduled command has no matching registered command")
     ErrUnsupportedRunnerEntry             = errors.New("cron: the in-process runner supports only name-scheduled single-instance entries")
     ErrUnknownRunnerDialect               = errors.New("cron: unknown runner dialect")
+    ErrUnknownTimezone                    = errors.New("cron: unknown timezone")
     ErrDuplicateRunnerCommand             = errors.New("cron: two runner commands share one name")
     ErrSharedRunnerCommandFlags           = errors.New("cron: runner command returns shared flag instances")
     ErrCommandTimeout                     = errors.New("cron: scheduled command exceeded its timeout")

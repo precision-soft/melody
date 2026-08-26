@@ -33,6 +33,17 @@ func Replacing() containercontract.RegisterOption {
     }
 }
 
+/* WithTeardownDependency declares that this registration must be CLOSED BEFORE the named container services, without resolving them. It is the declarative form of the edge the container otherwise writes by itself: a provider that resolves another service while it is being built has that dependency recorded at the moment of the resolution, and the teardown then closes the dependent first. A provider that CAPTURES an already-built collaborator resolves nothing, so no edge exists and the teardown order it needs is decided by creation order instead — which is not an ordering at all, only a coincidence.
+
+Resolving remains the better door wherever it is possible, because an edge derived from the resolution cannot fall out of step with what the provider actually uses, while a declared one is a second place to keep in sync. This one exists for the registration that has nothing to resolve: an instance built before the container, published through a closure that only hands it back.
+
+The declaration composes — two calls add to one list — and orders teardown alone. It does not build the named service, does not make it exist, and takes no part in cycle detection during resolution; an edge naming a service that was never created is dropped by the teardown walk, so naming an optional collaborator is not an error. An empty name is refused where the registration is made, and so is a service naming itself. It is read by the container registration paths only: RegisterScoped refuses it, because a scope keeps its own teardown graph, built per scope from the resolutions that scope actually made. */
+func WithTeardownDependency(serviceNames ...string) containercontract.RegisterOption {
+    return func(option *containercontract.RegisterOptions) {
+        option.TeardownDependencyNames = append(option.TeardownDependencyNames, serviceNames...)
+    }
+}
+
 func buildRegisterServiceOption() *containercontract.RegisterOptions {
     return &containercontract.RegisterOptions{
         AlsoRegisterType:         true,

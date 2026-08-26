@@ -6,6 +6,7 @@ import (
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     melodylogging "github.com/precision-soft/melody/v3/logging"
@@ -122,6 +123,29 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
     registrar.RegisterService(
         serviceDatabaseRegistry,
         func(resolver melodycontainercontract.Resolver) (*melodybunorm.ManagerRegistry, error) {
+            /* the logger is RESOLVED rather than captured, and that is load-bearing twice over.
+
+            It gives the registry the application's real journal. The registry is built during module wiring,
+            where the framework's logger does not exist yet, so it is constructed on the emergency logger — and
+            without this every later open, every retry warning and every terminal connection failure would
+            keep bypassing the json journal for the life of the process, along with bun's own diagnostics,
+            which the registry routes with it.
+
+            It also writes the TEARDOWN EDGE. The container records a dependency at the moment one service
+            resolves another, and closes dependents before their dependencies; a provider that only captured
+            an already-built collaborator resolves nothing, so no edge existed and the order of these two
+            closes was decided by creation order — which is not an ordering, only a coincidence. With the
+            edge, the registry closes first: its pools are torn down and it hands bun's diagnostic channel
+            back while the journal it routed to is still open. */
+            logger, loggerErr := melodylogging.LoggerFromResolver(resolver)
+            if nil != loggerErr {
+                return nil, loggerErr
+            }
+
+            if setLoggerErr := registry.SetLogger(logger); nil != setLoggerErr {
+                return nil, setLoggerErr
+            }
+
             return registry, nil
         },
     )
@@ -129,7 +153,18 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
     registrar.RegisterService(
         serviceDatabase,
         func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
-            return registry.DefaultDatabase()
+            /* the registry is RESOLVED here for the same reason the logger is resolved above, and it is the
+            teardown half that matters: this name publishes the registry's own pool under a second identity,
+            and the container closes anything carrying a Close, so without the edge the shared pool was torn
+            down in creation order — before or after the registry that owns it, and before or after whatever
+            still had queries to make, by coincidence rather than by rule. With the edge the handle closes
+            ahead of its owner, and the whole chain — handle, registry, journal — unwinds in that order. */
+            resolvedRegistry, registryErr := melodycontainer.FromResolver[*melodybunorm.ManagerRegistry](resolver, serviceDatabaseRegistry)
+            if nil != registryErr {
+                return nil, registryErr
+            }
+
+            return resolvedRegistry.DefaultDatabase()
         },
     )
 }

@@ -25,6 +25,7 @@ import (
 const (
     flagNameOnce       = "once"
     flagNameReportIdle = "report-idle"
+    flagNameTimezone   = "timezone"
 )
 
 /* scheduledRunEntry pairs a parsed schedule with the registered command it fires, resolved once at construction so the tick loop never looks a command up by name at run time. fixedTime carries the vixie-cron entry class the wall-clock reconciliation reads: a fixed-time entry pins both a minute and an hour, a wildcard entry leaves either as a plain or stepped wildcard. */
@@ -56,8 +57,10 @@ const commandUnwindGrace = 300 * time.Second
 
 Due commands run concurrently, each in its own goroutine, the way crontab starts an independent process per entry: one slow job delays neither the commands sharing its minute nor the scheduler loop, and an entry that runs longer than its own interval overlaps itself — wrap the command in lock.NewExclusiveCommand to serialize successive runs. A run is bounded only where EntryConfig.Timeout asks for it, because nothing in the runtime context would ever end a command wedged on a deadline-less read and a bound melody picked would cut short a job that had always been allowed to take as long as it takes. Where a deadline is set, reaching it cancels the command's context; a command still running one EntryConfig.GracefulTimeout later is reported at warning, has its scope closed under it and stops counting towards the shutdown wait, since waiting on it would never end either. Wall-clock jumps follow the vixie-cron virtual-time algorithm, documented on reconcileWallClock, so a schedule pinned inside a daylight-saving gap still runs exactly once. Multi-instance safety is left to composition — wrap each command in lock.NewExclusiveCommand, or gate the whole runner behind a lock.LeaderGate, before handing the commands in. */
 type RunnerCommand struct {
-    entries     []*scheduledRunEntry
-    now         func() time.Time
+    entries []*scheduledRunEntry
+    now     func() time.Time
+    /* the zone every minute this runner evaluates is rendered in. The schedule matcher reads calendar fields and the wall-minute chain folds the offset in, so the zone is applied to the CLOCK READING and nothing below it needs to know about it. Nil means the process zone, which is what the runner always did. */
+    location    *time.Location
     unwindGrace time.Duration
     inFlight    sync.WaitGroup
     /* the scheduler loop hands each minute's wait to a goroutine of its own, so two minutes' documents can complete in any order: the writer is guarded to keep one document one line */
@@ -205,9 +208,49 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
     return &RunnerCommand{
         entries:             entries,
         now:                 time.Now,
+        location:            mustLoadConfiguredLocation(configuration.TimezoneName()),
         unwindGrace:         commandUnwindGrace,
         userIgnoredCommands: userIgnoredCommands,
     }
+}
+
+/* mustLoadConfiguredLocation resolves the zone a configuration declared, nil when it declared none. A name the standard library cannot load is a wiring mistake and panics here, beside the malformed schedules and the unknown command names — a scheduler that silently fell back to the process zone would run every job at the right clock time in the wrong place, which is the one failure nobody notices until the reports are wrong. */
+func mustLoadConfiguredLocation(name string) *time.Location {
+    if "" == name {
+        return nil
+    }
+
+    location, loadErr := loadLocation(name)
+    if nil != loadErr {
+        exception.Panic(exception.FromError(loadErr))
+    }
+
+    return location
+}
+
+/* loadLocation reads an IANA zone name, naming the refusal rather than handing on the standard library's own. */
+func loadLocation(name string) (*time.Location, error) {
+    location, loadErr := time.LoadLocation(name)
+    if nil != loadErr {
+        return nil, exception.NewError(
+            ErrUnknownTimezone.Error(),
+            exceptioncontract.Context{"timezone": name},
+            ErrUnknownTimezone,
+        )
+    }
+
+    return location, nil
+}
+
+/* nowInZone is the one clock reading this runner makes. Everything below it — the schedule matcher's calendar fields, the wall-minute chain's offset folding, the document's own timestamp — reads the time it answers, so the zone is applied here and in no other place. */
+func (instance *RunnerCommand) nowInZone() time.Time {
+    now := instance.now()
+
+    if nil == instance.location {
+        return now
+    }
+
+    return now.In(instance.location)
 }
 
 func scheduleOfEntry(scheduled *ScheduledCommand) *Schedule {
@@ -302,6 +345,11 @@ func (instance *RunnerCommand) Flags() []clicontract.Flag {
                 Name:  flagNameReportIdle,
                 Usage: "in the scheduler loop, report every evaluated minute instead of only the ones that dispatched a command, so a consumer can tell a live scheduler with nothing due from a dead one",
             },
+            &clicontract.StringFlag{
+                Name:  flagNameTimezone,
+                Usage: "the IANA zone name the schedules are evaluated under (for example Europe/Bucharest), overriding the one the configuration declared; unset, the configuration's zone applies, and without one the process zone does",
+                Value: "",
+            },
         },
     )
 }
@@ -323,8 +371,18 @@ func (instance *RunnerCommand) Run(
 
     option := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
 
+    /* the flag WINS over the configuration: the zone is a property of the schedule, but an operator running one invocation against another region's calendar — a catch-up after a migration, a rehearsal — says so at the invocation. It is refused by name rather than by panic, because a flag is what the caller typed, and a mistyped zone deserves the command's own error rather than a stack trace. */
+    if timezoneName := commandContext.String(flagNameTimezone); "" != timezoneName {
+        location, loadErr := loadLocation(timezoneName)
+        if nil != loadErr {
+            return loadErr
+        }
+
+        instance.location = location
+    }
+
     if true == commandContext.Bool(flagNameOnce) {
-        startedAt := instance.now()
+        startedAt := instance.nowInZone()
         report, runErr := instance.dispatchDue(runtimeInstance, startedAt, true, true)()
 
         return instance.renderRunReport(commandContext, option, startedAt, report, runErr)
@@ -476,7 +534,7 @@ func failedSuffixOf(report dueReport) string {
 
 /* runLoop wakes at each minute boundary until the runtime context is cancelled. The evaluation is pinned to the minute the (monotonic) timer was armed for, so a wall-clock step between arming and firing neither replays nor skips a minute; the armed minute's wall rendering is then reconciled against the last evaluated minute by reconcileWallClock, which resolves daylight-saving transitions and larger clock jumps with vixie-cron semantics. The chain anchor and the first armed minute derive from one clock read — two reads could straddle a minute boundary and manufacture a jump that never happened. A wake that re-arrives at the wall minute the previous wake already dispatched is skipped: a backward wall step inside the armed window makes the loop arm for that minute a second time, and dispatching it again would run every wildcard entry twice seconds apart — the repeated wall minute of a daylight-saving fall-back is a different case, since a whole hour of other minutes runs in between. Due commands are dispatched without waiting for them, so arming the next minute never blocks on a running job; command failures are logged by the dispatch as the commands complete. On cancellation the loop stops ticking and waits for the in-flight jobs — their contexts derive from the runtime context, so the cancellation has already reached them — before returning. */
 func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime) error {
-    now := instance.now()
+    now := instance.nowInZone()
     previousTarget := now.Truncate(time.Minute)
     dispatchedIndex := wallMinuteIndex(previousTarget)
 
@@ -497,7 +555,7 @@ func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime) 
         case <-timer.C:
         }
 
-        now = instance.now()
+        now = instance.nowInZone()
 
         if wallMinuteIndex(nextWake) == dispatchedIndex {
             continue
@@ -534,7 +592,7 @@ func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime) 
                 }
 
                 _ = instance.renderRunReport(reporting.commandContext, reporting.option, minuteStartedAt, report, runErr)
-            }(wait, instance.now())
+            }(wait, instance.nowInZone())
         }
     }
 }

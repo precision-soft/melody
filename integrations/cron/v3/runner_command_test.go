@@ -3427,3 +3427,154 @@ func TestDispatchDue_TheDocumentOrdersRunsByCommandName(t *testing.T) {
         )
     }
 }
+
+/*
+TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue is the guard the whole zone
+declaration exists for, and it is written so that the two zones DISAGREE about
+the same instant. 09:00 UTC is 18:00 in Tokyo, and the entry is scheduled for
+eighteen hundred: under the configured zone it is due, under the process zone it
+is not. A probe whose zones agreed at the chosen instant would pass with the zone
+never applied at all.
+*/
+func TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue(t *testing.T) {
+    job := newRecordingCommand("job:evening")
+
+    configuration := NewConfiguration().
+        InTimezone("Asia/Tokyo").
+        Schedule("job:evening", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    cliCommand := &urfavecli.Command{
+        Name:  runner.Name(),
+        Flags: runner.Flags(),
+        Action: func(ctx context.Context, commandContext *urfavecli.Command) error {
+            return runner.Run(newRunnerTestRuntime(ctx), commandContext)
+        },
+    }
+
+    if runErr := cliCommand.Run(context.Background(), []string{runner.Name(), "--once"}); nil != runErr {
+        t.Fatalf("unexpected error running --once: %v", runErr)
+    }
+
+    if 1 != job.runCount {
+        t.Fatalf("expected the eighteen-hundred entry to be due at 09:00 UTC under Asia/Tokyo, ran %d", job.runCount)
+    }
+}
+
+/* the negative half of the pair: the SAME instant and the SAME schedule, with no zone declared, must NOT be due. Without it the test above would still pass on a runner that ran everything. */
+func TestRunnerCommand_WithoutAZoneTheSameInstantIsNotDue(t *testing.T) {
+    job := newRecordingCommand("job:evening")
+
+    configuration := NewConfiguration().
+        Schedule("job:evening", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    cliCommand := &urfavecli.Command{
+        Name:  runner.Name(),
+        Flags: runner.Flags(),
+        Action: func(ctx context.Context, commandContext *urfavecli.Command) error {
+            return runner.Run(newRunnerTestRuntime(ctx), commandContext)
+        },
+    }
+
+    if runErr := cliCommand.Run(context.Background(), []string{runner.Name(), "--once"}); nil != runErr {
+        t.Fatalf("unexpected error running --once: %v", runErr)
+    }
+
+    if 0 != job.runCount {
+        t.Fatalf("expected the eighteen-hundred entry not to be due at 09:00 UTC, ran %d", job.runCount)
+    }
+}
+
+/* the flag wins over the configuration: an operator running one invocation against another region's calendar says so at the invocation. The configuration names a zone under which the entry is NOT due, so only the flag can make it run. */
+func TestRunnerCommand_TheTimezoneFlagWinsOverTheConfiguration(t *testing.T) {
+    job := newRecordingCommand("job:evening")
+
+    configuration := NewConfiguration().
+        InTimezone("UTC").
+        Schedule("job:evening", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    cliCommand := &urfavecli.Command{
+        Name:  runner.Name(),
+        Flags: runner.Flags(),
+        Action: func(ctx context.Context, commandContext *urfavecli.Command) error {
+            return runner.Run(newRunnerTestRuntime(ctx), commandContext)
+        },
+    }
+
+    if runErr := cliCommand.Run(context.Background(), []string{runner.Name(), "--once", "--timezone=Asia/Tokyo"}); nil != runErr {
+        t.Fatalf("unexpected error running --once: %v", runErr)
+    }
+
+    if 1 != job.runCount {
+        t.Fatalf("expected the flag to override the configured zone, ran %d", job.runCount)
+    }
+}
+
+/* a zone the standard library cannot load is a wiring mistake and fails at CONSTRUCTION, beside the malformed schedules and the unknown command names: a scheduler that fell back to the process zone would run every job at the right clock time in the wrong place, which nobody notices until the reports are wrong. */
+func TestNewRunnerCommand_PanicsForAZoneItCannotLoad(t *testing.T) {
+    configuration := NewConfiguration().
+        InTimezone("Mars/Olympus_Mons").
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a panic for a zone that cannot be loaded")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic to carry an error, got %T", recovered)
+        }
+
+        if false == errors.Is(recoveredErr, ErrUnknownTimezone) {
+            t.Fatalf("expected ErrUnknownTimezone, got %v", recoveredErr)
+        }
+    }()
+
+    _ = NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:top"))
+}
+
+/* a mistyped FLAG is what the caller typed, so it is refused by name and the command carries the refusal out — a stack trace would be the wrong answer to a typing mistake. */
+func TestRunnerCommand_RefusesATimezoneFlagItCannotLoad(t *testing.T) {
+    job := newRecordingCommand("job:top")
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    cliCommand := &urfavecli.Command{
+        Name:  runner.Name(),
+        Flags: runner.Flags(),
+        Action: func(ctx context.Context, commandContext *urfavecli.Command) error {
+            return runner.Run(newRunnerTestRuntime(ctx), commandContext)
+        },
+    }
+
+    runErr := cliCommand.Run(context.Background(), []string{runner.Name(), "--once", "--timezone=Mars/Olympus_Mons"})
+    if false == errors.Is(runErr, ErrUnknownTimezone) {
+        t.Fatalf("expected ErrUnknownTimezone, got %v", runErr)
+    }
+
+    if 0 != job.runCount {
+        t.Fatalf("expected nothing to run under a zone that was refused, ran %d", job.runCount)
+    }
+}

@@ -33,13 +33,30 @@ type ScheduledCommand struct {
 }
 
 type Configuration struct {
-    entries []*ScheduledCommand
+    entries      []*ScheduledCommand
+    timezoneName string
 }
 
 func NewConfiguration() *Configuration {
     return &Configuration{
         entries: []*ScheduledCommand{},
     }
+}
+
+/* InTimezone names the zone the IN-PROCESS runner evaluates its schedules under, as an IANA name — "Europe/Bucharest". Unset, the runner evaluates on the process zone, which is what it always did.
+
+It is declared once for the whole configuration rather than per entry because a zone is a property of the schedule an operator reads, not of one job: an entry written "0 3 * * *" means three in the morning wherever the business keeps its books, and two entries meaning two different three-in-the-mornings is a crontab nobody can read. A zone the standard library cannot load is a wiring mistake and panics at construction, beside the malformed schedules and the unknown command names.
+
+It reaches the in-process runner ALONE. The generated manifests are run by an external scheduler whose zone belongs to that scheduler and to the container it runs in, not to this configuration; the generator therefore emits nothing for it, and the readme says so where the zone is documented. */
+func (instance *Configuration) InTimezone(name string) *Configuration {
+    instance.timezoneName = name
+
+    return instance
+}
+
+/* TimezoneName answers the zone this configuration declared, empty when it declared none. */
+func (instance *Configuration) TimezoneName() string {
+    return instance.timezoneName
 }
 
 /* Schedule copies the entry configuration instead of retaining the caller's pointer: the generator re-reads an entry's fields at every generation, so a caller mutating its own struct after registration changed the manifests emitted afterwards. The in-process runner is not the consumer at risk — it photographs each entry's deadlines into its own run entry at construction, so a mutation landing after that cannot reach a scheduler already running — but a runner built later reads the same fields the generator does. What was registered is what stays in force, for both. */

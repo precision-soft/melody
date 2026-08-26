@@ -8,6 +8,14 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
+/* containerNameNodeKeyPrefix is the one spelling of a container name node's key. It is a constant rather than a literal at each site because the teardown reads the graph by key: a declared edge written under one spelling and a created node recorded under another would never meet, and the ordering would be silently absent rather than wrong — the failure no test of the ordering itself can see. */
+const containerNameNodeKeyPrefix = "service:"
+
+/* containerNameNodeKey is the key a container service is known by in the resolution stack, the creation order and the teardown graph. */
+func containerNameNodeKey(serviceName string) string {
+    return containerNameNodeKeyPrefix + serviceName
+}
+
 /* the scoped node keys carry their own prefix so the two levels never share one. The resolution stack detects a cycle by node key, and a scoped service that resolves the container service it replaces must be reported as repeating the scoped node rather than the container one; the container's teardown walks its own dependency graph by the same keys and must never find a node standing for a value it does not hold. */
 func scopedNameNodeKey(serviceName string) string {
     return "scope:service:" + serviceName

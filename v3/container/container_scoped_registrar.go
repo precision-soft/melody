@@ -96,6 +96,17 @@ func (instance *container) registerScoped(
 ) error {
     registerOption := applyRegisterServiceOptions(options)
 
+    /* a scope keeps its own teardown graph, recorded per scope from the resolutions that scope actually made, so a declaration written once at registration has no scope to be written into. Accepting it silently would install nothing while reading as an ordering that holds, which is the one outcome worse than refusing. */
+    if 0 < len(registerOption.TeardownDependencyNames) {
+        return exception.NewError(
+            "a scoped registration cannot declare a teardown dependency",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            ErrScopedTeardownDependencyUnsupported,
+        )
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

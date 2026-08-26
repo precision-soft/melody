@@ -9,6 +9,10 @@ type RegisterOptions struct {
 
        It admits substitution, not decoration. A scoped provider that resolves the name it is replacing re-enters itself, and the resolution is reported as the circular dependency it is; a decorator has to take the decorated service under its own name. */
     ReplacesContainerService bool
+    /* TeardownDependencyNames are the container services this registration declares itself dependent on for TEARDOWN ORDER alone, so it is closed before them. It exists for the registration that cannot write its edge the ordinary way: the graph the teardown walks is recorded automatically when a provider RESOLVES another service while it is being built, and a provider that CAPTURES an already-built collaborator instead resolves nothing and therefore declares nothing. Resolving is still the better door, because it cannot fall out of step with what the provider actually uses; this one is for the pre-built instance that has nothing to resolve.
+
+       It orders teardown and nothing else: it does not build the named service, does not make it exist, and does not enter the cycle report of a resolution. An edge naming a service that was never created is dropped by the teardown walk, so declaring a dependency on an optional service is not an error at either end. */
+    TeardownDependencyNames []string
 }
 
 type RegisterOption func(option *RegisterOptions)

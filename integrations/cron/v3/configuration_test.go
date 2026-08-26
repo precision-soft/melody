@@ -181,3 +181,37 @@ func TestConfiguration_EntriesHandsOutADistinctObjectOnEveryCall(t *testing.T) {
         t.Fatal("expected a distinct Schedule on every call")
     }
 }
+
+/* the zone is declared once for the whole configuration and read back as it was written: it is a property of the schedule an operator reads, not of one job, and two entries meaning two different three-in-the-mornings is a crontab nobody can read. */
+func TestConfiguration_InTimezoneIsDeclaredOnceAndReadBack(t *testing.T) {
+    configuration := NewConfiguration()
+
+    if "" != configuration.TimezoneName() {
+        t.Fatalf("expected no zone by default, got %q", configuration.TimezoneName())
+    }
+
+    returned := configuration.InTimezone("Europe/Bucharest")
+
+    if configuration != returned {
+        t.Fatal("expected InTimezone to answer the configuration it was called on, for chaining")
+    }
+
+    if "Europe/Bucharest" != configuration.TimezoneName() {
+        t.Fatalf("expected the declared zone, got %q", configuration.TimezoneName())
+    }
+}
+
+/* the zone survives the entry registrations that follow it, and does not travel into the entries themselves: Entries hands out copies all the way down, and a zone folded into them would be one declaration per job again. */
+func TestConfiguration_InTimezoneSurvivesTheEntriesRegisteredAfterIt(t *testing.T) {
+    configuration := NewConfiguration().
+        InTimezone("Europe/Bucharest").
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    if "Europe/Bucharest" != configuration.TimezoneName() {
+        t.Fatalf("expected the declared zone to survive the registration, got %q", configuration.TimezoneName())
+    }
+
+    if 1 != len(configuration.Entries()) {
+        t.Fatalf("expected the entry to be registered, got %d", len(configuration.Entries()))
+    }
+}

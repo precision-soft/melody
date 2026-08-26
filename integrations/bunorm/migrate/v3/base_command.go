@@ -68,17 +68,37 @@ func (instance *baseCommand) resolveRegistry(resolver containercontract.Resolver
     return container.FromResolver[*bunorm.ManagerRegistry](resolver, instance.options.ManagerRegistryServiceId)
 }
 
+/*
+resolveDatabase answers the connection this command runs on, the label the output
+names it by, and the RELEASE its caller must defer.
+
+The release ends the dedicated migration connection. That connection is not a
+request pool and must not live like one: it deliberately lifts the driver's read
+and write deadlines and recycles nothing, which is right for a DDL statement that
+runs for minutes and wrong for anything that then sits idle. The registry memoizes
+it until the registry itself closes, so a single migration run inside a process
+that goes on to serve requests left a deadline-less connection open against the
+database for the life of that process.
+
+It is handed back as a value rather than left to each command to remember,
+because a forgotten call compiles and a changed signature does not: every command
+had to be visited to keep building. It is safe on every path — a command whose
+provider offers no migration capability ran on the ordinary pool, which this never
+touches, and one that failed before opening has nothing to end.
+*/
 func (instance *baseCommand) resolveDatabase(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
-) (*bun.DB, string, error) {
+) (*bun.DB, string, func(), error) {
+    noRelease := func() {}
+
     registry, registryErr := instance.resolveRegistry(runtimeInstance.Scope())
     if nil != registryErr {
-        return nil, "", registryErr
+        return nil, "", noRelease, registryErr
     }
 
     if nil == registry {
-        return nil, "", errors.New("manager registry service is nil")
+        return nil, "", noRelease, errors.New("manager registry service is nil")
     }
 
     managerName := commandContext.String(instance.options.ManagerFlagName)
@@ -89,7 +109,7 @@ func (instance *baseCommand) resolveDatabase(
     /* the migration commands prefer the dedicated migration connection — the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement — and fall back to the ordinary pool when the provider offers no such capability */
     database, dedicated, migrationDatabaseErr := registry.MigrationDatabase(managerName)
     if nil != migrationDatabaseErr {
-        return nil, "", migrationDatabaseErr
+        return nil, "", noRelease, migrationDatabaseErr
     }
 
     label := managerName
@@ -97,11 +117,18 @@ func (instance *baseCommand) resolveDatabase(
         label = "<default>"
     }
 
+    release := noRelease
+
     if true == dedicated {
         label = label + " (dedicated migration connection)"
+
+        /* only the dedicated connection is ours to end. The ordinary pool belongs to the application for as long as the registry does, and ending it here would take the database away from everything else the process runs. */
+        release = func() {
+            _ = registry.CloseMigrationDatabase(managerName)
+        }
     }
 
-    return database, label, nil
+    return database, label, release, nil
 }
 
 func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) {

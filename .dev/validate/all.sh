@@ -286,8 +286,10 @@ run_vulncheck_checks() {
 # up at all — a middleware ordering that only matters once a real request traverses the chain, a route the
 # router registers but never answers, a session cookie that never reaches the wire. The scripts are host
 # scripts: each execs into the dev container itself, so this lane brings the stack up and hands off. mailpit
-# and prometheus join the live backends because the mail and metric sections scrape them directly, and the
-# load balancer because a stack check asserts what it routes.
+# and prometheus join the live backends because the mail and metric sections scrape them directly, the
+# load balancer because a stack check asserts what it routes, and the otel collector because the v3 example
+# EXPORTS to it — a span exporter with nowhere to send fails the application's own close with a context
+# deadline, so a collector that happened to be down failed this lane on ambient state rather than on code.
 E2E_SERVICE_NAME_STRING_LIST=(
     "rabbitmq"
     "redis"
@@ -296,6 +298,7 @@ E2E_SERVICE_NAME_STRING_LIST=(
     "localstack"
     "mailpit"
     "prometheus"
+    "otel-collector"
     # the v1 and v2 example applications: THREE HOSTS asks the load balancer for each major's vhost, so
     # all three supervised applications have to be up, not only the v3 one the dev service runs
     "dev-v1"

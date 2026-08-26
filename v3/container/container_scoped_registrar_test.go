@@ -515,3 +515,22 @@ func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
         t.Fatalf("expected the colliding identity key to be refused at the scoped door")
     }
 }
+
+/* TestContainer_RegisterScoped_RefusesATeardownDependency pins the refusal the declarative edge gets on the scoped path. A scope keeps its own teardown graph, recorded per scope from the resolutions that scope actually made, so a declaration written once at registration has no scope to be written into — and accepting it silently would install nothing while reading as an ordering that holds. */
+func TestContainer_RegisterScoped_RefusesATeardownDependency(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.RegisterScoped(
+        "scoped.dependent",
+        func(resolver containercontract.Resolver) (*scopedTeardownProbeService, error) {
+            return &scopedTeardownProbeService{}, nil
+        },
+        WithTeardownDependency("service.logger"),
+    )
+
+    if false == errors.Is(registerErr, ErrScopedTeardownDependencyUnsupported) {
+        t.Fatalf("expected ErrScopedTeardownDependencyUnsupported, got %v", registerErr)
+    }
+}
+
+type scopedTeardownProbeService struct{}

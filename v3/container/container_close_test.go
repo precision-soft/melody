@@ -1648,3 +1648,157 @@ func TestContainer_Close_AnEvictedOverrideAfterABuiltInstanceIsNotClosed(t *test
         t.Fatalf("expected the replaced built instance to be closed exactly once, got %v", closeSequence)
     }
 }
+
+/*
+TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder is the
+declarative twin of the test above, for the registration that resolves nothing.
+Neither provider touches the resolver, so the container derives no edge at all,
+and the two are resolved in the order that makes the creation-order tie-break
+answer WRONG on its own: the dependency is created LAST, so the latest-first
+tie-break would close it FIRST, while its dependent is still alive. Only the
+declaration can put it last, which is what makes this probe separate the guard
+from the ordering the container would have reached anyway.
+*/
+func TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependency",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        WithTeardownDependency("service.dependency"),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    /* the dependent is built FIRST and the dependency SECOND, so the creation-order tie-break alone would close the dependency first — the wrong way round. Nothing resolves anything, so the declaration is the only edge there is. */
+    if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.dependency"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "b" != closeSequence[0] || "a" != closeSequence[1] {
+        t.Fatalf("expected the declared teardown dependency to decide, got %v", closeSequence)
+    }
+}
+
+/*
+TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst is the positive
+control for the test above: the same two services, the same resolution order, the
+declaration removed. It asserts the order the container reaches WITHOUT the
+declaration, so a reader can see that the probe above is not green for a reason
+that has nothing to do with the option — and so a change to the tie-break itself
+fails here rather than quietly making the guard vacuous.
+*/
+func TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependency",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.dependency"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "a" != closeSequence[0] || "b" != closeSequence[1] {
+        t.Fatalf("expected the creation-order tie-break to close the dependency first, got %v", closeSequence)
+    }
+}
+
+/* TestContainer_Close_ADeclaredTeardownDependencyOnAnUnbuiltServiceIsDropped pins the promise the option's documentation makes about an optional collaborator: the edge names a service that was registered but never resolved, so the teardown walk drops it rather than refusing the walk or wedging the dependent behind a node that will never close. */
+func TestContainer_Close_ADeclaredTeardownDependencyOnAnUnbuiltServiceIsDropped(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 1)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependency",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        WithTeardownDependency("service.dependency"),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    /* only the dependent is ever built */
+    if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(closeSequence) || "b" != closeSequence[0] {
+        t.Fatalf("expected the dependent alone to close, got %v", closeSequence)
+    }
+}

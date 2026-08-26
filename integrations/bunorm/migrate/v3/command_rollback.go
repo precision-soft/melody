@@ -45,10 +45,11 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
     SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer, option))
 
-    db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
+    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
         return dbErr
     }
+    defer releaseDatabase()
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {

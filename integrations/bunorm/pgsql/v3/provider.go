@@ -6,6 +6,7 @@ import (
     "database/sql"
     "errors"
     "fmt"
+    "math"
     "net"
     "reflect"
     "strings"
@@ -412,6 +413,13 @@ func (instance *Provider) toConnectionContext(
     }
 }
 
+/* minimumBackoffDelay is the floor under every delay this provider computes. The guards below refuse a
+   non-positive delay, which left ONE NANOSECOND as the smallest thing a configuration could ask for — and a
+   one-nanosecond wait between dials is not a backoff, it is the re-dial storm those guards exist to prevent,
+   arriving through the door they left open. Under a millisecond the wait is shorter than the dial it is
+   meant to separate, so a millisecond is where a delay starts meaning anything at all. */
+const minimumBackoffDelay = time.Millisecond
+
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
     /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes
        time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing
@@ -426,6 +434,16 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
         maxDelay = 5 * time.Second
     }
 
+    /* the floor is applied to BOTH bounds, so every branch below returns at least it: raising the initial
+       delay alone would still let a sub-millisecond ceiling cap the result straight back under the floor. */
+    if minimumBackoffDelay > initialDelay {
+        initialDelay = minimumBackoffDelay
+    }
+
+    if minimumBackoffDelay > maxDelay {
+        maxDelay = minimumBackoffDelay
+    }
+
     /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN
        multiplier through, poison the float-space growth below and collapse the backoff into an immediate
        re-dial storm once the NaN converts to a negative duration. */
@@ -434,20 +452,27 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
         backoffMultiplier = 2.0
     }
 
-    /* grow the delay in float space and cap at maxDelay as soon as it is reached, before converting to
-       time.Duration — otherwise a large attempt count overflows the float64->int64 conversion to a negative
-       duration, which slips past the `> maxDelay` cap and collapses the backoff to zero (a re-dial storm). */
-    maxDelayFloat := float64(maxDelay)
-    delay := float64(initialDelay)
-
-    for i := uint32(1); i < attempt; i = i + 1 {
-        delay = delay * backoffMultiplier
-        if delay >= maxDelayFloat {
-            return maxDelay
-        }
+    /* the first attempt waits the initial delay, so the growth is over the attempts ALREADY made. A zero
+       attempt is not one of them and would wrap the unsigned subtraction below into a growth of four
+       billion steps; it reads as the first attempt, which is the answer the growth loop this replaced gave
+       it by never running. */
+    if 0 == attempt {
+        attempt = 1
     }
 
-    if delay >= maxDelayFloat {
+    /* the growth is computed in CLOSED FORM rather than by multiplying once per attempt already made. The
+       loop that did it cost O(attempt) per call and therefore O(attempt²) over a run, and it left early
+       only once the delay had passed the ceiling — which a multiplier of exactly 1, a valid constant
+       backoff, never does, so a large attempt budget paid that square in full for a delay that never moved.
+       What the loop was right about is kept: the growth stays in float space and is capped BEFORE the
+       conversion, because a large attempt count overflows the float64->int64 conversion to a negative
+       duration, which slips past a `> maxDelay` cap and collapses the backoff to zero. The cap is written
+       as the not-less-than form for the same reason the multiplier guard is: an infinite growth — which is
+       where a big enough exponent lands — compares false against every ceiling it is asked about. */
+    maxDelayFloat := float64(maxDelay)
+    delay := float64(initialDelay) * math.Pow(backoffMultiplier, float64(attempt-1))
+
+    if false == (delay < maxDelayFloat) {
         return maxDelay
     }
 

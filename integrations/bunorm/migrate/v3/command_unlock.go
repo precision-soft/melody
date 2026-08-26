@@ -38,10 +38,11 @@ func (instance *UnlockCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
     }()
 
-    db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
+    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
         return dbErr
     }
+    defer releaseDatabase()
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {

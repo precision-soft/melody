@@ -287,7 +287,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     delete(instance.builtServiceNames, serviceName)
 
     instance.instances[serviceName] = value
-    instance.recordCreationOrderLocked("service:" + serviceName)
+    instance.recordCreationOrderLocked(containerNameNodeKey(serviceName))
 
     if _, typeRegistered := instance.typeRegistrationNamesByType[canonicalType]; true == typeRegistered {
         instance.typeInstances[canonicalType] = value
@@ -482,6 +482,29 @@ func (instance *container) register(
         )
     }
 
+    /* the declared teardown edges are validated BEFORE anything is written, so a refused registration leaves the maps exactly as it found them */
+    for _, dependencyName := range registerOption.TeardownDependencyNames {
+        if "" == dependencyName {
+            return exception.NewError(
+                "a teardown dependency name is required",
+                map[string]any{
+                    "serviceName": serviceName,
+                },
+                ErrTeardownDependencyNameIsRequired,
+            )
+        }
+
+        if serviceName == dependencyName {
+            return exception.NewError(
+                "a service cannot declare a teardown dependency on itself",
+                map[string]any{
+                    "serviceName": serviceName,
+                },
+                ErrTeardownDependencyIsSelf,
+            )
+        }
+    }
+
     instance.providers[serviceName] = provider
     if nil != serviceType {
         instance.providerServiceTypeByName[serviceName] = serviceType
@@ -504,6 +527,14 @@ func (instance *container) register(
             delete(instance.collectionPriorityByName, serviceName)
             return registerTypeErr
         }
+    }
+
+    /* the declared edges are written last, once the registration cannot fail anymore: the graph is never pruned, so an edge left behind by a refused registration would outlive it for the life of the process. They go into the very graph a resolution writes into, in the same key space, so the teardown reads one graph and cannot order two ways. */
+    for _, dependencyName := range registerOption.TeardownDependencyNames {
+        instance.registerDependencyLocked(
+            containerNameNodeKey(serviceName),
+            containerNameNodeKey(dependencyName),
+        )
     }
 
     return nil

@@ -66,7 +66,7 @@ func (instance *container) closeInternal() error {
     )
 
     for serviceName := range instance.instances {
-        createdNodeKeys = append(createdNodeKeys, "service:"+serviceName)
+        createdNodeKeys = append(createdNodeKeys, containerNameNodeKey(serviceName))
     }
 
     for targetType := range instance.typeInstances {
@@ -83,8 +83,8 @@ func (instance *container) closeInternal() error {
     )
 
     resolveNodeValue := func(nodeKey string) (any, bool) {
-        if true == strings.HasPrefix(nodeKey, "service:") {
-            serviceName := strings.TrimPrefix(nodeKey, "service:")
+        if true == strings.HasPrefix(nodeKey, containerNameNodeKeyPrefix) {
+            serviceName := strings.TrimPrefix(nodeKey, containerNameNodeKeyPrefix)
             instanceValue, exists := instance.instances[serviceName]
             return instanceValue, exists
         }
@@ -196,7 +196,7 @@ func (instance *container) closeInternal() error {
         }
 
         for _, serviceName := range instance.typeRegistrationNamesByType[targetType] {
-            if existingRepresentative, hasRepresentative := representativeOf["service:"+serviceName]; true == hasRepresentative {
+            if existingRepresentative, hasRepresentative := representativeOf[containerNameNodeKey(serviceName)]; true == hasRepresentative {
                 return existingRepresentative, true
             }
         }
@@ -205,7 +205,7 @@ func (instance *container) closeInternal() error {
     }
 
     for _, nodeKey := range createdNodeKeys {
-        if false == strings.HasPrefix(nodeKey, "service:") {
+        if false == strings.HasPrefix(nodeKey, containerNameNodeKeyPrefix) {
             continue
         }
 

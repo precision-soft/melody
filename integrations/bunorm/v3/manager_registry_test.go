@@ -2066,3 +2066,439 @@ func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T
         t.Fatalf("expected the record to name the stage that actually unwound, got %v", pendingOpen.openError)
     }
 }
+
+/*
+TestManagerRegistry_CloseWaitsForAnInFlightOpen is the guard for the window Close
+used to return over. The refusal is published under the lock before any pool is
+torn down, and that used to be the whole of it: a dial started before it was
+still in the air when Close answered nil, so a caller that exited on that answer
+left the connection outstanding, its server-side session to be reaped by a
+timeout rather than ended.
+
+The assertion is NEGATIVE and given a real window: Close must still not have
+returned while the open is parked. A bare non-blocking probe would pass against a
+Close that simply had not been scheduled yet, which is the tie-break making a
+guard's mutant flaky rather than dead.
+*/
+func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
+    database, _ := newCloseRaceDatabase()
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    provider := &closeRaceProvider{
+        database:    database,
+        openStarted: openStarted,
+        releaseOpen: releaseOpen,
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    go func() {
+        _, _ = registry.Manager("x")
+    }()
+
+    select {
+    case <-openStarted:
+    case <-time.After(2 * time.Second):
+        close(releaseOpen)
+        t.Fatalf("the open of 'x' never started")
+    }
+
+    closeReturned := make(chan error, 1)
+    go func() {
+        closeReturned <- registry.Close()
+    }()
+
+    /* the flag is OBSERVED rather than waited out, exactly as the sibling test does it: from the instant Close publishes it, every door answers the refusal, so a probe for a name the registry never had says when Close has passed the publication and is into the teardown proper. */
+    closePublishedDeadline := time.Now().Add(2 * time.Second)
+    for {
+        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+            break
+        }
+
+        if true == time.Now().After(closePublishedDeadline) {
+            close(releaseOpen)
+            t.Fatal("Close never published the closed flag")
+        }
+
+        runtime.Gosched()
+    }
+
+    select {
+    case closeErr := <-closeReturned:
+        close(releaseOpen)
+        t.Fatalf("Close returned while an open was still in flight: %v", closeErr)
+    case <-time.After(200 * time.Millisecond):
+    }
+
+    close(releaseOpen)
+
+    select {
+    case closeErr := <-closeReturned:
+        if nil != closeErr {
+            t.Fatalf("unexpected error closing registry: %v", closeErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("Close never returned after the open was released")
+    }
+}
+
+/*
+TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen is the same guard on the
+migration door. It needs its own probe because that door keeps no coalescing
+record — migrations run from a sequential command, so nobody waits for another
+caller's dial — and a teardown still has to. Without the announcement the
+migration open makes before it releases the lock, this window has nothing for
+Close to wait on at all.
+*/
+func TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen(t *testing.T) {
+    migrationDatabase, _ := newCloseRaceDatabase()
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    provider := &configurableMigrationProvider{
+        migrationDatabase: migrationDatabase,
+        openStarted:       openStarted,
+        releaseOpen:       releaseOpen,
+    }
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    go func() {
+        _, _, _ = registry.MigrationDatabase("main")
+    }()
+
+    select {
+    case <-openStarted:
+    case <-time.After(2 * time.Second):
+        close(releaseOpen)
+        t.Fatalf("the migration open never started")
+    }
+
+    closeReturned := make(chan error, 1)
+    go func() {
+        closeReturned <- registry.Close()
+    }()
+
+    closePublishedDeadline := time.Now().Add(2 * time.Second)
+    for {
+        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+            break
+        }
+
+        if true == time.Now().After(closePublishedDeadline) {
+            close(releaseOpen)
+            t.Fatal("Close never published the closed flag")
+        }
+
+        runtime.Gosched()
+    }
+
+    select {
+    case closeErr := <-closeReturned:
+        close(releaseOpen)
+        t.Fatalf("Close returned while a migration open was still in flight: %v", closeErr)
+    case <-time.After(200 * time.Millisecond):
+    }
+
+    close(releaseOpen)
+
+    select {
+    case closeErr := <-closeReturned:
+        if nil != closeErr {
+            t.Fatalf("unexpected error closing registry: %v", closeErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("Close never returned after the migration open was released")
+    }
+}
+
+/*
+TestManagerRegistry_CloseMigrationDatabaseEndsThePoolAndForgetsIt pins both
+halves of the door: the connection is really closed, and the memo is really
+dropped, so the next call opens a fresh one rather than handing back a pool over
+a dead connection. Forgetting without closing would leak; closing without
+forgetting would hand the next caller a closed pool with a nil error.
+*/
+func TestManagerRegistry_CloseMigrationDatabaseEndsThePoolAndForgetsIt(t *testing.T) {
+    migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{
+            Name:      "main",
+            Provider:  &configurableMigrationProvider{migrationDatabase: migrationDatabase},
+            IsDefault: true,
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, _, migrationErr := registry.MigrationDatabase("main"); nil != migrationErr {
+        t.Fatalf("unexpected migration database error: %v", migrationErr)
+    }
+
+    if 1 != len(registry.migrationDatabases) {
+        t.Fatalf("expected the migration database to be memoized, got %d", len(registry.migrationDatabases))
+    }
+
+    if closeErr := registry.CloseMigrationDatabase("main"); nil != closeErr {
+        t.Fatalf("unexpected error: %v", closeErr)
+    }
+
+    select {
+    case <-migrationDatabaseClosed:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the migration database was forgotten without being closed")
+    }
+
+    if 0 != len(registry.migrationDatabases) {
+        t.Fatalf("expected the migration database to be forgotten, got %d", len(registry.migrationDatabases))
+    }
+}
+
+/* an empty name selects the default definition, exactly as MigrationDatabase reads it — a command that never names a manager must reach the same connection through both doors. */
+func TestManagerRegistry_CloseMigrationDatabaseReadsAnEmptyNameAsTheDefault(t *testing.T) {
+    migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{
+            Name:      "main",
+            Provider:  &configurableMigrationProvider{migrationDatabase: migrationDatabase},
+            IsDefault: true,
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, _, migrationErr := registry.MigrationDatabase(""); nil != migrationErr {
+        t.Fatalf("unexpected migration database error: %v", migrationErr)
+    }
+
+    if closeErr := registry.CloseMigrationDatabase(""); nil != closeErr {
+        t.Fatalf("unexpected error: %v", closeErr)
+    }
+
+    select {
+    case <-migrationDatabaseClosed:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the empty name did not reach the default definition's migration database")
+    }
+}
+
+/* a name that never opened a migration connection — and one already ended here — closes nothing and is not an error: the commands call this on their way out, including the ones that never reached the migration door. */
+func TestManagerRegistry_CloseMigrationDatabaseIsSilentForANameThatHasNone(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if closeErr := registry.CloseMigrationDatabase("main"); nil != closeErr {
+        t.Fatalf("expected silence for a name with no migration connection, got %v", closeErr)
+    }
+
+    if closeErr := registry.CloseMigrationDatabase("a name this registry never had"); nil != closeErr {
+        t.Fatalf("expected silence for an unknown name, got %v", closeErr)
+    }
+}
+
+/* a closed registry refuses the door rather than answering success: there is nothing left to end, and a nil error would say this call ended the pool when Close already had. */
+func TestManagerRegistry_CloseMigrationDatabaseRefusesAClosedRegistry(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if closeErr := registry.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if closeErr := registry.CloseMigrationDatabase("main"); false == errors.Is(closeErr, ErrManagerRegistryClosed) {
+        t.Fatalf("expected ErrManagerRegistryClosed, got %v", closeErr)
+    }
+}
+
+/* loggerRecordingProvider keeps every logger the registry hands it, so a replacement can be proven on what the provider ACTUALLY receives rather than on the field it was written into. */
+type loggerRecordingProvider struct {
+    mutex   sync.Mutex
+    loggers []loggingcontract.Logger
+}
+
+func (instance *loggerRecordingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.mutex.Lock()
+    instance.loggers = append(instance.loggers, logger)
+    instance.mutex.Unlock()
+
+    database, _ := newCloseRaceDatabase()
+
+    return database, nil
+}
+
+func (instance *loggerRecordingProvider) received() []loggingcontract.Logger {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]loggingcontract.Logger{}, instance.loggers...)
+}
+
+var _ Provider = (*loggerRecordingProvider)(nil)
+
+/*
+TestManagerRegistry_SetLoggerReachesTheNextOpen pins the door on what the
+provider is handed, not on the field behind it. A registry built during module
+wiring has no application logger to be given — the framework's own does not exist
+that early — so it is constructed on the emergency logger, and without this door
+every later open, retry warning and terminal connection failure would keep
+bypassing the journal for the life of the process.
+
+Two definitions are opened, one before the replacement and one after, so the
+probe separates "the registry took a new logger" from "the registry was built
+with this one all along".
+*/
+func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
+    provider := &loggerRecordingProvider{}
+    wiringLogger := &fakeLogger{}
+    applicationLogger := &capturingDiagnosticLogger{}
+
+    registry, registryErr := NewManagerRegistry(
+        wiringLogger,
+        ProviderDefinition{Name: "first", Provider: provider, IsDefault: true},
+        ProviderDefinition{Name: "second", Provider: provider},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+    t.Cleanup(func() { _ = registry.Close() })
+
+    if _, managerErr := registry.Manager("first"); nil != managerErr {
+        t.Fatalf("unexpected error: %v", managerErr)
+    }
+
+    if setErr := registry.SetLogger(applicationLogger); nil != setErr {
+        t.Fatalf("unexpected error: %v", setErr)
+    }
+
+    if _, managerErr := registry.Manager("second"); nil != managerErr {
+        t.Fatalf("unexpected error: %v", managerErr)
+    }
+
+    received := provider.received()
+    if 2 != len(received) {
+        t.Fatalf("expected two opens, got %d", len(received))
+    }
+
+    if loggingcontract.Logger(wiringLogger) != received[0] {
+        t.Fatalf("the first open did not get the wiring logger")
+    }
+
+    if loggingcontract.Logger(applicationLogger) != received[1] {
+        t.Fatalf("the open after the replacement did not get the application logger")
+    }
+}
+
+/* the replacement takes bun's diagnostic channel with it, so the registry's journal and bun's own cannot drift apart: one call gives both the same destination. */
+func TestManagerRegistry_SetLoggerTakesBunsDiagnosticChannelWithIt(t *testing.T) {
+    applicationLogger := &capturingDiagnosticLogger{}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+    t.Cleanup(ResetDiagnostics)
+
+    if setErr := registry.SetLogger(applicationLogger); nil != setErr {
+        t.Fatalf("unexpected error: %v", setErr)
+    }
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 0 == len(applicationLogger.captured()) {
+        t.Fatal("the replacement did not take bun's diagnostic channel with it")
+    }
+}
+
+/* a nil logger, and a typed nil holding no value, are refused: they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
+func TestManagerRegistry_SetLoggerRefusesTheAbsentLogger(t *testing.T) {
+    provider := &loggerRecordingProvider{}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+    t.Cleanup(func() { _ = registry.Close() })
+
+    if setErr := registry.SetLogger(nil); false == errors.Is(setErr, ErrLoggerIsRequired) {
+        t.Fatalf("expected ErrLoggerIsRequired for a nil logger, got %v", setErr)
+    }
+
+    var typedNil *capturingDiagnosticLogger
+    if setErr := registry.SetLogger(typedNil); false == errors.Is(setErr, ErrLoggerIsRequired) {
+        t.Fatalf("expected ErrLoggerIsRequired for a typed nil logger, got %v", setErr)
+    }
+
+    if _, managerErr := registry.Manager("main"); nil != managerErr {
+        t.Fatalf("unexpected error: %v", managerErr)
+    }
+
+    received := provider.received()
+    if 1 != len(received) || nil == received[0] {
+        t.Fatalf("a refused replacement reached the provider: %v", received)
+    }
+}
+
+/* the registry hands bun's channel back from its own Close, while the logger it routed to is still alive — the container closes the registry before the logging service, because the registry resolves it. */
+func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
+    applicationLogger := &capturingDiagnosticLogger{}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+    t.Cleanup(ResetDiagnostics)
+
+    if setErr := registry.SetLogger(applicationLogger); nil != setErr {
+        t.Fatalf("unexpected error: %v", setErr)
+    }
+
+    if closeErr := registry.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 0 != len(applicationLogger.captured()) {
+        t.Fatalf("the closed registry still holds bun's channel: %v", applicationLogger.captured())
+    }
+}

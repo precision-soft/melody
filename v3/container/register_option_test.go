@@ -51,6 +51,34 @@ func TestRegisterOptions_EachMovesExactlyItsOwnField(t *testing.T) {
     if false == replacing.AlsoRegisterType || false == replacing.TypeRegistrationIsStrict {
         t.Fatalf("expected Replacing to leave the type registration untouched")
     }
+
+    teardown := applyRegisterServiceOptions([]containercontract.RegisterOption{WithTeardownDependency("service.logger")})
+    if 1 != len(teardown.TeardownDependencyNames) || "service.logger" != teardown.TeardownDependencyNames[0] {
+        t.Fatalf("expected the declared teardown dependency, got %v", teardown.TeardownDependencyNames)
+    }
+    if false == teardown.AlsoRegisterType || false == teardown.TypeRegistrationIsStrict || true == teardown.ReplacesContainerService {
+        t.Fatalf("expected WithTeardownDependency to leave every other field untouched")
+    }
+}
+
+/* TestWithTeardownDependency_ComposesAcrossCallsAndArguments pins the promise the option's documentation makes about composing: two declarations add to one list rather than the second replacing the first, and one call naming several services keeps all of them in the order they were written. A replacing fold would silently drop the first collaborator, which is the failure no ordering test can see — the edge that is missing simply never constrains anything. */
+func TestWithTeardownDependency_ComposesAcrossCallsAndArguments(t *testing.T) {
+    option := applyRegisterServiceOptions([]containercontract.RegisterOption{
+        WithTeardownDependency("service.logger", "service.metrics"),
+        WithTeardownDependency("service.tracer"),
+    })
+
+    expected := []string{"service.logger", "service.metrics", "service.tracer"}
+
+    if len(expected) != len(option.TeardownDependencyNames) {
+        t.Fatalf("expected %v, got %v", expected, option.TeardownDependencyNames)
+    }
+
+    for index, name := range expected {
+        if name != option.TeardownDependencyNames[index] {
+            t.Fatalf("expected %v, got %v", expected, option.TeardownDependencyNames)
+        }
+    }
 }
 
 func TestApplyRegisterServiceOptions_FoldsInOrderAndSkipsANilOption(t *testing.T) {

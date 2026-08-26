@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- the retry backoff has a FLOOR of one millisecond and is computed in closed form. The configuration guards refused a non-positive delay, which left one NANOSECOND as the smallest thing an operator could ask for — a wait shorter than the dial it separates, which is the re-dial storm those guards exist to prevent arriving through the door they left open. The floor is applied to the initial delay and to the ceiling, so no branch can answer under it. Separately, the growth was walked once per attempt already made — O(attempt) per call and therefore O(attempt²) over a run — and it left the walk early only once the delay had passed the ceiling, which a multiplier of exactly 1, a valid constant backoff, never does; a large attempt budget paid that square in full for a delay that never moved. The growth is now a single exponentiation, capped before the conversion exactly as the walk was, so a large attempt count still cannot overflow into a negative duration. An attempt of zero reads as the first attempt, which is what the walk answered it by never running
+
 ## [v1.2.0] - 2026-08-18 - Migration-Tuned Opens, Context-Threaded Retries and Word-Bounded Transient Markers
 
 ### Added

@@ -25,6 +25,8 @@ type ManagerRegistry struct {
     lock              sync.Mutex
     managers          map[string]*Manager
     pendingOpenByName map[string]*managerOpen
+    /* the migration opens in flight, kept as bare channels because migrations are not coalesced — a caller waits for its own dial, never for another's — while a teardown still has to wait for all of them */
+    pendingMigrationOpens map[chan struct{}]struct{}
     /* the migration databases live beside the request pools, never inside them: a migration connection lifts the driver deadlines, and handing it to request traffic would trade one failure mode for another */
     migrationDatabases map[string]*bun.DB
     closed             bool
@@ -100,6 +102,7 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
         pendingOpenByName:             make(map[string]*managerOpen),
+        pendingMigrationOpens:         make(map[chan struct{}]struct{}),
         migrationDatabases:            make(map[string]*bun.DB),
     }, nil
 }
@@ -171,7 +174,21 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
     }
 
     /* the dial runs outside the registry-wide lock for the same reason Manager's does: a down database must not serialize cache hits or a concurrent Close. Migrations run from a sequential cli command, so no coalescing machinery is warranted — a concurrent duplicate open is resolved below by closing the loser. */
+
+    /* the dial is announced before the lock is released, so a Close arriving during it waits this open out instead of returning over it. It is a bare channel rather than the coalescing record its sibling keeps: nobody waits for this dial except a teardown, and never for its value. */
+    migrationOpenDone := make(chan struct{})
+    instance.pendingMigrationOpens[migrationOpenDone] = struct{}{}
+
     instance.lock.Unlock()
+
+    /* registered FIRST so it runs LAST: every later defer in this function is the registry lock's own unlock, and a cleanup that took the lock ahead of it would deadlock against it. Unconditional, because every path out of here — the refusals below, a panic in the provider — ends this dial as far as a teardown is concerned. */
+    defer func() {
+        instance.lock.Lock()
+        delete(instance.pendingMigrationOpens, migrationOpenDone)
+        instance.lock.Unlock()
+
+        close(migrationOpenDone)
+    }()
 
     database, openErr := instance.openProviderMigrationDatabase(migrationProvider, providerDefinition.Params)
     if nil != openErr {
@@ -204,6 +221,43 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
     instance.migrationDatabases[name] = database
 
     return database, true, nil
+}
+
+/* CloseMigrationDatabase ends the dedicated migration connection opened for one definition and forgets it, so the next MigrationDatabase for that name opens a fresh one. An empty name selects the default definition, exactly as MigrationDatabase does.
+
+It exists because that connection is not a request pool and must not live like one. It deliberately lifts the driver's read and write deadlines and recycles nothing — no lifetime, no idle timeout — which is right for a DDL statement that legitimately runs for minutes and wrong for anything that then sits idle. Memoized until the registry itself closes, a single migration run at boot left a deadline-less connection open against the database for the whole life of a process that serves requests; the migration commands call this on their way out, and the registry's own Close stays the net underneath for whatever did not.
+
+Calling it for a name that has no migration connection — never opened, or already ended here — is not an error and closes nothing. A closed registry refuses it, because there is nothing left to end and answering success would say the pool was ended by this call. */
+func (instance *ManagerRegistry) CloseMigrationDatabase(name string) error {
+    if "" == name {
+        name = instance.defaultProviderDefinitionName
+    }
+
+    instance.lock.Lock()
+
+    if true == instance.closed {
+        instance.lock.Unlock()
+
+        return ErrManagerRegistryClosed
+    }
+
+    database, exists := instance.migrationDatabases[name]
+    if false == exists {
+        instance.lock.Unlock()
+
+        return nil
+    }
+
+    delete(instance.migrationDatabases, name)
+
+    instance.lock.Unlock()
+
+    if nil == database {
+        return nil
+    }
+
+    /* the close travels the wire — COM_QUIT to a peer that may be partitioned, on a connection whose write deadlines are deliberately lifted — so it runs outside the registry-wide lock, the same discipline Close keeps and for the same reason */
+    return database.Close()
 }
 
 func (instance *ManagerRegistry) DefaultManager() (*Manager, error) {
@@ -416,22 +470,51 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     return pendingOpen.manager, pendingOpen.openError
 }
 
-/* openProviderDatabase runs one provider open, under the registry's context when the provider can honour one. */
-func (instance *ManagerRegistry) openProviderDatabase(provider Provider, params ConnectionParameters) (*bun.DB, error) {
-    if contextOpener, isContextOpener := provider.(ContextOpener); true == isContextOpener {
-        return contextOpener.OpenContext(instance.openContext, params, instance.logger)
+/* currentLogger reads the logger the registry reports through. It takes the lock because SetLogger replaces the field while opens are in flight, and both opens below run OUTSIDE the registry-wide lock on purpose — a plain field read there would race the replacement. */
+func (instance *ManagerRegistry) currentLogger() loggingcontract.Logger {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    return instance.logger
+}
+
+/* SetLogger replaces the logger this registry reports through, and takes bun's diagnostic channel with it. It exists for the wiring window an application cannot avoid: a registry built while the modules are still being assembled has no application logger to be handed — the framework's own does not exist yet — so it is constructed on the emergency logger, and without this door every later open, every retry warning and every terminal connection failure would keep bypassing the journal for the life of the process.
+
+The routing follows deliberately: the same call that gives the registry its real journal gives bun's own diagnostics the same destination, so the two cannot drift apart. A nil logger, and a typed nil holding no value, are refused — they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
+func (instance *ManagerRegistry) SetLogger(logger loggingcontract.Logger) error {
+    if true == isNilInterface(logger) {
+        return ErrLoggerIsRequired
     }
 
-    return provider.Open(params, instance.logger)
+    instance.lock.Lock()
+    instance.logger = logger
+    instance.lock.Unlock()
+
+    RouteDiagnostics(logger)
+
+    return nil
+}
+
+/* openProviderDatabase runs one provider open, under the registry's context when the provider can honour one. */
+func (instance *ManagerRegistry) openProviderDatabase(provider Provider, params ConnectionParameters) (*bun.DB, error) {
+    logger := instance.currentLogger()
+
+    if contextOpener, isContextOpener := provider.(ContextOpener); true == isContextOpener {
+        return contextOpener.OpenContext(instance.openContext, params, logger)
+    }
+
+    return provider.Open(params, logger)
 }
 
 /* openProviderMigrationDatabase runs one migration open, under the registry's context when the provider can honour one — the same preference its sibling above applies to the ordinary open, on the door the promise had not reached. */
 func (instance *ManagerRegistry) openProviderMigrationDatabase(provider MigrationProvider, params ConnectionParameters) (*bun.DB, error) {
+    logger := instance.currentLogger()
+
     if contextOpener, isContextOpener := provider.(MigrationContextOpener); true == isContextOpener {
-        return contextOpener.OpenForMigrationContext(instance.openContext, params, instance.logger)
+        return contextOpener.OpenForMigrationContext(instance.openContext, params, logger)
     }
 
-    return provider.OpenForMigration(params, instance.logger)
+    return provider.OpenForMigration(params, logger)
 }
 
 func (instance *ManagerRegistry) MustManager(name string) *Manager {
@@ -490,6 +573,17 @@ func (instance *ManagerRegistry) Close() error {
         migrationDatabases = append(migrationDatabases, instance.migrationDatabases[name])
     }
 
+    /* the opens still in flight are photographed alongside the pools, so the teardown can WAIT for them below. Close used to return while a dial was still in the air: the open publishes afterwards, reads the closed flag and ends its own database — nothing leaks — but the caller was told the teardown was over while it was not, and a process exiting on that answer left the dial outstanding, its server-side session to be reaped by a timeout rather than ended. On the context-bound constructor a cancellation shortens the wait; on the plain one there is nothing to cancel, which is exactly the case this wait exists for. */
+    pendingOpens := make([]*managerOpen, 0, len(instance.pendingOpenByName))
+    for _, pendingOpen := range instance.pendingOpenByName {
+        pendingOpens = append(pendingOpens, pendingOpen)
+    }
+
+    pendingMigrationOpens := make([]chan struct{}, 0, len(instance.pendingMigrationOpens))
+    for migrationOpenDone := range instance.pendingMigrationOpens {
+        pendingMigrationOpens = append(pendingMigrationOpens, migrationOpenDone)
+    }
+
     instance.lock.Unlock()
 
     var closeErr error
@@ -524,6 +618,18 @@ func (instance *ManagerRegistry) Close() error {
             closeErr = migrationDatabaseCloseErr
         }
     }
+
+    /* every open that was in flight when the refusal was published is waited out here, after the memoized pools are gone. Each one ends its own freshly opened database against the closed flag, so what is being waited for is that ending — not a value this teardown could use. The wait is unbounded by design: it is the caller's own resolution finishing, and the constructor that binds a context is the door that shortens it. A panicking open closes the same channel through the recovery defer, so an unwinding provider cannot park this loop. */
+    for _, pendingOpen := range pendingOpens {
+        <-pendingOpen.done
+    }
+
+    for _, migrationOpenDone := range pendingMigrationOpens {
+        <-migrationOpenDone
+    }
+
+    /* bun's diagnostic channel is handed back LAST, while the logger this registry reports through is still alive: the container closes the registry before the logging service, because the registry resolves it. Everything above — a pool close that provokes a bun warning, an open finishing against the closed flag — still reaches the journal; what comes after belongs on standard error. */
+    ResetDiagnostics()
 
     /* teardown diagnostics must name every pool that failed to close, not the first alone: the caller gets one error, so the other failures would otherwise leave no trace anywhere */
     if 1 < len(failedNames) {

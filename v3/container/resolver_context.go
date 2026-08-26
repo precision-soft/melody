@@ -108,7 +108,7 @@ func containerNameStore(
 
             containerInstance.instances[serviceName] = value
             containerInstance.builtServiceNames[serviceName] = struct{}{}
-            containerInstance.recordCreationOrderLocked("service:" + serviceName)
+            containerInstance.recordCreationOrderLocked(containerNameNodeKey(serviceName))
 
             if nil != canonicalTargetType {
                 containerInstance.typeInstances[canonicalTargetType] = value
@@ -157,7 +157,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         scopedProvider, scopedProviderExists = instance.scopeInstance.scopedProviderByName(serviceName)
     }
 
-    nodeKey := "service:" + serviceName
+    nodeKey := containerNameNodeKey(serviceName)
     if true == scopedProviderExists {
         nodeKey = scopedNameNodeKey(serviceName)
     }
@@ -730,7 +730,7 @@ func (instance *resolverContext) isResolvingReference(reference containercontrac
 
     topIndex := len(instance.stack.keys) - 1
 
-    if "service:"+reference.ServiceName == instance.stack.keys[topIndex] {
+    if containerNameNodeKey(reference.ServiceName) == instance.stack.keys[topIndex] {
         return true
     }
 

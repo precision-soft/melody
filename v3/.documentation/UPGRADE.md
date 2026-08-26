@@ -1546,6 +1546,38 @@ func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Durati
 }
 ```
 
+### Behavioural: bunorm's diagnostic routing follows the LATEST logger, not the first
+
+**What changed.** [`bunorm.RouteDiagnostics`](../../integrations/bunorm/v3/diagnostics.go) still sets bun's package-level logger exactly once — it is one variable for the whole process — but what it sets is now a forwarder onto a destination every call REPLACES. The destination is what decides where a record goes, so the latest routing wins. A typed nil logger is refused alongside a nil one. [`bunorm.ResetDiagnostics`](../../integrations/bunorm/v3/diagnostics.go) hands the channel back to standard error, and [`ManagerRegistry.Close`](../../integrations/bunorm/v3/manager_registry.go) calls it.
+
+**Symptom.** In a process that routes more than once — a test binary that builds and closes an application repeatedly, an application whose database registry is wired before its own logger exists — bun's diagnostics now arrive at the logger of the CURRENT lifecycle rather than the first one's. Code that relied on first-wins to pin the channel to a logger of its own choosing no longer pins it. After a registry closes, the records go to standard error until something routes again.
+
+**Remedy.** Route last, or route again after whatever else routes. A host process that wants bun's channel for itself takes it back with `ResetDiagnostics` and then sets its own `bun.SetLogger`.
+
+### Behavioural: `ManagerRegistry.Close` waits for the opens still in flight
+
+**What changed.** [`ManagerRegistry.Close`](../../integrations/bunorm/v3/manager_registry.go) publishes its refusal and tears the memoized pools down as before, and then WAITS for the opens — ordinary and migration alike — that were in flight when the refusal was published.
+
+**Symptom.** `Close` can now block for as long as a dial started before it takes to finish. It never leaked before either: such an open ends its own freshly opened database against the closed flag. What changes is the answer's meaning — `Close` returning now means the teardown is over, where it used to mean the teardown of everything already memoized was over while a dial was still in the air, and a process exiting on that answer left the connection outstanding for a server-side timeout to reap.
+
+**Remedy.** Build the registry with [`NewManagerRegistryWithContext`](../../integrations/bunorm/v3/manager_registry.go) and cancel that context as part of the shutdown: the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Without a context there is nothing to cancel, which is the case the wait exists for.
+
+### Behavioural: the retry backoff has a floor, and a constant multiplier no longer costs the square
+
+**What changed.** Both dialect providers ([`mysql`](../../integrations/bunorm/mysql/v3/provider.go), [`pgsql`](../../integrations/bunorm/pgsql/v3/provider.go)) floor the initial delay AND the ceiling at one millisecond, and compute the growth in closed form instead of walking it once per attempt already made.
+
+**Symptom.** A `RetryConfig` asking for a sub-millisecond `InitialDelay` or `MaxDelay` now waits a millisecond. The guards only ever refused a non-positive value, so one nanosecond was the smallest thing that could be configured — a wait shorter than the dial it separates, which is the re-dial storm those guards exist to prevent, reached through the door they left open. Separately, a `BackoffMultiplier` of exactly 1 — a valid constant backoff — never left the growth walk early, so a large `MaxAttempts` paid O(attempt²) for a delay that never moved.
+
+**Remedy.** None for any configuration that was backing off at all: the delays a sane configuration produces are unchanged, and the closed form answers the same values the walk did. A configuration that deliberately wanted sub-millisecond re-dials has to say so some other way — this package will not produce one.
+
+### Behavioural: the migration commands end the dedicated migration connection
+
+**What changed.** Every command in [`bunorm/migrate`](../../integrations/bunorm/migrate/v3) releases the dedicated migration connection on its way out, through the registry's new `CloseMigrationDatabase`. `db:create` additionally finishes bun's file write atomically — temporary neighbour, fsync, rename, directory fsync.
+
+**Symptom.** A second migration command in the same process dials a fresh migration connection instead of reusing the memoized one, so a process that runs several of them pays one dial each. That connection deliberately lifts the driver's read and write deadlines and recycles nothing, and it used to live until the registry itself closed — so a migration run at the boot of a process that then serves requests kept a deadline-less connection open for that process's whole life. A provider offering no migration capability ran on the ordinary pool, which belongs to the application and is untouched.
+
+**Remedy.** None. To keep one migration connection across several commands deliberately, call `MigrationDatabase` yourself and hold the handle; the registry's `Close` remains the net underneath.
+
 ## v3.0.0
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version. The entry below is the one rewrite that does not compile afterwards: v1 and v2 keep the identifiers, v3 has never carried them.

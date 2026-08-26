@@ -46,10 +46,11 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return err
     }
 
-    db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
+    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
         return dbErr
     }
+    defer releaseDatabase()
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {
@@ -59,6 +60,13 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
     files, createErr := migrator.CreateGoMigration(runtimeInstance.Context(), migrationName)
     if nil != createErr {
         return createErr
+    }
+
+    /* bun wrote that file with a single os.WriteFile, which is not atomic and not durable: the same content is written again here into a temporary neighbour, fsynced, renamed over it and the directory fsynced, so a command that reports success has left a whole file behind rather than one a crash could have truncated into a Go source that does not compile. The path and the content are bun's own, taken from what it just returned. */
+    if nil != files && "" != files.Path {
+        if finishErr := finishFileAtomically(files.Path, []byte(files.Content)); nil != finishErr {
+            return finishErr
+        }
     }
 
     outputInstance.printSuccess("migration file created")
