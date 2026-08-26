@@ -791,6 +791,16 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Spell the name out; the replacement is a rename, signature-identical. The templates have read `CrontabForbiddenCharacters` since the aliases were deprecated, so nothing behavioural changes.
 
+### Cron: the shared-flag-instance refusal is removed
+
+**What changed.** `NewRunnerCommand` no longer refuses a command whose `Flags()` returns the same flag instances on every call, and the sentinel `ErrSharedRunnerCommandFlags` is gone from the cron binding.
+
+The refusal existed because the flag types were the parsing engine's own — `clicontract.Flag` was a type alias of `urfave/cli/v3` — and the runner handed each due command's own flag instances straight to the engine, which writes parse state into them. Two invocations of one entry overlapping in the same minute then raced on that state, so a command memoizing its flags was a wiring error worth failing the boot for. Since the cli contract became melody's own, a command declares melody-owned flags and `cli.DispatchCommand` builds the engine's flags fresh from each `Definition()` on every dispatch. The command's instances never reach the engine, nothing writes into them, and the refusal guards a hazard this major no longer has.
+
+**Symptom.** Code naming `ErrSharedRunnerCommandFlags` stops compiling with an undefined-identifier error. A configuration that was refused at construction — a scheduled command whose `Flags()` memoizes — now boots and runs.
+
+**Remedy.** Drop the `errors.Is` branch; there is no failure left for it to match. A `Flags()` that memoizes needs no rewrite on this major, and one that already builds fresh instances per call keeps working unchanged. On v1 and v2 the refusal and the hazard both remain.
+
 ### Cron: the generated k8s manifests open with the ownership marker
 
 **What changed.** Every file the builtin `k8s` template renders starts with three comment lines carrying `# owned by melody:cron:generate`, the same marker the crontab dialects carry in their header block, and the template renders the marker header alone — demanding no container image — when it has no entries. That is what lets `--prune` reconcile a k8s output directory: the sweep empties only a file whose first bytes prove this generator wrote it.

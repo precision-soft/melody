@@ -31,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Removed
 
+- `runner_command.go`, `errors.go` — the shared-flag-instance refusal and its sentinel `ErrSharedRunnerCommandFlags`. `NewRunnerCommand` refused a command whose `Flags()` returned the same instances on every call because the flag types were the parsing engine's own and the runner handed those very instances to it, which writes parse state into them: two invocations of one entry overlapping in a minute raced on that state. Since the cli contract became melody's own, `cli.DispatchCommand` builds the engine's flags fresh from each `Definition()` on every dispatch, so the command's instances never reach the engine and the refusal guards a hazard this major no longer has — a guard that prevents nothing reads as protection that is not there. **Breaking** at compile time for a caller naming the sentinel, and at boot in the permissive direction: a configuration refused until now boots and runs. The frozen majors keep both the refusal and the hazard
+
 - `validation.go` — the three deprecated abbreviated aliases: `ForbiddenChar` (use `ForbiddenCharacter`), `CrontabForbiddenChars` (use `CrontabForbiddenCharacters`) and `ValidateNoForbiddenChars` (use `ValidateNoForbiddenCharacters`). Every caller in the repository already reads the spelled-out forms. **Breaking** at compile time for a caller still naming an alias
 
 ### Fixed

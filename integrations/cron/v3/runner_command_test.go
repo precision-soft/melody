@@ -1127,60 +1127,6 @@ func TestRunnerCommand_DuplicateCommandNamePanicsAtConstruction(t *testing.T) {
     NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:top"), newRecordingCommand("job:top"))
 }
 
-type memoizedFlagsCommand struct {
-    commandName string
-    flags       []clicontract.Flag
-}
-
-func newMemoizedFlagsCommand(name string) *memoizedFlagsCommand {
-    return &memoizedFlagsCommand{
-        commandName: name,
-        flags: []clicontract.Flag{
-            &clicontract.IntFlag{Name: probeFlagNameBatchSize, Value: 100},
-        },
-    }
-}
-
-func (instance *memoizedFlagsCommand) Name() string {
-    return instance.commandName
-}
-
-func (instance *memoizedFlagsCommand) Description() string {
-    return "memoized flags command"
-}
-
-func (instance *memoizedFlagsCommand) Flags() []clicontract.Flag {
-    return instance.flags
-}
-
-func (instance *memoizedFlagsCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
-    return nil
-}
-
-/* the cli library writes parse state into the flag instances, so a command handing the runner the same instances on every Flags() call would make overlapping invocations race on them; the wiring error surfaces at construction. */
-func TestRunnerCommand_SharedFlagInstancesPanicAtConstruction(t *testing.T) {
-    defer func() {
-        recovered := recover()
-        if nil == recovered {
-            t.Fatal("expected a panic for a command returning shared flag instances")
-        }
-
-        recoveredErr, isError := recovered.(error)
-        if false == isError {
-            t.Fatalf("expected the panic value to be an error, got %T", recovered)
-        }
-
-        if false == errors.Is(recoveredErr, ErrSharedRunnerCommandFlags) {
-            t.Fatalf("expected ErrSharedRunnerCommandFlags, got %v", recoveredErr)
-        }
-    }()
-
-    configuration := NewConfiguration().
-        Schedule("job:memoized", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
-
-    NewRunnerCommand(configuration, RunnerDialectCrontab, newMemoizedFlagsCommand("job:memoized"))
-}
-
 /* an entry naming a system user stays runnable in-process — the one Configuration keeps driving both the generated manifests and the runner — and the runner records the affected command for the warning Run logs. */
 func TestRunnerCommand_UserEntryIsAcceptedAndRecordedForTheWarning(t *testing.T) {
     job := newRecordingCommand("job:user")
