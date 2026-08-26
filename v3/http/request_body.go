@@ -18,10 +18,7 @@ func (instance *Request) BindJson(target any) error {
     return bindJsonBody(instance, target)
 }
 
-/* bindJsonBody is the one json-reading half of the framework: the request method above and the typed
-   JsonHandler both answer through it, so the configured body limit with its 413, the decoder's own
-   diagnosis kept as the refusal's cause and the empty-body refusal are read once rather than written
-   twice and drifted apart. */
+/* bindJsonBody is the one json-reading half of the framework: the request method above and the typed JsonHandler both answer through it, so the configured body limit with its 413, the decoder's own diagnosis kept as the refusal's cause and the empty-body refusal are read once rather than written twice and drifted apart. */
 func bindJsonBody(instance httpcontract.Request, target any) error {
     if nil == target {
         return exception.NewError("bind target is nil", map[string]any{}, nil)
@@ -77,12 +74,7 @@ func (instance *Request) BindJsonAndValidate(target any) error {
     return validateBoundBody(instance.runtimeInstance, target)
 }
 
-/* validateBoundBody is the one validation half every json-binding door answers through — the request
-   method above and the typed JsonHandler alike. Held in two places it drifted: the typed handler
-   flattened the collection into the exception's message, so its client read a joined sentence where
-   the binding method's client read the validationErrors array, and the listener's rule-wiring
-   classification — which reads exactly that context key — never fired for it, leaving a route broken
-   by a struct-tag typo recorded at warning among the users who mistyped their address. */
+/* validateBoundBody is the one validation half every json-binding door answers through — the request method above and the typed JsonHandler alike. Held in two places it drifted: the typed handler flattened the collection into the exception's message, so its client read a joined sentence where the binding method's client read the validationErrors array, and the listener's rule-wiring classification — which reads exactly that context key — never fired for it, leaving a route broken by a struct-tag typo recorded at warning among the users who mistyped their address. */
 func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) error {
     validatorInstance := validation.ValidatorMustFromContainer(runtimeInstance.Container())
 

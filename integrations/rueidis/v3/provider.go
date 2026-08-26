@@ -49,7 +49,7 @@ func WithRetryConfig(retryConfig *RetryConfig) ProviderOption {
 
 /* Provider opens the redis client a set of connection values names. It holds only client, timeout and retry tuning: the address, user and password reach it through ConnectionParameters at open time.
 
-Because it is handed the values rather than the configuration keys they came from, this provider knows no configuration key and names no credential of its own — so it carries no marking door, and neither does this package. Arming the framework's credential redaction is the application's call, through the parameter registrar's own RegisterSecretParameter for a parameter the application declares, or MarkParameterSecret for one melody registered from the .env artifacts. The party that resolved the values is the party that knows the keys, and the mark propagates to every parameter whose template reads the secret, so a template assembled from the credential is redacted with it and debug:parameters masks the password in a process that never dials. The frozen majors carry Provider.SecretParameterNames and a package-level MarkSecretParameters instead, because there the provider is told the parameter names and is therefore the component that knows them; on this major that door would only say a second time what the framework already says. */
+   Because it is handed the values rather than the configuration keys they came from, this provider knows no configuration key and names no credential of its own — so it carries no marking door, and neither does this package. Arming the framework's credential redaction is the application's call, through the parameter registrar's own RegisterSecretParameter for a parameter the application declares, or MarkParameterSecret for one melody registered from the .env artifacts. The party that resolved the values is the party that knows the keys, and the mark propagates to every parameter whose template reads the secret, so a template assembled from the credential is redacted with it and debug:parameters masks the password in a process that never dials. The frozen majors carry Provider.SecretParameterNames and a package-level MarkSecretParameters instead, because there the provider is told the parameter names and is therefore the component that knows them; on this major that door would only say a second time what the framework already says. */
 type Provider struct {
     clientConfig  *ClientConfig
     timeoutConfig *TimeoutConfig
@@ -178,9 +178,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
     defaults := DefaultRetryConfig()
 
-    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes
-       time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing
-       the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
+    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
     initialDelay := instance.retryConfig.InitialDelay
     if 0 >= initialDelay {
         initialDelay = defaults.InitialDelay
@@ -191,17 +189,13 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
         maxDelay = defaults.MaxDelay
     }
 
-    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN
-       multiplier through, poison the float-space growth below and collapse the backoff into an immediate
-       re-dial storm once the NaN converts to a negative duration. */
+    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through, poison the float-space growth below and collapse the backoff into an immediate re-dial storm once the NaN converts to a negative duration. */
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
     if false == (backoffMultiplier >= 1) {
         backoffMultiplier = defaults.BackoffMultiplier
     }
 
-    /* grow the delay in float space and cap at maxDelay as soon as it is reached, before converting to
-       time.Duration — otherwise a large attempt count overflows the float64->int64 conversion to a negative
-       duration, which slips past the `> maxDelay` cap and collapses the backoff to zero (a re-dial storm). */
+    /* grow the delay in float space and cap at maxDelay as soon as it is reached, before converting to time.Duration — otherwise a large attempt count overflows the float64->int64 conversion to a negative duration, which slips past the `> maxDelay` cap and collapses the backoff to zero (a re-dial storm). */
     maxDelayFloat := float64(maxDelay)
     delay := float64(initialDelay)
 
@@ -291,7 +285,7 @@ func (instance *Provider) open(params ConnectionParameters) (rueidis.Client, err
 
 /* connectionContext is the diagnostic shape of every refusal this provider writes, and it is assembled here rather than inside ConnectionParameters.SafeContext because only the provider knows what the safe context cannot: the deadlines that actually governed the attempt, which live in the client and timeout configurations the connection values know nothing about. It is the shape the bunorm siblings' toConnectionContext already writes for a failed dial. The password is never part of it: the safe context decides what may be rendered.
 
-Unlike the frozen majors, this one names no configuration parameter in the context. Those majors read the address and the user from parameters they were told the names of, and named them here so the operator had a key to go and set; this major is handed the values, so there is no key to name and inventing one would be a guess. */
+   Unlike the frozen majors, this one names no configuration parameter in the context. Those majors read the address and the user from parameters they were told the names of, and named them here so the operator had a key to go and set; this major is handed the values, so there is no key to name and inventing one would be a guess. */
 func (instance *Provider) connectionContext(
     params ConnectionParameters,
     clientConfig *ClientConfig,

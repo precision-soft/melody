@@ -15,9 +15,7 @@ import (
     bun "github.com/uptrace/bun"
 )
 
-/* Enrollment shows how to persist a user's TOTP second factor with the secret and
- * recovery codes encrypted at rest through bunorm's EncryptedString. The recovery
- * codes are stored as an encrypted JSON array. */
+/* Enrollment shows how to persist a user's TOTP second factor with the secret and recovery codes encrypted at rest through bunorm's EncryptedString. The recovery codes are stored as an encrypted JSON array. */
 type Enrollment struct {
     bun.BaseModel `bun:"table:melody_example_v3_two_factor"`
 
@@ -35,9 +33,7 @@ type Store struct {
     database *bun.DB
 }
 
-/* Enroll generates a fresh secret and recovery codes for a user, persists them
- * encrypted, and returns the secret, the otpauth URI to render as a QR code, and the
- * plaintext recovery codes to show the user once. */
+/* Enroll generates a fresh secret and recovery codes for a user, persists them encrypted, and returns the secret, the otpauth URI to render as a QR code, and the plaintext recovery codes to show the user once. */
 func (instance *Store) Enroll(
     ctx context.Context,
     userIdentifier string,
@@ -74,8 +70,7 @@ func (instance *Store) Enroll(
     return secret, uri, recoveryCodes, nil
 }
 
-/* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the
- * stored secret transparently through EncryptedString. */
+/* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the stored secret transparently through EncryptedString. */
 func (instance *Store) FindTotpSecret(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
@@ -88,9 +83,7 @@ func (instance *Store) FindTotpSecret(
         Limit(1).
         Scan(runtimeInstance.Context())
     if nil != selectErr {
-        /* a missing row means the user has no second factor; any other error must
-         * fail closed (be returned) rather than be mistaken for "not enrolled", which
-         * would silently let primary authentication stand on its own */
+        /* a missing row means the user has no second factor; any other error must fail closed (be returned) rather than be mistaken for "not enrolled", which would silently let primary authentication stand on its own */
         if true == errors.Is(selectErr, sql.ErrNoRows) {
             return "", false, nil
         }
@@ -101,12 +94,7 @@ func (instance *Store) FindTotpSecret(
     return string(enrollment.Secret), true, nil
 }
 
-/* RedeemRecoveryCode implements securitycontract.TwoFactorRecoveryStore. It atomically
- * consumes a single-use recovery code: inside a transaction it loads the enrollment row FOR
- * UPDATE, decrypts and unmarshals the stored codes, and — on a constant-time match — removes
- * the code, re-encrypts the remaining set and writes it back, so the same code can never be
- * redeemed twice even under concurrent requests. It reports redeemed=false (with a nil error)
- * when the user has no enrollment or the code is not one of the currently-unused codes. */
+/* RedeemRecoveryCode implements securitycontract.TwoFactorRecoveryStore. It atomically consumes a single-use recovery code: inside a transaction it loads the enrollment row FOR UPDATE, decrypts and unmarshals the stored codes, and — on a constant-time match — removes the code, re-encrypts the remaining set and writes it back, so the same code can never be redeemed twice even under concurrent requests. It reports redeemed=false (with a nil error) when the user has no enrollment or the code is not one of the currently-unused codes. */
 func (instance *Store) RedeemRecoveryCode(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
@@ -131,8 +119,7 @@ func (instance *Store) RedeemRecoveryCode(
                 Limit(1).
                 Scan(ctx)
             if nil != selectErr {
-                /* a missing row means the user has no second factor; treat it as
-                 * nothing-to-redeem rather than an error, matching FindTotpSecret */
+                /* a missing row means the user has no second factor; treat it as nothing-to-redeem rather than an error, matching FindTotpSecret */
                 if true == errors.Is(selectErr, sql.ErrNoRows) {
                     return nil
                 }
@@ -147,8 +134,7 @@ func (instance *Store) RedeemRecoveryCode(
 
             remaining := make([]string, 0, len(codes))
             for _, candidate := range codes {
-                /* constant-time compare so a redemption attempt does not leak, through
-                 * timing, how much of a recovery code matched */
+                /* constant-time compare so a redemption attempt does not leak, through timing, how much of a recovery code matched */
                 if 1 == subtle.ConstantTimeCompare([]byte(candidate), []byte(code)) {
                     redeemed = true
 

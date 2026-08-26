@@ -65,9 +65,7 @@ func (instance *refreshFailingLock) Refresh(runtimeInstance runtimecontract.Runt
     return exception.NewError("lease lost", nil, nil)
 }
 
-/* contextCancelledAcquireLock stands in for a backend round trip cut short by a SIGTERM: Acquire fails
-with the runtime cancellation wrapped in a store error, exactly as a real locker reports an in-flight
-Acquire when the context it was called with is cancelled underneath it. */
+/* contextCancelledAcquireLock stands in for a backend round trip cut short by a SIGTERM: Acquire fails with the runtime cancellation wrapped in a store error, exactly as a real locker reports an in-flight Acquire when the context it was called with is cancelled underneath it. */
 type contextCancelledAcquireLocker struct{}
 
 func (instance *contextCancelledAcquireLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
@@ -241,8 +239,7 @@ func TestRunExclusive_ReleasesEvenWhenCallerContextIsCancelled(t *testing.T) {
     }
 }
 
-/* recordingRefreshLocker captures the ttl each Refresh is asked to write, so a test can assert the lease
-margin the refresher gives a lease-style backend. */
+/* recordingRefreshLocker captures the ttl each Refresh is asked to write, so a test can assert the lease margin the refresher gives a lease-style backend. */
 type recordingRefreshLocker struct {
     inner      lockcontract.Locker
     refreshTtl chan time.Duration
@@ -274,8 +271,7 @@ func (instance *recordingRefreshLock) Refresh(runtimeInstance runtimecontract.Ru
     return instance.inner.Refresh(runtimeInstance, ttl)
 }
 
-/* blockingRefreshLock blocks inside Refresh until its runtime context is cancelled, standing in for a
-backend whose connection has been blackholed by a network partition. */
+/* blockingRefreshLock blocks inside Refresh until its runtime context is cancelled, standing in for a backend whose connection has been blackholed by a network partition. */
 type blockingRefreshLocker struct {
     entered chan struct{}
 }
@@ -334,8 +330,7 @@ func TestResolveRefreshSchedule(t *testing.T) {
                 t.Fatal("a non-positive interval would panic time.NewTicker")
             }
 
-            /* a ttl below the floor is a misconfiguration the lock cannot rescue — the lease expires before
-               any renewal can land — but it must not panic; every sane ttl renews with slack to spare */
+            /* a ttl below the floor is a misconfiguration the lock cannot rescue — the lease expires before any renewal can land — but it must not panic; every sane ttl renews with slack to spare */
             if minimumRefreshInterval <= testCase.ttl || 0 >= testCase.ttl {
                 if 0 >= refreshTtl-interval {
                     t.Fatalf("the refresh ttl %s gives no margin over the %s cadence", refreshTtl, interval)

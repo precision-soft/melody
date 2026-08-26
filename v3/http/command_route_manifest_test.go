@@ -91,8 +91,7 @@ func runRouteManifestCommand(
     return output.String(), runErr
 }
 
-/* the documented invocation is relative; anchored at whatever directory the process happened to start
-   in, the manifest landed in a different tree per launcher while the command reported success */
+/* the documented invocation is relative; anchored at whatever directory the process happened to start in, the manifest landed in a different tree per launcher while the command reported success */
 func TestRouteManifestCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
@@ -146,8 +145,7 @@ func TestRouteManifestCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     }
 }
 
-/* an unrecognised zone matched nothing, so the command wrote an empty manifest over the good one and
-   reported success; the frontend then failed to resolve every route it asked for, with the build green */
+/* an unrecognised zone matched nothing, so the command wrote an empty manifest over the good one and reported success; the frontend then failed to resolve every route it asked for, with the build green */
 func TestRouteManifestCommand_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
@@ -175,8 +173,7 @@ func TestRouteManifestCommand_RefusesAZoneThatIsNotDeclared(t *testing.T) {
 func TestRouteManifestCommand_PrintsTheManifestToTheCommandWriterWhenOutIsEmpty(t *testing.T) {
     runtimeInstance := newManifestCommandRuntime(t, t.TempDir())
 
-    /* a raw print escapes the writer the cli layer redirects, and in json mode it splices the document
-       into the machine-readable stream from the first byte */
+    /* a raw print escapes the writer the cli layer redirects, and in json mode it splices the document into the machine-readable stream from the first byte */
     output, runErr := runRouteManifestCommand(t, runtimeInstance)
     if nil != runErr {
         t.Fatalf("run: %v", runErr)

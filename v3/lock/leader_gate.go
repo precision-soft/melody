@@ -391,11 +391,11 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
 
 /* refreshFailureEndsTheTerm answers the one question a failed renewal poses: is the lock still ours to hold? Two things say no, and they answer different failures.
 
-The lease clock is the authority. Until the lease this gate last wrote lapses, the store refuses the lock to everyone else whether or not this process can still reach it — so a renewal that failed while the lease runs has cost nothing yet, and leaving on it gives up availability for no exclusivity gained.
+   The lease clock is the authority. Until the lease this gate last wrote lapses, the store refuses the lock to everyone else whether or not this process can still reach it — so a renewal that failed while the lease runs has cost nothing yet, and leaving on it gives up availability for no exclusivity gained.
 
-The consecutive-failure threshold covers what the lease clock cannot see: a gate whose cadence is far denser than its lease would otherwise keep working for the whole lease against a store that has plainly gone. At the default cadence the threshold is unreachable and the lease decides.
+   The consecutive-failure threshold covers what the lease clock cannot see: a gate whose cadence is far denser than its lease would otherwise keep working for the whole lease against a store that has plainly gone. At the default cadence the threshold is unreachable and the lease decides.
 
-In session mode (a non-positive ttl) there is no lease and no lease clock: the lock lives as long as the backend session does, so only the threshold decides. Consulting the lease clock there would read a deadline that was never written — the zero offset dates to the gate's construction, so the FIRST failed probe of every term would demote immediately, overriding the documented three-failure tolerance and even a negative never-on-count threshold. */
+   In session mode (a non-positive ttl) there is no lease and no lease clock: the lock lives as long as the backend session does, so only the threshold decides. Consulting the lease clock there would read a deadline that was never written — the zero offset dates to the gate's construction, so the FIRST failed probe of every term would demote immediately, overriding the documented three-failure tolerance and even a negative never-on-count threshold. */
 func (instance *LeaderGate) refreshFailureEndsTheTerm(consecutiveFailureCount int) bool {
     if 0 < instance.ttl {
         leaseExpiry := instance.timeAnchor.Add(time.Duration(instance.leaseExpiry.Load()))

@@ -624,7 +624,7 @@ func (instance *HttpClient) Close() error {
 
 /* buildUrl resolves the caller's target against the configured base url. The base url is a PREFIX here, deliberately unlike RFC 3986 reference resolution — which Symfony and Guzzle implement, and where an absolute path replaces the base path entirely, so a base of "https://host/v1" and a target of "/users" would name "https://host/users". An empty target names the base resource itself, with nothing appended.
 
-An absolute target names its own host, so the base url does not apply to it. When the client HAS a base url, a target leaving that origin is refused instead: the headers and the authorization this client was configured with would otherwise travel to a host the target string chose — the very leak the redirect policy exists to stop, one hop earlier. A caller that talks to more than one origin builds a client without a base url. */
+   An absolute target names its own host, so the base url does not apply to it. When the client HAS a base url, a target leaving that origin is refused instead: the headers and the authorization this client was configured with would otherwise travel to a host the target string chose — the very leak the redirect policy exists to stop, one hop earlier. A caller that talks to more than one origin builds a client without a base url. */
 func (instance *HttpClient) buildUrl(urlString string, query map[string]string) (string, error) {
     instance.mutex.RLock()
     baseUrl := instance.baseUrl

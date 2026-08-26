@@ -836,9 +836,7 @@ func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
     }
 }
 
-/* a pattern that names one parameter twice is ambiguous by construction: the extraction writes both
-   segments under one map key, so the handler can only ever read one of the two values and cannot tell
-   which, and the openapi document emitted for it is spec-invalid on duplicate path parameters. */
+/* a pattern that names one parameter twice is ambiguous by construction: the extraction writes both segments under one map key, so the handler can only ever read one of the two values and cannot tell which, and the openapi document emitted for it is spec-invalid on duplicate path parameters. */
 func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,

@@ -744,8 +744,7 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
     }
 }
 
-/* closeTrackingReader stands in for a file-backed response body (FileResponse / static ServeReader): the
-only thing that matters here is whether the kernel closed the descriptor. */
+/* closeTrackingReader stands in for a file-backed response body (FileResponse / static ServeReader): the only thing that matters here is whether the kernel closed the descriptor. */
 type closeTrackingReader struct {
     closed atomic.Bool
 }
@@ -759,10 +758,7 @@ func (instance *closeTrackingReader) Close() error {
     return nil
 }
 
-/* panicOnceSessionStorage blows up on its first Save, the way a database driver does on a lost connection.
-writeResponse persists the session before WriteToHttpResponseWriter registers the body's deferred Close, so
-that panic unwinds with the response's descriptor still open. It succeeds afterwards so the kernel's recovery
-path can finish and write the error response. */
+/* panicOnceSessionStorage blows up on its first Save, the way a database driver does on a lost connection. writeResponse persists the session before WriteToHttpResponseWriter registers the body's deferred Close, so that panic unwinds with the response's descriptor still open. It succeeds afterwards so the kernel's recovery path can finish and write the error response. */
 type panicOnceSessionStorage struct {
     panicked atomic.Bool
 }
@@ -1364,8 +1360,7 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
     }
 }
 
-/* errorContextRecordingLogger captures every Error call with its context, so a test can assert not just
-that something was logged but what the record carries. */
+/* errorContextRecordingLogger captures every Error call with its context, so a test can assert not just that something was logged but what the record carries. */
 type errorContextRecordingLogger struct {
     mutex         sync.Mutex
     errorMessages []string
@@ -1931,8 +1926,7 @@ func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkippe
     }
 }
 
-/* noMatchRouter reports "no match" the way the contract permits and the framework's own router does not: a
-nil result beside the false flag. */
+/* noMatchRouter reports "no match" the way the contract permits and the framework's own router does not: a nil result beside the false flag. */
 type noMatchRouter struct {
     *Router
 }
@@ -1956,10 +1950,7 @@ func TestKernel_ServeHttpAnswersARouterThatReportsNoMatchWithANilResult(t *testi
     }
 }
 
-/* The terminate dispatch is the one in ServeHttp with no recovery above it — its defer is registered before
-the recovery defer, so it runs after that one has already fired. It needs none: the dispatcher recovers a
-listener panic per listener and hands it back as an error. This pins that division, because a recovery added
-here would swallow the one panic the dispatcher re-raises on purpose, a deliberate exit. */
+/* The terminate dispatch is the one in ServeHttp with no recovery above it — its defer is registered before the recovery defer, so it runs after that one has already fired. It needs none: the dispatcher recovers a listener panic per listener and hands it back as an error. This pins that division, because a recovery added here would swallow the one panic the dispatcher re-raises on purpose, a deliberate exit. */
 func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1992,10 +1983,7 @@ func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.
     }
 }
 
-/* The listener is what the assertion turns on, not the status: writeResponse answers 204 for an absent
-response whichever way it became absent, so a status alone cannot tell the kernel's door from the writer's
-fallback. A listener is the only thing that decorates a response, and it must see the empty 204 the door
-built rather than the nothing a typed nil would have carried this far. */
+/* The listener is what the assertion turns on, not the status: writeResponse answers 204 for an absent response whichever way it became absent, so a status alone cannot tell the kernel's door from the writer's fallback. A listener is the only thing that decorates a response, and it must see the empty 204 the door built rather than the nothing a typed nil would have carried this far. */
 func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2043,10 +2031,7 @@ func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault
     }
 }
 
-/* explodingError is what an application error looks like when its own rendering is broken. It is the input
-that reaches the window: a listener cannot panic out of a dispatch — the dispatcher recovers it per listener
-— so the only thing left between the chain returning and the response being published is the log context the
-kernel builds from the error, which reads it by calling Error(). */
+/* explodingError is what an application error looks like when its own rendering is broken. It is the input that reaches the window: a listener cannot panic out of a dispatch — the dispatcher recovers it per listener — so the only thing left between the chain returning and the response being published is the log context the kernel builds from the error, which reads it by calling Error(). */
 type explodingError struct{}
 
 func (instance *explodingError) Error() string {
@@ -2584,15 +2569,7 @@ func (instance *kernelHandlerErrorCaptureLogger) Error(message string, context l
     instance.errorMessages = append(instance.errorMessages, message)
 }
 
-/*
-TestLogHandlerError_ARuleWiringFaultIsFiledAtError pins the classification on
-the writer that runs FIRST. A validation exception a handler returns is filed
-here and MARKED here, so the exception listener — which carries the same rule
-of its own — only attaches coordinates to it and never reaches its error
-branch. A struct tag naming a rule that does not exist refuses every request
-that route will ever serve, and it sat at warning among the users who mistyped
-their address.
-*/
+/* TestLogHandlerError_ARuleWiringFaultIsFiledAtError pins the classification on the writer that runs FIRST. A validation exception a handler returns is filed here and MARKED here, so the exception listener — which carries the same rule of its own — only attaches coordinates to it and never reaches its error branch. A struct tag naming a rule that does not exist refuses every request that route will ever serve, and it sat at warning among the users who mistyped their address. */
 func TestLogHandlerError_ARuleWiringFaultIsFiledAtError(t *testing.T) {
     capture := &kernelHandlerErrorCaptureLogger{Logger: logging.NewNopLogger()}
 
@@ -2714,8 +2691,7 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    /* the path folds to "/login", which the access-control matcher would authorize as a different
-       rule than the admin handler the router reaches; the kernel must refuse it before either runs */
+    /* the path folds to "/login", which the access-control matcher would authorize as a different rule than the admin handler the router reaches; the kernel must refuse it before either runs */
     request := httptest.NewRequest(nethttp.MethodGet, "/admin/x/../../login", nil)
     recorder := httptest.NewRecorder()
 
@@ -2790,10 +2766,7 @@ func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
     }
 }
 
-/* the abort sentinel suppresses the response, not the ownership of what it holds: the branch re-raised
-it ten lines before the in-flight response was captured and seventy before either close, so a deliberate
-abort over a file-backed response leaked the descriptor. invokeErrorHandlerSafely already refuses to
-honour the sentinel for exactly this reason, which is the contradiction this closes. */
+/* the abort sentinel suppresses the response, not the ownership of what it holds: the branch re-raised it ten lines before the in-flight response was captured and seventy before either close, so a deliberate abort over a file-backed response leaked the descriptor. invokeErrorHandlerSafely already refuses to honour the sentinel for exactly this reason, which is the contradiction this closes. */
 func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
@@ -2814,8 +2787,7 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
 
     kernel := NewKernel(router)
 
-    /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the
-       response the chain produced is held only by the recording shim */
+    /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the response the chain produced is held only by the recording shim */
     kernel.Use(func(next httpcontract.Handler) httpcontract.Handler {
         return func(
             runtimeInstance runtimecontract.Runtime,

@@ -1256,15 +1256,7 @@ func (instance *panickingCloseWithTextService) Close() error {
     panic("the drain buffer was nil")
 }
 
-/*
-TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack pins what an
-operator learns from the one boundary that contains a teardown panic: nothing
-above it sees the panic and nothing below it survives, so whatever the recorded
-failure drops is gone. An error-shaped panic value kept only as its stringified
-message collapsed to one line at the render boundary, taking the context map
-and the cause chain of the very error the Close raised with it, and the frames
-that ran existed only inside the recover.
-*/
+/* TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack pins what an operator learns from the one boundary that contains a teardown panic: nothing above it sees the panic and nothing below it survives, so whatever the recorded failure drops is gone. An error-shaped panic value kept only as its stringified message collapsed to one line at the render boundary, taking the context map and the cause chain of the very error the Close raised with it, and the frames that ran existed only inside the recover. */
 func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T) {
     panicCause := exception.NewError(
         "the socket was already gone",
@@ -1316,15 +1308,7 @@ func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(
     }
 }
 
-/*
-TestContainer_Close_ClosesTheEarliestCreatedServiceLast pins the tie-break the
-dependency graph leaves open. It used to be the node key descending — a string
-comparison nobody wrote — so a service resolved first at boot and used silently
-by everything afterwards, the logger being the case that matters, was closed in
-the middle of the teardown by nothing but its name. Whether a worker still had
-somewhere to report its drain came down to whether it sorted above or below its
-dependency: renaming app.worker to zz.worker was the whole difference.
-*/
+/* TestContainer_Close_ClosesTheEarliestCreatedServiceLast pins the tie-break the dependency graph leaves open. It used to be the node key descending — a string comparison nobody wrote — so a service resolved first at boot and used silently by everything afterwards, the logger being the case that matters, was closed in the middle of the teardown by nothing but its name. Whether a worker still had somewhere to report its drain came down to whether it sorted above or below its dependency: renaming app.worker to zz.worker was the whole difference. */
 func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
     for _, dependentName := range []string{"service.aaa.worker", "service.zzz.worker"} {
         serviceContainer := NewContainer()
@@ -1436,15 +1420,7 @@ func (instance *closeTimeResolvingService) Close() error {
     return nil
 }
 
-/*
-TestContainer_Close_AServiceStillResolvesDuringTheTeardown pins the first of the
-two closing states against the second. Refusing every resolution from the moment
-Close begins would take away the very thing closing the logger last exists to
-give: a worker reporting its drain resolves what it reports through, from inside
-its own Close. What is refused is a resolution made after the LAST close
-returned, which used to answer the instance found in the map — already closed —
-with a nil error.
-*/
+/* TestContainer_Close_AServiceStillResolvesDuringTheTeardown pins the first of the two closing states against the second. Refusing every resolution from the moment Close begins would take away the very thing closing the logger last exists to give: a worker reporting its drain resolves what it reports through, from inside its own Close. What is refused is a resolution made after the LAST close returned, which used to answer the instance found in the map — already closed — with a nil error. */
 func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1496,15 +1472,7 @@ func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     }
 }
 
-/*
-TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state.
-A resolution performed once the teardown is over was answered out of the maps —
-which the teardown has just emptied of meaning — so a caller holding a resolver
-received a handle to a service every Close in the process had already run on,
-with a nil error saying it was fine. The fast path is asked separately because a
-memoized instance never reaches the creation guard that refuses a closed
-container.
-*/
+/* TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state. A resolution performed once the teardown is over was answered out of the maps — which the teardown has just emptied of meaning — so a caller holding a resolver received a handle to a service every Close in the process had already run on, with a nil error saying it was fine. The fast path is asked separately because a memoized instance never reaches the creation guard that refuses a closed container. */
 func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
     serviceContainer := NewContainer()
 

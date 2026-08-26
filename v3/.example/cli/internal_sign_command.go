@@ -9,10 +9,7 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the
-/internal firewall. It signs with the same shared secret the firewall verifies against, so the printed
-header authenticates. The signed method/path/body must match the request exactly, so pass the same values
-to curl. */
+/* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the /internal firewall. It signs with the same shared secret the firewall verifies against, so the printed header authenticates. The signed method/path/body must match the request exactly, so pass the same values to curl. */
 func NewInternalSignCommand(signer *melodysecurity.HmacEnvelopeSigner) *InternalSignCommand {
     return &InternalSignCommand{signer: signer}
 }

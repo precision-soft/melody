@@ -845,9 +845,7 @@ func TestResolveTemplate_UnclosedParameterReferenceIsRefused(t *testing.T) {
         t.Fatalf("expected the malformed reference report, got: %v", resolveErr)
     }
 
-    /* the sentence alone does not say WHICH percent was refused: the trailing percent of this same
-    template opens no reference and, with the guard reading the flag the other way round, produces the
-    identical sentence — so the named reference is the observable that tells the two paths apart */
+    /* the sentence alone does not say WHICH percent was refused: the trailing percent of this same template opens no reference and, with the guard reading the flag the other way round, produces the identical sentence — so the named reference is the observable that tells the two paths apart */
     if "%app" != contextOfError(t, resolveErr)["reference"] {
         t.Fatalf("expected the name-shaped run to be the refused reference, got: %v", contextOfError(t, resolveErr)["reference"])
     }

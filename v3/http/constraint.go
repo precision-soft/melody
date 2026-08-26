@@ -31,18 +31,9 @@ func (instance *Requirement) Pattern() string {
     return instance.pattern
 }
 
-/* NewRequirements collects the declared requirements into the map a route option takes. It refuses
-   what it used to drop, because both drops failed OPEN: a requirement missing its pattern — a
-   constant that was never filled in, a pattern read from configuration that resolved to "" — left
-   the parameter with NO constraint at all, so a path segment the developer declared numeric matched
-   anything, and a name declared twice kept whichever entry the argument order happened to put last
-   while the other declaration vanished. The router refuses an uncompilable pattern by name at
-   registration; an absent one is the same class of mistake and is refused here, where the
-   declaration is.
+/* NewRequirements collects the declared requirements into the map a route option takes. It refuses what it used to drop, because both drops failed OPEN: a requirement missing its pattern — a constant that was never filled in, a pattern read from configuration that resolved to "" — left the parameter with NO constraint at all, so a path segment the developer declared numeric matched anything, and a name declared twice kept whichever entry the argument order happened to put last while the other declaration vanished. The router refuses an uncompilable pattern by name at registration; an absent one is the same class of mistake and is refused here, where the declaration is.
 
-   It takes the pointers the Require* helpers return: the helpers were unusable with the value form,
-   since every call site had to dereference them by hand for a signature that could just as well
-   accept what they hand back. */
+   It takes the pointers the Require* helpers return: the helpers were unusable with the value form, since every call site had to dereference them by hand for a signature that could just as well accept what they hand back. */
 func NewRequirements(requirements ...*Requirement) map[string]string {
     result := map[string]string{}
 

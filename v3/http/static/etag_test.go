@@ -99,9 +99,7 @@ func TestGenerateEtag_ChangesWithEitherTheSizeOrTheModificationTime(t *testing.T
     }
 }
 
-/* two rewrites within the same second that keep the same length must still produce different tags:
-at whole-second resolution they did not, so a deploy that swapped a bundle for one of the same size
-revalidated 304 and stayed served stale until its length or its second changed */
+/* two rewrites within the same second that keep the same length must still produce different tags: at whole-second resolution they did not, so a deploy that swapped a bundle for one of the same size revalidated 304 and stayed served stale until its length or its second changed */
 func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     earlier := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 100000000)}, false)
     later := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 900000000)}, false)

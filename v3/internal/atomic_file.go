@@ -8,10 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* RefuseNonJsonOutputTarget refuses to replace a file that is not a JSON document. Every command that
-   writes a generated json artifact replaces its target whole, so an existing file holding anything
-   else is someone's source a mistyped --out points at rather than a previous output of this command,
-   and overwriting it is not recoverable. */
+/* RefuseNonJsonOutputTarget refuses to replace a file that is not a JSON document. Every command that writes a generated json artifact replaces its target whole, so an existing file holding anything else is someone's source a mistyped --out points at rather than a previous output of this command, and overwriting it is not recoverable. */
 func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exception.Error {
     existingContent, readErr := os.ReadFile(outputPath)
     if nil != readErr && false == os.IsNotExist(readErr) {
@@ -45,10 +42,7 @@ func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exceptio
     )
 }
 
-/* WriteFileAtomically lands a generated artifact through a temp file and a rename, so a write that
-   dies partway — a full disk, a killed process — leaves the previous artifact intact instead of a torn
-   file published as the thing it describes. The parent directories are created, because a fresh
-   checkout has none of them and the raw open error names nothing. */
+/* WriteFileAtomically lands a generated artifact through a temp file and a rename, so a write that dies partway — a full disk, a killed process — leaves the previous artifact intact instead of a torn file published as the thing it describes. The parent directories are created, because a fresh checkout has none of them and the raw open error names nothing. */
 func WriteFileAtomically(outputPath string, payload []byte, artifactName string) *exception.Error {
     directoryPath := filepath.Dir(outputPath)
 

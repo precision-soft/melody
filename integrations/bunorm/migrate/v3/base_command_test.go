@@ -307,19 +307,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     }
 }
 
-/*
-TestNewMigrator_SqlMigrationExecFailureReachesTheCaller pins the verdict of the
-SQL migration path against the bun version this module requires. The path is
-bun's — a *migrate.Migrations filled by Discover — but melody builds the
-migrator over it and is the layer that prints the result, so a swallowed
-failure here is a green deploy over a schema that never changed. Under
-bun v1.2.16 the deferred conn.Close overwrote the exec failure with its own nil
-return, so Migrate answered nil, the command printed [success], exited 0 and
-marked the migration applied forever, which made the failure unrepeatable. The
-pin drives a .up.sql whose exec the driver refuses and requires the refusal to
-reach the caller, so a bump that reintroduces the swallow fails here rather
-than at three in the morning.
-*/
+/* TestNewMigrator_SqlMigrationExecFailureReachesTheCaller pins the verdict of the SQL migration path against the bun version this module requires. The path is bun's — a *migrate.Migrations filled by Discover — but melody builds the migrator over it and is the layer that prints the result, so a swallowed failure here is a green deploy over a schema that never changed. Under bun v1.2.16 the deferred conn.Close overwrote the exec failure with its own nil return, so Migrate answered nil, the command printed [success], exited 0 and marked the migration applied forever, which made the failure unrepeatable. The pin drives a .up.sql whose exec the driver refuses and requires the refusal to reach the caller, so a bump that reintroduces the swallow fails here rather than at three in the morning. */
 func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
     const migrationName = "20260101000001"
     const migrationStatement = "CREATE TABLE probe_three (id NOT_A_TYPE)"
@@ -390,19 +378,9 @@ func (instance *migrationCapableTestProvider) OpenForMigration(params bunorm.Con
 
 var _ bunorm.MigrationProvider = (*migrationCapableTestProvider)(nil)
 
-/*
-TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection pins the half
-of the door a command defers. The dedicated connection deliberately lifts the
-driver's read and write deadlines and recycles nothing, which is right for a DDL
-statement that runs for minutes and wrong for anything that then sits idle; the
-registry memoizes it until the registry itself closes, so a migration run at the
-boot of a process that goes on to serve requests used to leave a deadline-less
-connection open for the life of that process.
+/* TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection pins the half of the door a command defers. The dedicated connection deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle; the registry memoizes it until the registry itself closes, so a migration run at the boot of a process that goes on to serve requests used to leave a deadline-less connection open for the life of that process.
 
-The proof is that the NEXT resolution dials again: the memo is really gone, not
-merely marked. Counting the provider's migration opens says that where checking
-the connection's own state could not — the same pointer answers both times.
-*/
+   The proof is that the NEXT resolution dials again: the memo is really gone, not merely marked. Counting the provider's migration opens says that where checking the connection's own state could not — the same pointer answers both times. */
 func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()

@@ -34,11 +34,7 @@ type ManagerRegistry struct {
     closed             bool
 }
 
-/*
-   managerOpen tracks a single in-flight Provider.Open for one definition name so
-   that concurrent openers of the same name coalesce onto one attempt instead of
-   each dialing the database while holding the registry-wide lock.
-*/
+/* managerOpen tracks a single in-flight Provider.Open for one definition name so that concurrent openers of the same name coalesce onto one attempt instead of each dialing the database while holding the registry-wide lock. */
 type managerOpen struct {
     done      chan struct{}
     manager   *Manager
@@ -347,12 +343,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
 
     instance.lock.Unlock()
 
-    /*
-       Open the provider outside the registry-wide lock: dialing, pinging and any
-       uninterruptible retry sleeps of a down database must not serialize cache
-       hits for other managers or a concurrent Close. A failed open is never
-       memoized, so a later call retries.
-    */
+    /* Open the provider outside the registry-wide lock: dialing, pinging and any uninterruptible retry sleeps of a down database must not serialize cache hits for other managers or a concurrent Close. A failed open is never memoized, so a later call retries. */
 
     settled := false
     providerReturned := false
@@ -430,11 +421,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         }
 
         if true == instance.closed {
-            /*
-               Close ran while this open was in flight: it already iterated the manager
-               map without this entry, so memoizing the manager now would leak its
-               connection pool. Close the freshly opened database and refuse.
-            */
+            /* Close ran while this open was in flight: it already iterated the manager map without this entry, so memoizing the manager now would leak its connection pool. Close the freshly opened database and refuse. */
             _ = database.Close()
             pendingOpen.openError = ErrManagerRegistryClosed
 

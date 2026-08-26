@@ -10,7 +10,7 @@ const (
 
 /* NewWiringBindSet declares which packages melody:wiring:generate scans and how the scalar arguments of the constructors it finds are filled. Everything else a constructor asks for is resolved from the container by type, so only the values that cannot come from there are named here.
 
-The repository and service packages need no binds at all: every argument of their constructors is a service. They are scanned so that adding one is a matter of writing the constructor and regenerating, instead of also remembering to register it. */
+   The repository and service packages need no binds at all: every argument of their constructors is a service. They are scanned so that adding one is a matter of writing the constructor and regenerating, instead of also remembering to register it. */
 func NewWiringBindSet() *melodywiring.BindSet {
     bindSet := melodywiring.NewBindSet()
 

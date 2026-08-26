@@ -38,7 +38,7 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
 
 /* resolutionStack is the live chain of node keys one resolution is in the middle of building, held apart from the context so a provider's own view of the resolution can carry a different owner while still pushing and popping the one chain the cycle detection reads.
 
-types runs parallel to keys: the canonical type of a type node, nil for a name node. It lives inside the shared chain rather than beside it on the context, because the view handed to a provider shares the chain and the collection exclusion reads the two together — a type slice held per view would answer for a different depth than the keys it is indexed against. The exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
+   types runs parallel to keys: the canonical type of a type node, nil for a name node. It lives inside the shared chain rather than beside it on the context, because the view handed to a provider shares the chain and the collection exclusion reads the two together — a type slice held per view would answer for a different depth than the keys it is indexed against. The exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
 type resolutionStack struct {
     keys  []string
     types []reflect.Type
@@ -67,7 +67,7 @@ type resolverContext struct {
 
 /* childOwnedBy is the view of this resolution handed to the provider of one node: the same container, the same scope, the same resolution id and the same live stack, so cycle detection and the wait graph are unchanged, with the owning node written on it. A provider that keeps it and resolves through it after it has returned is then still recorded as depending on what it resolves.
 
-The suspension rides on the view rather than being set on the shared context and restored afterwards: the caller's own resolution continues above this frame and must keep seeing the scope, and a restore that runs at the wrong moment — after a panic unwound past it, say — would leave the wrong answer behind for everything further up. */
+   The suspension rides on the view rather than being set on the shared context and restored afterwards: the caller's own resolution continues above this frame and must keep seeing the scope, and a restore that runs at the wrong moment — after a panic unwound past it, say — would leave the wrong answer behind for everything further up. */
 func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended bool) *resolverContext {
     return &resolverContext{
         containerInstance: instance.containerInstance,

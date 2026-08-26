@@ -3040,15 +3040,7 @@ func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
     }
 }
 
-/*
-TestErrorDetailsOf_CarriesTheFailuresOwnContext pins the guard where it lives.
-The envelope's details and cause were nil on every failure alike, so the
-machine document — the one a deploy pipeline reads — was the single rendering
-that threw away what the error already carried. The rule is asserted here
-rather than through the command, because the generate failures reachable from
-the command carry no context of their own and would leave the rule
-unobservable: the guard would pass just as well emptied.
-*/
+/* TestErrorDetailsOf_CarriesTheFailuresOwnContext pins the guard where it lives. The envelope's details and cause were nil on every failure alike, so the machine document — the one a deploy pipeline reads — was the single rendering that threw away what the error already carried. The rule is asserted here rather than through the command, because the generate failures reachable from the command carry no context of their own and would leave the rule unobservable: the guard would pass just as well emptied. */
 func TestErrorDetailsOf_CarriesTheFailuresOwnContext(t *testing.T) {
     runErr := exception.NewError(
         "the cron manifest could not be renamed into place",
@@ -3163,7 +3155,7 @@ func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *t
 
 /* a run that fails part way through still names what it already did, on the text rendering as well as the json one. Emptying a destination is irreversible and the sweep hands back what it emptied beside its failure, so returning without printing left the operator of a broken deploy with manifests blanked and not one line saying which — neither a "pruned" line nor the "wrote" lines of the writes that had succeeded.
 
-It is driven through the report door rather than through a sweep made to fail, because what can still fail a sweep is now filesystem trivia: the candidates it will open are regular files only, and as the process that wrote them it can read them. The state is constructed instead of waited for. */
+   It is driven through the report door rather than through a sweep made to fail, because what can still fail a sweep is now filesystem trivia: the candidates it will open are regular files only, and as the process that wrote them it can read them. The state is constructed instead of waited for. */
 func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testing.T) {
     var stdout bytes.Buffer
     commandContext := &clicontract.CommandContext{Writer: &stdout}

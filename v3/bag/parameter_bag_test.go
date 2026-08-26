@@ -237,8 +237,7 @@ func TestParameterBag_AppendString_KeepsEveryConcurrentAppend(t *testing.T) {
     }
 }
 
-/* ParameterBag{} is a legal value a caller outside this package can declare, and writing into its nil
-map panicked inside the assignment rather than at a door the caller can see */
+/* ParameterBag{} is a legal value a caller outside this package can declare, and writing into its nil map panicked inside the assignment rather than at a door the caller can see */
 func TestParameterBag_SetAllocatesTheZeroValueMap(t *testing.T) {
     parameterBag := &ParameterBag{}
 

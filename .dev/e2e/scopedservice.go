@@ -11,20 +11,17 @@ import (
 
 const scopedServiceLabel = "scoped service"
 
-/* the journal table the v3 example writes its changes into, and the prefix of its redis write budget. Both are
-the application's own, read here from the outside. */
+/* the journal table the v3 example writes its changes into, and the prefix of its redis write budget. Both are the application's own, read here from the outside. */
 const (
     scopedServiceRateLimitKey   = "melody-example-v3:rate_limit:"
     scopedServiceProbeNameFirst = "e2e scoped trail probe one"
     scopedServiceProbeNameOther = "e2e scoped trail probe two"
 )
 
-/* scopedServiceProbeNames are the products this section writes. They are removed with everything the
-application recorded about them, because the example recycles a freed identifier into the next probe. */
+/* scopedServiceProbeNames are the products this section writes. They are removed with everything the application recorded about them, because the example recycles a freed identifier into the next probe. */
 var scopedServiceProbeNames = []string{scopedServiceProbeNameFirst, scopedServiceProbeNameOther}
 
-/* scopedJournalRow is one row of the application's journal, read through the harness's own connection rather
-than through any route the application serves. */
+/* scopedJournalRow is one row of the application's journal, read through the harness's own connection rather than through any route the application serves. */
 type scopedJournalRow struct {
     RequestId string
     Actor     string
@@ -82,8 +79,7 @@ func runScopedServiceCheck(baseUrl string, mysqlDsn string, redisAddress string)
     removeScopedServiceProbes(database)
     defer removeScopedServiceProbes(database)
 
-    /* EXAMPLE OVER HTTP asserts an exact exhaustion point of this budget just before this section runs, so the
-       two writes below start from a budget of their own rather than from whatever is left of one */
+    /* EXAMPLE OVER HTTP asserts an exact exhaustion point of this budget just before this section runs, so the two writes below start from a budget of their own rather than from whatever is left of one */
     resetExampleRateLimitCounters(scopedServiceLabel, redisAddress, scopedServiceRateLimitKey)
 
     client := newExampleHttpClient()
@@ -92,11 +88,7 @@ func runScopedServiceCheck(baseUrl string, mysqlDsn string, redisAddress string)
     firstProductId, firstRequestId, firstChangeCount := createScopedServiceProbe(client, baseUrl, scopedServiceProbeNameFirst)
     otherProductId, otherRequestId, otherChangeCount := createScopedServiceProbe(client, baseUrl, scopedServiceProbeNameOther)
 
-    /* the header counts what the flush ACTUALLY WROTE, measured across the flush inside the request. That is
-       the one thing a journal row alone cannot show: the trail's own Close persists the same entries from the
-       scope's teardown, which runs after the response has already gone to the client, so a row read afterwards
-       would be there either way. A zero here with a row in the table means the write moved back behind the
-       response and every caller that reads the journal on receipt of its 201 is racing it. */
+    /* the header counts what the flush ACTUALLY WROTE, measured across the flush inside the request. That is the one thing a journal row alone cannot show: the trail's own Close persists the same entries from the scope's teardown, which runs after the response has already gone to the client, so a row read afterwards would be there either way. A zero here with a row in the table means the write moved back behind the response and every caller that reads the journal on receipt of its 201 is racing it. */
     if "1" != firstChangeCount || "1" != otherChangeCount {
         fail(
             "%s: the responses reported %q and %q journal writes, wanted one each — the change was not written while the request was still being served",
@@ -151,8 +143,7 @@ func runScopedServiceCheck(baseUrl string, mysqlDsn string, redisAddress string)
         otherRow.RequestId,
     )
 
-    /* the journal records WHO by identifier rather than by the name they signed in under, so the editor's own
-       identifier is read out of the directory instead of assumed */
+    /* the journal records WHO by identifier rather than by the name they signed in under, so the editor's own identifier is read out of the directory instead of assumed */
     editorIdentifier := requireScopedServiceEditorIdentifier(database)
 
     for _, row := range []scopedJournalRow{firstRow, otherRow} {
@@ -191,9 +182,7 @@ func runScopedServiceCheck(baseUrl string, mysqlDsn string, redisAddress string)
     )
 }
 
-/* requireScopedServiceEditorIdentifier reads the identifier of the account the section signs in as. The journal
-records who acted by identifier, not by the name typed at the login form, so the expected value comes from the
-directory the application authenticated against rather than from a constant that would drift with the seed. */
+/* requireScopedServiceEditorIdentifier reads the identifier of the account the section signs in as. The journal records who acted by identifier, not by the name typed at the login form, so the expected value comes from the directory the application authenticated against rather than from a constant that would drift with the seed. */
 func requireScopedServiceEditorIdentifier(database *bun.DB) string {
     identifiers := make([]string, 0, 1)
 
@@ -219,9 +208,7 @@ func requireScopedServiceEditorIdentifier(database *bun.DB) string {
     return identifiers[0]
 }
 
-/* createScopedServiceProbe writes one product and reports the identifier it was given, the request id the
-response carried, and what the flush middleware said it wrote. The raw response is needed for the headers, so
-this does not go through the shared client helpers. */
+/* createScopedServiceProbe writes one product and reports the identifier it was given, the request id the response carried, and what the flush middleware said it wrote. The raw response is needed for the headers, so this does not go through the shared client helpers. */
 func createScopedServiceProbe(client *http.Client, baseUrl string, name string) (string, string, string) {
     body := `{"name":"` + name + `","description":"probe","categoryId":"cat-1","price":4,"currencyId":"cur-eur","stock":1}`
 
@@ -282,9 +269,7 @@ func createScopedServiceProbe(client *http.Client, baseUrl string, name string) 
     return created.Id, requestId, response.Header.Get("X-Example-Catalog-Changes")
 }
 
-/* requireScopedServiceJournalRow reads the one entry the application must have written for a product, through
-the harness's own connection. Exactly one is demanded: a second entry for the same change would mean the trail
-was flushed twice. */
+/* requireScopedServiceJournalRow reads the one entry the application must have written for a product, through the harness's own connection. Exactly one is demanded: a second entry for the same change would mean the trail was flushed twice. */
 func requireScopedServiceJournalRow(database *bun.DB, productId string) scopedJournalRow {
     rows := make([]scopedJournalRow, 0, 2)
 

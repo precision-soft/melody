@@ -22,12 +22,7 @@ type boundDatabase struct {
     origin *bun.DB
 }
 
-/* WithDatabase binds a database/transaction handle onto the context so a Recorder's Record{Insert,
-   Update,Delete} writes its entry through it — typically the caller's already-open transaction — keeping
-   the audit entry atomic with the data change without forcing the write through the Tracker. A caller
-   that runs its own write inside a unit-of-work transaction records with WithDatabase(ctx, tx); the
-   binding is honoured unconditionally, so it is the caller's statement that the handle can carry the
-   audit rows. */
+/* WithDatabase binds a database/transaction handle onto the context so a Recorder's Record{Insert, Update,Delete} writes its entry through it — typically the caller's already-open transaction — keeping the audit entry atomic with the data change without forcing the write through the Tracker. A caller that runs its own write inside a unit-of-work transaction records with WithDatabase(ctx, tx); the binding is honoured unconditionally, so it is the caller's statement that the handle can carry the audit rows. */
 func WithDatabase(ctx context.Context, database bun.IDB) context.Context {
     /* a nil handle — typed or bare — is a wiring error, and bound it would either be ignored in silence (losing the atomicity the caller asked for) or dereferenced inside the caller's own transaction; it is refused where it is written */
     if true == isNilInterface(database) {
@@ -37,8 +32,7 @@ func WithDatabase(ctx context.Context, database bun.IDB) context.Context {
     return context.WithValue(ctx, databaseContextKey{}, &boundDatabase{handle: database})
 }
 
-/* withTransactionForDatabase is the tracker-side binding: it remembers which database the transaction
-   belongs to, so a storage writing elsewhere keeps its own handle. */
+/* withTransactionForDatabase is the tracker-side binding: it remembers which database the transaction belongs to, so a storage writing elsewhere keeps its own handle. */
 func withTransactionForDatabase(ctx context.Context, handle bun.IDB, origin *bun.DB) context.Context {
     return context.WithValue(ctx, databaseContextKey{}, &boundDatabase{handle: handle, origin: origin})
 }

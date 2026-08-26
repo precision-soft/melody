@@ -81,21 +81,11 @@ func (instance *Kernel) OpenRequestScopes() int64 {
     return instance.openRequestScopes.Load()
 }
 
-/* the kernel's configuration doors are BOOT-ONLY, and after the handler is built they refuse rather
-than corrupt. Every mutator below writes a field that each request goroutine reads without
-synchronization — the middleware chain, the forwarded-headers policy whose four words decide whether a
-session cookie is marked Secure, the method policy, the not-found and error handlers — so a call made
-while requests are in flight is a data race, and the route tree's maps are worse: a concurrent write
-there is an unrecoverable fatal error, not a torn read.
+/* the kernel's configuration doors are BOOT-ONLY, and after the handler is built they refuse rather than corrupt. Every mutator below writes a field that each request goroutine reads without synchronization — the middleware chain, the forwarded-headers policy whose four words decide whether a session cookie is marked Secure, the method policy, the not-found and error handlers — so a call made while requests are in flight is a data race, and the route tree's maps are worse: a concurrent write there is an unrecoverable fatal error, not a torn read.
 
-Configuration is compiled once and then serves; it is not reconfigured under load. The refusal makes
-that contract enforceable rather than merely written, and it is raised on the calling goroutine, at the
-door, naming the door — where a race would instead surface as a corrupted read somewhere else entirely,
-or not at all. The application's own boot registrar refuses on the same principle once it has booted.
+   Configuration is compiled once and then serves; it is not reconfigured under load. The refusal makes that contract enforceable rather than merely written, and it is raised on the calling goroutine, at the door, naming the door — where a race would instead surface as a corrupted read somewhere else entirely, or not at all. The application's own boot registrar refuses on the same principle once it has booted.
 
-The reading doors stay open: RouteDefinitions, RouteDefinition, RouteRegistry and the introspection
-surface are read from inside handlers — the openapi document is served that way — and freezing them
-would break the very route that publishes the table. */
+   The reading doors stay open: RouteDefinitions, RouteDefinition, RouteRegistry and the introspection surface are read from inside handlers — the openapi document is served that way — and freezing them would break the very route that publishes the table. */
 func (instance *Kernel) refuseMutationWhileServing(door string) {
     if false == instance.serving.Load() {
         return
@@ -124,20 +114,14 @@ func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
     instance.notFoundHandler = handler
 }
 
-/* SetErrorHandler installs the application's own error rendering, and it is read at boot: the
-application registers the framework exception listener only when no handler is installed by then,
-because that listener answers every kernel.exception dispatch first and a handler behind it can
-never run. An installed handler therefore takes over what the listener did — negotiation, the
-request-id header, the validation errors payload — and when it returns nil the kernel's own default
-rendering answers instead. */
+/* SetErrorHandler installs the application's own error rendering, and it is read at boot: the application registers the framework exception listener only when no handler is installed by then, because that listener answers every kernel.exception dispatch first and a handler behind it can never run. An installed handler therefore takes over what the listener did — negotiation, the request-id header, the validation errors payload — and when it returns nil the kernel's own default rendering answers instead. */
 func (instance *Kernel) SetErrorHandler(handler httpcontract.ErrorHandler) {
     instance.refuseMutationWhileServing("SetErrorHandler")
 
     instance.errorHandler = handler
 }
 
-/* HasErrorHandler reports whether the application installed an error handler; the composition root
-reads it before deciding to register the framework exception listener. */
+/* HasErrorHandler reports whether the application installed an error handler; the composition root reads it before deciding to register the framework exception listener. */
 func (instance *Kernel) HasErrorHandler() bool {
     return nil != instance.errorHandler
 }
@@ -176,11 +160,7 @@ func copyStringList(values []string) []string {
 }
 
 func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
-    /* building the handler is the moment configuration stops and serving begins, so the freeze is raised
-       here rather than at the first request: it is deterministic, it happens once, and it closes the
-       window in which a mutator could race the very first connection. The router is frozen with it,
-       through a package-private door — a router from outside this package cannot be reached that way and
-       keeps only the written contract, which is all a foreign implementation can be held to. */
+    /* building the handler is the moment configuration stops and serving begins, so the freeze is raised here rather than at the first request: it is deterministic, it happens once, and it closes the window in which a mutator could race the very first connection. The router is frozen with it, through a package-private door — a router from outside this package cannot be reached that way and keeps only the written contract, which is all a foreign implementation can be held to. */
     instance.serving.Store(true)
     freezeRouterForServing(instance.router)
 
@@ -1030,9 +1010,9 @@ func (instance *Kernel) logEventDispatchError(
 
 /* logHandlerError files the one record for a handler-returned failure, under the discipline the panic recovery shares: an error something upstream already logged is not filed again, a deliberate 4xx a handler returned is a refusal recorded at warning, a client's own cancellation is named for what it is, and everything else keeps the error level.
 
-A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure.
+   A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure.
 
-The reported error is the value the caller must put on the exception event: a handler's plain errors.New carries no AlreadyLogged implementer for the mark to live on, so it comes back wrapped in a marked carrier keeping the original as its cause. The caller's own error is what still reaches the application's error handler. */
+   The reported error is the value the caller must put on the exception event: a handler's plain errors.New carries no AlreadyLogged implementer for the mark to live on, so it comes back wrapped in a marked carrier keeping the original as its cause. The caller's own error is what still reaches the application's error handler. */
 func logHandlerError(requestLogger loggingcontract.Logger, message string, handlerErr error, httpRequest *nethttp.Request) error {
     if true == exception.IsAlreadyLogged(handlerErr) {
         return handlerErr

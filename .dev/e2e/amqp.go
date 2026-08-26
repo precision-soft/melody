@@ -13,9 +13,7 @@ type amqpOrder struct {
     Name string `json:"name"`
 }
 
-/* runAmqpCheck exercises a full publish → consume → ack round-trip against a live rabbitmq, and verifies a
-producer-assigned message id survives the round-trip (so an at-least-once consumer can deduplicate). It
-uses a per-run queue name so leftover messages from an earlier run never bleed into this one. */
+/* runAmqpCheck exercises a full publish → consume → ack round-trip against a live rabbitmq, and verifies a producer-assigned message id survives the round-trip (so an at-least-once consumer can deduplicate). It uses a per-run queue name so leftover messages from an earlier run never bleed into this one. */
 func runAmqpCheck(dsn string) {
     runtimeInstance := newRuntime()
 

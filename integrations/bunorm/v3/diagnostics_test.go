@@ -11,7 +11,7 @@ import (
 
 /* bun's own diagnostics reach the application's journal instead of standard error. They are the developer's declaration mistakes — here a query carrying an argument with nowhere to put it — and written to standard error as unstructured text they are invisible to a deployment whose journal is a json file.
 
-The warning is provoked through bun's public surface rather than by calling its logger, because what has to be proven is that bun uses the destination this package installs, not that a *log.Logger writes where it was pointed. It goes through the EXPORTED door: the once now guards only the forwarder, and the destination behind it is replaced on every call, so a second run of this test proves exactly what the first did. */
+   The warning is provoked through bun's public surface rather than by calling its logger, because what has to be proven is that bun uses the destination this package installs, not that a *log.Logger writes where it was pointed. It goes through the EXPORTED door: the once now guards only the forwarder, and the destination behind it is replaced on every call, so a second run of this test proves exactly what the first did. */
 func TestRouteDiagnostics_SendsBunsOwnChannelToTheJournal(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
 
@@ -43,18 +43,9 @@ func TestRouteDiagnostics_SendsBunsOwnChannelToTheJournal(t *testing.T) {
     }
 }
 
-/*
-TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack is the guard the whole
-retargeting exists for. A process that builds, closes and rebuilds its
-application routes twice; under the old shape the first routing owned bun's
-channel for the life of the process, so the SECOND lifecycle's diagnostics were
-dropped into the first lifecycle's logger — closed by then, or the emergency
-fallback of a registry wired before its application had a logger at all.
+/* TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack is the guard the whole retargeting exists for. A process that builds, closes and rebuilds its application routes twice; under the old shape the first routing owned bun's channel for the life of the process, so the SECOND lifecycle's diagnostics were dropped into the first lifecycle's logger — closed by then, or the emergency fallback of a registry wired before its application had a logger at all.
 
-The assertion is two-sided on purpose: the second logger must receive the record
-AND the first must not. A one-sided check passes on a forwarder that writes to
-both.
-*/
+   The assertion is two-sided on purpose: the second logger must receive the record AND the first must not. A one-sided check passes on a forwarder that writes to both. */
 func TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack(t *testing.T) {
     firstLifecycle := &capturingDiagnosticLogger{}
     secondLifecycle := &capturingDiagnosticLogger{}
@@ -74,16 +65,9 @@ func TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack(t *testing.T) {
     }
 }
 
-/*
-TestResetDiagnostics_HandsTheChannelBack pins what a teardown gets. The registry
-calls it from its own Close, while the logger it routed to is still alive, so no
-record is written into a journal that is closing; afterwards the line belongs on
-standard error, which is where bun puts it when nobody routes it at all.
+/* TestResetDiagnostics_HandsTheChannelBack pins what a teardown gets. The registry calls it from its own Close, while the logger it routed to is still alive, so no record is written into a journal that is closing; afterwards the line belongs on standard error, which is where bun puts it when nobody routes it at all.
 
-What is asserted is that the routed logger stops receiving. The fallback's own
-destination is standard error by construction — asserting on the process console
-would be asserting on the test runner's output, not on this package.
-*/
+   What is asserted is that the routed logger stops receiving. The fallback's own destination is standard error by construction — asserting on the process console would be asserting on the test runner's output, not on this package. */
 func TestResetDiagnostics_HandsTheChannelBack(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
 
@@ -113,17 +97,9 @@ func TestRouteDiagnostics_ANilLoggerLeavesTheDestinationWhereItWas(t *testing.T)
     }
 }
 
-/*
-TestRouteDiagnostics_ATypedNilLoggerLeavesTheDestinationWhereItWas is the same
-guard for the nil that a plain nil comparison lets through. A resolver answering
-a nil pointer of its own logger type produces a non-nil interface, so without the
-typed-nil reading the destination would be replaced by a receiver whose first
-record panics — inside bun's own logging call, one frame from a query.
+/* TestRouteDiagnostics_ATypedNilLoggerLeavesTheDestinationWhereItWas is the same guard for the nil that a plain nil comparison lets through. A resolver answering a nil pointer of its own logger type produces a non-nil interface, so without the typed-nil reading the destination would be replaced by a receiver whose first record panics — inside bun's own logging call, one frame from a query.
 
-The double dereferences its receiver on every method, which is what lets the
-guard die: a double whose methods tolerate a nil receiver would pass with the
-guard removed.
-*/
+   The double dereferences its receiver on every method, which is what lets the guard die: a double whose methods tolerate a nil receiver would pass with the guard removed. */
 func TestRouteDiagnostics_ATypedNilLoggerLeavesTheDestinationWhereItWas(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     RouteDiagnostics(logger)

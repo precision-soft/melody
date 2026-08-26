@@ -803,15 +803,7 @@ func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
     }
 }
 
-/*
-TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero pins the clean
-shutdown against the shield the panic path has had since the exit-step budget
-was installed. The teardown loop is strictly sequential with no budget of its
-own, so one Close that never returns — a pooled connection draining to a peer
-that is gone — parked every service behind it and the process with them, on the
-HEALTHY path, while the panicking one had ten seconds and an escape. A teardown
-that had to be abandoned is not a clean shutdown and does not report one.
-*/
+/* TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero pins the clean shutdown against the shield the panic path has had since the exit-step budget was installed. The teardown loop is strictly sequential with no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone — parked every service behind it and the process with them, on the HEALTHY path, while the panicking one had ten seconds and an escape. A teardown that had to be abandoned is not a clean shutdown and does not report one. */
 func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
     originalStep := shieldedCloseStep
     originalExit := applicationExit

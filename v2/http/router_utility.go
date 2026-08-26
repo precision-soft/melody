@@ -237,20 +237,9 @@ func splitNormalizedPath(value string) []string {
     return strings.Split(normalizedPath, "/")
 }
 
-/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer
-reads the same. The router matches the path as sent — splitNormalizedPath drops trailing slashes but
-folds no dot or empty segment — while the access-control matcher folds "..", "." and "//" through
-path.Clean before it selects a rule, and the firewall matcher reads the raw path with neither fold.
-A path that folds to a different spelling therefore routes to one handler and is authorized against
-another rule, so a request that reaches a protected handler under its sent spelling can be granted the
-attributes of the folded spelling's rule — a different, possibly public one, or none at all. The
-static file server already refuses a non-canonical path for exactly this reason; refusing at the
-kernel keeps the router, the firewall matchers and the access control reading one spelling.
+/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer reads the same. The router matches the path as sent — splitNormalizedPath drops trailing slashes but folds no dot or empty segment — while the access-control matcher folds "..", "." and "//" through path.Clean before it selects a rule, and the firewall matcher reads the raw path with neither fold. A path that folds to a different spelling therefore routes to one handler and is authorized against another rule, so a request that reaches a protected handler under its sent spelling can be granted the attributes of the folded spelling's rule — a different, possibly public one, or none at all. The static file server already refuses a non-canonical path for exactly this reason; refusing at the kernel keeps the router, the firewall matchers and the access control reading one spelling.
 
-A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route
-"/admin", so it is normalized away here before the comparison rather than refused. A target that does
-not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and
-is left to the router to answer. */
+   A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route "/admin", so it is normalized away here before the comparison rather than refused. A target that does not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and is left to the router to answer. */
 func requestPathIsCanonical(path string) bool {
     if false == strings.HasPrefix(path, "/") {
         return true
@@ -570,9 +559,9 @@ func resolveSessionCookieSecure(
 
 /* logSessionPersistenceEvent records what the response path did with the session, at the level the event deserves and with the coordinates that let it be found again.
 
-The level is a parameter because one of the three is not a failure at all: a session another request ended while this one was running is the session ending — the contract says so in as many words, and so does the branch that answers it — while the other two are storage outages. Filed at error alongside them, a user who logged out in a second tab produced one indistinguishable "failed to save session" per concurrent request, against a perfectly healthy backend.
+   The level is a parameter because one of the three is not a failure at all: a session another request ended while this one was running is the session ending — the contract says so in as many words, and so does the branch that answers it — while the other two are storage outages. Filed at error alongside them, a user who logged out in a second tab produced one indistinguishable "failed to save session" per concurrent request, against a perfectly healthy backend.
 
-The coordinates travel because only the middle record ever named the session, and that by accident: it carries sessionId through the cause's own context. None of the three named the route, so a record that did arrive could not be tied to the request that produced it. The level switch goes through the named methods rather than Log, because that is the door a substituted logger overrides. */
+   The coordinates travel because only the middle record ever named the session, and that by accident: it carries sessionId through the cause's own context. None of the three named the route, so a record that did arrive could not be tied to the request that produced it. The level switch goes through the named methods rather than Log, because that is the door a substituted logger overrides. */
 func logSessionPersistenceEvent(
     runtimeInstance runtimecontract.Runtime,
     level loggingcontract.Level,

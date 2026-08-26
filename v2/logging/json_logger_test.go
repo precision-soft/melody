@@ -970,16 +970,7 @@ func (instance *blockingOrderedWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/*
-TestJsonLogger_TheStampOrderIsTheWriteOrder pins a guard against a RACE, so it
-is proven by construction rather than by a mutant: one write is held open while
-a second record is asked for, and the second record's stamp cannot precede the
-first write's completion unless the stamp is taken outside the lock. It was:
-the stamp said when the record was FORMED and the encoding happened between the
-stamp and the write, so at eight goroutines 484 records of 1600 reached the
-file out of stamp order while LOGGING.md promised the write order stays
-reconstructible from them.
-*/
+/* TestJsonLogger_TheStampOrderIsTheWriteOrder pins a guard against a RACE, so it is proven by construction rather than by a mutant: one write is held open while a second record is asked for, and the second record's stamp cannot precede the first write's completion unless the stamp is taken outside the lock. It was: the stamp said when the record was FORMED and the encoding happened between the stamp and the write, so at eight goroutines 484 records of 1600 reached the file out of stamp order while LOGGING.md promised the write order stays reconstructible from them. */
 func TestJsonLogger_TheStampOrderIsTheWriteOrder(t *testing.T) {
     writer := &blockingOrderedWriter{
         firstWriteAt: make(chan struct{}),

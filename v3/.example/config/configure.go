@@ -31,9 +31,7 @@ func Configure(app *melodyapplication.Application) {
 
     app.RegisterModule(moduleInstance)
 
-    /* opt-in OTLP tracing: when OTEL_EXPORTER_OTLP_ENDPOINT is set (see .env) the otlp module builds
-       a TracerProvider, adds the tracing middleware and flushes spans on shutdown — plug-and-play, exactly
-       like the other integration module facades. Unset ⇒ no tracing, no OTLP dependency cost at runtime. */
+    /* opt-in OTLP tracing: when OTEL_EXPORTER_OTLP_ENDPOINT is set (see .env) the otlp module builds a TracerProvider, adds the tracing middleware and flushes spans on shutdown — plug-and-play, exactly like the other integration module facades. Unset ⇒ no tracing, no OTLP dependency cost at runtime. */
     if otelEndpoint := moduleInstance.environmentValue(environmentKeyOtelExporterEndpoint); "" != otelEndpoint {
         app.RegisterModule(melodyotlp.NewModule(melodyotlp.ModuleConfig{
             Config: melodyotlp.Config{
@@ -46,17 +44,13 @@ func Configure(app *melodyapplication.Application) {
         }))
     }
 
-    /* the encrypt bulk command resolves its database through the factory at the first run — after
-       Boot — so registering the command costs nothing in http or worker mode, and a boot without MYSQL_HOST
-       stays clean (the first run then reports the missing database service). */
+    /* the encrypt bulk command resolves its database through the factory at the first run — after Boot — so registering the command costs nothing in http or worker mode, and a boot without MYSQL_HOST stays clean (the first run then reports the missing database service). */
     app.RegisterModule(melodyencrypt.NewModule(melodyencrypt.ModuleConfig{
         DatabaseFactory: moduleInstance.encryptDatabaseFactory,
         Cipher:          moduleInstance.cipher,
     }))
 
-    /* transactional-outbox module in the factory shape: the store and relay are registered as service
-       providers that resolve the shared *bun.DB from the container at first use, and the module contributes
-       the melody:outbox:relay command over the same lazily-resolved relay. */
+    /* transactional-outbox module in the factory shape: the store and relay are registered as service providers that resolve the shared *bun.DB from the container at first use, and the module contributes the melody:outbox:relay command over the same lazily-resolved relay. */
     if nil != moduleInstance.database {
         app.RegisterModule(melodyoutbox.NewModule(melodyoutbox.ModuleConfig{
             StoreFactory: moduleInstance.outboxStoreFactory,
@@ -64,11 +58,7 @@ func Configure(app *melodyapplication.Application) {
         }))
     }
 
-    /* the db:* family is registered whether or not a database is configured, so the command surface does not
-       change between environments; without one every db:* command fails at Run with the container refusal
-       naming the registry service. No context family is declared: this major keeps the journal, the
-       two-factor enrollment and the catalogue on one connection, so a single set covers the whole schema and
-       the registry has a single manager for the unprefixed commands to reach. */
+    /* the db:* family is registered whether or not a database is configured, so the command surface does not change between environments; without one every db:* command fails at Run with the container refusal naming the registry service. No context family is declared: this major keeps the journal, the two-factor enrollment and the catalogue on one connection, so a single set covers the whole schema and the registry has a single manager for the unprefixed commands to reach. */
     app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
         Migrations: migration.Migrations,
         Options: bunormmigrate.Options{

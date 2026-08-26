@@ -391,9 +391,7 @@ func TestBuilder_KeepsTheReportWhenAFactoryFails(t *testing.T) {
         t.Fatalf("expected the factory failure to surface")
     }
 
-    /* dropped for the refusal, the caller reporting the failure had the name of the offending
-       middleware and nothing about the selection, the gating or the cycle detection around it —
-       while Describe, the same selection without the factories, has always returned it */
+    /* dropped for the refusal, the caller reporting the failure had the name of the offending middleware and nothing about the selection, the gating or the cycle detection around it — while Describe, the same selection without the factories, has always returned it */
     if nil == report {
         t.Fatalf("expected the report to travel with the refusal")
     }
@@ -425,9 +423,7 @@ func TestBuilder_RecordsAMiddlewareItsFactoryDeclinedToBuildAsInactive(t *testin
         t.Fatalf("expected no middleware in the chain, got %d", len(middlewares))
     }
 
-    /* requested, selected and ordered, then vanished from the chain without appearing in the selected
-       names OR in the inactive list — the operator reading the report saw a pipeline that simply never
-       mentioned it */
+    /* requested, selected and ordered, then vanished from the chain without appearing in the selected names OR in the inactive list — the operator reading the report saw a pipeline that simply never mentioned it */
     found := false
     for _, inactive := range report.Inactive() {
         if "declined" == inactive.Name() {

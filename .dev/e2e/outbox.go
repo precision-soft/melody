@@ -15,12 +15,10 @@ type orderMessage struct {
     Order string `json:"order"`
 }
 
-/* poisonMessage encodes fine but is deliberately undecodable, so the relay must dead-letter it as poison
-rather than retry it forever. */
+/* poisonMessage encodes fine but is deliberately undecodable, so the relay must dead-letter it as poison rather than retry it forever. */
 type poisonMessage struct{}
 
-/* e2eCodec is the outbox MessageCodec: it round-trips orderMessage and deliberately fails to decode the
-poison type so the poison-dead-letter path can be observed. */
+/* e2eCodec is the outbox MessageCodec: it round-trips orderMessage and deliberately fails to decode the poison type so the poison-dead-letter path can be observed. */
 type e2eCodec struct{}
 
 func (instance *e2eCodec) Encode(message any) (string, []byte, error) {
@@ -52,8 +50,7 @@ func (instance *e2eCodec) Decode(typeName string, payload []byte) (any, error) {
     }
 }
 
-/* recordingTransport is a messagebuscontract.Transport that only records the message ids it is asked to
-send, so the harness can assert the relay published each outbox row under its stable, deduplicable id. */
+/* recordingTransport is a messagebuscontract.Transport that only records the message ids it is asked to send, so the harness can assert the relay published each outbox row under its stable, deduplicable id. */
 type recordingTransport struct {
     sent []string
 }
@@ -82,10 +79,7 @@ func (instance *recordingTransport) Close() error {
     return nil
 }
 
-/* runOutboxCheck exercises the transactional-outbox guarantee against a live postgres: business rows are
-enqueued in a transaction, then the relay claims the batch (FOR UPDATE SKIP LOCKED), publishes each row to
-the transport under a stable id, marks it sent, and dead-letters an undecodable (poison) row instead of
-retrying it forever. */
+/* runOutboxCheck exercises the transactional-outbox guarantee against a live postgres: business rows are enqueued in a transaction, then the relay claims the batch (FOR UPDATE SKIP LOCKED), publishes each row to the transport under a stable id, marks it sent, and dead-letters an undecodable (poison) row instead of retrying it forever. */
 func runOutboxCheck(dsn string) {
     ctx := context.Background()
 
@@ -104,8 +98,7 @@ func runOutboxCheck(dsn string) {
         fail("outbox truncate: %v", truncateErr)
     }
 
-    /* two good business messages + one poison, each enqueued transactionally (here each in its own tx —
-       in real use the outbox write shares the business write's tx) */
+    /* two good business messages + one poison, each enqueued transactionally (here each in its own tx — in real use the outbox write shares the business write's tx) */
     for _, order := range []string{"SO-1", "SO-2"} {
         if enqueueErr := store.Enqueue(ctx, database, orderMessage{Order: order}); nil != enqueueErr {
             fail("outbox enqueue %s: %v", order, enqueueErr)

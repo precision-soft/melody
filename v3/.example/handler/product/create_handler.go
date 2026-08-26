@@ -46,12 +46,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* the cause travels with the refusal, so the responder answers through ApiErrorWithErr rather
-   than ApiError: the decoder's own diagnosis and the per-field validation collection reach the error
-   context and the debug trace instead of dying at this boundary. Returning the response rather than
-   nothing is what keeps the refusal a refusal — a responder that answers nothing leaves the framework's
-   own refusal standing, and returning a nil pair used to be read as a handler that answered nothing at
-   all and served an empty 204 for a rejected write. */
+/* the cause travels with the refusal, so the responder answers through ApiErrorWithErr rather than ApiError: the decoder's own diagnosis and the per-field validation collection reach the error context and the debug trace instead of dying at this boundary. Returning the response rather than nothing is what keeps the refusal a refusal — a responder that answers nothing leaves the framework's own refusal standing, and returning a nil pair used to be read as a handler that answered nothing at all and served an empty 204 for a rejected write. */
 func apiJsonErrorResponder(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,

@@ -31,20 +31,9 @@ var (
     migratedDatabaseList = map[*bun.DB]struct{}{}
 )
 
-/*
-EnsureMigrated applies the Migrations set to the example's database, once per
-handle and per process. The repository constructors the generated wiring fills
-call it at first resolution, and the two-factor build step calls it before it
-publishes its store, which is what keeps a freshly recreated volume usable
-without an operator step: the tables appear when the first request reaches a
-repository, exactly as they did when each repository owned its own create
-statement.
+/* EnsureMigrated applies the Migrations set to the example's database, once per handle and per process. The repository constructors the generated wiring fills call it at first resolution, and the two-factor build step calls it before it publishes its store, which is what keeps a freshly recreated volume usable without an operator step: the tables appear when the first request reaches a repository, exactly as they did when each repository owned its own create statement.
 
-Only a success is recorded; a failed attempt is retried at the next
-resolution. The mutex serializes the callers of one process, and the bun
-migration lock serializes processes sharing the database — several instances
-of this example race here whenever a volume starts empty.
-*/
+   Only a success is recorded; a failed attempt is retried at the next resolution. The mutex serializes the callers of one process, and the bun migration lock serializes processes sharing the database — several instances of this example race here whenever a volume starts empty. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     if nil == database {
         return exception.NewError("migration: bun database is nil", nil, nil)
@@ -83,11 +72,7 @@ func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/*
-acquireMigrationLock answers whether the lock was taken. A false with a nil
-error means another process applied the whole set while this one waited, so
-there is nothing left to run and the lock was never held here.
-*/
+/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. */
 func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator) (bool, error) {
     startedAt := time.Now()
 
@@ -132,12 +117,7 @@ func hasUnappliedMigration(ctx context.Context, migrator *migrate.Migrator) (boo
     return 0 < len(status.Unapplied()), nil
 }
 
-/*
-migrateWhileLocked releases the lock whatever the migration answered: a lock
-row that survives refuses every later migration on every process. The unlock
-failure becomes the verdict only when the migration itself succeeded; a failed
-migration keeps its own error.
-*/
+/* migrateWhileLocked releases the lock whatever the migration answered: a lock row that survives refuses every later migration on every process. The unlock failure becomes the verdict only when the migration itself succeeded; a failed migration keeps its own error. */
 func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator) (migrateErr error) {
     defer func() {
         unlockContext, cancelUnlock := context.WithTimeout(

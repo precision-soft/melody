@@ -54,10 +54,7 @@ func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Tran
 
     provider := amqp.NewProvider()
 
-    /* the boot-time dial stays as fail-fast VALIDATION of the DSN, but only as a probe that is closed at
-    once: a connection opened here and handed to the transport would be owned by nobody — the transport
-    closes only a connection it dialed itself — so it outlived every teardown. With just the dialer, the
-    first use dials a connection the transport owns and its registered closer actually closes. */
+    /* the boot-time dial stays as fail-fast VALIDATION of the DSN, but only as a probe that is closed at once: a connection opened here and handed to the transport would be owned by nobody — the transport closes only a connection it dialed itself — so it outlived every teardown. With just the dialer, the first use dials a connection the transport owns and its registered closer actually closes. */
     probe, openErr := provider.Open(dsn)
     if nil != openErr {
         exception.Panic(exception.FromError(openErr))

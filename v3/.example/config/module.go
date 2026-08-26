@@ -67,8 +67,7 @@ type Module struct {
     storageBucket string
     storage       *melodyawss3.Storage
 
-    /* the registry is the one door onto the connection: the db:* command family resolves it by name, and the
-    handle below is its default manager rather than a second pool opened beside it. */
+    /* the registry is the one door onto the connection: the db:* command family resolves it by name, and the handle below is its default manager rather than a second pool opened beside it. */
     databaseRegistry *melodybunorm.ManagerRegistry
     database         *bun.DB
     cipher           melodyencrypt.Cipher
@@ -94,9 +93,7 @@ func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module 
     return moduleInstance
 }
 
-/* env-key constants for the example's opt-in live integrations. melody auto-registers
-   every .env key as a same-named parameter, so these double as the parameter names the
-   eager build steps read through environmentValue. */
+/* env-key constants for the example's opt-in live integrations. melody auto-registers every .env key as a same-named parameter, so these double as the parameter names the eager build steps read through environmentValue. */
 const (
     environmentKeyMysqlHost     = "MYSQL_HOST"
     environmentKeyMysqlPort     = "MYSQL_PORT"
@@ -124,11 +121,7 @@ const (
     environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
 )
 
-/* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a
-   same-named parameter). The values are already fully resolved here — NewConfiguration (called in
-   NewApplication, before this composition root runs) applies applyEnvironmentOverrides + resolvePlaceholders,
-   which expand %env(X)%/%name% indirection and unescape %% — so a plain String() read is correct. Returns ""
-   when the key is absent so the eager build steps keep their "unset means skip this integration" behaviour. */
+/* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a same-named parameter). The values are already fully resolved here — NewConfiguration (called in NewApplication, before this composition root runs) applies applyEnvironmentOverrides + resolvePlaceholders, which expand %env(X)%/%name% indirection and unescape %% — so a plain String() read is correct. Returns "" when the key is absent so the eager build steps keep their "unset means skip this integration" behaviour. */
 func (instance *Module) environmentValue(key string) string {
     parameter := instance.configuration.Get(key)
     if nil == parameter {

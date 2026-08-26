@@ -538,9 +538,7 @@ func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
     }
 }
 
-/* the configured window must travel from the environment key through the configuration into the
-manager: only a lapsed 300ms window explains a deleted session accepting a write-back 400ms later,
-where the five-minute default would still refuse it. */
+/* the configured window must travel from the environment key through the configuration into the manager: only a lapsed 300ms window explains a deleted session accepting a write-back 400ms later, where the five-minute default would still refuse it. */
 func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -580,13 +578,7 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
     }
 }
 
-/*
-TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided pins the
-other two the boot used to make unsubstitutable. Both have exported
-constructors, so a replacement built outside is a whole answer — which is the
-line that separates them from the router, the dispatcher and the clock, where a
-gate would promise a substitution the request path would then ignore.
-*/
+/* TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided pins the other two the boot used to make unsubstitutable. Both have exported constructors, so a replacement built outside is a whole answer — which is the line that separates them from the router, the dispatcher and the clock, where a gate would promise a substitution the request path would then ignore. */
 func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -638,13 +630,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
     }
 }
 
-/*
-TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id
-the two published resolvers read. SerializerMustFromRuntime and
-SerializerFromRuntime were documented with the id nothing registered, so the
-Must door panicked for every caller and the soft one answered nil — by
-construction, on every boot the framework has ever performed.
-*/
+/* TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id the two published resolvers read. SerializerMustFromRuntime and SerializerFromRuntime were documented with the id nothing registered, so the Must door panicked for every caller and the soft one answered nil — by construction, on every boot the framework has ever performed. */
 func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -671,12 +657,7 @@ func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *test
     }
 }
 
-/*
-TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided
-pins the gate over the same id, so registering a default serializer is a
-substitution rather than the boot collision every ungated framework id answered
-with.
-*/
+/* TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided pins the gate over the same id, so registering a default serializer is a substitution rather than the boot collision every ungated framework id answered with. */
 func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),

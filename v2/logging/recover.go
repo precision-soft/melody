@@ -171,7 +171,7 @@ var exitStepBudget = 10 * time.Second
 
 /* RunShieldedStep is the exit handler's own shield, offered to the one other caller that stands between a process and its end: the normal return of Run, whose teardown is deferred with no budget at all, so the healthy shutdown was the one without an emergency exit while the panicking one had a ten-second escape. It contains a panic inside the step, echoes it to stderr best-effort, and abandons a step that does not return within the budget, answering whether the step finished. A caller that gets false has a process holding something it cannot release and should end rather than wait.
 
-The step keeps running on its goroutine after abandonment, so anything it writes must not be read by a caller that was told it did not finish. */
+   The step keeps running on its goroutine after abandonment, so anything it writes must not be read by a caller that was told it did not finish. */
 func RunShieldedStep(stepName string, step func()) bool {
     return runExitStepShielded(stepName, step)
 }

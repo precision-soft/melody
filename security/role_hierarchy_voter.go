@@ -52,7 +52,7 @@ func (instance *RoleHierarchyVoter) Vote(token securitycontract.Token, attribute
 
 /* RolesReplacer is the optional capability a token implements to answer its own twin under a different role set. It exists because the delegate of a hierarchy voter is any Voter, and a voter of the application's own reads more than Roles(): it asserts the concrete token, or an interface of its own on it, to learn WHICH tenant or which owner the request speaks for. A token rebuilt as one of melody's own answers that assertion with a type the voter has never seen, so the voter abstains — and a voter that would have REFUSED, abstaining under the affirmative strategy beside a role voter that grants, hands out the access it exists to withhold. A token that answers its own twin keeps its dynamic type through the expansion and the delegate is none the wiser.
 
-The capability is optional because Token is a published contract of a stable major and cannot grow a method. A token that does not carry it is rebuilt as before, which is what it already got. */
+   The capability is optional because Token is a published contract of a stable major and cannot grow a method. A token that does not carry it is rebuilt as before, which is what it already got. */
 type RolesReplacer interface {
     WithRoles(roles []string) securitycontract.Token
 }

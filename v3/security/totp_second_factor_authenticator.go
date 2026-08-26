@@ -21,9 +21,9 @@ const DefaultTotpRecoveryHeaderName = "X-2FA-Recovery-Code"
 
 /* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into a single Authenticator, so it slots into the existing AuthenticatorManager without changing the manager's first-match flow. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is additionally required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code.
 
-The ReplayGuard blocks reuse of an *accepted* code within its validity window, but this authenticator intentionally does NOT rate-limit *failed* code attempts: an unthrottled stream of distinct wrong guesses against a 6-digit code (with skew, a handful of codes are valid at any instant) can brute-force the second factor once the primary credential is known. The same caveat covers recovery codes — their larger space makes guessing far less feasible, but nothing here throttles wrong recovery guesses either. Throttling and per-user lockout are the application's responsibility and MUST front this authenticator — enforce them at the transport/middleware layer (an attempt counter with exponential backoff or a temporary lockout keyed on the authenticating user), the same layer that should already rate-limit primary-credential attempts.
+   The ReplayGuard blocks reuse of an *accepted* code within its validity window, but this authenticator intentionally does NOT rate-limit *failed* code attempts: an unthrottled stream of distinct wrong guesses against a 6-digit code (with skew, a handful of codes are valid at any instant) can brute-force the second factor once the primary credential is known. The same caveat covers recovery codes — their larger space makes guessing far less feasible, but nothing here throttles wrong recovery guesses either. Throttling and per-user lockout are the application's responsibility and MUST front this authenticator — enforce them at the transport/middleware layer (an attempt counter with exponential backoff or a temporary lockout keyed on the authenticating user), the same layer that should already rate-limit primary-credential attempts.
 
-When the configured Enrollments store also implements TwoFactorRecoveryStore, a single-use recovery code supplied on RecoveryHeaderName is accepted as an alternative to a TOTP code: the store atomically verifies and consumes it, so each recovery code authenticates at most once. A store that does not implement that interface simply makes recovery codes unavailable. */
+   When the configured Enrollments store also implements TwoFactorRecoveryStore, a single-use recovery code supplied on RecoveryHeaderName is accepted as an alternative to a TOTP code: the store atomically verifies and consumes it, so each recovery code authenticates at most once. A store that does not implement that interface simply makes recovery codes unavailable. */
 type TotpSecondFactorAuthenticatorConfig struct {
     Primary securitycontract.Authenticator
 
@@ -189,7 +189,7 @@ func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
 
 /* codeAlreadyUsed records an accepted code through the replay guard and reports whether it had already been used within its validity window. The constructor always installs a guard (an in-process one by default), so this relies on that invariant rather than tolerating a nil guard — a struct built by literal without one would fail loudly here instead of silently disabling replay protection.
 
-The nonce keys on the NORMALIZED code, exactly as Verify compared it: "123 456" and "123456" are the same code to Verify, so keying on the raw header value would let a captured code be replayed by re-spacing it. */
+   The nonce keys on the NORMALIZED code, exactly as Verify compared it: "123 456" and "123456" are the same code to Verify, so keying on the raw header value would let a captured code be replayed by re-spacing it. */
 func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
     request httpcontract.Request,
     userIdentifier string,

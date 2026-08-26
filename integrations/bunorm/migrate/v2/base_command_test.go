@@ -306,19 +306,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     }
 }
 
-/*
-TestNewMigrator_SqlMigrationExecFailureReachesTheCaller pins the verdict of the
-SQL migration path against the bun version this module requires. The path is
-bun's — a *migrate.Migrations filled by Discover — but melody builds the
-migrator over it and is the layer that prints the result, so a swallowed
-failure here is a green deploy over a schema that never changed. Under
-bun v1.2.16 the deferred conn.Close overwrote the exec failure with its own nil
-return, so Migrate answered nil, the command printed [success], exited 0 and
-marked the migration applied forever, which made the failure unrepeatable. The
-pin drives a .up.sql whose exec the driver refuses and requires the refusal to
-reach the caller, so a bump that reintroduces the swallow fails here rather
-than at three in the morning.
-*/
+/* TestNewMigrator_SqlMigrationExecFailureReachesTheCaller pins the verdict of the SQL migration path against the bun version this module requires. The path is bun's — a *migrate.Migrations filled by Discover — but melody builds the migrator over it and is the layer that prints the result, so a swallowed failure here is a green deploy over a schema that never changed. Under bun v1.2.16 the deferred conn.Close overwrote the exec failure with its own nil return, so Migrate answered nil, the command printed [success], exited 0 and marked the migration applied forever, which made the failure unrepeatable. The pin drives a .up.sql whose exec the driver refuses and requires the refusal to reach the caller, so a bump that reintroduces the swallow fails here rather than at three in the morning. */
 func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
     const migrationName = "20260101000001"
     const migrationStatement = "CREATE TABLE probe_three (id NOT_A_TYPE)"

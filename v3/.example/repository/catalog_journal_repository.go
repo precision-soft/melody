@@ -24,9 +24,9 @@ const (
 
 /* CatalogJournalEntry is one change to the nomenclature: who made it, what they did, to which record, and under which request.
 
-RequestId is what ties an entry back to the call that caused it. It is empty for a change made outside a request — a scheduled refresh or a console run has no request to be attributed to, and an identifier invented for one would claim a correlation that cannot be followed anywhere.
+   RequestId is what ties an entry back to the call that caused it. It is empty for a change made outside a request — a scheduled refresh or a console run has no request to be attributed to, and an identifier invented for one would claim a correlation that cannot be followed anywhere.
 
-It lives here rather than in the entity package on purpose: the domain entities are cached through a gob serializer and carry no storage concerns, so the one type that does carry them stays beside the repository that maps it. */
+   It lives here rather than in the entity package on purpose: the domain entities are cached through a gob serializer and carry no storage concerns, so the one type that does carry them stays beside the repository that maps it. */
 type CatalogJournalEntry struct {
     Id         int64
     RequestId  string

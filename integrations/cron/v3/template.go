@@ -7,14 +7,14 @@ type Template interface {
 
 /* OwnedTemplate is the optional capability of naming a line every destination this template renders carries, by which a later run recognizes a file as one of its own. It exists for --prune, which has to answer "did I write this?" about a file it is being asked to empty, and the only honest answer comes from the rendered content itself: the marker cannot be injected by the generator, because Render is userland and a comment prefix that is right for a crontab corrupts a format that has no comments.
 
-A template that implements this must include the exact string it returns in everything Render produces, entries or none. A template that does not implement it is never pruned — a destination whose ownership cannot be proven belongs to the operator, and emptying it on a guess is the one mistake a reconciliation must not make. */
+   A template that implements this must include the exact string it returns in everything Render produces, entries or none. A template that does not implement it is never pruned — a destination whose ownership cannot be proven belongs to the operator, and emptying it on a guess is the one mistake a reconciliation must not make. */
 type OwnedTemplate interface {
     OwnershipMarker() string
 }
 
 /* UserColumnTemplate is the optional capability of answering whether this dialect renders a user column. The generator has to know before it renders, because a heartbeat line placed in a dialect that carries a user column needs a user and one placed in a dialect that carries none never does — so a template that renders no user column is refused for a missing user it could not have used.
 
-A template that does not implement this is judged by name, which answers only for the builtins: every registered dialect that renders no user column has to say so here, or it is treated as one that does. */
+   A template that does not implement this is judged by name, which answers only for the builtins: every registered dialect that renders no user column has to say so here, or it is treated as one that does. */
 type UserColumnTemplate interface {
     RendersUserColumn() bool
 }

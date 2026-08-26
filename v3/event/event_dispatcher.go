@@ -103,7 +103,7 @@ func (instance *EventDispatcher) AddListener(
 
 /* MarkListenerRequired flags the registered listener so that if another listener stops event propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused rather than ignored: a mark that lands nowhere leaves the guarantee unarmed while reporting that it was applied, and the caller has no way to tell.
 
-The mark necessarily follows the registration it takes as its argument, so a dispatch running between the two steps sees the listener unmarked and a stop in that window skips it without the error. Registration at boot — before anything dispatches — closes the window; a runtime registrar that needs the guarantee armed atomically must not dispatch the event until the mark is applied. */
+   The mark necessarily follows the registration it takes as its argument, so a dispatch running between the two steps sees the listener unmarked and a stop in that window skips it without the error. Registration at boot — before anything dispatches — closes the window; a runtime registrar that needs the guarantee armed atomically must not dispatch the event until the mark is applied. */
 func (instance *EventDispatcher) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
     instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
         entry.required = true
@@ -750,7 +750,7 @@ var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
 
 /* requireEventSubscriber refuses a subscriber that cannot be installed and answers the type name the installation is filed under, for inspection. The nil test reads through the interface: a typed nil passes a plain comparison, and the SubscribedEvents call that follows would dereference it, so the caller used to receive a bare nil dereference raised inside its own subscriber instead of the framework error.
 
-A subscriber that is not a pointer is NOT refused, unlike the door this replaced. That refusal existed because the pointer was the identity a subscriber was filed under, and a zero-size value has no distinguishing one; the installation is filed under an id the dispatcher issues, so a value subscriber and a zero-size subscriber are as installable and as removable as any other. */
+   A subscriber that is not a pointer is NOT refused, unlike the door this replaced. That refusal existed because the pointer was the identity a subscriber was filed under, and a zero-size value has no distinguishing one; the installation is filed under an id the dispatcher issues, so a value subscriber and a zero-size subscriber are as installable and as removable as any other. */
 func requireEventSubscriber(
     subscriber eventcontract.EventSubscriber,
     action string,

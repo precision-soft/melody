@@ -576,8 +576,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
             close(callbackEntered)
 
-            /* keep processing briefly, then resolve a service through the scope-backed
-               runtime; a healthy callback must never observe a closed scope */
+            /* keep processing briefly, then resolve a service through the scope-backed runtime; a healthy callback must never observe a closed scope */
             time.Sleep(200 * time.Millisecond)
 
             _, getErr := runtimeInstance.Scope().Get("service")
@@ -619,8 +618,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         time.Sleep(time.Millisecond)
     }
 
-    /* keep answering control frames so an unfixed graceful close completes fast and the
-       handler returns (and closes the scope) well before the callback resolves */
+    /* keep answering control frames so an unfixed graceful close completes fast and the handler returns (and closes the scope) well before the callback resolves */
     go func() {
         _, _, _ = connection.Read(ctx)
     }()
@@ -686,8 +684,7 @@ func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *
         time.Sleep(time.Millisecond)
     }
 
-    /* the client never reads again, so it never answers a close handshake: an unfixed
-       graceful close can only end at coder/websocket's five-second timeout */
+    /* the client never reads again, so it never answers a close handshake: an unfixed graceful close can only end at coder/websocket's five-second timeout */
     if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("wedge")); nil != writeErr {
         t.Fatalf("write: %v", writeErr)
     }
@@ -724,12 +721,7 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
     stop := make(chan struct{})
     reaped := make(chan struct{}, 1)
 
-    /* observer mirrors the non-callback branch of cannotAnswer: with no callback
-       running the activity mark must already be fresh, or the connection is reaped.
-       A stale mark seen at callbacks==0 is only reported when it is a STABLE state
-       (callbacks still zero and the same mark on re-read), so a torn read that
-       straddles the next iteration's freshly-entered callback cannot masquerade as
-       the pre-decrement window the reorder closes. */
+    /* observer mirrors the non-callback branch of cannotAnswer: with no callback running the activity mark must already be fresh, or the connection is reaped. A stale mark seen at callbacks==0 is only reported when it is a STABLE state (callbacks still zero and the same mark on re-read), so a torn read that straddles the next iteration's freshly-entered callback cannot masquerade as the pre-decrement window the reorder closes. */
     go func() {
         for {
             select {
@@ -780,8 +772,7 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
 func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
     liveness := newConnectionLiveness()
 
-    /* a time.Time carrying a monotonic reading differs from its own wall-clock
-       rounding; one stripped of it (as time.Unix(0, n) yields) does not */
+    /* a time.Time carrying a monotonic reading differs from its own wall-clock rounding; one stripped of it (as time.Unix(0, n) yields) does not */
     if liveness.base == liveness.base.Round(0) {
         t.Fatalf("connectionLiveness base carries no monotonic reading; the grace windows would follow the wall clock")
     }
@@ -795,8 +786,7 @@ func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
         t.Fatalf("a callback within the grace must be excused")
     }
 
-    /* a callback whose start is older than the grace, measured from the monotonic
-       base, must no longer be excused */
+    /* a callback whose start is older than the grace, measured from the monotonic base, must no longer be excused */
     liveness.callbackStartedOffset.Store(int64(liveness.elapsed()) - int64(2*grace))
     if true == liveness.cannotAnswer(false, window, grace, grace) {
         t.Fatalf("a callback that outran the grace must no longer be excused")

@@ -675,14 +675,7 @@ func (instance *keptResolverHolder) Close() error {
     return nil
 }
 
-/*
-the sibling above cannot tell the edge from the creation-order tie-break: a dependency that is
-ALREADY held was necessarily created before its dependent, so latest-first closes the dependent first
-whether the edge exists or not. Here the two disagree. The holder is created first and keeps the
-resolver it was handed; the scoped entry it later reaches for is installed AFTER it, so the tie-break
-alone would close that entry first — out from under the holder that is still open. The edge recorded
-on the already-held path is the only thing that puts them back in order.
-*/
+/* the sibling above cannot tell the edge from the creation-order tie-break: a dependency that is ALREADY held was necessarily created before its dependent, so latest-first closes the dependent first whether the edge exists or not. Here the two disagree. The holder is created first and keeps the resolver it was handed; the scoped entry it later reaches for is installed AFTER it, so the tie-break alone would close that entry first — out from under the holder that is still open. The edge recorded on the already-held path is the only thing that puts them back in order. */
 func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -698,8 +691,7 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    /* the name carries a scoped registration of its own, which is what makes it a SCOPED node: the
-       provider never runs, because the override installed below answers before anything is built */
+    /* the name carries a scoped registration of its own, which is what makes it a SCOPED node: the provider never runs, because the override installed below answers before anything is built */
     if registerErr := serviceContainer.RegisterScoped(
         "app.zzz.late",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {

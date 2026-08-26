@@ -296,14 +296,7 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
     }
 }
 
-/*
-TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a
-deploy log captures. The success line lived inside wantsDetail(), so a plain
-run — the shape a deploy script invokes — printed a warning for the run that
-did nothing and not one byte for the run that applied migrations: the log was
-empty exactly when something had happened, and the operator reading it could
-not tell the two apart. The rollback sibling has always printed its line.
-*/
+/* TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a deploy log captures. The success line lived inside wantsDetail(), so a plain run — the shape a deploy script invokes — printed a warning for the run that did nothing and not one byte for the run that applied migrations: the log was empty exactly when something had happened, and the operator reading it could not tell the two apart. The rollback sibling has always printed its line. */
 func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()

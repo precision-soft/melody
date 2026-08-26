@@ -162,8 +162,7 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
     }
 }
 
-/* emptyNameCipherRef is the misuse the compartment marker must refuse: an empty name is the default cipher's
-reserved registry entry, not a compartment. */
+/* emptyNameCipherRef is the misuse the compartment marker must refuse: an empty name is the default cipher's reserved registry entry, not a compartment. */
 type emptyNameCipherRef struct{}
 
 func (instance emptyNameCipherRef) CipherName() string {

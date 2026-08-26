@@ -303,9 +303,7 @@ func (instance *cancellationEchoRepository) ClaimDueMessages(ctx context.Context
     return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a
-refused command line — which the dispatch answers — from the command's own failure, which is what it
-is asserting. */
+/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance runtimecontract.Runtime

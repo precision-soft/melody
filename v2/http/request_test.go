@@ -383,9 +383,7 @@ func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     }
 }
 
-/* The shape of a request parameter is the client's to choose, so repeating one is not a programming error
-to refuse loudly: the refusal was a 500 with a full stack record that any client could raise at will. The
-whole array is still reachable, through bag.StringSlice. */
+/* The shape of a request parameter is the client's to choose, so repeating one is not a programming error to refuse loudly: the refusal was a 500 with a full stack record that any client could raise at will. The whole array is still reachable, through bag.StringSlice. */
 func TestRequest_Input_AnswersTheFirstValueOfARepeatedKey(t *testing.T) {
     repeatedRequest := httptest.NewRequest("GET", "/search?a=1&a=2", nil)
     request := NewRequest(repeatedRequest, nil, nil, nil)

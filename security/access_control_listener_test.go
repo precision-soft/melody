@@ -1015,16 +1015,7 @@ func TestAccessControlListener_ATypedNilDecisionManagerAnswersTheMissingManagerB
     }
 }
 
-/*
-TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed
-pins the branch that used to be silent. The required-listener mark is what makes
-a listener stopping propagation ahead of access control fail the dispatch closed
-instead of letting the request reach its handler unchecked; a dispatcher that
-cannot take the mark disarms that guarantee for the whole process, and the
-framework's own event adapter refuses the very same condition with a panic
-rather than swallowing it. The record goes to the emergency channel because this
-runs at boot, before the configured logger is resolvable.
-*/
+/* TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed pins the branch that used to be silent. The required-listener mark is what makes a listener stopping propagation ahead of access control fail the dispatch closed instead of letting the request reach its handler unchecked; a dispatcher that cannot take the mark disarms that guarantee for the whole process, and the framework's own event adapter refuses the very same condition with a panic rather than swallowing it. The record goes to the emergency channel because this runs at boot, before the configured logger is resolvable. */
 func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed(t *testing.T) {
     readEnd, writeEnd, pipeErr := os.Pipe()
     if nil != pipeErr {

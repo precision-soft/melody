@@ -37,28 +37,14 @@ var (
     migratedDatabaseList = map[migratedSetKey]struct{}{}
 )
 
-/*
-EnsureMigrated applies the Migrations set to the catalog database, once per
-handle and per process. The catalog repository providers call it at first
-resolution, which is what keeps a freshly recreated volume usable without an
-operator step: the tables appear when the first request reaches a repository,
-exactly as they did when each repository owned its own create statement.
+/* EnsureMigrated applies the Migrations set to the catalog database, once per handle and per process. The catalog repository providers call it at first resolution, which is what keeps a freshly recreated volume usable without an operator step: the tables appear when the first request reaches a repository, exactly as they did when each repository owned its own create statement.
 
-Only a success is recorded; a failed attempt is retried at the next
-resolution. The mutex serializes the providers of one process, and the bun
-migration lock serializes processes sharing the database — several example
-applications race here whenever a volume starts empty.
-*/
+   Only a success is recorded; a failed attempt is retried at the next resolution. The mutex serializes the providers of one process, and the bun migration lock serializes processes sharing the database — several example applications race here whenever a volume starts empty. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return ensureMigratedSet(ctx, database, Migrations, migrationUnlockCommand)
 }
 
-/*
-EnsureJournalMigrated applies the JournalMigrations set to the journal
-database, through the same funnel EnsureMigrated runs — only the set and the
-unlock remedy differ, because the journal's lock lives in the journal's own
-database and is cleared by db:journal:unlock, not db:unlock.
-*/
+/* EnsureJournalMigrated applies the JournalMigrations set to the journal database, through the same funnel EnsureMigrated runs — only the set and the unlock remedy differ, because the journal's lock lives in the journal's own database and is cleared by db:journal:unlock, not db:unlock. */
 func EnsureJournalMigrated(ctx context.Context, database *bun.DB) error {
     return ensureMigratedSet(ctx, database, JournalMigrations, journalMigrationUnlockCommand)
 }
@@ -102,11 +88,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
     return nil
 }
 
-/*
-acquireMigrationLock answers whether the lock was taken. A false with a nil
-error means another process applied the whole set while this one waited, so
-there is nothing left to run and the lock was never held here.
-*/
+/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. */
 func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, unlockCommand string) (bool, error) {
     startedAt := time.Now()
 
@@ -151,12 +133,7 @@ func hasUnappliedMigration(ctx context.Context, migrator *migrate.Migrator) (boo
     return 0 < len(status.Unapplied()), nil
 }
 
-/*
-migrateWhileLocked releases the lock whatever the migration answered: a lock
-row that survives refuses every later migration on every process. The unlock
-failure becomes the verdict only when the migration itself succeeded; a failed
-migration keeps its own error.
-*/
+/* migrateWhileLocked releases the lock whatever the migration answered: a lock row that survives refuses every later migration on every process. The unlock failure becomes the verdict only when the migration itself succeeded; a failed migration keeps its own error. */
 func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockCommand string) (migrateErr error) {
     defer func() {
         unlockContext, cancelUnlock := context.WithTimeout(

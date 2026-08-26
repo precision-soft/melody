@@ -115,18 +115,9 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
     return renderErr
 }
 
-/*
-errorDetailsOf and errorCauseOf fill the two fields the json envelope always
-declared and always answered null. The machine document is the contract a
-pipeline reads, and it was the one rendering that threw away what the error
-already carried: at the same instant, over the same value, the journal filed
-the connection, the pool sizing, the deadlines and the whole cause chain, while
-stdout answered `"details":null,"cause":null` beside a single sentence.
+/* errorDetailsOf and errorCauseOf fill the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing, the deadlines and the whole cause chain, while stdout answered `"details":null,"cause":null` beside a single sentence.
 
-The details object is empty rather than null when the error carries no context,
-so the field keeps its json type on every failure — the rule the machine
-contracts of this family were put on.
-*/
+   The details object is empty rather than null when the error carries no context, so the field keeps its json type on every failure — the rule the machine contracts of this family were put on. */
 func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 

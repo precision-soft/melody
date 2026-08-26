@@ -314,15 +314,7 @@ func extractOriginScheme(origin string) string {
     return strings.ToLower(parsedUrl.Scheme)
 }
 
-/*
-parseSchemeWildcard recognizes a scheme-qualified wildcard pattern of the form
-"<scheme>://*.suffix" (for example "https://*.example.com"). It returns the
-scheme, the subdomain suffix, and true when the pattern is such a wildcard.
-Scheme-less patterns (for example "*.example.com") are not scheme wildcards and
-keep their scheme-agnostic host matching. The port is significant in every
-suffix: a wildcard without one matches only portless origins, and a wildcard
-meaning to allow a port names it ("https://*.example.com:8443").
-*/
+/* parseSchemeWildcard recognizes a scheme-qualified wildcard pattern of the form "<scheme>://*.suffix" (for example "https://*.example.com"). It returns the scheme, the subdomain suffix, and true when the pattern is such a wildcard. Scheme-less patterns (for example "*.example.com") are not scheme wildcards and keep their scheme-agnostic host matching. The port is significant in every suffix: a wildcard without one matches only portless origins, and a wildcard meaning to allow a port names it ("https://*.example.com:8443"). */
 func parseSchemeWildcard(pattern string) (string, string, bool) {
     index := strings.Index(pattern, "://")
     if -1 == index {

@@ -339,12 +339,7 @@ func TestHmacTokenSource_RejectsEnvelopeTooCloseToExpiryForReplayGuard(t *testin
     }
 }
 
-/* the HMAC replay guard records envelope nonces under an "hmac:"-namespaced key, so a caller-chosen
-   nonce can never collide with the TOTP replay guard's "2fa:" key space when one shared NonceGuard
-   backs both components. An attacker holding a valid key signs an envelope whose nonce spells the TOTP
-   guard key of alice's next code and sends it to an HMAC endpoint; the genuine second factor that
-   follows must still find that key unseen (unburned), so the namespacing is what closes the targeted
-   two-factor lockout. */
+/* the HMAC replay guard records envelope nonces under an "hmac:"-namespaced key, so a caller-chosen nonce can never collide with the TOTP replay guard's "2fa:" key space when one shared NonceGuard backs both components. An attacker holding a valid key signs an envelope whose nonce spells the TOTP guard key of alice's next code and sends it to an HMAC endpoint; the genuine second factor that follows must still find that key unseen (unburned), so the namespacing is what closes the targeted two-factor lockout. */
 func TestHmacTokenSource_NonceIsNamespacedAwayFromTotpGuard(t *testing.T) {
     guard := NewMemoryNonceGuard()
     source := NewHmacTokenSource(HmacTokenSourceConfig{Secrets: hmacTestSecrets(), Apps: hmacTestApps(), NonceGuard: guard})
@@ -545,8 +540,7 @@ func tamperHmacPayload(headerValue string) string {
     return parts[0] + "." + parts[1] + "." + parts[2]
 }
 
-/* hmacE2EFirewall wires a real HmacTokenSource into a compiled firewall + the kernel security
-   resolution listener, exercising the exact path a product uses (not Resolve in isolation). */
+/* hmacE2EFirewall wires a real HmacTokenSource into a compiled firewall + the kernel security resolution listener, exercising the exact path a product uses (not Resolve in isolation). */
 func hmacE2EFirewall(source securitycontract.TokenSource) *FirewallRegistry {
     firewall := NewCompiledFirewall(
         "internal",

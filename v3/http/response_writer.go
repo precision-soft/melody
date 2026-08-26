@@ -42,11 +42,7 @@ func WriteToHttpResponseWriter(
 
     headers := response.Headers()
     if nil != headers {
-        /* a key the response names is owned by the response: the writer's values for it are
-           replaced rather than appended to, so a header both sides set — the request id the kernel
-           puts on the raw writer, and any header a kernel.response listener sets on the response —
-           reaches the client once instead of twice. Keys the response does not name keep whatever
-           the writer already carries. */
+        /* a key the response names is owned by the response: the writer's values for it are replaced rather than appended to, so a header both sides set — the request id the kernel puts on the raw writer, and any header a kernel.response listener sets on the response — reaches the client once instead of twice. Keys the response does not name keep whatever the writer already carries. */
         for key, values := range headers {
             responseWriter.Header().Del(key)
             for _, value := range values {
@@ -105,13 +101,7 @@ type committedStatusRecorder interface {
     CommittedStatusCode() int
 }
 
-/* recordingResponseWriter tracks whether the response headers were already committed, so the kernel can tell a handler that streamed its own response (for example a hand-rolled streaming or download handler) apart from one that returned no response and expects the default 204. */
-/* recordingResponseWriter records what the delegate committed so the kernel can tell a response it still
-owns from one already on the wire. Its fields are written and read on the SERVING goroutine only — the
-kernel's recovery defer runs there too — so they carry no lock. A handler that hands the raw writer to
-a second goroutine, which is the documented shape of a stream, is outside that guarantee: the
-server-sent-event writer serializes its own frames under its own mutex, and it is the only writer of
-that connection while it runs. */
+/* recordingResponseWriter records what the delegate committed so the kernel can tell a response it still owns from one already on the wire. Its fields are written and read on the SERVING goroutine only — the kernel's recovery defer runs there too — so they carry no lock. A handler that hands the raw writer to a second goroutine, which is the documented shape of a stream, is outside that guarantee: the server-sent-event writer serializes its own frames under its own mutex, and it is the only writer of that connection while it runs. */
 type recordingResponseWriter struct {
     nethttp.ResponseWriter
     wroteHeader      bool

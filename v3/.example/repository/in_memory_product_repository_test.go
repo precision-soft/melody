@@ -12,9 +12,7 @@ import (
 /* concurrentRounds is shared by the four in-memory suites in this package. */
 const concurrentRounds = 500
 
-/* every repository is a process-wide singleton and net/http serves each request on its own
-goroutine, so a listing request and a deleting request overlap; the writer here always removes a
-non-terminal element, which is what makes DeleteById compact the backing array under the reader */
+/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
 
 func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -117,8 +115,7 @@ func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
     }
 }
 
-/* the two implementations share one validation, so a write the in-memory catalogue refuses is
-refused by the database-backed one with the same words */
+/* the two implementations share one validation, so a write the in-memory catalogue refuses is refused by the database-backed one with the same words */
 
 func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T) {
     ctx := context.Background()

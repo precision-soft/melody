@@ -808,11 +808,7 @@ func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
     }
 }
 
-/* The mount root answers the configured index file — that resolution is named by configuration and is what
-a browser asks for by visiting the site — but only for the root as it is actually spelled. The branch that
-resolves every other path refuses a spelling `path.Clean` folded, because the matchers in front of the
-application compare the raw path; the root branch carries the same refusal, or the mount's index page is
-served from behind whatever rule the folded-away prefix carried. */
+/* The mount root answers the configured index file — that resolution is named by configuration and is what a browser asks for by visiting the site — but only for the root as it is actually spelled. The branch that resolves every other path refuses a spelling `path.Clean` folded, because the matchers in front of the application compare the raw path; the root branch carries the same refusal, or the mount's index page is served from behind whatever rule the folded-away prefix carried. */
 func TestFileServer_ServesTheIndexFileForTheMountRoot(t *testing.T) {
     server := newFoldingRootTestFileServer()
 
@@ -850,8 +846,7 @@ func TestFileServer_RefusesTheSpellingsThatFoldIntoTheRoot(t *testing.T) {
     }
 }
 
-/* The two halves are textual twins and only the streaming one has a production caller, so the refusal is
-asserted on it by name rather than through Serve alone. */
+/* The two halves are textual twins and only the streaming one has a production caller, so the refusal is asserted on it by name rather than through Serve alone. */
 func TestFileServer_ServeReaderRefusesTheSpellingsThatFoldIntoTheRoot(t *testing.T) {
     server := newFoldingRootTestFileServer()
 
@@ -2501,7 +2496,7 @@ func TestFileServer_ServeReader_StripPrefixServesTheFileBeneathTheMount(t *testi
 
 /* the mount point itself is the site root as far as the client is concerned, so a request for the prefix alone answers the index file.
 
-The substitution that puts "/" back is SHADOWED, and this test is not its proof: the anchoring below it prefixes a leading slash onto whatever the trim left, so an empty remainder folds onto the root either way and removing the substitution changes nothing observable. It is proved on its verdict instead, by the inversion that turns every non-empty remainder into the root — which is the mount serving its index file for every asset beneath it. */
+   The substitution that puts "/" back is SHADOWED, and this test is not its proof: the anchoring below it prefixes a leading slash onto whatever the trim left, so an empty remainder folds onto the root either way and removing the substitution changes nothing observable. It is proved on its verdict instead, by the inversion that turns every non-empty remainder into the root — which is the mount serving its index file for every asset beneath it. */
 func TestFileServer_ServeReader_TheMountPointAloneResolvesToTheIndexFile(t *testing.T) {
     server := NewFileServer(
         NewOptions(

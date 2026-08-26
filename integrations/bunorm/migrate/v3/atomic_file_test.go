@@ -46,13 +46,7 @@ func TestFinishFileAtomically_ReplacesTheContentAndLeavesNoTemporaryBehind(t *te
     }
 }
 
-/*
-TestFinishFileAtomically_GivesTheDestinationTheMigrationMode is not a detail.
-os.CreateTemp makes its file 0600, and a rename carries the temporary file's mode
-onto the destination — so without the chmod the rewrite would silently narrow a
-world-readable migration to owner-only, and the narrowing would show up on a
-teammate's checkout rather than here.
-*/
+/* TestFinishFileAtomically_GivesTheDestinationTheMigrationMode is not a detail. os.CreateTemp makes its file 0600, and a rename carries the temporary file's mode onto the destination — so without the chmod the rewrite would silently narrow a world-readable migration to owner-only, and the narrowing would show up on a teammate's checkout rather than here. */
 func TestFinishFileAtomically_GivesTheDestinationTheMigrationMode(t *testing.T) {
     directory := t.TempDir()
     destination := filepath.Join(directory, "20260826120000_create_users.go")
@@ -75,14 +69,7 @@ func TestFinishFileAtomically_GivesTheDestinationTheMigrationMode(t *testing.T) 
     }
 }
 
-/*
-TestFinishFileAtomically_RefusesADestinationWhoseDirectoryIsNotThere pins the
-refusal by NAME rather than by panic, on a cause the environment cannot wave
-away. The obvious probe — a directory with the write bit cleared — is vacuous
-here: the development container runs its tests as root, and root ignores the
-permission bit, so that probe passed the failure straight through and reported a
-guard that had never run.
-*/
+/* TestFinishFileAtomically_RefusesADestinationWhoseDirectoryIsNotThere pins the refusal by NAME rather than by panic, on a cause the environment cannot wave away. The obvious probe — a directory with the write bit cleared — is vacuous here: the development container runs its tests as root, and root ignores the permission bit, so that probe passed the failure straight through and reported a guard that had never run. */
 func TestFinishFileAtomically_RefusesADestinationWhoseDirectoryIsNotThere(t *testing.T) {
     destination := filepath.Join(t.TempDir(), "a directory that was never created", "20260826120000_create_users.go")
 
@@ -96,17 +83,9 @@ func TestFinishFileAtomically_RefusesADestinationWhoseDirectoryIsNotThere(t *tes
     }
 }
 
-/*
-TestFinishFileAtomically_LeavesNoTemporaryBehindWhenTheRenameFails is the guard
-on the deferred cleanup, and it needs a failure that lands AFTER the temporary
-file exists — everything earlier fails before there is anything to clean up. A
-destination that is an existing DIRECTORY gives exactly that: the temporary
-neighbour is written, synced and chmodded, and only the rename refuses, because a
-file cannot be renamed over a directory.
+/* TestFinishFileAtomically_LeavesNoTemporaryBehindWhenTheRenameFails is the guard on the deferred cleanup, and it needs a failure that lands AFTER the temporary file exists — everything earlier fails before there is anything to clean up. A destination that is an existing DIRECTORY gives exactly that: the temporary neighbour is written, synced and chmodded, and only the rename refuses, because a file cannot be renamed over a directory.
 
-Without the cleanup the migrations directory keeps a dot-prefixed fragment of a
-migration for every failed attempt, which nothing reads and nothing removes.
-*/
+   Without the cleanup the migrations directory keeps a dot-prefixed fragment of a migration for every failed attempt, which nothing reads and nothing removes. */
 func TestFinishFileAtomically_LeavesNoTemporaryBehindWhenTheRenameFails(t *testing.T) {
     directory := t.TempDir()
     destination := filepath.Join(directory, "20260826120000_create_users.go")

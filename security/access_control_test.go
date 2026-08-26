@@ -367,8 +367,7 @@ func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testin
     }
 }
 
-/* A route ending in a catch-all parameter accepts the spellings net/http hands through unfolded, so a rule
-that only matches the folded one is a rule the request walks past — and no rule matched means granted. */
+/* A route ending in a catch-all parameter accepts the spellings net/http hands through unfolded, so a rule that only matches the folded one is a rule the request walks past — and no rule matched means granted. */
 func TestAccessControl_MatchFoldsTheSpellingsACatchAllRouteAccepts(t *testing.T) {
     control := NewAccessControl(
         NewAccessControlRawPrefixRule("/admin", "ROLE_ADMIN"),

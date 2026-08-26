@@ -16,12 +16,7 @@ type routeListingResponse struct {
     Example string `json:"example"`
 }
 
-/* RoutesHandler lists the routes a client may know about. It reads them through the framework's own
-   projection every page carries, which applies both the RouteAttributeExpose opt-in and the caller's own
-   zone: walking the registry directly listed every named route in the application — the internal whoami endpoint, the
-   token revocation endpoints, the user delete endpoint — each with a worked example url, to an
-   anonymous caller, while the sibling door onto the same data honoured the gate. Two doors, one gate,
-   and it was the ungated one that faced the public. */
+/* RoutesHandler lists the routes a client may know about. It reads them through the framework's own projection every page carries, which applies both the RouteAttributeExpose opt-in and the caller's own zone: walking the registry directly listed every named route in the application — the internal whoami endpoint, the token revocation endpoints, the user delete endpoint — each with a worked example url, to an anonymous caller, while the sibling door onto the same data honoured the gate. Two doors, one gate, and it was the ungated one that faced the public. */
 func RoutesHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         urlGenerator := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container())

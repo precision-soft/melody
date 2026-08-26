@@ -241,7 +241,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
 
 /* refuseTypedNilDependency refuses a dependency that reads as declared and holds a typed nil. The three interfaces an override carries — the decision manager, the entry point, the denied handler — are the ones the plain comparison above cannot judge: `var manager *myManager` handed to the setter is not nil as an interface, so the fallback to the global one is skipped, the firewall compiles green, and the first request behind it dereferences a nil receiver inside the listener. The matcher, the token source and the login and logout handlers are refused by name in this same loop; the three that are not include the one that decides access, so the silence fell on the security-critical dependency and on no other.
 
-The refusal names the source, because a typed nil that arrived through the global configuration and one that arrived through this firewall's own override are two different mistakes in two different files. */
+   The refusal names the source, because a typed nil that arrived through the global configuration and one that arrived through this firewall's own override are two different mistakes in two different files. */
 func refuseTypedNilDependency(firewallName string, dependencyName string, source security.Source, dependency any) error {
     if nil == dependency {
         return nil

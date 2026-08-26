@@ -49,10 +49,7 @@ func TestRouteDefinition_ReportsEveryFacetOfTheRoute(t *testing.T) {
         t.Fatalf("unexpected schemes: %v", definition.Schemes())
     }
 
-    /* the listing carries the requirement the caller DECLARED, not the anchored non-capturing form the
-       registration compiles: the wrapped spelling is not the developer's, it re-wraps on every round
-       trip, and it hands RE2-only syntax to consumers — the manifest's browser generator, an openapi
-       schema's ECMA-262 pattern field — whose engines cannot parse it */
+    /* the listing carries the requirement the caller DECLARED, not the anchored non-capturing form the registration compiles: the wrapped spelling is not the developer's, it re-wraps on every round trip, and it hands RE2-only syntax to consumers — the manifest's browser generator, an openapi schema's ECMA-262 pattern field — whose engines cannot parse it */
     if ConstraintNumeric != definition.Requirements()["id"] {
         t.Fatalf("unexpected requirements: %v", definition.Requirements())
     }

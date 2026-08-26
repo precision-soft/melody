@@ -33,16 +33,14 @@ func (instance *Tracker) Insert(ctx context.Context, entity string, entityId str
             return exception.NewError("audited insert failed", map[string]any{"entity": entity}, insertErr)
         }
 
-        /* An autoincrement primary key is only known after the insert, so a caller cannot pass it in
-           advance. Derive it from the now-populated model so the INSERT entry carries the real
-           entity_id (and an entity's history stays queryable by id) instead of an empty string. */
+        /* An autoincrement primary key is only known after the insert, so a caller cannot pass it in advance. Derive it from the now-populated model so the INSERT entry carries the real entity_id (and an entity's history stays queryable by id) instead of an empty string. */
         return instance.recorder.RecordInsert(withTransactionForDatabase(ctx, tx, instance.database), entity, instance.resolveEntityId(entityId, model), model)
     })
 }
 
 /* runInTx is every Tracker operation's transaction boundary, and it refuses a context that carries a caller-made WithDatabase binding: that binding means the caller already holds its own open transaction, and the Tracker — which owns a transaction of its own by contract — would then open a SECOND one on the same pool. The failure that follows is not an error but a deadlock: the outer transaction holds the row the inner SELECT ... FOR UPDATE asks for, or N concurrent requests hold all N pool connections while each waits for one more. The two doors are alternatives — a caller inside its own unit of work records through Recorder.Record* with WithDatabase(ctx, tx); the Tracker is for the caller that has no transaction and wants the write and its audit entry in one.
 
-The margins of the transaction are wrapped here because bun's RunInTx returns the BeginTx and Commit failures raw: everything inside the closure names its entity, and the two edges — the commit deadlock, the connection lost at the last moment — were the only failures that reached the caller with no entity and no operation on them. */
+   The margins of the transaction are wrapped here because bun's RunInTx returns the BeginTx and Commit failures raw: everything inside the closure names its entity, and the two edges — the commit deadlock, the connection lost at the last moment — were the only failures that reached the caller with no entity and no operation on them. */
 func (instance *Tracker) runInTx(ctx context.Context, entity string, operation string, unitOfWork func(ctx context.Context, tx bun.Tx) error) error {
     if bound, isBound := ctx.Value(databaseContextKey{}).(*boundDatabase); true == isBound && nil != bound && nil == bound.origin && nil != bound.handle {
         return exception.NewError(
@@ -91,11 +89,7 @@ func (instance *Tracker) Update(ctx context.Context, entity string, entityId str
     })
 }
 
-/* the caller usually passes only the primary key, so the passed-in model's remaining fields
-   are zero values it never read: recording them would assert them as the deleted row's contents. By
-   default nothing is claimed about them — the trail carries the identifier, the actor and the time,
-   which is what the delete actually knows — and the working database is not charged a read to write an
-   audit row. An entity whose deleted contents must be recoverable opts into CaptureDeleteBeforeImage. */
+/* the caller usually passes only the primary key, so the passed-in model's remaining fields are zero values it never read: recording them would assert them as the deleted row's contents. By default nothing is claimed about them — the trail carries the identifier, the actor and the time, which is what the delete actually knows — and the working database is not charged a read to write an audit row. An entity whose deleted contents must be recoverable opts into CaptureDeleteBeforeImage. */
 func (instance *Tracker) Delete(ctx context.Context, entity string, entityId string, model any) error {
     return instance.runInTx(ctx, entity, OperationDelete, func(ctx context.Context, tx bun.Tx) error {
         var before any
@@ -127,8 +121,7 @@ func (instance *Tracker) Delete(ctx context.Context, entity string, entityId str
     })
 }
 
-/* resolveEntityId keeps a caller-supplied id, or derives it from the model's primary key when none
-   was given (the common case for autoincrement keys, unknown before the insert). */
+/* resolveEntityId keeps a caller-supplied id, or derives it from the model's primary key when none was given (the common case for autoincrement keys, unknown before the insert). */
 func (instance *Tracker) resolveEntityId(entityId string, model any) string {
     if "" != entityId {
         return entityId
@@ -137,9 +130,7 @@ func (instance *Tracker) resolveEntityId(entityId string, model any) string {
     return entityIdFromModel(instance.database, model)
 }
 
-/* entityIdFromModel reads the bun primary-key value(s) off a model via its table schema; a composite
-   key is joined with ":". Returns "" when the model is not a struct pointer, has no primary key, or a
-   primary-key field is reached through a nil pointer. */
+/* entityIdFromModel reads the bun primary-key value(s) off a model via its table schema; a composite key is joined with ":". Returns "" when the model is not a struct pointer, has no primary key, or a primary-key field is reached through a nil pointer. */
 func entityIdFromModel(database *bun.DB, model any) string {
     value := reflect.ValueOf(model)
     if reflect.Ptr != value.Kind() || true == value.IsNil() {

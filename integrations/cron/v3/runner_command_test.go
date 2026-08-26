@@ -2613,14 +2613,7 @@ func newCapturingRunnerRuntime(ctx context.Context) (runtimecontract.Runtime, *c
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), captured
 }
 
-/*
-TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step
-reads. The command declared and validated --format=json through StandardFlags
-and then answered zero bytes on every path: `melody:cron:run --once
---format=json | jq` received an empty stream, which is indistinguishable, to
-the step consuming it, from a missing binary. The only observable effect the
-flag had was that the cli banner disappeared.
-*/
+/* TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step reads. The command declared and validated --format=json through StandardFlags and then answered zero bytes on every path: `melody:cron:run --once --format=json | jq` received an empty stream, which is indistinguishable, to the step consuming it, from a missing binary. The only observable effect the flag had was that the cli banner disappeared. */
 func TestRunnerCommand_OnceRendersTheMachineDocument(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -2751,14 +2744,7 @@ func TestRunnerCommand_OnceRendersTheFailureInsideTheDocument(t *testing.T) {
     }
 }
 
-/*
-TestRunnerCommand_DeclaresWhatItDrives pins the other half of the same silence.
-A scheduler built over a configuration emptied by a refactor, or whose entries
-an environment gate filtered away, ran forever, exited successfully and wrote
-not one byte on any channel: nothing distinguished it from a healthy one, and
-the absence was noticed days later, when the nightly sweep turned out not to
-have run.
-*/
+/* TestRunnerCommand_DeclaresWhatItDrives pins the other half of the same silence. A scheduler built over a configuration emptied by a refactor, or whose entries an environment gate filtered away, ran forever, exited successfully and wrote not one byte on any channel: nothing distinguished it from a healthy one, and the absence was noticed days later, when the nightly sweep turned out not to have run. */
 func TestRunnerCommand_DeclaresWhatItDrives(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -2812,15 +2798,7 @@ func TestRunnerCommand_DeclaresAnEmptyScheduleAsAWarning(t *testing.T) {
     }
 }
 
-/*
-TestRunScheduledCommand_APanicKeepsItsCauseChain pins the record a panicking
-job produces. The recovery boundary joined its rich error onto the (nil) run
-error, and errors.Join answers an Unwrap of []error while exception.LogContext
-anchors cause and causeChain on errors.Unwrap — the single-value form — so the
-record carried the top message and nothing else: not the context naming the
-parameter, not the chain naming what refused. The same failure RETURNED rather
-than raised filed a complete record, which is the difference this closes.
-*/
+/* TestRunScheduledCommand_APanicKeepsItsCauseChain pins the record a panicking job produces. The recovery boundary joined its rich error onto the (nil) run error, and errors.Join answers an Unwrap of []error while exception.LogContext anchors cause and causeChain on errors.Unwrap — the single-value form — so the record carried the top message and nothing else: not the context naming the parameter, not the chain naming what refused. The same failure RETURNED rather than raised filed a complete record, which is the difference this closes. */
 func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
     dialErr := errors.New("dial tcp 10.0.0.9:5432: connect: connection refused")
 
@@ -2949,14 +2927,7 @@ func TestTimeoutError_WithoutACommandFailureWrapsTheSentinelAlone(t *testing.T) 
     }
 }
 
-/*
-TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive pins the shape that
-replaced the join at the scope-close boundary. The command's own failure stays
-the wrapped one, so its context and its whole cause chain still reach the
-record; the close failure travels beside it in the context, where a join would
-have emptied both — errors.Join answers an Unwrap of []error and
-exception.LogContext anchors cause and causeChain on the single-value form.
-*/
+/* TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive pins the shape that replaced the join at the scope-close boundary. The command's own failure stays the wrapped one, so its context and its whole cause chain still reach the record; the close failure travels beside it in the context, where a join would have emptied both — errors.Join answers an Unwrap of []error and exception.LogContext anchors cause and causeChain on the single-value form. */
 func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     job := newRecordingCommand("job:top")
     job.runErr = exception.NewError(
@@ -3012,12 +2983,7 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     }
 }
 
-/*
-TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing pins the default posture of
-the scheduler loop's document. A per-minute document for an entry that runs
-once a night would be 1439 lines a day saying nothing, so a minute that
-dispatched nothing is silent unless --report-idle asks for it.
-*/
+/* TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing pins the default posture of the scheduler loop's document. A per-minute document for an entry that runs once a night would be 1439 lines a day saying nothing, so a minute that dispatched nothing is silent unless --report-idle asks for it. */
 func TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing(t *testing.T) {
     buffer, finished, cancel := driveOneIdleLoopMinute(t, false)
     defer cancel()
@@ -3029,11 +2995,7 @@ func TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing(t *testing.T) {
     }
 }
 
-/*
-TestRunLoop_ReportsAnIdleMinuteWhenAsked pins the flag: without it a consumer
-cannot tell a live scheduler with nothing due from a dead one, since both write
-nothing at all.
-*/
+/* TestRunLoop_ReportsAnIdleMinuteWhenAsked pins the flag: without it a consumer cannot tell a live scheduler with nothing due from a dead one, since both write nothing at all. */
 func TestRunLoop_ReportsAnIdleMinuteWhenAsked(t *testing.T) {
     buffer, finished, cancel := driveOneIdleLoopMinute(t, true)
     defer cancel()
@@ -3344,14 +3306,7 @@ func TestDispatchDue_TheDocumentOrdersRunsByCommandName(t *testing.T) {
     }
 }
 
-/*
-TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue is the guard the whole zone
-declaration exists for, and it is written so that the two zones DISAGREE about
-the same instant. 09:00 UTC is 18:00 in Tokyo, and the entry is scheduled for
-eighteen hundred: under the configured zone it is due, under the process zone it
-is not. A probe whose zones agreed at the chosen instant would pass with the zone
-never applied at all.
-*/
+/* TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue is the guard the whole zone declaration exists for, and it is written so that the two zones DISAGREE about the same instant. 09:00 UTC is 18:00 in Tokyo, and the entry is scheduled for eighteen hundred: under the configured zone it is due, under the process zone it is not. A probe whose zones agreed at the chosen instant would pass with the zone never applied at all. */
 func TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue(t *testing.T) {
     job := newRecordingCommand("job:evening")
 

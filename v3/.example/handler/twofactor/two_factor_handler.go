@@ -13,8 +13,7 @@ import (
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* queryString reads a query parameter as a string, handling the bag's []string storage (query values are
-kept as string slices) as well as a plain string, returning "" when absent. */
+/* queryString reads a query parameter as a string, handling the bag's []string storage (query values are kept as string slices) as well as a plain string, returning "" when absent. */
 func queryString(request melodyhttpcontract.Request, name string) string {
     value, exists := request.Query().Get(name)
     if false == exists {
@@ -42,10 +41,7 @@ type enrollPayload struct {
     RecoveryCodes  []string `json:"recoveryCodes"`
 }
 
-/* EnrollHandler enrolls a user's TOTP second factor: it generates a secret and single-use recovery codes,
-persists them encrypted, and returns the secret + otpauth URI (the QR payload) and the recovery codes to
-show once. An endpoint kept deliberately simple — a production application returns the secret only during enrollment and behind the user's
-authenticated session. */
+/* EnrollHandler enrolls a user's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and returns the secret + otpauth URI (the QR payload) and the recovery codes to show once. An endpoint kept deliberately simple — a production application returns the secret only during enrollment and behind the user's authenticated session. */
 func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user := queryString(request, "user")
@@ -67,14 +63,9 @@ func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     }
 }
 
-/* VerifyHandler verifies a submitted second factor for a user: a TOTP code on the X-2FA-Code header is
-checked against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code is atomically
-redeemed. It reports 200 on success and 401 on a wrong/replayed factor, exercising the same store the
-TotpSecondFactorAuthenticator uses.
+/* VerifyHandler verifies a submitted second factor for a user: a TOTP code on the X-2FA-Code header is checked against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code is atomically redeemed. It reports 200 on success and 401 on a wrong/replayed factor, exercising the same store the TotpSecondFactorAuthenticator uses.
 
-An accepted TOTP code stays valid for its whole window, so — exactly as the framework's authenticator does — it is
-burned in a replay guard the moment it is accepted. The nonce is keyed on the NORMALIZED code, because Verify
-normalizes before comparing: keying on the raw code would let "409 643" replay a code already spent as "409643". */
+   An accepted TOTP code stays valid for its whole window, so — exactly as the framework's authenticator does — it is burned in a replay guard the moment it is accepted. The nonce is keyed on the NORMALIZED code, because Verify normalizes before comparing: keying on the raw code would let "409 643" replay a code already spent as "409643". */
 func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     replayGuard := melodysecurity.NewMemoryNonceGuard()
 
@@ -133,8 +124,7 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     }
 }
 
-/* totpCodeValidityWindow is the span an accepted code stays verifiable — (2*skew+1) periods — and therefore how long a
-spent code must stay burned. It resolves through the totp package so it can never drift from what Verify honours. */
+/* totpCodeValidityWindow is the span an accepted code stays verifiable — (2*skew+1) periods — and therefore how long a spent code must stay burned. It resolves through the totp package so it can never drift from what Verify honours. */
 func totpCodeValidityWindow() time.Duration {
     resolved := totp.Config{}.Resolve()
 

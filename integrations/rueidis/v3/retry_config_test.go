@@ -25,8 +25,7 @@ func TestDefaultRetryConfig(t *testing.T) {
     }
 }
 
-/* a cold-start dial failure (connection refused / no such host / timeout) is transient and retried;
-an unrelated error is not, so a real misconfiguration still fails fast. */
+/* a cold-start dial failure (connection refused / no such host / timeout) is transient and retried; an unrelated error is not, so a real misconfiguration still fails fast. */
 func TestIsTransientError(t *testing.T) {
     provider := &Provider{retryConfig: DefaultRetryConfig()}
 
@@ -77,8 +76,7 @@ func TestComputeBackoffDelay(t *testing.T) {
     }
 }
 
-/* negative delays and a sub-1 multiplier are degenerate (an immediate sleep, a decaying delay) and
-resolve to the defaults instead of collapsing the backoff. */
+/* negative delays and a sub-1 multiplier are degenerate (an immediate sleep, a decaying delay) and resolve to the defaults instead of collapsing the backoff. */
 func TestComputeBackoffDelayDegenerateValuesFallBackToDefaults(t *testing.T) {
     provider := &Provider{retryConfig: NewRetryConfig(3, -time.Second, -time.Second, 0.5)}
 

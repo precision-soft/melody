@@ -223,17 +223,14 @@ func (instance *Application) registerParameter(
     instance.configuration.RegisterRuntime(name, value)
 }
 
-/* Configuration exposes the loaded configuration before boot so wiring code (module
-   construction in the composition root) can read parameters — including the values
-   melody auto-registers from the .env files — without reaching for os.Getenv. Services
-   resolved from the container should instead read config through the resolver. */
+/* Configuration exposes the loaded configuration before boot so wiring code (module construction in the composition root) can read parameters — including the values melody auto-registers from the .env files — without reaching for os.Getenv. Services resolved from the container should instead read config through the resolver. */
 func (instance *Application) Configuration() configcontract.Configuration {
     return instance.configuration
 }
 
 /* ProcessRole is the resolved process role (config.RoleWeb, config.RoleWorker or config.RoleAll): an explicit --role flag wins over the MELODY_PROCESS_ROLE parameter, which defaults to all. Melody gates nothing on it — wiring code queries it to decide whether to register background runners (outbox relays, consumers) on this process; services resolve the same value through ServiceProcessRole.
 
-Nothing in this major waits for those runners: when Run returns, the container closes immediately, so a goroutine still draining loses its services under it. A runner that must finish its work observes the run context and completes its drain before the handler that received the context returns. */
+   Nothing in this major waits for those runners: when Run returns, the container closes immediately, so a goroutine still draining loses its services under it. A runner that must finish its work observes the run context and completes its drain before the handler that received the context returns. */
 func (instance *Application) ProcessRole() string {
     return instance.runtimeFlags.Role()
 }
@@ -435,7 +432,7 @@ var shieldedCloseStep = logging.RunShieldedStep
 
 /* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call itself discovered turns into a non-zero exit, so a supervisor sees a shutdown that lost something — a failed flush, a close that errored — instead of recording a clean exit 0 whose only trace was one stderr line. A close somebody else already performed reported its failure through its own channel and keeps its own exit code.
 
-The teardown runs under the same shield the panic path has had since the exit-step budget was installed, and for the same reason: the loop is strictly sequential with no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone, a session file on a vanished mount — parks every service behind it and the process with them. The healthy shutdown was the one without an escape while the dying one had ten seconds. An abandoned teardown exits non-zero, because a process that could not release what it held did not shut down cleanly however quiet it was; and the error the step was writing is deliberately not read on that branch, since the step is still running on its own goroutine. */
+   The teardown runs under the same shield the panic path has had since the exit-step budget was installed, and for the same reason: the loop is strictly sequential with no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone, a session file on a vanished mount — parks every service behind it and the process with them. The healthy shutdown was the one without an escape while the dying one had ten seconds. An abandoned teardown exits non-zero, because a process that could not release what it held did not shut down cleanly however quiet it was; and the error the step was writing is deliberately not read on that branch, since the step is still running on its own goroutine. */
 func (instance *Application) closeAndExitOnFailure() {
     var closeErr error
 

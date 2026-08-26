@@ -261,7 +261,7 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
 
 /* MarkSecret marks an already registered parameter as holding a credential. The parameters melody registers automatically from the .env artifacts are the ones most likely to hold one, and they exist before any module runs, so marking them is separate from declaring them.
 
-An absent parameter is left alone rather than reported: an environment key is legitimately undefined in some environments, and refusing to boot over one would make the marking unusable exactly where it matters. The secret column of debug:parameters is what confirms a marking took effect. */
+   An absent parameter is left alone rather than reported: an environment key is legitimately undefined in some environments, and refusing to boot over one would make the marking unusable exactly where it matters. The secret column of debug:parameters is what confirms a marking took effect. */
 func (instance *Configuration) MarkSecret(name string) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

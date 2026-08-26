@@ -192,13 +192,7 @@ func JsonErrorResponse(statusCode int, message string) *Response {
     }
 }
 
-/* FileResponse opens path exactly as given and streams it as the response body — it applies no
-folding, no root and no containment check, so it must never be handed a path built from client input
-without the caller confining it first. `os.Open("storage/invoices/" + request.Input("name"))` reads
-"../../../../etc/passwd" as readily as an invoice. Confine the name to a known directory before the
-call (reject "..", resolve symlinks and check the result stays under the root — the static file
-server does this for the paths it serves), or serve a fixed set of files by a lookup the client cannot
-steer. The returned body is the open file; the kernel closes it after the response is written. */
+/* FileResponse opens path exactly as given and streams it as the response body — it applies no folding, no root and no containment check, so it must never be handed a path built from client input without the caller confining it first. `os.Open("storage/invoices/" + request.Input("name"))` reads "../../../../etc/passwd" as readily as an invoice. Confine the name to a known directory before the call (reject "..", resolve symlinks and check the result stays under the root — the static file server does this for the paths it serves), or serve a fixed set of files by a lookup the client cannot steer. The returned body is the open file; the kernel closes it after the response is written. */
 func FileResponse(statusCode int, path string) (*Response, error) {
     file, err := os.Open(path)
     if nil != err {

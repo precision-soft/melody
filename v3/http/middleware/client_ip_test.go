@@ -231,10 +231,7 @@ func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *te
     }
 }
 
-/* an entry that parses as neither a CIDR prefix nor an address used to be skipped on every request,
-   which narrowed the trusted list in silence: the hop it named stopped being believed, the framework
-   fell back to the direct peer, and every client behind that proxy collapsed onto one rate-limit
-   bucket with no record anywhere. */
+/* an entry that parses as neither a CIDR prefix nor an address used to be skipped on every request, which narrowed the trusted list in silence: the hop it named stopped being believed, the framework fell back to the direct peer, and every client behind that proxy collapsed onto one rate-limit bucket with no record anywhere. */
 func TestNewForwardedClientIpResolver_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -249,8 +246,7 @@ func TestNewForwardedClientIpResolver_RefusesAMalformedTrustedProxyEntry(t *test
 }
 
 func TestNewForwardedClientIpResolver_KeepsAcceptingAnEmptyEntry(t *testing.T) {
-    /* a list assembled by splitting an environment variable carries a trailing empty field for a
-       trailing separator, and both readers already treat it as absent */
+    /* a list assembled by splitting an environment variable carries a trailing empty field for a trailing separator, and both readers already treat it as absent */
     resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: true,
         TrustedProxyList:      []string{"10.0.0.0/8", ""},

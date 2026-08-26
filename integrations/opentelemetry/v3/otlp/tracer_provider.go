@@ -15,18 +15,14 @@ import (
 )
 
 const (
-    /* ProtocolGrpc and ProtocolHttp select the OTLP transport; grpc (default) talks to the collector's
-       4317 receiver, http/protobuf to 4318. */
+    /* ProtocolGrpc and ProtocolHttp select the OTLP transport; grpc (default) talks to the collector's 4317 receiver, http/protobuf to 4318. */
     ProtocolGrpc = "grpc"
     ProtocolHttp = "http"
 
     defaultBatchTimeout = 5 * time.Second
 )
 
-/* Config describes how to export spans to an OTLP collector. Endpoint is host:port without a scheme (for
-example "otel-collector:4317"); the deployment owns these values, so an app typically fills them from a
-parameter / .env. SampleRatio in (0,1) keeps that fraction of traces; 0 or >=1 samples everything; a
-negative or NaN ratio is refused at construction, because both used to fall through to AlwaysSample. */
+/* Config describes how to export spans to an OTLP collector. Endpoint is host:port without a scheme (for example "otel-collector:4317"); the deployment owns these values, so an app typically fills them from a parameter / .env. SampleRatio in (0,1) keeps that fraction of traces; 0 or >=1 samples everything; a negative or NaN ratio is refused at construction, because both used to fall through to AlwaysSample. */
 type Config struct {
     Endpoint       string
     Protocol       string
@@ -38,9 +34,7 @@ type Config struct {
     BatchTimeout   time.Duration
 }
 
-/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter. The caller owns the
-returned provider's lifecycle — Shutdown must run on application exit to flush pending spans; the plug-and-
-play Module in this package does that for you by registering it as a container-managed service. */
+/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter. The caller owns the returned provider's lifecycle — Shutdown must run on application exit to flush pending spans; the plug-and- play Module in this package does that for you by registering it as a container-managed service. */
 func NewTracerProvider(ctx context.Context, config Config) (*sdktrace.TracerProvider, error) {
     if "" == config.Endpoint {
         return nil, exception.NewError("otlp tracer provider endpoint is required", nil, nil)

@@ -610,16 +610,13 @@ func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     }
 }
 
-/* TestMain silences the standard logger for the whole package: the configuration reports through it on
-several paths, and the output belongs to the code under test rather than to the test run. */
+/* TestMain silences the standard logger for the whole package: the configuration reports through it on several paths, and the output belongs to the code under test rather than to the test run. */
 func TestMain(mainInstance *testing.M) {
     log.SetOutput(io.Discard)
     os.Exit(mainInstance.Run())
 }
 
-/* newResolvedConfiguration builds a configuration over a fixed environment, lets the caller declare its
-parameters and resolves them, which is the shape almost every test of this file and of the resolve path
-needs before it can assert anything. */
+/* newResolvedConfiguration builds a configuration over a fixed environment, lets the caller declare its parameters and resolves them, which is the shape almost every test of this file and of the resolve path needs before it can assert anything. */
 func newResolvedConfiguration(
     t *testing.T,
     environmentValues map[string]string,

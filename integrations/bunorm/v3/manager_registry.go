@@ -32,11 +32,7 @@ type ManagerRegistry struct {
     closed             bool
 }
 
-/*
-   managerOpen tracks a single in-flight Provider.Open for one definition name so
-   that concurrent openers of the same name coalesce onto one attempt instead of
-   each dialing the database while holding the registry-wide lock.
-*/
+/* managerOpen tracks a single in-flight Provider.Open for one definition name so that concurrent openers of the same name coalesce onto one attempt instead of each dialing the database while holding the registry-wide lock. */
 type managerOpen struct {
     done      chan struct{}
     manager   *Manager
@@ -225,9 +221,9 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
 
 /* CloseMigrationDatabase ends the dedicated migration connection opened for one definition and forgets it, so the next MigrationDatabase for that name opens a fresh one. An empty name selects the default definition, exactly as MigrationDatabase does.
 
-It exists because that connection is not a request pool and must not live like one. It deliberately lifts the driver's read and write deadlines and recycles nothing — no lifetime, no idle timeout — which is right for a DDL statement that legitimately runs for minutes and wrong for anything that then sits idle. Memoized until the registry itself closes, a single migration run at boot left a deadline-less connection open against the database for the whole life of a process that serves requests; the migration commands call this on their way out, and the registry's own Close stays the net underneath for whatever did not.
+   It exists because that connection is not a request pool and must not live like one. It deliberately lifts the driver's read and write deadlines and recycles nothing — no lifetime, no idle timeout — which is right for a DDL statement that legitimately runs for minutes and wrong for anything that then sits idle. Memoized until the registry itself closes, a single migration run at boot left a deadline-less connection open against the database for the whole life of a process that serves requests; the migration commands call this on their way out, and the registry's own Close stays the net underneath for whatever did not.
 
-Calling it for a name that has no migration connection — never opened, or already ended here — is not an error and closes nothing. A closed registry refuses it, because there is nothing left to end and answering success would say the pool was ended by this call. */
+   Calling it for a name that has no migration connection — never opened, or already ended here — is not an error and closes nothing. A closed registry refuses it, because there is nothing left to end and answering success would say the pool was ended by this call. */
 func (instance *ManagerRegistry) CloseMigrationDatabase(name string) error {
     if "" == name {
         name = instance.defaultProviderDefinitionName
@@ -364,12 +360,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
 
     instance.lock.Unlock()
 
-    /*
-       Open the provider outside the registry-wide lock: dialing, pinging and any
-       uninterruptible retry sleeps of a down database must not serialize cache
-       hits for other managers or a concurrent Close. A failed open is never
-       memoized, so a later call retries.
-    */
+    /* Open the provider outside the registry-wide lock: dialing, pinging and any uninterruptible retry sleeps of a down database must not serialize cache hits for other managers or a concurrent Close. A failed open is never memoized, so a later call retries. */
 
     settled := false
     providerReturned := false
@@ -447,11 +438,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         }
 
         if true == instance.closed {
-            /*
-               Close ran while this open was in flight: it already iterated the manager
-               map without this entry, so memoizing the manager now would leak its
-               connection pool. Close the freshly opened database and refuse.
-            */
+            /* Close ran while this open was in flight: it already iterated the manager map without this entry, so memoizing the manager now would leak its connection pool. Close the freshly opened database and refuse. */
             _ = database.Close()
             pendingOpen.openError = ErrManagerRegistryClosed
 
@@ -480,7 +467,7 @@ func (instance *ManagerRegistry) currentLogger() loggingcontract.Logger {
 
 /* SetLogger replaces the logger this registry reports through, and takes bun's diagnostic channel with it. It exists for the wiring window an application cannot avoid: a registry built while the modules are still being assembled has no application logger to be handed — the framework's own does not exist yet — so it is constructed on the emergency logger, and without this door every later open, every retry warning and every terminal connection failure would keep bypassing the journal for the life of the process.
 
-The routing follows deliberately: the same call that gives the registry its real journal gives bun's own diagnostics the same destination, so the two cannot drift apart. A nil logger, and a typed nil holding no value, are refused — they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
+   The routing follows deliberately: the same call that gives the registry its real journal gives bun's own diagnostics the same destination, so the two cannot drift apart. A nil logger, and a typed nil holding no value, are refused — they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
 func (instance *ManagerRegistry) SetLogger(logger loggingcontract.Logger) error {
     if true == isNilInterface(logger) {
         return ErrLoggerIsRequired

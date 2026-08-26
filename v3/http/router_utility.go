@@ -215,14 +215,7 @@ func splitPath(value string) []string {
 
 /* a request path is never trimmed: whitespace is significant to whatever sits in front of the application, so trimming it would let "/admin%20" reach the "/admin" handler through a proxy rule that never saw a match
 
-The path arrives in its ESCAPED spelling and is split on the separators the client actually sent, then
-each segment is unescaped on its own. Splitting the decoded path instead made "%2F" a segment
-separator: "/admin%2Fusers" is one segment naming a resource called "admin/users", but decoded first
-it became two and reached the "/admin/users" handler — while a proxy or WAF rule written against the
-raw request line saw neither. Per-segment unescaping keeps an encoded separator inside the value where
-the client put it, so a parameter can legitimately carry a slash and the route tree still sees exactly
-the segments the request line has. A segment whose escaping is malformed is left as sent rather than
-guessed at, so it matches only a route that literally spells it. */
+   The path arrives in its ESCAPED spelling and is split on the separators the client actually sent, then each segment is unescaped on its own. Splitting the decoded path instead made "%2F" a segment separator: "/admin%2Fusers" is one segment naming a resource called "admin/users", but decoded first it became two and reached the "/admin/users" handler — while a proxy or WAF rule written against the raw request line saw neither. Per-segment unescaping keeps an encoded separator inside the value where the client put it, so a parameter can legitimately carry a slash and the route tree still sees exactly the segments the request line has. A segment whose escaping is malformed is left as sent rather than guessed at, so it matches only a route that literally spells it. */
 func splitRequestPath(value string) []string {
     segments := splitNormalizedPath(value)
 
@@ -239,10 +232,7 @@ func splitRequestPath(value string) []string {
 }
 
 func splitNormalizedPath(value string) []string {
-    /* an empty path is the root, which is what every consumer of it means. Answered as [""] instead,
-       the tree walk started with no segments to consume and reached only the tree root, where a route
-       registered as "/" does not live — it lives under the empty static child — so a request whose
-       target normalized to nothing 404'd even against an application that had registered "/". */
+    /* an empty path is the root, which is what every consumer of it means. Answered as [""] instead, the tree walk started with no segments to consume and reached only the tree root, where a route registered as "/" does not live — it lives under the empty static child — so a request whose target normalized to nothing 404'd even against an application that had registered "/". */
     if "" == value {
         value = "/"
     }
@@ -262,20 +252,9 @@ func splitNormalizedPath(value string) []string {
     return strings.Split(normalizedPath, "/")
 }
 
-/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer
-reads the same. The router matches the path as sent — splitNormalizedPath drops trailing slashes but
-folds no dot or empty segment — while the access-control matcher folds "..", "." and "//" through
-path.Clean before it selects a rule, and the firewall matcher reads the raw path with neither fold.
-A path that folds to a different spelling therefore routes to one handler and is authorized against
-another rule, so a request that reaches a protected handler under its sent spelling can be granted the
-attributes of the folded spelling's rule — a different, possibly public one, or none at all. The
-static file server already refuses a non-canonical path for exactly this reason; refusing at the
-kernel keeps the router, the firewall matchers and the access control reading one spelling.
+/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer reads the same. The router matches the path as sent — splitNormalizedPath drops trailing slashes but folds no dot or empty segment — while the access-control matcher folds "..", "." and "//" through path.Clean before it selects a rule, and the firewall matcher reads the raw path with neither fold. A path that folds to a different spelling therefore routes to one handler and is authorized against another rule, so a request that reaches a protected handler under its sent spelling can be granted the attributes of the folded spelling's rule — a different, possibly public one, or none at all. The static file server already refuses a non-canonical path for exactly this reason; refusing at the kernel keeps the router, the firewall matchers and the access control reading one spelling.
 
-A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route
-"/admin", so it is normalized away here before the comparison rather than refused. A target that does
-not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and
-is left to the router to answer. */
+   A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route "/admin", so it is normalized away here before the comparison rather than refused. A target that does not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and is left to the router to answer. */
 func requestPathIsCanonical(path string) bool {
     if false == strings.HasPrefix(path, "/") {
         return true
@@ -595,9 +574,9 @@ func resolveSessionCookieSecure(
 
 /* logSessionPersistenceEvent records what the response path did with the session, at the level the event deserves and with the coordinates that let it be found again.
 
-The level is a parameter because one of the three is not a failure at all: a session another request ended while this one was running is the session ending — the contract says so in as many words, and so does the branch that answers it — while the other two are storage outages. Filed at error alongside them, a user who logged out in a second tab produced one indistinguishable "failed to save session" per concurrent request, against a perfectly healthy backend.
+   The level is a parameter because one of the three is not a failure at all: a session another request ended while this one was running is the session ending — the contract says so in as many words, and so does the branch that answers it — while the other two are storage outages. Filed at error alongside them, a user who logged out in a second tab produced one indistinguishable "failed to save session" per concurrent request, against a perfectly healthy backend.
 
-The coordinates travel because only the middle record ever named the session, and that by accident: it carries sessionId through the cause's own context. None of the three named the route, so a record that did arrive could not be tied to the request that produced it. The level switch goes through the named methods rather than Log, because that is the door a substituted logger overrides. */
+   The coordinates travel because only the middle record ever named the session, and that by accident: it carries sessionId through the cause's own context. None of the three named the route, so a record that did arrive could not be tied to the request that produced it. The level switch goes through the named methods rather than Log, because that is the door a substituted logger overrides. */
 func logSessionPersistenceEvent(
     runtimeInstance runtimecontract.Runtime,
     level loggingcontract.Level,
@@ -840,14 +819,7 @@ func matchesMethod(methods []string, method string) bool {
     return false
 }
 
-/* matchesHost compares host names the way the host header is defined rather than the way two strings
-compare. A host name is case-insensitive, so a client sending Example.com reaches a route bound to
-example.com; and the port is a discriminator only when the route asked for one, so a route bound to
-example.com matches example.com:8443 while a route bound to example.com:8443 still matches only that
-port. The exact comparison this replaced made a route bound to a host unreachable behind any
-non-default port — the whole of local development and every non-443 deployment — and the request fell
-through to a broader route on the same pattern, or to a 404, with nothing recorded. The sibling
-matchesScheme already folds case for the same reason. */
+/* matchesHost compares host names the way the host header is defined rather than the way two strings compare. A host name is case-insensitive, so a client sending Example.com reaches a route bound to example.com; and the port is a discriminator only when the route asked for one, so a route bound to example.com matches example.com:8443 while a route bound to example.com:8443 still matches only that port. The exact comparison this replaced made a route bound to a host unreachable behind any non-default port — the whole of local development and every non-443 deployment — and the request fell through to a broader route on the same pattern, or to a 404, with nothing recorded. The sibling matchesScheme already folds case for the same reason. */
 func matchesHost(expectedHost string, actualHost string) bool {
     if "" == expectedHost {
         return true
@@ -1050,12 +1022,7 @@ func matchPath(
     return params, true
 }
 
-/* requestPathIsRoutable reports whether a request target is a path at all. The origin-form is the only
-   target a route table can answer: the asterisk-form of OPTIONS names the server rather than a
-   resource, and net/http hands it through as the path "*", which the splitter then read as the single
-   segment "*" — so a server-wide OPTIONS was offered to every "/:param" route in the application and
-   bound the asterisk as that parameter's value. An authority-form CONNECT reaches the same door.
-   Neither is path-routed; both are left to the kernel to answer as no route. */
+/* requestPathIsRoutable reports whether a request target is a path at all. The origin-form is the only target a route table can answer: the asterisk-form of OPTIONS names the server rather than a resource, and net/http hands it through as the path "*", which the splitter then read as the single segment "*" — so a server-wide OPTIONS was offered to every "/:param" route in the application and bound the asterisk as that parameter's value. An authority-form CONNECT reaches the same door. Neither is path-routed; both are left to the kernel to answer as no route. */
 func requestPathIsRoutable(path string) bool {
     if "" == path {
         return true

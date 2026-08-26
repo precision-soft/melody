@@ -43,11 +43,7 @@ func NormalizeResultToResponse(
         return nil, nil
     }
 
-    /* the assertion is against the contract, the same question the controller registration door
-       asks: a caller's own Response implementation is served with its status and headers rather than
-       being handed to the serializer, which rendered it as a value — all unexported fields, so an
-       empty body under a 200 that replaced the status the caller chose. The typed nil is read through
-       the interface, where a bare comparison would take it for a live response. */
+    /* the assertion is against the contract, the same question the controller registration door asks: a caller's own Response implementation is served with its status and headers rather than being handed to the serializer, which rendered it as a value — all unexported fields, so an empty body under a 200 that replaced the status the caller chose. The typed nil is read through the interface, where a bare comparison would take it for a live response. */
     responseInstance, ok := value.(httpcontract.Response)
     if true == ok {
         if true == internal.IsNilInterface(responseInstance) {

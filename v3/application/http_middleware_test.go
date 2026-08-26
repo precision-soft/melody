@@ -77,10 +77,7 @@ func TestHttpMiddlewareAll_BuildsWithAHealthyFactory(t *testing.T) {
 }
 
 /* describing the pipeline runs no factory and leaves the serving path's report alone, while still naming the function captured at registration — the console listing must have no side effect in a process that will never serve */
-/* the name is captured on the middleware door too, not only on the factory one: a middleware handed in
-as a value is exactly the case where the listing has nothing else to call it, since there is no factory
-whose name could stand in for it. The v2 suite describes only the factory path, so the value path was
-unpinned on the released major as well. */
+/* the name is captured on the middleware door too, not only on the factory one: a middleware handed in as a value is exactly the case where the listing has nothing else to call it, since there is no factory whose name could stand in for it. The v2 suite describes only the factory path, so the value path was unpinned on the released major as well. */
 func TestHttpMiddlewareDescribe_NamesAMiddlewareRegisteredAsAValue(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -109,8 +106,7 @@ func TestHttpMiddlewareDescribe_NamesAMiddlewareRegisteredAsAValue(t *testing.T)
     }
 }
 
-/* namedProbeMiddleware exists as a declared function precisely so the description has a name to report: an
-anonymous literal would carry the enclosing test's name and could not tell the two registration doors apart. */
+/* namedProbeMiddleware exists as a declared function precisely so the description has a name to report: an anonymous literal would carry the enclosing test's name and could not tell the two registration doors apart. */
 func namedProbeMiddleware(next httpcontract.Handler) httpcontract.Handler {
     return next
 }

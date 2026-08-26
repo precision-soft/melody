@@ -1,7 +1,4 @@
-/* The shared test material of this package: the runtime and command doubles every test file of it
-reaches for. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed
-to exist without a matching source, which is what keeps every other one honest. A test provable from a
-single source belongs in that source's own mirror, not here. */
+/* The shared test material of this package: the runtime and command doubles every test file of it reaches for. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to exist without a matching source, which is what keeps every other one honest. A test provable from a single source belongs in that source's own mirror, not here. */
 package cli
 
 import (

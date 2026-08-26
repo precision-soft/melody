@@ -12,9 +12,7 @@ import (
     melodyclock "github.com/precision-soft/melody/v3/clock"
 )
 
-/* runCacheCheck exercises the rueidis cache backend against a live redis: a set/get round-trip, a
-short time-to-live that actually expires the key, a miss on an absent key, and the atomic increment
-counter — the behaviours a unit test with a fake backend cannot prove. */
+/* runCacheCheck exercises the rueidis cache backend against a live redis: a set/get round-trip, a short time-to-live that actually expires the key, a miss on an absent key, and the atomic increment counter — the behaviours a unit test with a fake backend cannot prove. */
 func runCacheCheck(address string) {
     ctx := context.Background()
 
@@ -100,13 +98,7 @@ func runCacheCheck(address string) {
     assertCacheKeyGrammarIsOneContract(ctx, backend)
 }
 
-/* assertCacheKeyGrammarIsOneContract is the one cache claim no unit test can settle: the Backend contract
-states that a key is non-empty, carries no spaces or newlines and is at most 1024 bytes, and that EVERY
-implementation refuses a malformed key with the same answer — the point being that a caller cannot tell the
-backends apart by which keys they accept. A fake proves what the fake was written to say; only the in-memory
-backend and a live redis, asked the same question in the same process, prove that the two agree. The payload
-identity is the same kind of claim: redis has no nil to store, so an implementation preserving the
-distinction would be tellable apart by reading back what was written. */
+/* assertCacheKeyGrammarIsOneContract is the one cache claim no unit test can settle: the Backend contract states that a key is non-empty, carries no spaces or newlines and is at most 1024 bytes, and that EVERY implementation refuses a malformed key with the same answer — the point being that a caller cannot tell the backends apart by which keys they accept. A fake proves what the fake was written to say; only the in-memory backend and a live redis, asked the same question in the same process, prove that the two agree. The payload identity is the same kind of claim: redis has no nil to store, so an implementation preserving the distinction would be tellable apart by reading back what was written. */
 func assertCacheKeyGrammarIsOneContract(ctx context.Context, redisBackend *rueidiscache.Backend) {
     inMemory := melodycache.NewInMemoryBackend(16, time.Minute, melodyclock.NewSystemClock())
     defer inMemory.Close()

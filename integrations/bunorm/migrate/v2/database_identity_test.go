@@ -23,11 +23,7 @@ func TestFetchDatabaseIdentity_AnswersNilForADialectWithoutAFetcher(t *testing.T
     }
 }
 
-/*
-   dialectNamedAs plays any dialect name over the fake driver, so the dispatch of
-   fetchDatabaseIdentity can be observed per dialect without a live server: the
-   fetchers themselves need one, the dispatch does not.
-*/
+/* dialectNamedAs plays any dialect name over the fake driver, so the dispatch of fetchDatabaseIdentity can be observed per dialect without a live server: the fetchers themselves need one, the dispatch does not. */
 type dialectNamedAs struct {
     schema.Dialect
 

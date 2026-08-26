@@ -32,19 +32,9 @@ var (
     ErrCommandTimeout                     = errors.New("cron: scheduled command exceeded its timeout")
 )
 
-/*
-commandTimeoutFailure is the single-valued link that lets one returned error
-answer both questions a lapsed deadline raises: errors.Is against
-ErrCommandTimeout for the classification, and errors.Is against the command's
-own sentinel for what it was doing when the clock ran out.
+/* commandTimeoutFailure is the single-valued link that lets one returned error answer both questions a lapsed deadline raises: errors.Is against ErrCommandTimeout for the classification, and errors.Is against the command's own sentinel for what it was doing when the clock ran out.
 
-errors.Join answers both too, and that is what the runner used to return — but
-its Unwrap is []error, and exception.LogContext resolves a record's cause chain
-from the nearest *Error a deep errors.As reaches: one branch of the join. The
-classification error is that branch, so the command's own context, its cause
-chain and everything under them were dropped from exactly the record written
-to explain the failure.
-*/
+   errors.Join answers both too, and that is what the runner used to return — but its Unwrap is []error, and exception.LogContext resolves a record's cause chain from the nearest *Error a deep errors.As reaches: one branch of the join. The classification error is that branch, so the command's own context, its cause chain and everything under them were dropped from exactly the record written to explain the failure. */
 type commandTimeoutFailure struct {
     cause error
 }

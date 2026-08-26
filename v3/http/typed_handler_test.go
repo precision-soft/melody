@@ -23,9 +23,7 @@ type jsonHandlerTestRequest struct {
     Name string `json:"name" validate:"notBlank"`
 }
 
-/* the shared http container carries the configuration the body-reading door resolves the request
-   limit from: JsonHandler binds through the same door Request.BindJson does, so it needs the same
-   services the rest of the request cycle needs rather than a container of its own with fewer */
+/* the shared http container carries the configuration the body-reading door resolves the request limit from: JsonHandler binds through the same door Request.BindJson does, so it needs the same services the rest of the request cycle needs rather than a container of its own with fewer */
 func newJsonHandlerRuntime() runtimecontract.Runtime {
     serviceContainer := newHttpTestContainer()
 
@@ -235,9 +233,7 @@ func TestJsonHandler_AnswersAnOversizedBodyWith413RatherThanInvalidJson(t *testi
         t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
     }
 
-    /* the limit used to be laundered into a flat 400 "invalid json": the client retried the same
-       payload forever because it was told its json was broken, and the 413-at-warning treatment the
-       kernel builds for every other body path was bypassed */
+    /* the limit used to be laundered into a flat 400 "invalid json": the client retried the same payload forever because it was told its json was broken, and the 413-at-warning treatment the kernel builds for every other body path was bypassed */
     if nethttp.StatusRequestEntityTooLarge != httpException.StatusCode() {
         t.Fatalf("expected status %d, got %d", nethttp.StatusRequestEntityTooLarge, httpException.StatusCode())
     }
@@ -260,8 +256,7 @@ func TestJsonHandler_CarriesTheDecoderDiagnosisAsTheRefusalCause(t *testing.T) {
         t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
     }
 
-    /* the decoder's own diagnosis — offending offset, field, type — used to die on the line that
-       replaced it with a flat message, so the operator had nothing to read */
+    /* the decoder's own diagnosis — offending offset, field, type — used to die on the line that replaced it with a flat message, so the operator had nothing to read */
     if nil == httpException.CauseErr() {
         t.Fatalf("expected the decoder cause to travel with the refusal")
     }
@@ -284,9 +279,7 @@ func TestJsonHandler_ServesValidationDetailUnderTheValidationErrorsKey(t *testin
         t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
     }
 
-    /* flattened into the message, the per-field detail never reached the client under the one key
-       that names it, and the listener's rule-wiring classification — which reads exactly this key —
-       could never fire for a route bound through this door */
+    /* flattened into the message, the per-field detail never reached the client under the one key that names it, and the listener's rule-wiring classification — which reads exactly this key — could never fire for a route bound through this door */
     if _, exists := httpException.Context()["validationErrors"]; false == exists {
         t.Fatalf("expected the validation detail under validationErrors, got context %v", httpException.Context())
     }
@@ -307,8 +300,7 @@ func TestJsonHandler_RefusesANullBodyBoundToASlice(t *testing.T) {
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
-    /* the guard asked only about pointers, so a bulk endpoint typed on a slice took the same null
-       past it, the validator reported the nil collection valid, and the handler was entered with it */
+    /* the guard asked only about pointers, so a bulk endpoint typed on a slice took the same null past it, the validator reported the nil collection valid, and the handler was entered with it */
     if nil == handleErr {
         t.Fatalf("expected a null body to be refused")
     }
@@ -351,8 +343,7 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
 
     response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
-    /* returned as it was, the nil pair was read by the kernel as a handler that answered nothing and
-       served an empty 204 — a refused write reporting success to its client with no record filed */
+    /* returned as it was, the nil pair was read by the kernel as a handler that answered nothing and served an empty 204 — a refused write reporting success to its client with no record filed */
     if nil != response {
         t.Fatalf("expected no response, got %v", response)
     }
@@ -417,8 +408,7 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
         t.Fatalf("expected the responder's response to be served, got %v", handleErr)
     }
 
-    /* the responder used to receive a status and a flattened string, so an application that wanted the
-       structured body could not get it from this hook either */
+    /* the responder used to receive a status and a flattened string, so an application that wanted the structured body could not get it from this hook either */
     if nil == receivedCause {
         t.Fatalf("expected the responder to be handed the refusal itself")
     }

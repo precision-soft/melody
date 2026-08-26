@@ -59,11 +59,7 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) runtimecontract.Runt
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
-/*
-runMigrationCommand drives a migration command exactly like the CLI kernel
-does: the command metadata is mounted on a command context, the arguments are
-parsed and the command's Run receives the parsed context.
-*/
+/* runMigrationCommand drives a migration command exactly like the CLI kernel does: the command metadata is mounted on a command context, the arguments are parsed and the command's Run receives the parsed context. */
 func runMigrationCommand(
     t *testing.T,
     runtimeInstance runtimecontract.Runtime,
@@ -141,11 +137,7 @@ func isMigrationStatusSelect(query string) bool {
     return strings.HasPrefix(query, "SELECT") && strings.Contains(query, "bun_migrations")
 }
 
-/*
-queryRecorder captures every statement sent to the fake driver so tests can
-assert on the exact statements and their relative order (for example that the
-migration lock is taken before any migration work and released afterwards).
-*/
+/* queryRecorder captures every statement sent to the fake driver so tests can assert on the exact statements and their relative order (for example that the migration lock is taken before any migration work and released afterwards). */
 type queryRecorder struct {
     mutex     sync.Mutex
     queries   []string
@@ -170,10 +162,7 @@ func (instance *queryRecorder) recordedQueries() []string {
     return queries
 }
 
-/*
-firstIndexMatching returns the index of the first recorded query accepted by
-the matcher, or -1 when no recorded query matches.
-*/
+/* firstIndexMatching returns the index of the first recorded query accepted by the matcher, or -1 when no recorded query matches. */
 func (instance *queryRecorder) firstIndexMatching(matcher func(query string) bool) int {
     for index, query := range instance.recordedQueries() {
         if true == matcher(query) {
@@ -280,12 +269,7 @@ func (instance *fakeSqlDriver) Open(name string) (driver.Conn, error) {
     return nil, errors.New("open by dsn is not supported by the fake driver")
 }
 
-/*
-fakeDialect is a minimal bun dialect built only from packages that already
-live in the bun core module, so no database driver or dialect dependency is
-required. It reports the sqlite dialect name, which keeps the verbose
-database-identity lookup (a mysql-only feature) out of the command flows.
-*/
+/* fakeDialect is a minimal bun dialect built only from packages that already live in the bun core module, so no database driver or dialect dependency is required. It reports the sqlite dialect name, which keeps the verbose database-identity lookup (a mysql-only feature) out of the command flows. */
 type fakeDialect struct {
     schema.BaseDialect
 
@@ -333,10 +317,7 @@ func (instance *fakeDialect) DefaultSchema() string {
     return "main"
 }
 
-/*
-newFakeBunDatabase returns a real *bun.DB backed by the in-memory fake driver
-together with the recorder observing every statement.
-*/
+/* newFakeBunDatabase returns a real *bun.DB backed by the in-memory fake driver together with the recorder observing every statement. */
 func newFakeBunDatabase() (*bun.DB, *queryRecorder) {
     recorder := &queryRecorder{}
     sqlDatabase := sql.OpenDB(&fakeConnector{recorder: recorder})
@@ -352,9 +333,7 @@ var (
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
 
-/* probeCommand is a melody command assembled in place: the tests below exercise a piece of the base
-command against a parsed command context, and the command contract is what carries a flag set to the
-dispatch that parses it. */
+/* probeCommand is a melody command assembled in place: the tests below exercise a piece of the base command against a parsed command context, and the command contract is what carries a flag set to the dispatch that parses it. */
 type probeCommand struct {
     nameValue   string
     flagsValue  []clicontract.Flag
@@ -390,9 +369,7 @@ func dispatchProbeCommand(
     return melodycli.DispatchCommand(context.Background(), command, runtimeInstance, arguments, io.Discard)
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a
-refused command line — which the dispatch answers — from the command's own failure, which is what it
-is asserting. */
+/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance runtimecontract.Runtime

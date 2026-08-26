@@ -180,11 +180,11 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
 
 /* reportError delivers a store failure and answers the error the caller should carry on with.
 
-An observer given by the application is the application's channel and gets the failure untouched — it may be a counter rather than a journal, so nothing is recorded here and nothing is marked, leaving whatever the caller does with the error exactly as it was.
+   An observer given by the application is the application's channel and gets the failure untouched — it may be a counter rather than a journal, so nothing is recorded here and nothing is marked, leaving whatever the caller does with the error exactly as it was.
 
-With no observer the failure is recorded here, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage refused every call and reached no channel whatsoever — no record, no error, no metric — and the shipped default is precisely that, since the reference application wires no observer. The record carries the level the http middleware picks for the same failure: a caller's own cancellation is not an outage and would page an operator for a client that hung up.
+   With no observer the failure is recorded here, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage refused every call and reached no channel whatsoever — no record, no error, no metric — and the shipped default is precisely that, since the reference application wires no observer. The record carries the level the http middleware picks for the same failure: a caller's own cancellation is not an outage and would page an operator for a client that hung up.
 
-The error is then marked already-logged and handed back, so the reader above files nothing a second time — the framework's own mark, which the exception listener and the sites in the http kernel already honour. That is what lets the record be filed here, at the one place that knows the key and the failure mode, without the middleware writing its own beside it. */
+   The error is then marked already-logged and handed back, so the reader above files nothing a second time — the framework's own mark, which the exception listener and the sites in the http kernel already honour. That is what lets the record be filed here, at the one place that knows the key and the failure mode, without the middleware writing its own beside it. */
 func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err error) error {
     if nil != instance.onError {
         instance.onError(err)

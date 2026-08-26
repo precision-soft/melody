@@ -307,9 +307,7 @@ func dispatchGenerateCommand(
     return stdout.String(), runErr
 }
 
-/* runnerDispatch drives the runner command through the framework's dispatch door while keeping the
-Run(ctx, argv) shape the tests around it were written against: the arguments are parsed against the
-flags the command declares, and the context it reads is the one production hands it. */
+/* runnerDispatch drives the runner command through the framework's dispatch door while keeping the Run(ctx, argv) shape the tests around it were written against: the arguments are parsed against the flags the command declares, and the context it reads is the one production hands it. */
 type runnerDispatch struct {
     runner          *RunnerCommand
     runtimeInstance runtimecontract.Runtime

@@ -29,8 +29,7 @@ func (instance fakeDriver) Open(string) (driver.Conn, error) {
     return nil, errors.New("fake driver never opens")
 }
 
-/* newTestDatabase builds an offline *bun.DB whose schema parsing (table and primary-key metadata)
-   works without a live connection; the dialect logs an undiscoverable version and moves on. */
+/* newTestDatabase builds an offline *bun.DB whose schema parsing (table and primary-key metadata) works without a live connection; the dialect logs an undiscoverable version and moves on. */
 func newTestDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(fakeConnector{}), mysqldialect.New())
 }
@@ -136,8 +135,7 @@ type auditedAccount struct {
 
 var auditedAccountColumnList = []string{"id", "name", "email", "balance"}
 
-/* scriptedDatabase answers the statements an audited write issues over a single stored row and records
-   them in order, so a test can assert both what was executed and what the database held. */
+/* scriptedDatabase answers the statements an audited write issues over a single stored row and records them in order, so a test can assert both what was executed and what the database held. */
 type scriptedDatabase struct {
     row        *auditedAccount
     statements []string

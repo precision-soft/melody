@@ -13,9 +13,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
 )
 
-/* catalogReadingCacheKey is where a reading is left for whoever asks next. The scheduled refresh writes it and
-every request reads it, which is the whole point: the request that finds a cold cache is the one that pays for
-the reading. */
+/* catalogReadingCacheKey is where a reading is left for whoever asks next. The scheduled refresh writes it and every request reads it, which is the whole point: the request that finds a cold cache is the one that pays for the reading. */
 const catalogReadingCacheKey = "catalog.reading"
 
 /* the services in this package are never registered by hand: melody:wiring:generate scans the package and renders their registrations into generated/wiring_gen.go, which is what config.Module registers. They are here to exercise the generated wiring against a real container — a dependency resolved by type, two scalars bound to configuration parameters and one bound through a directive. */
@@ -73,9 +71,7 @@ type CatalogReading struct {
     FromCache  bool
 }
 
-/* Reading yields the current reading, from the cache when the scheduled refresh left one there. A cached
-reading keeps the instant it was taken at, which is the point of stamping it: the caller can tell how old the
-answer is. */
+/* Reading yields the current reading, from the cache when the scheduled refresh left one there. A cached reading keeps the instant it was taken at, which is the point of stamping it: the caller can tell how old the answer is. */
 func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogReading, error) {
     cached, existsErr := instance.cache.Has(catalogReadingCacheKey)
     if nil != existsErr {
@@ -102,9 +98,7 @@ func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogRead
     return instance.Refresh(ctx)
 }
 
-/* Refresh takes a new reading and leaves it in the cache whatever was there before, which is what the
-scheduled command calls: a reading nobody asked for in the last window is the one that would otherwise be
-computed inside a request. */
+/* Refresh takes a new reading and leaves it in the cache whatever was there before, which is what the scheduled command calls: a reading nobody asked for in the last window is the one that would otherwise be computed inside a request. */
 func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogReading, error) {
     recordedAt := instance.clock.Now()
 
@@ -143,16 +137,10 @@ func (instance *CatalogReportService) RefreshInterval() time.Duration {
     return instance.refreshInterval
 }
 
-/* the name deliberately stays out of the "service." namespace, which the framework reserves for its own:
-a scoped registration there is refused at boot, because a scoped service silently shadowing a protected
-container singleton inside every request is exactly what the protection exists to prevent. The container-lifetime
-services of this application keep the dotted "service.example." spelling, which registration does admit. */
+/* the name deliberately stays out of the "service." namespace, which the framework reserves for its own: a scoped registration there is refused at boot, because a scoped service silently shadowing a protected container singleton inside every request is exactly what the protection exists to prevent. The container-lifetime services of this application keep the dotted "service.example." spelling, which registration does admit. */
 const ServiceRequestReportTrail = "service-example-reporting-request-trail"
 
-/* the trail belongs to one request: it is built from the request context the kernel installs into every
-scope, and a service that holds one request's identity must not be a process singleton. The directive is what
-says so, and the generator emits it into the scoped registration function rather than the container one. It
-takes container singletons beside the request context on purpose — a scoped service may read both levels. */
+/* the trail belongs to one request: it is built from the request context the kernel installs into every scope, and a service that holds one request's identity must not be a process singleton. The directive is what says so, and the generator emits it into the scoped registration function rather than the container one. It takes container singletons beside the request context on purpose — a scoped service may read both levels. */
 //melody:scoped
 //melody:service ServiceRequestReportTrail
 func NewRequestReportTrail(
@@ -170,18 +158,11 @@ func NewRequestReportTrail(
     }, nil
 }
 
-/* RequestReportTrail is where one request's changes to the nomenclature are collected before they are
-written.
+/* RequestReportTrail is where one request's changes to the nomenclature are collected before they are written.
 
-It is what makes the scope-owned registration mean something rather than demonstrate itself. The event
-listeners record into it while the request is being served, and the flush middleware writes what it holds once
-the handler chain has returned; both reach it through the scope, and if those two resolutions ever yielded
-different objects the middleware would flush an empty trail and nothing would be journalled at all. The
-journal row existing is therefore the proof that a scope holds one instance of what it owns — a claim no
-single response can make about itself.
+   It is what makes the scope-owned registration mean something rather than demonstrate itself. The event listeners record into it while the request is being served, and the flush middleware writes what it holds once the handler chain has returned; both reach it through the scope, and if those two resolutions ever yielded different objects the middleware would flush an empty trail and nothing would be journalled at all. The journal row existing is therefore the proof that a scope holds one instance of what it owns — a claim no single response can make about itself.
 
-Collecting first also buys the journal something real: every entry carries the request that caused it, and a
-request that changed several records costs one round trip instead of one per change. */
+   Collecting first also buys the journal something real: every entry carries the request that caused it, and a request that changed several records costs one round trip instead of one per change. */
 type RequestReportTrail struct {
     requestContext    *melodyhttp.RequestContext
     formatter         *ReportFormatter
@@ -208,13 +189,9 @@ func (instance *RequestReportTrail) Record(actor string, action string, subject 
 
 /* Flush writes what the request accumulated and empties the trail.
 
-The trail is emptied only once the write has succeeded, so a failed flush leaves the entries staged for Close
-to try again rather than dropping the record of a change that did happen. That is safe to retry because a
-batch is written in one statement and fails as a whole: a failure means no row was written, so the second
-attempt cannot duplicate the first.
+   The trail is emptied only once the write has succeeded, so a failed flush leaves the entries staged for Close to try again rather than dropping the record of a change that did happen. That is safe to retry because a batch is written in one statement and fails as a whole: a failure means no row was written, so the second attempt cannot duplicate the first.
 
-Calling Flush on an empty trail touches nothing, so a request that read rather than wrote pays no query — and
-a second call after a successful one is a no-op rather than a duplicate. */
+   Calling Flush on an empty trail touches nothing, so a request that read rather than wrote pays no query — and a second call after a successful one is a no-op rather than a duplicate. */
 func (instance *RequestReportTrail) Flush(ctx context.Context) error {
     if 0 == len(instance.entries) {
         return nil
@@ -230,10 +207,7 @@ func (instance *RequestReportTrail) Flush(ctx context.Context) error {
     return nil
 }
 
-/* Close is the scope's own last word on the trail. The flush middleware is what normally empties it, before
-the response is written and while the caller can still be told the write failed; this runs when that never
-happened — a panic on the way out of the handler chain — and is the difference between losing the record of a
-change and keeping it. */
+/* Close is the scope's own last word on the trail. The flush middleware is what normally empties it, before the response is written and while the caller can still be told the write failed; this runs when that never happened — a panic on the way out of the handler chain — and is the difference between losing the record of a change and keeping it. */
 func (instance *RequestReportTrail) Close() error {
     return instance.Flush(context.Background())
 }

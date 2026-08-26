@@ -19,8 +19,7 @@ type inMemoryProductRepository struct {
     products []*entity.Product
 }
 
-/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
-repository, so a caller that mutates an entity in place bypasses the lock */
+/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()

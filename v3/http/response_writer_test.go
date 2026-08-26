@@ -85,8 +85,7 @@ func TestRecordingResponseWriter_UnwrapReturnsUnderlying(t *testing.T) {
     }
 }
 
-/* WriteToHttpResponseWriter is a public door, so a nil pointer of a response type boxed into the contract
-reaches it and passes a plain comparison. */
+/* WriteToHttpResponseWriter is a public door, so a nil pointer of a response type boxed into the contract reaches it and passes a plain comparison. */
 func TestWriteToHttpResponseWriter_ReadsATypedNilResponseAsAbsent(t *testing.T) {
     var unassignedResponse *Response
 

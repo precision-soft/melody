@@ -10,28 +10,11 @@ import (
 /* migrationFileMode is the permission the finished migration file carries. It is bun's own 0644 for the file it wrote, kept so the rewrite below replaces the content and nothing else. */
 const migrationFileMode = os.FileMode(0o644)
 
-/*
-finishFileAtomically replaces a file with the same content, written the way a
-file that must survive a crash has to be written: into a temporary neighbour,
-fsynced, renamed over the destination, and the destination's DIRECTORY fsynced so
-the rename itself is durable.
+/* finishFileAtomically replaces a file with the same content, written the way a file that must survive a crash has to be written: into a temporary neighbour, fsynced, renamed over the destination, and the destination's DIRECTORY fsynced so the rename itself is durable.
 
-It exists because bun creates a Go migration with a single os.WriteFile straight
-onto the destination path, which is not atomic: a crash, a full disk or a killed
-process in the middle of that write leaves a TRUNCATED Go file in the migrations
-directory — one that does not compile, under a timestamped name whose position in
-the sequence looks entirely legitimate. Taking the write away from bun is not
-possible, because the directory it writes into is unexported; what is possible is
-to finish the job over the file it produced, so that a command reporting success
-has left a whole and durable file behind. A crash before that point leaves bun's
-partial file, but the command did not report success either, which is the same
-answer a failed create has always given.
+   It exists because bun creates a Go migration with a single os.WriteFile straight onto the destination path, which is not atomic: a crash, a full disk or a killed process in the middle of that write leaves a TRUNCATED Go file in the migrations directory — one that does not compile, under a timestamped name whose position in the sequence looks entirely legitimate. Taking the write away from bun is not possible, because the directory it writes into is unexported; what is possible is to finish the job over the file it produced, so that a command reporting success has left a whole and durable file behind. A crash before that point leaves bun's partial file, but the command did not report success either, which is the same answer a failed create has always given.
 
-The helper is duplicated here rather than imported: the framework's own atomic
-writer lives in an internal package, which a separate module cannot reach, and
-the cron generator carries the same shape beside its own manifests for the same
-reason.
-*/
+   The helper is duplicated here rather than imported: the framework's own atomic writer lives in an internal package, which a separate module cannot reach, and the cron generator carries the same shape beside its own manifests for the same reason. */
 func finishFileAtomically(destination string, content []byte) error {
     directory := filepath.Dir(destination)
 

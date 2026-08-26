@@ -75,8 +75,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
 
     override := melodysecurityconfig.NewFirewallOverrideConfiguration()
 
-    /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies
-       the signed envelope a caller service sends and authenticates the call as that service principal. */
+    /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies the signed envelope a caller service sends and authenticates the call as that service principal. */
     builder.AddStatelessFirewall(
         "internal",
         melodysecurity.NewPathPrefixMatcher(route.InternalPrefix),
@@ -90,9 +89,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
     )
 
-    /* the token firewall's bearer source is decorated with switch-user impersonation: an admin holding
-       ROLE_ALLOWED_TO_SWITCH can act as another user by sending X-Switch-User, and the resulting token
-       authorizes as the target while keeping the admin readable (and auditable) as the impersonator. */
+    /* the token firewall's bearer source is decorated with switch-user impersonation: an admin holding ROLE_ALLOWED_TO_SWITCH can act as another user by sending X-Switch-User, and the resulting token authorizes as the target while keeping the admin readable (and auditable) as the impersonator. */
     builder.AddStatelessFirewall(
         "token",
         melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),

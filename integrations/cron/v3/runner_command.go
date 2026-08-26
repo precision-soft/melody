@@ -45,19 +45,19 @@ type scheduledRunEntry struct {
 
 /* defaultCommandTimeout bounds one run of a scheduled command when its entry sets no timeout of its own. It is zero — no deadline — which is what every entry configured before the deadline existed already ran under, so upgrading does not begin cutting a job short at a duration nobody chose.
 
-What zero costs is worth naming, because nothing else bounds a run. The runner starts a goroutine per due entry per matching minute, and a command's context is derived from the runtime's, which is cancelled at shutdown and never before — so a command wedged on a deadline-less network read holds its goroutine AND its container scope until the process ends, one of each per matching minute, 1440 a day for a per-minute entry, and nothing in the logs marks the run that never finished. An entry that wants the bound asks for it with EntryConfig.Timeout; an hour is a reasonable value for work that normally finishes in seconds.
+   What zero costs is worth naming, because nothing else bounds a run. The runner starts a goroutine per due entry per matching minute, and a command's context is derived from the runtime's, which is cancelled at shutdown and never before — so a command wedged on a deadline-less network read holds its goroutine AND its container scope until the process ends, one of each per matching minute, 1440 a day for a per-minute entry, and nothing in the logs marks the run that never finished. An entry that wants the bound asks for it with EntryConfig.Timeout; an hour is a reasonable value for work that normally finishes in seconds.
 
-A deadline is not a kill. It cancels the command's context, which a command that watches it answers by unwinding; only after EntryConfig.GracefulTimeout on top of it does the runner stop waiting and tear the run's scope down under a command that never looked. */
+   A deadline is not a kill. It cancels the command's context, which a command that watches it answers by unwinding; only after EntryConfig.GracefulTimeout on top of it does the runner stop waiting and tear the run's scope down under a command that never looked. */
 const defaultCommandTimeout = 0
 
 /* commandUnwindGrace is how long a command that has hit its deadline is given to unwind before the runner stops waiting for it, when its entry names no window of its own. The deadline cancels the command's context; a command that watches it returns well inside this window and has its own error reported together with the timeout.
 
-Five minutes rather than seconds, because what happens at the end of it is not graceful: the run's container scope is closed under a command that may still be executing, which is the only way to give the resources back and is why the window before it has to be long enough for any honest unwind — flushing a batch, rolling a transaction back, finishing an in-flight request. An entry whose unwind is legitimately slower names its own with EntryConfig.GracefulTimeout. */
+   Five minutes rather than seconds, because what happens at the end of it is not graceful: the run's container scope is closed under a command that may still be executing, which is the only way to give the resources back and is why the window before it has to be long enough for any honest unwind — flushing a batch, rolling a transaction back, finishing an in-flight request. An entry whose unwind is legitimately slower names its own with EntryConfig.GracefulTimeout. */
 const commandUnwindGrace = 300 * time.Second
 
 /* RunnerCommand runs the same cron Configuration in-process instead of emitting a manifest for an external scheduler: it evaluates each entry's schedule against the wall clock and invokes the corresponding registered command when it is due. A single-binary deployment (no crontab, no kubernetes) gets its scheduled work from the one Configuration that already drives the generator. The day-of-month / day-of-week combination follows the configured RunnerDialect — crontab by default, the vixie crond rule where a star-based day field (plain or stepped wildcard) counts as unrestricted and the day fields combine with and; the kubernetes dialect opts into the robfig scheduler behind the k8s template, where only the star-bit shapes (the plain or the unit-stepped wildcard, alone or inside a list) are unrestricted and a stepped wildcard day field with a step above one combines with or. Two genuinely restricted day fields combine with or in both dialects; the two real schedulers diverge only on the star-based shapes, which is inherent to the targets, so pick the dialect of the manifests the same Configuration generates.
 
-Due commands run concurrently, each in its own goroutine, the way crontab starts an independent process per entry: one slow job delays neither the commands sharing its minute nor the scheduler loop, and an entry that runs longer than its own interval overlaps itself — wrap the command in lock.NewExclusiveCommand to serialize successive runs. A run is bounded only where EntryConfig.Timeout asks for it, because nothing in the runtime context would ever end a command wedged on a deadline-less read and a bound melody picked would cut short a job that had always been allowed to take as long as it takes. Where a deadline is set, reaching it cancels the command's context; a command still running one EntryConfig.GracefulTimeout later is reported at warning, has its scope closed under it and stops counting towards the shutdown wait, since waiting on it would never end either. Wall-clock jumps follow the vixie-cron virtual-time algorithm, documented on reconcileWallClock, so a schedule pinned inside a daylight-saving gap still runs exactly once. Multi-instance safety is left to composition — wrap each command in lock.NewExclusiveCommand, or gate the whole runner behind a lock.LeaderGate, before handing the commands in. */
+   Due commands run concurrently, each in its own goroutine, the way crontab starts an independent process per entry: one slow job delays neither the commands sharing its minute nor the scheduler loop, and an entry that runs longer than its own interval overlaps itself — wrap the command in lock.NewExclusiveCommand to serialize successive runs. A run is bounded only where EntryConfig.Timeout asks for it, because nothing in the runtime context would ever end a command wedged on a deadline-less read and a bound melody picked would cut short a job that had always been allowed to take as long as it takes. Where a deadline is set, reaching it cancels the command's context; a command still running one EntryConfig.GracefulTimeout later is reported at warning, has its scope closed under it and stops counting towards the shutdown wait, since waiting on it would never end either. Wall-clock jumps follow the vixie-cron virtual-time algorithm, documented on reconcileWallClock, so a schedule pinned inside a daylight-saving gap still runs exactly once. Multi-instance safety is left to composition — wrap each command in lock.NewExclusiveCommand, or gate the whole runner behind a lock.LeaderGate, before handing the commands in. */
 type RunnerCommand struct {
     entries []*scheduledRunEntry
     now     func() time.Time
@@ -360,15 +360,7 @@ func (instance *RunnerCommand) Run(
     return instance.runLoop(runtimeInstance)
 }
 
-/*
-declareSchedule writes what this process is driving before it drives anything.
-A scheduler built over a configuration emptied by a refactor, or whose entries
-an environment gate filtered away, used to run forever, exit successfully and
-write not one byte on any channel: nothing distinguished a healthy scheduler
-from one that would never dispatch anything, and the absence was noticed days
-later, when the nightly sweep turned out not to have run. The empty case is a
-warning for the same reason the generator's nothingToWrite is one.
-*/
+/* declareSchedule writes what this process is driving before it drives anything. A scheduler built over a configuration emptied by a refactor, or whose entries an environment gate filtered away, used to run forever, exit successfully and write not one byte on any channel: nothing distinguished a healthy scheduler from one that would never dispatch anything, and the absence was noticed days later, when the nightly sweep turned out not to have run. The empty case is a warning for the same reason the generator's nothingToWrite is one. */
 func (instance *RunnerCommand) declareSchedule(runtimeInstance runtimecontract.Runtime) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
@@ -402,22 +394,11 @@ func (instance *RunnerCommand) declareSchedule(runtimeInstance runtimecontract.R
     )
 }
 
-/*
-renderRunReport writes one evaluated minute as the envelope every other melody
-command writes: meta, data, warnings, error. The runner used to declare and
-validate --format and then answer zero bytes on every path, so a deploy step
-spelled `app melody:cron:run --once --format=json | jq` received an empty
-stream — indistinguishable, to the step reading it, from a missing binary.
+/* renderRunReport writes one evaluated minute as the envelope every other melody command writes: meta, data, warnings, error. The runner used to declare and validate --format and then answer zero bytes on every path, so a deploy step spelled `app melody:cron:run --once --format=json | jq` received an empty stream — indistinguishable, to the step reading it, from a missing binary.
 
-Under json each minute is one closed document on its own line, so the scheduler
-loop is a stream a consumer can follow live at constant memory rather than a
-summary that would only arrive when the process dies. Under text it is one
-line, which is what a supervisor's log wants.
+   Under json each minute is one closed document on its own line, so the scheduler loop is a stream a consumer can follow live at constant memory rather than a summary that would only arrive when the process dies. Under text it is one line, which is what a supervisor's log wants.
 
-The writer is guarded because the loop hands each minute's wait to a goroutine
-of its own — two minutes' documents may complete in any order and must not
-interleave inside one line.
-*/
+   The writer is guarded because the loop hands each minute's wait to a goroutine of its own — two minutes' documents may complete in any order and must not interleave inside one line. */
 func (instance *RunnerCommand) renderRunReport(
     commandContext clicontract.Context,
     option output.Option,
@@ -765,9 +746,9 @@ func reconcileWallClock(previousTarget time.Time, current time.Time) ([]minuteEv
 
 /* invoke runs one command on a child runtime: a fresh scope so scoped services do not bleed across ticks, and a context derived from the runner's so a shutdown reaches the command in flight, carrying the entry's deadline so a command that never finishes does not run for the life of the process. The command line is dispatched through cli.DispatchCommand with the command's declared flags, so unset flags read their declared defaults, the output writers are usable and the parsed arguments are initialized — the same surface a command sees under the cli entry point, minus the banner, the scope close and the exit handling the registration path adds around a command. An error carrying an exit code comes back as an error rather than ending the process: both doors onto the parsing engine install melody's inert exit handler in place of the engine's own, which calls os.Exit on such an error and here would take the whole scheduler down with the one job. A panic inside the command is recovered and reported as an error, and a child scope close failure is joined onto the command's own error, so one bad job neither takes the scheduler down nor hides a shutdown failure.
 
-The command runs on its own goroutine, which is what lets the deadline be enforced against a command that never looks at its context. The escalation is deliberate and has three steps. The deadline cancels the command's context — a signal, not a kill. A command that watches it unwinds inside the graceful window and has its own error reported together with the timeout, which is the path essentially every command takes. Only a command that ignores the cancellation reaches the third step: once the window lapses the run is abandoned, the failure is reported at warning naming the entry and how long it overran, the scope is closed under it, and it stops counting towards the shutdown wait.
+   The command runs on its own goroutine, which is what lets the deadline be enforced against a command that never looks at its context. The escalation is deliberate and has three steps. The deadline cancels the command's context — a signal, not a kill. A command that watches it unwinds inside the graceful window and has its own error reported together with the timeout, which is the path essentially every command takes. Only a command that ignores the cancellation reaches the third step: once the window lapses the run is abandoned, the failure is reported at warning naming the entry and how long it overran, the scope is closed under it, and it stops counting towards the shutdown wait.
 
-That last step is a kill and is described as one. Closing the scope gives the resources back — the pools, the handles, everything the run built — and the alternative is the leak this exists to stop, one scope and one goroutine per matching minute until the process ends. It is not free of consequence: a scope.Get from the closed scope returns an error, but scope.MustGet panics, and the recover here covers only the goroutine this runner started. A command that hands work to a goroutine of its own and resolves from the scope there can therefore take the process down. That is why the window before the kill is measured in minutes rather than seconds, and why a command whose unwind is legitimately slow should name its own with EntryConfig.GracefulTimeout rather than rely on the default. */
+   That last step is a kill and is described as one. Closing the scope gives the resources back — the pools, the handles, everything the run built — and the alternative is the leak this exists to stop, one scope and one goroutine per matching minute until the process ends. It is not free of consequence: a scope.Get from the closed scope returns an error, but scope.MustGet panics, and the recover here covers only the goroutine this runner started. A command that hands work to a goroutine of its own and resolves from the scope there can therefore take the process down. That is why the window before the kill is measured in minutes rather than seconds, and why a command whose unwind is legitimately slow should name its own with EntryConfig.GracefulTimeout rather than rely on the default. */
 func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry) (runId string, invokeErr error) {
     /* the run's id is minted first and returned beside the outcome, so the runner's own records about this run — the failure line, the abandon warning — carry the same cronRunId the run's records carry */
     runId = logging.GenerateProcessId()
@@ -938,25 +919,11 @@ func (instance *RunnerCommand) reportScheduledOutput(
     logger.Info("cron: scheduled command output", recordContext)
 }
 
-/*
-withSiblingFailure carries a second failure inside the context of the error the
-runner returns, instead of joining the two.
+/* withSiblingFailure carries a second failure inside the context of the error the runner returns, instead of joining the two.
 
-errors.Join answers an Unwrap of []error, and exception.LogContext resolves a
-record's context and cause chain from the nearest *Error a deep errors.As
-reaches — one branch of the join. A joined pair of failures therefore filed
-whichever branch the search reached first and dropped the other whole: a
-scope-close failure joined onto a job's own rich error left exactly one of the
-two stories in the record the operator reads. The same two failures carried
-down one single-valued chain file completely, which is the difference this
-exists to remove.
+   errors.Join answers an Unwrap of []error, and exception.LogContext resolves a record's context and cause chain from the nearest *Error a deep errors.As reaches — one branch of the join. A joined pair of failures therefore filed whichever branch the search reached first and dropped the other whole: a scope-close failure joined onto a job's own rich error left exactly one of the two stories in the record the operator reads. The same two failures carried down one single-valued chain file completely, which is the difference this exists to remove.
 
-The primary error stays the one wrapped, so every errors.Is a caller performs
-still answers, and the sibling travels under the given prefix with its own
-context and cause chain where it has them. Both extra fields keep their json
-type on every row — an empty object and an empty list rather than null — since
-a field whose type changes with the outcome cannot be consumed.
-*/
+   The primary error stays the one wrapped, so every errors.Is a caller performs still answers, and the sibling travels under the given prefix with its own context and cause chain where it has them. Both extra fields keep their json type on every row — an empty object and an empty list rather than null — since a field whose type changes with the outcome cannot be consumed. */
 func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling error) exceptioncontract.Context {
     merged := exceptioncontract.Context{}
     for key, value := range base {
@@ -996,7 +963,7 @@ func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling e
 
 /* reportRunOutcome files the record one dispatched run leaves behind and answers whether it counts towards the minute's failure aggregate. A command that watched its context and unwound when the shutdown cancelled it did exactly what the runner's GoDoc asks of it: that is a clean stop, recorded at warning, named, and kept out of the aggregate. A deadline the entry asked for stays a failure.
 
-It is handed the classification instead of computing its own, and that is the whole point of the parameter: the document row a few lines above is built from the same answer, and computing it twice read the runtime's context twice. A shutdown landing between the two reads made the row report failed while this branch treated the same run as a clean stop and returned early — one run with two verdicts, a document saying a job failed and a process exiting 0 over it. The window is microseconds wide and cannot be produced from the outside, which is why this is a function: a test hands it the two answers separately. */
+   It is handed the classification instead of computing its own, and that is the whole point of the parameter: the document row a few lines above is built from the same answer, and computing it twice read the runtime's context twice. A shutdown landing between the two reads made the row report failed while this branch treated the same run as a clean stop and returned early — one run with two verdicts, a document saying a job failed and a process exiting 0 over it. The window is microseconds wide and cannot be produced from the outside, which is why this is a function: a test hands it the two answers separately. */
 func (instance *RunnerCommand) reportRunOutcome(
     runtimeInstance runtimecontract.Runtime,
     entry *scheduledRunEntry,

@@ -87,8 +87,7 @@ func indexOf(value string, needle string) int {
     return -1
 }
 
-/* Nil headers are a state the contract permits — SetHeaders stores the nil it is given — and every other
-consumer of Headers() in the chain checks for it before writing. */
+/* Nil headers are a state the contract permits — SetHeaders stores the nil it is given — and every other consumer of Headers() in the chain checks for it before writing. */
 func TestSetCookie_AllocatesTheHeaderMapWhenTheResponseHasNone(t *testing.T) {
     response := EmptyResponse(200)
     response.SetHeaders(nil)

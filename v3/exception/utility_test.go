@@ -962,16 +962,7 @@ func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
     }
 }
 
-/*
-TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second
-unwrap shape the standard library defines. Every walk here anchored on the
-single-valued errors.Unwrap, which answers nothing at all for an errors.Join:
-a failure that gathered what several replicas had to say arrived as one
-flattened line of text, with the context of every branch — the host that
-refused, the destination that timed out — reaching no record. The writers this
-framework repaired are one producer of the shape; a join can arrive from any
-dependency and from any application.
-*/
+/* TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second unwrap shape the standard library defines. Every walk here anchored on the single-valued errors.Unwrap, which answers nothing at all for an errors.Join: a failure that gathered what several replicas had to say arrived as one flattened line of text, with the context of every branch — the host that refused, the destination that timed out — reaching no record. The writers this framework repaired are one producer of the shape; a join can arrive from any dependency and from any application. */
 func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
     firstCause := NewError(
         "the primary replica refused the write",

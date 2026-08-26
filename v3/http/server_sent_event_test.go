@@ -196,11 +196,7 @@ func TestServerSentEventWriter_StripsNulFromId(t *testing.T) {
     }
 }
 
-/* a writer that cannot flush its way to the connection must be refused BEFORE the response is
-   committed. The probe used to be made at the kernel's recording writer, which always carries a Flush
-   method and forwards it only when its own delegate can flush — so the refusal was dead code for every
-   in-framework caller and the handler went on to write events into a buffer nothing would ever flush.
-   nonFlushingResponseWriter is the shared fixture in fixture_test.go. */
+/* a writer that cannot flush its way to the connection must be refused BEFORE the response is committed. The probe used to be made at the kernel's recording writer, which always carries a Flush method and forwards it only when its own delegate can flush — so the refusal was dead code for every in-framework caller and the handler went on to write events into a buffer nothing would ever flush. nonFlushingResponseWriter is the shared fixture in fixture_test.go. */
 func TestNewServerSentEventWriter_RefusesADelegateThatCannotFlushThroughTheRecordingWriter(t *testing.T) {
     delegate := &nonFlushingResponseWriter{}
     recorder := newRecordingResponseWriter(delegate)
@@ -246,8 +242,7 @@ func TestServerSentEventWriter_RefusesAnEventNameWithNoData(t *testing.T) {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* the grammar returns from dispatch the moment the data buffer is empty, so the listener the
-       caller named would never have fired and the caller had no way to find out */
+    /* the grammar returns from dispatch the moment the data buffer is empty, so the listener the caller named would never have fired and the caller had no way to find out */
     sendErr := writer.Send(ServerSentEvent{Event: "heartbeat"})
     if nil == sendErr {
         t.Fatalf("expected an event name with no data to be refused")
@@ -293,8 +288,7 @@ func TestServerSentEventWriter_RefusesAnEventNameThatIsEmptyOnceItsControlBytesA
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* emitted, "event: " with an empty value makes the browser fire the DEFAULT message type instead
-       of the one the caller named */
+    /* emitted, "event: " with an empty value makes the browser fire the DEFAULT message type instead of the one the caller named */
     sendErr := writer.Send(ServerSentEvent{Event: "\r", Data: "payload"})
     if nil == sendErr {
         t.Fatalf("expected an event name that sanitizes to empty to be refused")
@@ -313,10 +307,7 @@ func TestServerSentEventWriter_CommentEndsTheFrameSoAKeepaliveIsObservable(t *te
         t.Fatalf("comment: %v", commentErr)
     }
 
-    /* the blank line is what makes a comment-only keepalive observable to a client reading frame by
-       frame — the preamble a stream flushes at subscription time exists precisely so a client can tell
-       a live stream from a hung one. Send composes every frame whole under the lock, so a comment can
-       never dispatch a half-built event */
+    /* the blank line is what makes a comment-only keepalive observable to a client reading frame by frame — the preamble a stream flushes at subscription time exists precisely so a client can tell a live stream from a hung one. Send composes every frame whole under the lock, so a comment can never dispatch a half-built event */
     if ": keepalive\n\n" != recorder.Body.String() {
         t.Fatalf("unexpected comment bytes: %q", recorder.Body.String())
     }
@@ -358,8 +349,7 @@ func TestServerSentEventWriter_RefusesEveryFrameAfterAPartialWrite(t *testing.T)
         t.Fatalf("expected the partial write to surface")
     }
 
-    /* the torn frame is on the wire and no later frame can repair it; a well-formed frame appended
-       onto it is read by the client as one corrupt event */
+    /* the torn frame is on the wire and no later frame can repair it; a well-formed frame appended onto it is read by the client as one corrupt event */
     secondErr := writer.Send(ServerSentEvent{Data: "two"})
     if nil == secondErr {
         t.Fatalf("expected the writer to refuse after a partial write")
@@ -378,9 +368,7 @@ func TestServerSentEventWriter_SerializesConcurrentFrames(t *testing.T) {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* the documented shape of a stream is a handler emitting events beside a ticker emitting
-       keepalives; a net/http ResponseWriter is not safe for concurrent use, so unsynchronized frames
-       interleave into one corrupt frame with no error anywhere */
+    /* the documented shape of a stream is a handler emitting events beside a ticker emitting keepalives; a net/http ResponseWriter is not safe for concurrent use, so unsynchronized frames interleave into one corrupt frame with no error anywhere */
     var waitGroup sync.WaitGroup
     for index := 0; index < 32; index++ {
         waitGroup.Add(2)

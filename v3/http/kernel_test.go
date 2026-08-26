@@ -564,7 +564,7 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
 
 /* the guarantee this pins is the one F-134 exists for, and it is the exact case the neighbouring test does NOT cover: there a listener fails while producing a response and the response wins, which is right, because nothing required was skipped. Here a listener marked required sits BEHIND the one that stops and answers, so the response it produced would be served with access control never consulted — the cached /admin page handed to an anonymous caller. The kernel is required to drop that response for the error page, and it tells the two cases apart by the TYPE of the error the dispatch returned, not by whether a response exists.
 
-Measured on all three majors before it was written: no suite anywhere pins the kernel half of this refusal. v1 and v2 shipped the repair and proved only the dispatcher's half, so this test is what puts the two in disagreement. */
+   Measured on all three majors before it was written: no suite anywhere pins the kernel half of this refusal. v1 and v2 shipped the repair and proved only the dispatcher's half, so this test is what puts the two in disagreement. */
 func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -872,8 +872,7 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
     }
 }
 
-/* closeTrackingReader stands in for a file-backed response body (FileResponse / static ServeReader): the
-only thing that matters here is whether the kernel closed the descriptor. */
+/* closeTrackingReader stands in for a file-backed response body (FileResponse / static ServeReader): the only thing that matters here is whether the kernel closed the descriptor. */
 type closeTrackingReader struct {
     closed atomic.Bool
 }
@@ -887,10 +886,7 @@ func (instance *closeTrackingReader) Close() error {
     return nil
 }
 
-/* panicOnceSessionStorage blows up on its first Save, the way a database driver does on a lost connection.
-writeResponse persists the session before WriteToHttpResponseWriter registers the body's deferred Close, so
-that panic unwinds with the response's descriptor still open. It succeeds afterwards so the kernel's recovery
-path can finish and write the error response. */
+/* panicOnceSessionStorage blows up on its first Save, the way a database driver does on a lost connection. writeResponse persists the session before WriteToHttpResponseWriter registers the body's deferred Close, so that panic unwinds with the response's descriptor still open. It succeeds afterwards so the kernel's recovery path can finish and write the error response. */
 type panicOnceSessionStorage struct {
     panicked atomic.Bool
 }
@@ -1492,8 +1488,7 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
     }
 }
 
-/* errorContextRecordingLogger captures every Error call with its context, so a test can assert not just
-that something was logged but what the record carries. */
+/* errorContextRecordingLogger captures every Error call with its context, so a test can assert not just that something was logged but what the record carries. */
 type errorContextRecordingLogger struct {
     mutex         sync.Mutex
     errorMessages []string
@@ -1983,8 +1978,7 @@ func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkippe
     }
 }
 
-/* noMatchRouter reports "no match" the way the contract permits and the framework's own router does not: a
-nil result beside the false flag. */
+/* noMatchRouter reports "no match" the way the contract permits and the framework's own router does not: a nil result beside the false flag. */
 type noMatchRouter struct {
     *Router
 }
@@ -2008,10 +2002,7 @@ func TestKernel_ServeHttpAnswersARouterThatReportsNoMatchWithANilResult(t *testi
     }
 }
 
-/* The terminate dispatch is the one in ServeHttp with no recovery above it — its defer is registered before
-the recovery defer, so it runs after that one has already fired. It needs none: the dispatcher recovers a
-listener panic per listener and hands it back as an error. This pins that division, because a recovery added
-here would swallow the one panic the dispatcher re-raises on purpose, a deliberate exit. */
+/* The terminate dispatch is the one in ServeHttp with no recovery above it — its defer is registered before the recovery defer, so it runs after that one has already fired. It needs none: the dispatcher recovers a listener panic per listener and hands it back as an error. This pins that division, because a recovery added here would swallow the one panic the dispatcher re-raises on purpose, a deliberate exit. */
 func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2044,10 +2035,7 @@ func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.
     }
 }
 
-/* The listener is what the assertion turns on, not the status: writeResponse answers 204 for an absent
-response whichever way it became absent, so a status alone cannot tell the kernel's door from the writer's
-fallback. A listener is the only thing that decorates a response, and it must see the empty 204 the door
-built rather than the nothing a typed nil would have carried this far. */
+/* The listener is what the assertion turns on, not the status: writeResponse answers 204 for an absent response whichever way it became absent, so a status alone cannot tell the kernel's door from the writer's fallback. A listener is the only thing that decorates a response, and it must see the empty 204 the door built rather than the nothing a typed nil would have carried this far. */
 func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2095,10 +2083,7 @@ func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault
     }
 }
 
-/* explodingError is what an application error looks like when its own rendering is broken. It is the input
-that reaches the window: a listener cannot panic out of a dispatch — the dispatcher recovers it per listener
-— so the only thing left between the chain returning and the response being published is the log context the
-kernel builds from the error, which reads it by calling Error(). */
+/* explodingError is what an application error looks like when its own rendering is broken. It is the input that reaches the window: a listener cannot panic out of a dispatch — the dispatcher recovers it per listener — so the only thing left between the chain returning and the response being published is the log context the kernel builds from the error, which reads it by calling Error(). */
 type explodingError struct{}
 
 func (instance *explodingError) Error() string {
@@ -2694,8 +2679,7 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    /* the path folds to "/login", which the access-control matcher would authorize as a different
-       rule than the admin handler the router reaches; the kernel must refuse it before either runs */
+    /* the path folds to "/login", which the access-control matcher would authorize as a different rule than the admin handler the router reaches; the kernel must refuse it before either runs */
     request := httptest.NewRequest(nethttp.MethodGet, "/admin/x/../../login", nil)
     recorder := httptest.NewRecorder()
 
@@ -2770,10 +2754,7 @@ func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
     }
 }
 
-/* a typo in a trusted-proxy entry used to narrow the trust in silence: both readers of the list
-   skipped what they could not parse, so the hop it named stopped being believed, X-Forwarded-For from
-   it was no longer read, and every client behind that proxy collapsed onto the direct peer's single
-   rate-limit bucket with no record anywhere. */
+/* a typo in a trusted-proxy entry used to narrow the trust in silence: both readers of the list skipped what they could not parse, so the hop it named stopped being believed, X-Forwarded-For from it was no longer read, and every client behind that proxy collapsed onto the direct peer's single rate-limit bucket with no record anywhere. */
 func TestKernel_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -2807,8 +2788,7 @@ func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) 
     } {
         kernel := NewKernel(NewRouter())
 
-        /* configuring BEFORE the handler is built stays legal, which is the half that proves the guard
-           discriminates rather than refusing everything */
+        /* configuring BEFORE the handler is built stays legal, which is the half that proves the guard discriminates rather than refusing everything */
         testCase.mutate(kernel)
 
         _ = kernel.ServeHttp(newHttpTestContainer())
@@ -2840,8 +2820,7 @@ func TestKernel_LeavesTheRouteTableReadableAfterItStartedServing(t *testing.T) {
 
     _ = kernel.ServeHttp(newHttpTestContainer())
 
-    /* the openapi document and the route manifest are served FROM a handler, so freezing the reading
-       doors alongside the writing ones would break the very routes that publish the table */
+    /* the openapi document and the route manifest are served FROM a handler, so freezing the reading doors alongside the writing ones would break the very routes that publish the table */
     if 1 != len(router.RouteDefinitions()) {
         t.Fatalf("expected the route table to stay readable while serving")
     }
@@ -2864,9 +2843,7 @@ func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
     kernel := NewKernel(router)
     handler := kernel.ServeHttp(newHttpTestContainer())
 
-    /* a request is held open across the refusal, so the guard is exercised against a kernel that really
-       is serving rather than one that merely built a handler; under -race this is the shape that would
-       report the write the refusal prevents */
+    /* a request is held open across the refusal, so the guard is exercised against a kernel that really is serving rather than one that merely built a handler; under -race this is the shape that would report the write the refusal prevents */
     started := make(chan struct{})
     finished := make(chan struct{})
 
@@ -2897,10 +2874,7 @@ func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
     <-finished
 }
 
-/* the abort sentinel suppresses the response, not the ownership of what it holds: the branch re-raised
-it ten lines before the in-flight response was captured and seventy before either close, so a deliberate
-abort over a file-backed response leaked the descriptor. invokeErrorHandlerSafely already refuses to
-honour the sentinel for exactly this reason, which is the contradiction this closes. */
+/* the abort sentinel suppresses the response, not the ownership of what it holds: the branch re-raised it ten lines before the in-flight response was captured and seventy before either close, so a deliberate abort over a file-backed response leaked the descriptor. invokeErrorHandlerSafely already refuses to honour the sentinel for exactly this reason, which is the contradiction this closes. */
 func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
@@ -2921,8 +2895,7 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
 
     kernel := NewKernel(router)
 
-    /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the
-       response the chain produced is held only by the recording shim */
+    /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the response the chain produced is held only by the recording shim */
     kernel.Use(func(next httpcontract.Handler) httpcontract.Handler {
         return func(
             runtimeInstance runtimecontract.Runtime,
@@ -2953,10 +2926,7 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     }
 }
 
-/* the route is matched on the path as the client SPELLED it: net/http decodes "%2F" into a separator,
-so "/admin%2Fusers" — one segment naming a resource called "admin/users" — became two segments and
-reached the "/admin/users" handler, while a proxy rule written against the raw request line matched
-neither spelling. */
+/* the route is matched on the path as the client SPELLED it: net/http decodes "%2F" into a separator, so "/admin%2Fusers" — one segment naming a resource called "admin/users" — became two segments and reached the "/admin/users" handler, while a proxy rule written against the raw request line matched neither spelling. */
 func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
     reached := ""
 
@@ -2990,9 +2960,7 @@ func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
     }
 }
 
-/* the tie-break is registration order, deliberately, and specificity is not a factor. The rule is
-written on the RouteHandler contract; this pins it so a future change to the selection has to be a
-decision rather than an accident. */
+/* the tie-break is registration order, deliberately, and specificity is not a factor. The rule is written on the RouteHandler contract; this pins it so a future change to the selection has to be a decision rather than an accident. */
 func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
     router := NewRouter()
 

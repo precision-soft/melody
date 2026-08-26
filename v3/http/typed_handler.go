@@ -10,12 +10,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* JsonHandlerErrorResponder renders the refusals JsonHandler makes before the handler runs. It is
-   handed the failure itself and not only a status and a message: the cause carries the decoder's own
-   diagnosis and the validation collection under the validationErrors context key, so a responder can
-   render the framework's own envelope, or its own shape, without the detail having been destroyed on
-   the way to it. A responder that answers no response leaves the refusal to the framework — it can
-   never turn a refused request into a success. */
+/* JsonHandlerErrorResponder renders the refusals JsonHandler makes before the handler runs. It is handed the failure itself and not only a status and a message: the cause carries the decoder's own diagnosis and the validation collection under the validationErrors context key, so a responder can render the framework's own envelope, or its own shape, without the detail having been destroyed on the way to it. A responder that answers no response leaves the refusal to the framework — it can never turn a refused request into a success. */
 type JsonHandlerErrorResponder func(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -42,15 +37,9 @@ func WithJsonHandlerErrorResponder(responder JsonHandlerErrorResponder) JsonHand
     }
 }
 
-/* JsonHandler binds the request body into Req, validates it and calls handle. It reads the body
-   through the same door Request.BindJson is: the configured body limit with its 413, the decoder's
-   diagnosis kept as the refusal's cause, the empty and nil bodies refused by name — a door of its
-   own drifted from all three, answering an oversized upload as malformed json and filing a refusal
-   the operator could not read.
+/* JsonHandler binds the request body into Req, validates it and calls handle. It reads the body through the same door Request.BindJson is: the configured body limit with its 413, the decoder's diagnosis kept as the refusal's cause, the empty and nil bodies refused by name — a door of its own drifted from all three, answering an oversized upload as malformed json and filing a refusal the operator could not read.
 
-   A nil handle is refused at construction rather than at the first request that passes validation:
-   the route registered clean, the manifest listed it and the health check was green while every
-   valid request answered 500. */
+   A nil handle is refused at construction rather than at the first request that passes validation: the route registered clean, the manifest listed it and the health check was green while every valid request answered 500. */
 func JsonHandler[Req any](
     handle func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, body Req) (httpcontract.Response, error),
     options ...JsonHandlerOption,
@@ -103,10 +92,7 @@ func JsonHandler[Req any](
     }
 }
 
-/* boundBodyIsNil reads every kind a json null can leave nil. internal.IsNilInterface answers the same
-   question for a value already boxed in an interface; this one is handed the typed value itself, so
-   it reflects over Req directly and reads an invalid Value — Req instantiated as `any` and left
-   unset — as the nil it means. */
+/* boundBodyIsNil reads every kind a json null can leave nil. internal.IsNilInterface answers the same question for a value already boxed in an interface; this one is handed the typed value itself, so it reflects over Req directly and reads an invalid Value — Req instantiated as `any` and left unset — as the nil it means. */
 func boundBodyIsNil(body any) bool {
     bodyValue := reflect.ValueOf(body)
 
@@ -120,12 +106,7 @@ func boundBodyIsNil(body any) bool {
     return false
 }
 
-/* jsonHandlerError renders a pre-handler refusal. The application's responder runs under the kernel's
-   own containment discipline — third-party code invoked from framework internals runs under a guard,
-   because a panic here lands inside the failure path itself — and a responder that hands back no
-   response leaves the original refusal standing: returned as it was, the kernel read the nil pair as
-   a handler that answered nothing and served an empty 204, so a refused write reported success to
-   its client with no record filed anywhere. */
+/* jsonHandlerError renders a pre-handler refusal. The application's responder runs under the kernel's own containment discipline — third-party code invoked from framework internals runs under a guard, because a panic here lands inside the failure path itself — and a responder that hands back no response leaves the original refusal standing: returned as it was, the kernel read the nil pair as a handler that answered nothing and served an empty 204, so a refused write reported success to its client with no record filed anywhere. */
 func jsonHandlerError(
     settings *jsonHandlerOptions,
     runtimeInstance runtimecontract.Runtime,

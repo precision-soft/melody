@@ -33,7 +33,7 @@ func (instance *container) IsClosed() bool {
 
 /* Close tears the container down exactly once. A concurrent or repeated call blocks until the first teardown finishes and returns the same error, so a second caller never reports a premature success while services are still being closed.
 
-That blocking makes Close re-entrant-unsafe by construction: a service whose own Close calls back into container.Close re-enters the teardown that is waiting on it and deadlocks the whole shutdown. A service that closes defensively asks IsClosed first — the flag is set before the first service Close runs, so during the teardown it already answers true and the defensive caller skips. The scope resolves the same re-entrance by reading a closed scope instead of blocking, but its second caller may also return while services are still closing; this container keeps the stronger contract for its concurrent callers and leaves re-entrance to the IsClosed protocol. */
+   That blocking makes Close re-entrant-unsafe by construction: a service whose own Close calls back into container.Close re-enters the teardown that is waiting on it and deadlocks the whole shutdown. A service that closes defensively asks IsClosed first — the flag is set before the first service Close runs, so during the teardown it already answers true and the defensive caller skips. The scope resolves the same re-entrance by reading a closed scope instead of blocking, but its second caller may also return while services are still closing; this container keeps the stronger contract for its concurrent callers and leaves re-entrance to the IsClosed protocol. */
 func (instance *container) Close() error {
     instance.closeOnce.Do(func() {
         instance.closeErr = instance.closeInternal()
@@ -239,9 +239,7 @@ func (instance *container) closeInternal() error {
         assignRepresentative(nodeKey, value)
     }
 
-    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the
-       teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering
-       runs over it */
+    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it */
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
@@ -397,7 +395,7 @@ func (instance *container) closeInternal() error {
 
 /* contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned.
 
-What the failure carries is the whole of what the operator will ever learn about it: this is a containment boundary, so nothing above it sees the panic and nothing below it survives. An error-shaped panic value therefore travels as the CAUSE rather than only as its own stringified message — kept only in a context slot it collapses to one line at the render boundary, so the context map and the cause chain of the very error the Close raised reached no record at all — and the stack is captured here, inside the recover, because it is the only place the frames that ran still exist. The recovery boundaries of the event dispatcher and of the http kernel make the same two decisions for the same reason. */
+   What the failure carries is the whole of what the operator will ever learn about it: this is a containment boundary, so nothing above it sees the panic and nothing below it survives. An error-shaped panic value therefore travels as the CAUSE rather than only as its own stringified message — kept only in a context slot it collapses to one line at the render boundary, so the context map and the cause chain of the very error the Close raised reached no record at all — and the stack is captured here, inside the recover, because it is the only place the frames that ran still exist. The recovery boundaries of the event dispatcher and of the http kernel make the same two decisions for the same reason. */
 func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -448,7 +446,7 @@ func (instance *nodeKeyHeap) Less(leftIndex int, rightIndex int) bool {
 
 /* closesBefore answers which of two services with no edge between them is torn down first: the one created LATER. Creation order is the only order in this container that carries a causal claim — a service built during the construction of another was needed by it, whether or not the edge was declared, and a logger resolved at boot is beneath everything resolved afterwards. The comparison this replaced was on the node key descending, which is a string comparison nobody wrote and which decided, by nothing but spelling, that a worker named app.worker lost its shutdown records while the same worker renamed zz.worker kept them.
 
-A node with no recorded creation is ordered as if created first, which closes it last: the only nodes without one are those the maps gained outside a creation, and there the key keeps deciding, exactly as before. */
+   A node with no recorded creation is ordered as if created first, which closes it last: the only nodes without one are those the maps gained outside a creation, and there the key keeps deciding, exactly as before. */
 func closesBefore(creationOrderOf map[string]int, leftNodeKey string, rightNodeKey string) bool {
     leftOrder := creationOrderOf[leftNodeKey]
     rightOrder := creationOrderOf[rightNodeKey]
@@ -532,17 +530,11 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
     return pointerIdentity{}, false
 }
 
-/* teardownCloseOrder puts a set of created services into the order they have to be closed in: a dependent
-before everything it depends on, so nothing is torn down while something still using it is alive. Ties are
-broken by creation order, latest first — see closesBefore for why that and not the node key.
+/* teardownCloseOrder puts a set of created services into the order they have to be closed in: a dependent before everything it depends on, so nothing is torn down while something still using it is alive. Ties are broken by creation order, latest first — see closesBefore for why that and not the node key.
 
-The edges are expected in the same key space as the nodes; an edge naming a node that was not created is
-dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately
-and appended last, so the caller can both close it and report it.
+   The edges are expected in the same key space as the nodes; an edge naming a node that was not created is dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately and appended last, so the caller can both close it and report it.
 
-The container and the request scope share this walk because they answer the same question about different
-sets: the container asks it of everything it built for the process, the scope of everything it built for one
-request. Two implementations of it would be two chances to order a teardown differently. */
+   The container and the request scope share this walk because they answer the same question about different sets: the container asks it of everything it built for the process, the scope of everything it built for one request. Two implementations of it would be two chances to order a teardown differently. */
 func teardownCloseOrder(
     nodeKeys []string,
     edges map[string]map[string]struct{},

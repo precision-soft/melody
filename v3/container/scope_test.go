@@ -582,7 +582,7 @@ func (instance *scopeLifetimeProbe) Close() error {
 
 /* The container is request-agnostic: a service it owns is one instance for the whole process. Resolving that service THROUGH a request scope must not change what it is — the scope layers over the container for the code running inside a request, it does not reach underneath into the container's own wiring.
 
-This is the shape that broke: a provider that asks for the logger. The kernel installs a request logger into every scope under the same name the container registers, so a provider doing nothing request-specific at all was assembled from a scope entry, kept per request, and closed when the request ended. Live in the repository: the bunorm providers read the logger while opening, so the *bun.DB pool was closed at the end of the request that first resolved it. The provider must see the container's own logger, be built once, and never be closed by a request ending. */
+   This is the shape that broke: a provider that asks for the logger. The kernel installs a request logger into every scope under the same name the container registers, so a provider doing nothing request-specific at all was assembled from a scope entry, kept per request, and closed when the request ended. Live in the repository: the bunorm providers read the logger while opening, so the *bun.DB pool was closed at the end of the request that first resolved it. The provider must see the container's own logger, be built once, and never be closed by a request ending. */
 func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *testing.T) {
     var buildCount atomic.Int64
     var closeCount atomic.Int64
@@ -1484,17 +1484,7 @@ func (instance *aliasKeptResolverHolder) Close() error {
     return nil
 }
 
-/*
-the collapse is what the CREATION-ORDER tie-break cannot stand in for, and only a fixture where the
-two disagree can tell them apart. A dependency built DURING its dependent's construction is always
-stamped first, so latest-first reaches the dependent before either of its filings and the order comes
-out right with or without the collapse — which is why the sibling above passes either way. Here the
-holder is created first and reaches for the service through the resolver it kept, so the dual filing
-is stamped AFTER it: the type alias carries no edge of its own and is the newest node in the scope,
-so latest-first pops it before the holder and closes the shared instance out from under it. Collapsed
-onto the name node the alias inherits the holder's edge, and the one close the pair produces happens
-after the holder's.
-*/
+/* the collapse is what the CREATION-ORDER tie-break cannot stand in for, and only a fixture where the two disagree can tell them apart. A dependency built DURING its dependent's construction is always stamped first, so latest-first reaches the dependent before either of its filings and the order comes out right with or without the collapse — which is why the sibling above passes either way. Here the holder is created first and reaches for the service through the resolver it kept, so the dual filing is stamped AFTER it: the type alias carries no edge of its own and is the newest node in the scope, so latest-first pops it before the holder and closes the shared instance out from under it. Collapsed onto the name node the alias inherits the holder's edge, and the one close the pair produces happens after the holder's. */
 func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1531,8 +1521,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
         t.Fatalf("expected the holder, got %#v", holderValue)
     }
 
-    /* BY TYPE, which is the resolution that files the instance under its name AND its type; the edge
-       goes to the name node, so the type alias is left carrying nothing */
+    /* BY TYPE, which is the resolution that files the instance under its name AND its type; the edge goes to the name node, so the type alias is left carrying nothing */
     if _, heldErr := holder.resolver.GetByType(reflect.TypeOf((*aliasNameHeldService)(nil))); nil != heldErr {
         t.Fatalf("unexpected late resolution error: %v", heldErr)
     }
@@ -1551,12 +1540,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
     }
 }
 
-/*
-the same disagreement on the OVERRIDE path: an override declared ClosedWithScope propagates to every
-type the name is registered under, the type stamped after the name, and it is installed here after
-the holder that later reaches for it — so without the alias link the type node is the newest node
-with no edge on it and closes the installed value before its holder.
-*/
+/* the same disagreement on the OVERRIDE path: an override declared ClosedWithScope propagates to every type the name is registered under, the type stamped after the name, and it is installed here after the holder that later reaches for it — so without the alias link the type node is the newest node with no edge on it and closes the installed value before its holder. */
 func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
     serviceContainer := NewContainer()
 

@@ -396,15 +396,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     }
 }
 
-/*
-TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields
-the json envelope always declared and always answered null. The machine
-document is the contract a pipeline reads, and it was the one rendering that
-threw away what the error already carried: at the same instant, over the same
-value, the journal filed the connection, the pool sizing and the whole cause
-chain while stdout answered a single sentence beside `"details":null,
-"cause":null`.
-*/
+/* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing and the whole cause chain while stdout answered a single sentence beside `"details":null, "cause":null`. */
 func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})

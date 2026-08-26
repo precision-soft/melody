@@ -6,10 +6,7 @@ import (
     pgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql/v3"
 )
 
-/* runPgsqlLockCheck exercises the PostgreSQL session-advisory-lock Locker against a live postgres: two
-independent locks on the same name contend (each pins its own backend session), and releasing the holder
-hands the lock to the waiter — the mutual-exclusion primitive the outbox relay and cron leader-election
-rely on. */
+/* runPgsqlLockCheck exercises the PostgreSQL session-advisory-lock Locker against a live postgres: two independent locks on the same name contend (each pins its own backend session), and releasing the holder hands the lock to the waiter — the mutual-exclusion primitive the outbox relay and cron leader-election rely on. */
 func runPgsqlLockCheck(dsn string) {
     database := openPostgres(dsn)
     defer database.Close()
@@ -28,8 +25,7 @@ func runPgsqlLockCheck(dsn string) {
     }
     pass("holder acquired the advisory lock")
 
-    /* a second, independent lock on the same name must NOT be able to acquire it while the holder's
-       backend session still holds it */
+    /* a second, independent lock on the same name must NOT be able to acquire it while the holder's backend session still holds it */
     acquiredContender, contenderErr := contender.Acquire(newRuntime())
     if nil != contenderErr {
         fail("contender acquire (while held): %v", contenderErr)

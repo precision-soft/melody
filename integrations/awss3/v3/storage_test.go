@@ -963,8 +963,7 @@ func countIncompleteUploads(t *testing.T, client *minio.Client, bucket string, k
     return count
 }
 
-/* faultAfterPayloadReader yields its payload and then fails every read with the same transport error,
-the shape of a connection that breaks exactly at the declared boundary. */
+/* faultAfterPayloadReader yields its payload and then fails every read with the same transport error, the shape of a connection that breaks exactly at the declared boundary. */
 type faultAfterPayloadReader struct {
     payload  []byte
     position int

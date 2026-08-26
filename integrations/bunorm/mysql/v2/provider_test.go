@@ -1080,17 +1080,9 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
 }
 
 
-/*
-TestComputeBackoffDelayFloorsASubMillisecondInitialDelay pins the floor. The
-guards above refuse a non-positive delay, which left ONE NANOSECOND as the
-smallest thing a configuration could ask for — and the wait it produces is
-shorter than the dial it separates, so what the operator gets is the re-dial
-storm those guards exist to prevent, arriving through the door they left open.
+/* TestComputeBackoffDelayFloorsASubMillisecondInitialDelay pins the floor. The guards above refuse a non-positive delay, which left ONE NANOSECOND as the smallest thing a configuration could ask for — and the wait it produces is shorter than the dial it separates, so what the operator gets is the re-dial storm those guards exist to prevent, arriving through the door they left open.
 
-The growth is asserted from the floor as well as the floor itself: a fix that
-clamped the ANSWER instead of the starting point would return the floor at every
-attempt and stop backing off at all.
-*/
+   The growth is asserted from the floor as well as the floor itself: a fix that clamped the ANSWER instead of the starting point would return the floor at every attempt and stop backing off at all. */
 func TestComputeBackoffDelayFloorsASubMillisecondInitialDelay(t *testing.T) {
     provider := newTestProvider().
         WithRetryConfig(NewRetryConfig(10, time.Nanosecond, 5*time.Second, 2.0))
@@ -1114,25 +1106,11 @@ func TestComputeBackoffDelayFloorsASubMillisecondCeiling(t *testing.T) {
     }
 }
 
-/*
-TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime is the guard on
-the cost, and it is written as a DEADLINE because that is the only way the cost
-is observable. A multiplier of exactly 1 is a valid constant backoff, and it is
-the one value a growth walked attempt by attempt never leaves early: the delay
-does not move, so the walk runs once per attempt already made and a run costs its
-own square. At the largest attempt the counter can reach that walk is billions of
-float multiplications; the closed form is a single one.
+/* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime is the guard on the cost, and it is written as a DEADLINE because that is the only way the cost is observable. A multiplier of exactly 1 is a valid constant backoff, and it is the one value a growth walked attempt by attempt never leaves early: the delay does not move, so the walk runs once per attempt already made and a run costs its own square. At the largest attempt the counter can reach that walk is billions of float multiplications; the closed form is a single one.
 
-The window is MEASURED, not guessed: the walk it must not fit inside costs 1.02s
-on the development container at the largest attempt, so 250ms separates the two
-by four times in the failing direction while leaving the closed form — one
-math.Pow — a quarter of a second of scheduling slack it can never need. A window
-picked by eye at two seconds would have let the walk finish comfortably inside
-it, which is a probe that certifies nothing.
+   The window is MEASURED, not guessed: the walk it must not fit inside costs 1.02s on the development container at the largest attempt, so 250ms separates the two by four times in the failing direction while leaving the closed form — one math.Pow — a quarter of a second of scheduling slack it can never need. A window picked by eye at two seconds would have let the walk finish comfortably inside it, which is a probe that certifies nothing.
 
-The value is asserted beside the deadline so the probe cannot pass by answering
-quickly and wrongly.
-*/
+   The value is asserted beside the deadline so the probe cannot pass by answering quickly and wrongly. */
 func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T) {
     provider := newTestProvider().
         WithRetryConfig(NewRetryConfig(0, 10*time.Millisecond, 5*time.Second, 1.0))

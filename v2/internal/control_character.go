@@ -5,16 +5,12 @@ import (
     "strings"
 )
 
-/*
-EscapeControlCharacters replaces every C0 control character and DEL in the value with its visible escape spelling — the named ones as \n, \r, \t, the rest as \xNN — so text of unknown origin can be written to a terminal or a line-oriented log without repainting the one or forging records in the other. An embedded escape sequence stays data: the ESC byte that would start it is rendered as \x1b, and an embedded line break is rendered as \n instead of ending the record it belongs to.
-*/
+/* EscapeControlCharacters replaces every C0 control character and DEL in the value with its visible escape spelling — the named ones as \n, \r, \t, the rest as \xNN — so text of unknown origin can be written to a terminal or a line-oriented log without repainting the one or forging records in the other. An embedded escape sequence stays data: the ESC byte that would start it is rendered as \x1b, and an embedded line break is rendered as \n instead of ending the record it belongs to. */
 func EscapeControlCharacters(value string) string {
     return escapeControlCharacters(value, false)
 }
 
-/*
-EscapeControlCharactersKeepingNewlines is the cell form of EscapeControlCharacters: a newline stays a real line break, because the consumer renders multi-line values on purpose, and every other control character is escaped the same way.
-*/
+/* EscapeControlCharactersKeepingNewlines is the cell form of EscapeControlCharacters: a newline stays a real line break, because the consumer renders multi-line values on purpose, and every other control character is escaped the same way. */
 func EscapeControlCharactersKeepingNewlines(value string) string {
     return escapeControlCharacters(value, true)
 }

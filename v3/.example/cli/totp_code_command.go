@@ -9,8 +9,7 @@ import (
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* NewTotpCodeCommand prints the current TOTP code for a secret — it stands in for the authenticator app a
-user would hold, so the two-factor verification can be driven end-to-end. */
+/* NewTotpCodeCommand prints the current TOTP code for a secret — it stands in for the authenticator app a user would hold, so the two-factor verification can be driven end-to-end. */
 func NewTotpCodeCommand() *TotpCodeCommand {
     return &TotpCodeCommand{}
 }

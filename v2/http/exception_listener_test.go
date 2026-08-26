@@ -406,9 +406,7 @@ func TestExceptionListener_ContextWithoutErrorsKeyStaysPrivate(t *testing.T) {
     }
 }
 
-/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight
-off the result dereferenced it; the package's own door refuses the typed nil with the plain one, and the
-same call three lines below already used it. */
+/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight off the result dereferenced it; the package's own door refuses the typed nil with the plain one, and the same call three lines below already used it. */
 func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)

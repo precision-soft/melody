@@ -95,7 +95,7 @@ func (instance *Application) MustRegister(
 
 /* RegisterScopedService declares a service the application's scopes own: one instance per scope — one http request, one command run — closed with it. It mirrors RegisterService in everything but lifetime, collisions included — a name claimed at both lifetimes is absorbed into the aggregated boot report, so a module that scopes a name the framework registers later hears about it beside every other collision instead of one panic per boot attempt.
 
-In console the run's scope spans the whole command, so for a one-shot command "scoped" and "per run" are the same thing — but a long-running command that processes many units of work holds one scope for all of them, and a scoped transaction or identity quietly becomes a process singleton. Such a command creates a child runtime per unit, the way the cron runner does around each scheduled run: a fresh scope from Container().NewScope(), a runtime.New over it, and a Close whose error is joined onto the unit's own when the unit ends. */
+   In console the run's scope spans the whole command, so for a one-shot command "scoped" and "per run" are the same thing — but a long-running command that processes many units of work holds one scope for all of them, and a scoped transaction or identity quietly becomes a process singleton. Such a command creates a child runtime per unit, the way the cron runner does around each scheduled run: a fresh scope from Container().NewScope(), a runtime.New over it, and a Close whose error is joined onto the unit's own when the unit ends. */
 func (instance *Application) RegisterScopedService(
     serviceName string,
     provider any,
@@ -286,7 +286,7 @@ func (instance *Application) bootContainer() {
 
 /* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is acquired, because it panics on a configuration registered under the supported name with a type that does not implement the interface: a file opened above that would be left with no owner at all — the container stores only what a provider returned, so nothing would ever close it, and a creation failure is not memoized, so each later resolution opens another one.
 
-The file journal is a reopenable writer, and the container-served logger arms it on SIGHUP: rename-based rotation moves the file away under the descriptor, so without the reopen the journal keeps flowing into the renamed inode and the fresh file stays empty. The exit-path caller does not arm it — that logger exists for a process that is dying, whose descriptor is surrendered to os.Exit, and a watcher armed there would outlive nothing and own nothing. */
+   The file journal is a reopenable writer, and the container-served logger arms it on SIGHUP: rename-based rotation moves the file away under the descriptor, so without the reopen the journal keeps flowing into the renamed inode and the fresh file stays empty. The exit-path caller does not arm it — that logger exists for a process that is dying, whose descriptor is surrendered to os.Exit, and a watcher armed there would outlive nothing and own nothing. */
 func newContainerLogger(
     logPath string,
     logLevel loggingcontract.Level,

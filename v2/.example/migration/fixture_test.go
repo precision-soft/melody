@@ -1,13 +1,6 @@
 package migration
 
-/*
-Shared test material for the migration package: a fake database/sql driver
-wrapped in a real *bun.DB, with a recorder observing every statement. The
-connection honours context cancellation before recording, so a statement in
-the recorded list is one that really reached the database — the WithoutCancel
-guard on the unlock is only observable against a driver that refuses a
-cancelled context.
-*/
+/* Shared test material for the migration package: a fake database/sql driver wrapped in a real *bun.DB, with a recorder observing every statement. The connection honours context cancellation before recording, so a statement in the recorded list is one that really reached the database — the WithoutCancel guard on the unlock is only observable against a driver that refuses a cancelled context. */
 
 import (
     "context"
@@ -96,11 +89,7 @@ func isJournalCreateTable(query string) bool {
     return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "melody_example_v2_catalog_journal")
 }
 
-/*
-appliedStatusRows answers the status select as if every registered migration
-had already been applied, which is how a process that lost the lock race
-observes a finished competitor.
-*/
+/* appliedStatusRows answers the status select as if every registered migration had already been applied, which is how a process that lost the lock race observes a finished competitor. */
 func appliedStatusRows() ([]string, [][]driver.Value) {
     columns := []string{"id", "name", "group_id"}
 

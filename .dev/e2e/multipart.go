@@ -9,10 +9,7 @@ import (
 
 const multipartLabel = "multipart body"
 
-/* the storage demo is the only route in the example that reports the byte count its handler saw, which is what
-makes it the right probe: PutHandler reads the RAW request body and answers with its length
-(handler/storage/storage_handler.go), so the number in the response is a direct measurement of what the framework
-left for the handler to read. */
+/* the storage demo is the only route in the example that reports the byte count its handler saw, which is what makes it the right probe: PutHandler reads the RAW request body and answers with its length (handler/storage/storage_handler.go), so the number in the response is a direct measurement of what the framework left for the handler to read. */
 const multipartRoute = "/storage/object"
 
 /* multipartPutPayload and multipartGetPayload mirror the two handlers' response payloads. */
@@ -86,8 +83,7 @@ func assertMultipartBodyReachesHandlerIntact(client *liveExampleClient) {
     }
     pass("the handler read all %d bytes of the multipart envelope (the framework left the body unread)", put.Bytes)
 
-    /* the byte COUNT alone would also be satisfied by a body whose bytes were reordered or re-encoded, so the
-       stored object is read back and compared byte for byte */
+    /* the byte COUNT alone would also be satisfied by a body whose bytes were reordered or re-encoded, so the stored object is read back and compared byte for byte */
     stored := readMultipartStoredObject(client, key)
     if false == bytes.Equal(envelope, stored) {
         fail(
@@ -101,8 +97,7 @@ func assertMultipartBodyReachesHandlerIntact(client *liveExampleClient) {
     pass("the stored object is byte-identical to the multipart envelope that was posted")
 }
 
-/* assertUrlEncodedBodyIsRestoredAfterParsing is the twin half: the same route, the same measurement, a body the
-framework DOES drain. A zero byte count here is the drain-without-restore regression. */
+/* assertUrlEncodedBodyIsRestoredAfterParsing is the twin half: the same route, the same measurement, a body the framework DOES drain. A zero byte count here is the drain-without-restore regression. */
 func assertUrlEncodedBodyIsRestoredAfterParsing(client *liveExampleClient) {
     key := liveExampleUnique("e2e-urlencoded")
 
@@ -198,11 +193,7 @@ func readMultipartStoredObject(client *liveExampleClient, key string) []byte {
     return []byte(payload.Content)
 }
 
-/* buildMultipartEnvelope assembles a REAL mime/multipart envelope and returns it together with the Content-Type
-carrying the boundary the writer chose. Hand-writing the envelope would risk a body the framework rejects as
-malformed for a reason unrelated to the property under test — and the returned Content-Type has to come from the
-writer, because a boundary that does not match the body makes every assertion below meaningless. A file part is
-included only when a filename is given, so the missing-key probe can post a fields-only envelope. */
+/* buildMultipartEnvelope assembles a REAL mime/multipart envelope and returns it together with the Content-Type carrying the boundary the writer chose. Hand-writing the envelope would risk a body the framework rejects as malformed for a reason unrelated to the property under test — and the returned Content-Type has to come from the writer, because a boundary that does not match the body makes every assertion below meaningless. A file part is included only when a filename is given, so the missing-key probe can post a fields-only envelope. */
 func buildMultipartEnvelope(fields map[string]string, fileField string, fileName string, fileContent []byte) ([]byte, string) {
     buffer := &bytes.Buffer{}
     writer := multipart.NewWriter(buffer)

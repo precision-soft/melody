@@ -29,9 +29,7 @@ func TestConnectionParametersSafeContextNamesTheConnection(t *testing.T) {
     }
 }
 
-/* the value scan is what the assertion rests on: a password republished under any other key — "pass",
-"credential", the connection string it was folded into — reads as redacted to a check that only looks
-for the key it is not supposed to find. */
+/* the value scan is what the assertion rests on: a password republished under any other key — "pass", "credential", the connection string it was folded into — reads as redacted to a check that only looks for the key it is not supposed to find. */
 func TestConnectionParametersSafeContextOmitsPassword(t *testing.T) {
     connectionParameters := ConnectionParameters{
         Host:     "db.internal",
@@ -54,9 +52,7 @@ func TestConnectionParametersSafeContextOmitsPassword(t *testing.T) {
     }
 }
 
-/* ConnectionParams has to stay an ALIAS rather than become a defined type: the drivers of the next major
-still write it in the signatures that satisfy Provider, and a defined type would make those signatures
-stop matching the contract while every file involved kept compiling on its own. */
+/* ConnectionParams has to stay an ALIAS rather than become a defined type: the drivers of the next major still write it in the signatures that satisfy Provider, and a defined type would make those signatures stop matching the contract while every file involved kept compiling on its own. */
 func TestConnectionParamsIsAnAliasOfConnectionParameters(t *testing.T) {
     var connectionParameters ConnectionParameters = ConnectionParams{User: "melody_user"}
 

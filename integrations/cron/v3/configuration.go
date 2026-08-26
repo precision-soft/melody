@@ -45,9 +45,9 @@ func NewConfiguration() *Configuration {
 
 /* InTimezone names the zone the IN-PROCESS runner evaluates its schedules under, as an IANA name — "Europe/Bucharest". Unset, the runner evaluates on the process zone, which is what it always did.
 
-It is declared once for the whole configuration rather than per entry because a zone is a property of the schedule an operator reads, not of one job: an entry written "0 3 * * *" means three in the morning wherever the business keeps its books, and two entries meaning two different three-in-the-mornings is a crontab nobody can read. A zone the standard library cannot load is a wiring mistake and panics at construction, beside the malformed schedules and the unknown command names.
+   It is declared once for the whole configuration rather than per entry because a zone is a property of the schedule an operator reads, not of one job: an entry written "0 3 * * *" means three in the morning wherever the business keeps its books, and two entries meaning two different three-in-the-mornings is a crontab nobody can read. A zone the standard library cannot load is a wiring mistake and panics at construction, beside the malformed schedules and the unknown command names.
 
-It reaches the in-process runner ALONE. The generated manifests are run by an external scheduler whose zone belongs to that scheduler and to the container it runs in, not to this configuration; the generator therefore emits nothing for it, and the readme says so where the zone is documented. */
+   It reaches the in-process runner ALONE. The generated manifests are run by an external scheduler whose zone belongs to that scheduler and to the container it runs in, not to this configuration; the generator therefore emits nothing for it, and the readme says so where the zone is documented. */
 func (instance *Configuration) InTimezone(name string) *Configuration {
     instance.timezoneName = name
 

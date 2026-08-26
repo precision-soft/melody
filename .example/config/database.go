@@ -27,12 +27,7 @@ const (
     databaseProviderNameJournal = "journal"
 )
 
-/*
-databaseWiring is the decision of which connections the environment armed. The
-two switches are independent on purpose — the catalog on mysql and the journal
-on postgres each follow their own empty-means-unwired key, so every
-combination boots: both live, either one alone, or none at all.
-*/
+/* databaseWiring is the decision of which connections the environment armed. The two switches are independent on purpose — the catalog on mysql and the journal on postgres each follow their own empty-means-unwired key, so every combination boots: both live, either one alone, or none at all. */
 type databaseWiring struct {
     catalog bool
     journal bool
@@ -45,22 +40,14 @@ func databaseWiringFromHosts(catalogHost string, journalHost string) databaseWir
     }
 }
 
-/*
-dialIsInsecure reads a transport switch. Both providers negotiate a verified
-TLS handshake by default; the development compose mysql and postgres both
-speak plain TCP, so the shipped .env arms the insecure dial explicitly for
-each — the decision is visible in configuration rather than buried in the
-wiring. The spelling is exact: any value but "true" keeps the verified
-handshake, because a credential-bearing dial downgrades only on an
-unambiguous instruction.
-*/
+/* dialIsInsecure reads a transport switch. Both providers negotiate a verified TLS handshake by default; the development compose mysql and postgres both speak plain TCP, so the shipped .env arms the insecure dial explicitly for each — the decision is visible in configuration rather than buried in the wiring. The spelling is exact: any value but "true" keeps the verified handshake, because a credential-bearing dial downgrades only on an unambiguous instruction. */
 func dialIsInsecure(insecureValue string) bool {
     return "true" == insecureValue
 }
 
 /* buildDatabase declares the connections without opening them. bunorm's registry validates the definitions here and dials each one on the first Manager call, which lands after the framework has registered its own services — so the providers find the configuration and the logger they read while connecting, and the retry backoff is reported through the real logger instead of the emergency one.
 
-An unset host leaves its definition out; with both hosts unset the registry stays nil and nothing is wired: no services, no dial. */
+   An unset host leaves its definition out; with both hosts unset the registry stays nil and nothing is wired: no services, no dial. */
 func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel) {
     wiring := databaseWiringFromHosts(
         parameterValue(kernelInstance, ParameterDatabaseHost),

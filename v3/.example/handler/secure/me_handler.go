@@ -34,8 +34,7 @@ func MeHandler() melodyhttpcontract.Handler {
             Roles:          token.Roles(),
         }
 
-        /* when the request is running under switch-user impersonation, surface the accountable admin
-           behind the impersonated principal so the response shows both identities. */
+        /* when the request is running under switch-user impersonation, surface the accountable admin behind the impersonated principal so the response shows both identities. */
         if impersonator, present := melodysecurity.ImpersonatorFromToken(token); true == present {
             payload.Impersonator = &principalView{
                 UserIdentifier: impersonator.UserIdentifier(),

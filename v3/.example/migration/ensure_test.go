@@ -231,10 +231,7 @@ func TestEnsureMigratedCreatesTheJournalTableWithTheCatalogue(t *testing.T) {
     }
 }
 
-/* the released lock is the whole point of the deferred unlock, so a release that FAILED has to become the
-verdict rather than be dropped: a lock row that survives refuses every later migration on every process, and
-a resolution that answered success would leave the operator with a database nothing can migrate and no error
-saying why. Neither frozen major pins it — this is the assertion added here. */
+/* the released lock is the whole point of the deferred unlock, so a release that FAILED has to become the verdict rather than be dropped: a lock row that survives refuses every later migration on every process, and a resolution that answered success would leave the operator with a database nothing can migrate and no error saying why. Neither frozen major pins it — this is the assertion added here. */
 func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
