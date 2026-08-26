@@ -58,13 +58,17 @@ func (instance *ParameterBag) Set(name string, value any) {
     instance.parameters[name] = value
 }
 
+/* Get hands back a copy at the depth the bag's own writers go, exactly like All: handed back live, a stored []string or map[string]string was the bag's own, so a caller mutating an element wrote into the bag behind its lock — visible to every later reader and racing a concurrent All or StringSlice copy. Scalars are returned as stored and cost nothing; only the two aliasing shapes pay the copy. */
 func (instance *ParameterBag) Get(name string) (any, bool) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
     value, exists := instance.parameters[name]
+    if false == exists {
+        return nil, false
+    }
 
-    return value, exists
+    return copyStoredParameterValue(value), true
 }
 
 func (instance *ParameterBag) Has(name string) bool {
@@ -95,23 +99,30 @@ func (instance *ParameterBag) All() map[string]any {
     copied := make(map[string]any, len(instance.parameters))
 
     for key, value := range instance.parameters {
-        switch typedValue := value.(type) {
-        case []string:
-            copiedSlice := make([]string, len(typedValue))
-            copy(copiedSlice, typedValue)
-            copied[key] = copiedSlice
-        case map[string]string:
-            copiedMap := make(map[string]string, len(typedValue))
-            for mapKey, mapValue := range typedValue {
-                copiedMap[mapKey] = mapValue
-            }
-            copied[key] = copiedMap
-        default:
-            copied[key] = value
-        }
+        copied[key] = copyStoredParameterValue(value)
     }
 
     return copied
+}
+
+/* copyStoredParameterValue is the one spelling of the copy depth Get and All share: the two shapes the bag's own writers produce are copied, everything else is opaque to the bag and handed back as stored. */
+func copyStoredParameterValue(value any) any {
+    switch typedValue := value.(type) {
+    case []string:
+        copiedSlice := make([]string, len(typedValue))
+        copy(copiedSlice, typedValue)
+
+        return copiedSlice
+    case map[string]string:
+        copiedMap := make(map[string]string, len(typedValue))
+        for mapKey, mapValue := range typedValue {
+            copiedMap[mapKey] = mapValue
+        }
+
+        return copiedMap
+    default:
+        return value
+    }
 }
 
 /* AppendString adds one string under the name inside a single critical section: the read-modify-write helper of the same name works over the contract through Get and Set, whose window between the two locks loses one of two concurrent appends without an error — a lost update the race detector cannot see, because every individual access is locked. */

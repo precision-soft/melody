@@ -9,6 +9,7 @@ import (
     "sync/atomic"
     "time"
 
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -16,6 +17,25 @@ import (
 
 func NewJsonLogger(output io.Writer, minLevel loggingcontract.Level) loggingcontract.Logger {
     return NewJsonLoggerWithLabels(output, minLevel, loggingcontract.DefaultLevelLabels())
+}
+
+/* NewJsonLoggerWithClock stamps every record from the given clock instead of the process clock, which is what lets a test freeze the journal's time and what makes the container-built logger agree with every other timestamp the kernel's clock produces. The two constructors without a clock keep reading the process clock, because they are also the constructors of the last-resort loggers — the emergency logger on stderr, the exit-path logger of a dying process — where no injected clock exists to be wrong. */
+func NewJsonLoggerWithClock(
+    output io.Writer,
+    minLevel loggingcontract.Level,
+    labels loggingcontract.LevelLabels,
+    clockInstance clockcontract.Clock,
+) loggingcontract.Logger {
+    if true == internal.IsNilInterface(clockInstance) {
+        exception.Panic(
+            exception.NewError("json logger clock is not provided", nil, nil),
+        )
+    }
+
+    logger := NewJsonLoggerWithLabels(output, minLevel, labels)
+    logger.(*jsonLogger).clock = clockInstance
+
+    return logger
 }
 
 func NewJsonLoggerWithLabels(output io.Writer, minLevel loggingcontract.Level, labels loggingcontract.LevelLabels) loggingcontract.Logger {
@@ -55,6 +75,8 @@ type jsonLogger struct {
     output      io.Writer
     minLevel    loggingcontract.Level
     levelLabels loggingcontract.LevelLabels
+    /* nil means the process clock: the constructors that cannot be handed a clock — the emergency and exit-path loggers — still have to stamp their records */
+    clock clockcontract.Clock
     /* closed is atomic so Closed() can answer without the write lock: the probe is asked by the process-boundary exit handler, and an answer serialized behind an in-flight Write into a stalled pipe would hang the one handler that must reach os.Exit. The writes to the flag still happen under writeMutex — atomicity covers the lock-free read alone. */
     closed           atomic.Bool
     writeFailureOnce sync.Once
@@ -86,7 +108,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
         return
     }
 
-    timestamp := time.Now().Format(time.RFC3339Nano)
+    timestamp := instance.currentInstant().Format(time.RFC3339Nano)
 
     entry := logEntry{
         Message: message,
@@ -117,6 +139,14 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
     if nil != writeErr {
         instance.reportWriteFailure(writeErr)
     }
+}
+
+func (instance *jsonLogger) currentInstant() time.Time {
+    if nil == instance.clock {
+        return time.Now()
+    }
+
+    return instance.clock.Now()
 }
 
 /* reportWriteFailure echoes the first failed write to stderr, once for the life of the logger. A var/log that is full, read-only or on a vanished mount otherwise silences the entire journal with no signal on any channel — the operator reads a healthy-looking empty file — while the other way this same function can fail, a value that will not marshal, has had its fallback since it was written.

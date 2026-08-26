@@ -1,6 +1,8 @@
 package static
 
 import (
+    "crypto/sha256"
+    "encoding/hex"
     "fmt"
     "io/fs"
     "strings"
@@ -10,17 +12,25 @@ import (
 
 /* GenerateEtag derives the entity tag from the size and the modification time, and from the size and the BUILD VERSION for a filesystem that carries no modification time. An embedded filesystem is that filesystem: every FileInfo it hands out reports the zero instant, so the size-and-time form degenerated into size alone — identical across every rebuild — and a redeployed asset that kept its length (a version string, a colour, a bundle that re-minified to the same size) revalidated 304 and stayed served stale for the life of the deployment. The build version is the coarser but honest stand-in: every asset revalidates once after a deploy and no asset of the previous build survives it.
 
-The modification time is read at NANOSECOND resolution. At the whole second the Unix form used, two rewrites within the same second that kept the same length produced an identical tag — a deploy that swapped a bundle for one of the same size revalidated 304 and stayed served stale until its length or its second changed. If-None-Match carries this tag and takes precedence over If-Modified-Since, so the finer tag catches the change the second-resolution Last-Modified cannot. A filesystem whose FileInfo reports only whole seconds keeps the whole-second tag; nothing is lost. */
+The modification time is read at NANOSECOND resolution. At the whole second the Unix form used, two rewrites within the same second that kept the same length produced an identical tag — a deploy that swapped a bundle for one of the same size revalidated 304 and stayed served stale until its length or its second changed. If-None-Match carries this tag and takes precedence over If-Modified-Since, so the finer tag catches the change the second-resolution Last-Modified cannot. A filesystem whose FileInfo reports only whole seconds keeps the whole-second precision inside the digest; nothing is lost.
+
+The tag published is a truncated sha256 of that derivation, not the derivation itself. Spelled out, the tag told every anonymous client the file's modification instant to the nanosecond — deploy times, per-file build ordering — and, on the embedded branch, the binary's build version string, on every asset. The digest keeps every cache property, because equal inputs digest equal and different inputs digest different, and it discloses nothing; sixteen hex characters carry sixty-four bits of it, far past what tag collision over one url could ever need. */
 func GenerateEtag(info fs.FileInfo, weak bool) string {
     if nil == info {
         return ""
     }
 
     if true == info.ModTime().IsZero() {
-        return formatEtag(fmt.Sprintf("%d-%s", info.Size(), version.BuildVersion()), weak)
+        return formatEtag(digestEtagInput(fmt.Sprintf("%d-%s", info.Size(), version.BuildVersion())), weak)
     }
 
-    return formatEtag(fmt.Sprintf("%d-%d", info.Size(), info.ModTime().UnixNano()), weak)
+    return formatEtag(digestEtagInput(fmt.Sprintf("%d-%d", info.Size(), info.ModTime().UnixNano())), weak)
+}
+
+func digestEtagInput(input string) string {
+    digest := sha256.Sum256([]byte(input))
+
+    return hex.EncodeToString(digest[:8])
 }
 
 func formatEtag(etag string, weak bool) string {

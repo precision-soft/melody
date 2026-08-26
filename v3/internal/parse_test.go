@@ -67,20 +67,32 @@ func TestDuration_RefusesUnparseableString(t *testing.T) {
     }
 }
 
+/* the typed branches are where the finiteness guard is the only wall; the string spellings of the same values are refused one step earlier, by the decimal grammar, and both refusals are asserted so neither guard can silently absorb the other's job */
 func TestFloat64_RefusesNonFinite(t *testing.T) {
-    nonFiniteValues := []any{
-        "NaN", "nan", "Inf", "+Inf", "-Inf", "Infinity",
+    nonFiniteTypedValues := []any{
         math.NaN(), math.Inf(1), math.Inf(-1),
         float32(float64(math.Inf(1))),
     }
 
-    for _, value := range nonFiniteValues {
+    for _, value := range nonFiniteTypedValues {
         _, isSet, err := Float64(value, "probe")
         if nil == err {
             t.Fatalf("expected the non-finite %#v to be refused (isSet=%v)", value, isSet)
         }
         if false == strings.Contains(parseTestCauseMessage(t, err), "not finite") {
             t.Fatalf("expected the refusal of %#v to name finiteness, got cause %q", value, parseTestCauseMessage(t, err))
+        }
+    }
+
+    nonFiniteSpellings := []any{"NaN", "nan", "Inf", "+Inf", "-Inf", "Infinity"}
+
+    for _, value := range nonFiniteSpellings {
+        _, isSet, err := Float64(value, "probe")
+        if nil == err {
+            t.Fatalf("expected the non-finite spelling %#v to be refused (isSet=%v)", value, isSet)
+        }
+        if false == strings.Contains(parseTestCauseMessage(t, err), "decimal") {
+            t.Fatalf("expected the refusal of %#v to come from the decimal grammar, got cause %q", value, parseTestCauseMessage(t, err))
         }
     }
 }
@@ -285,5 +297,41 @@ func TestMapStringString_RefusesAnUnsupportedShape(t *testing.T) {
     }
     if false == strings.Contains(err.Error(), "parameter is not a 'map[string]string'") {
         t.Fatalf("expected the refusal to name the expected type, got %q", err.Error())
+    }
+}
+
+/* the float grammar is decimal on purpose: strconv.ParseFloat also reads underscores, hexadecimal floats and exponents, spellings the strict base-10 Int beside it refuses — a value refused as an int must not be silently accepted as a float */
+func TestFloat64_TheStringGrammarIsDecimal(t *testing.T) {
+    refused := []string{"1_000.5", "0x1p10", "1e3", "1E3", "NaN", "Inf", "Infinity", "-Inf", "", ".", "+", "-", "1.2.3", "1p3"}
+    for _, value := range refused {
+        _, present, parseErr := Float64(value, "probe")
+        if nil == parseErr {
+            t.Fatalf("expected the spelling %q to be refused", value)
+        }
+        if false == present {
+            t.Fatalf("expected the refused spelling %q to read as present", value)
+        }
+    }
+
+    accepted := map[string]float64{
+        "1.5":  1.5,
+        "-2":   -2,
+        "+0.5": 0.5,
+        ".5":   0.5,
+        "5.":   5,
+        " 42 ": 42,
+        "0":    0,
+    }
+    for value, expected := range accepted {
+        parsed, present, parseErr := Float64(value, "probe")
+        if nil != parseErr {
+            t.Fatalf("expected the spelling %q to parse, got %v", value, parseErr)
+        }
+        if false == present {
+            t.Fatalf("expected the spelling %q to read as present", value)
+        }
+        if expected != parsed {
+            t.Fatalf("expected %q to parse as %v, got %v", value, expected, parsed)
+        }
     }
 }

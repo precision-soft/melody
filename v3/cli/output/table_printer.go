@@ -6,7 +6,6 @@ import (
     "sort"
     "strings"
     "time"
-    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/internal"
 )
@@ -227,8 +226,9 @@ func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock
     columnCount := len(block.Columns)
     widths := make([]int, columnCount)
 
+    /* the measure is display cells, not runes: a CJK ideogram or an emoji occupies two terminal cells and a combining mark none, so a rune count rendered exactly those columns out of line with the separators it measured */
     for index, column := range block.Columns {
-        widths[index] = utf8.RuneCountInString(column)
+        widths[index] = internal.DisplayWidth(column)
     }
 
     for _, row := range block.Rows {
@@ -240,7 +240,7 @@ func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock
             if index >= len(row) {
                 continue
             }
-            cellWidth := utf8.RuneCountInString(row[index])
+            cellWidth := internal.DisplayWidth(row[index])
             if widths[index] < cellWidth {
                 widths[index] = cellWidth
             }
@@ -265,7 +265,7 @@ func (instance *TablePrinter) shrinkWidthsToFitMaxWidth(block TableBlock, widths
 
     for index := 0; index < columnCount; index++ {
         minWidth := defaultTableMinColumnWidth
-        columnWidth := utf8.RuneCountInString(block.Columns[index])
+        columnWidth := internal.DisplayWidth(block.Columns[index])
         if minWidth < columnWidth {
             minWidth = columnWidth
         }
@@ -352,7 +352,7 @@ func (instance *TablePrinter) printRowWrapped(writer io.Writer, cells []string, 
                 value = wrappedCells[cellIndex][lineIndex]
             }
 
-            valueWidth := utf8.RuneCountInString(value)
+            valueWidth := internal.DisplayWidth(value)
             if valueWidth < width {
                 value = value + strings.Repeat(" ", width-valueWidth)
             }
@@ -386,15 +386,24 @@ func (instance *TablePrinter) wrapCellValue(value string, width int) []string {
             continue
         }
 
+        /* the wrap slices by the same display-cell measure the widths were computed in, so a padded line never renders wider than it measured; the first rune of a line is always taken, which is what keeps a rune wider than the whole column from wrapping forever */
         splitRunes := []rune(splitLine)
         for 0 < len(splitRunes) {
-            if len(splitRunes) <= width {
-                lines = append(lines, string(splitRunes))
-                break
+            lineWidth := 0
+            takeCount := 0
+
+            for takeCount < len(splitRunes) {
+                runeWidth := internal.RuneDisplayWidth(splitRunes[takeCount])
+                if 0 < takeCount && width < lineWidth+runeWidth {
+                    break
+                }
+
+                lineWidth = lineWidth + runeWidth
+                takeCount = takeCount + 1
             }
 
-            lines = append(lines, string(splitRunes[:width]))
-            splitRunes = splitRunes[width:]
+            lines = append(lines, string(splitRunes[:takeCount]))
+            splitRunes = splitRunes[takeCount:]
         }
     }
 

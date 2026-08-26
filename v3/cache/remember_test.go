@@ -1754,3 +1754,14 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
         t.Fatalf("expected the uncoalesced callback to run under the caller context, saw %v", observedContextError)
     }
 }
+
+/* the default is the repair: under the old non-cancelable default a hung callback owned its key for the life of the process, and the replacement mechanism the flight already had could never fire. The mechanism itself is proven by the cancelable-flight tests above; this pins which side of it the constructor ships. */
+func TestNewDefaultRememberOption_ArmsACancelableFlight(t *testing.T) {
+    if false == NewDefaultRememberOption().IsCancelable() {
+        t.Fatalf("expected the default remember option to arm a cancelable flight")
+    }
+
+    if false == (&RememberOption{}).WithWaitTimeout(time.Minute).IsCancelable() {
+        t.Fatalf("expected the zero-value option to read the constructor's cancelable default")
+    }
+}

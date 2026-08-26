@@ -3,6 +3,7 @@ package logging
 import (
     "bufio"
     "bytes"
+    "fmt"
     "encoding/json"
     "errors"
     "io"
@@ -12,6 +13,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
@@ -1109,4 +1111,51 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
     if true == levelReporter.Enabled(loggingcontract.LevelEmergency) {
         t.Fatalf("expected a closed logger to report nothing enabled")
     }
+}
+
+/* the stamp comes from the injected clock, which is what lets the container-built logger agree with every other instant the kernel's clock produces and what makes the journal's time freezable in a test */
+func TestNewJsonLoggerWithClock_StampsTheRecordFromTheInjectedClock(t *testing.T) {
+    frozenInstant := time.Date(2026, time.August, 26, 10, 30, 0, 123456789, time.UTC)
+
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLoggerWithClock(
+        buffer,
+        loggingcontract.LevelInfo,
+        loggingcontract.DefaultLevelLabels(),
+        clock.NewFrozenClock(frozenInstant),
+    )
+
+    logger.Info("stamped", nil)
+
+    var payload map[string]any
+    if unmarshalErr := json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &payload); nil != unmarshalErr {
+        t.Fatalf("invalid json: %v", unmarshalErr)
+    }
+
+    stamp, ok := payload["time"].(string)
+    if false == ok {
+        t.Fatalf("missing time")
+    }
+    if frozenInstant.Format(time.RFC3339Nano) != stamp {
+        t.Fatalf("expected the frozen instant %s, got %s", frozenInstant.Format(time.RFC3339Nano), stamp)
+    }
+}
+
+func TestNewJsonLoggerWithClock_RefusesANilClock(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the nil clock to be refused")
+        }
+        if false == strings.Contains(fmt.Sprintf("%v", recoveredValue), "json logger clock is not provided") {
+            t.Fatalf("expected the refusal to name the clock, got %v", recoveredValue)
+        }
+    }()
+
+    _ = NewJsonLoggerWithClock(
+        &bytes.Buffer{},
+        loggingcontract.LevelInfo,
+        loggingcontract.DefaultLevelLabels(),
+        nil,
+    )
 }

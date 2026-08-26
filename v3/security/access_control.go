@@ -114,6 +114,14 @@ func NewAccessControlExactRule(path string, attributes ...string) AccessControlR
     return rule
 }
 
+/* NewAccessControlRegexRule builds a rule that matches when the pattern is found anywhere in the
+canonicalized request path. The pattern is compiled UNANCHORED and tested with regexp.MatchString, so
+it is a substring match, not a whole-path one: "/public" matches "/admin/public-notes" and
+"/x/publications" as readily as "/public". This is deliberate and mirrors the path regex of other
+frameworks, but it is the opposite of a route requirement, which melody anchors with ^(?:…)$ — so a
+rule meant to name one section must anchor itself. Write "^/public(/|$)" to bound it to the /public
+tree. Regex rules are the lowest match priority (after exact and prefix rules), and among themselves
+the first registered that matches wins. */
 func NewAccessControlRegexRule(pattern string, attributes ...string) AccessControlRule {
     normalizedPattern := strings.TrimSpace(pattern)
     if "" == normalizedPattern {

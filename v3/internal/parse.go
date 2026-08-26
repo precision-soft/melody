@@ -125,7 +125,17 @@ func Float64(value any, name string) (float64, bool, error) {
     case int64:
         return float64(typedValue), true, nil
     case string:
-        parsedValue, err := strconv.ParseFloat(strings.TrimSpace(typedValue), 64)
+        trimmedValue := strings.TrimSpace(typedValue)
+        if false == isDecimalFloatSpelling(trimmedValue) {
+            return 0, true, ParseError(
+                name,
+                "float64",
+                typedValue,
+                exception.NewError("the float grammar is decimal: an optional sign, digits and at most one decimal point", nil, nil),
+            )
+        }
+
+        parsedValue, err := strconv.ParseFloat(trimmedValue, 64)
         if nil != err {
             return 0, true, ParseError(name, "float64", typedValue, err)
         }
@@ -134,6 +144,43 @@ func Float64(value any, name string) (float64, bool, error) {
     default:
         return 0, true, ParseError(name, "float64", value, nil)
     }
+}
+
+/* isDecimalFloatSpelling narrows the string grammar to plain decimal before strconv.ParseFloat reads it in full. ParseFloat also accepts underscore spellings ("1_000.5"), hexadecimal floats ("0x1p10" is 1024) and exponents ("1e3"), so a value refused by the strict base-10 Int beside this parser was silently accepted as a float under a spelling nobody meant to support. What stays is what a configuration value writes: an optional sign, digits, at most one decimal point, and at least one digit. */
+func isDecimalFloatSpelling(value string) bool {
+    if "" == value {
+        return false
+    }
+
+    remainder := value
+    if '+' == remainder[0] || '-' == remainder[0] {
+        remainder = remainder[1:]
+    }
+
+    digitSeen := false
+    pointSeen := false
+
+    for _, character := range remainder {
+        if '0' <= character && '9' >= character {
+            digitSeen = true
+
+            continue
+        }
+
+        if '.' == character {
+            if true == pointSeen {
+                return false
+            }
+
+            pointSeen = true
+
+            continue
+        }
+
+        return false
+    }
+
+    return digitSeen
 }
 
 /* refuseNonFinite rejects NaN and the infinities on every branch of Float64: strconv.ParseFloat parses "NaN", "Inf" and "Infinity" without an error, and a NaN that slips through disarms every threshold written the normal way — each ordered comparison against it is false — so a guard like `ratio < 0 || ratio > 1` silently stops guarding. The sibling Int refuses the same shapes explicitly. */

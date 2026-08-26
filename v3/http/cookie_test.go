@@ -2,6 +2,7 @@ package http
 
 import (
     nethttp "net/http"
+    "strings"
     "testing"
 )
 
@@ -103,5 +104,44 @@ func TestSetCookie_AllocatesTheHeaderMapWhenTheResponseHasNone(t *testing.T) {
 
     if "" == response.Headers().Get("Set-Cookie") {
         t.Fatalf("expected the cookie to be set on a response whose header map was nil")
+    }
+}
+
+/* the browser enforces the prefix contracts on the deleting Set-Cookie too: without Secure — and for __Host- without path "/" — the deletion is rejected in silence and the cookie stays. The __Host- case pins that the one acceptable path wins over the one the caller passed. */
+func TestDeleteCookie_HonoursThePrefixContractsSoTheDeletionCanLand(t *testing.T) {
+    hostResponse := EmptyResponse(200)
+    DeleteCookie(hostResponse, "__Host-session", "/app")
+
+    hostHeader := hostResponse.Headers().Get("Set-Cookie")
+    if false == strings.Contains(hostHeader, "__Host-session=") {
+        t.Fatalf("expected the deletion header, got %q", hostHeader)
+    }
+    if false == strings.Contains(hostHeader, "Secure") {
+        t.Fatalf("expected the __Host- deletion to carry Secure, got %q", hostHeader)
+    }
+    if true == strings.Contains(hostHeader, "Path=/app") {
+        t.Fatalf("expected the caller's path to lose to the prefix contract, got %q", hostHeader)
+    }
+    if false == strings.Contains(hostHeader, "Path=/") {
+        t.Fatalf("expected the __Host- deletion to carry the one path the browser accepts, got %q", hostHeader)
+    }
+
+    secureResponse := EmptyResponse(200)
+    DeleteCookie(secureResponse, "__Secure-session", "/app")
+
+    secureHeader := secureResponse.Headers().Get("Set-Cookie")
+    if false == strings.Contains(secureHeader, "Secure") {
+        t.Fatalf("expected the __Secure- deletion to carry Secure, got %q", secureHeader)
+    }
+    if false == strings.Contains(secureHeader, "Path=/app") {
+        t.Fatalf("expected the __Secure- deletion to keep the caller's path, got %q", secureHeader)
+    }
+
+    plainResponse := EmptyResponse(200)
+    DeleteCookie(plainResponse, "session", "/app")
+
+    plainHeader := plainResponse.Headers().Get("Set-Cookie")
+    if true == strings.Contains(plainHeader, "Secure") {
+        t.Fatalf("expected the unprefixed deletion to stay as it was, got %q", plainHeader)
     }
 }

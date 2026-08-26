@@ -12,6 +12,7 @@ import (
 
     "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/debug"
@@ -191,8 +192,8 @@ func (instance *Application) runCli() error {
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, loggerWithProcess)
 
-    /* the console counterpart of the request context the http kernel installs into each request's scope: the run's identity lives where a scoped service can resolve it, instead of being computed for the logger and thrown away */
-    scope.MustOverrideProtectedInstance(ServiceProcessContext, NewProcessContext(processId, time.Now()))
+    /* the console counterpart of the request context the http kernel installs into each request's scope: the run's identity lives where a scoped service can resolve it, instead of being computed for the logger and thrown away. The instant comes from the kernel's clock, so a test that froze the clock reads the same start instant everywhere the process context travels. */
+    scope.MustOverrideProtectedInstance(ServiceProcessContext, NewProcessContext(processId, kernelInstance.Clock().Now()))
 
     loggerWithProcess.Info("starting cli application", nil)
 
@@ -219,7 +220,7 @@ func (instance *Application) runCli() error {
 
     normalizedArguments := normalizeCliVerbosityArguments(os.Args)
 
-    suggestCliCommandErr := suggestCliCommand(normalizedArguments, availableCommands)
+    suggestCliCommandErr := suggestCliCommand(normalizedArguments, availableCommands, kernelInstance.Clock())
     if nil != suggestCliCommandErr {
         return suggestCliCommandErr
     }
@@ -291,6 +292,7 @@ func normalizeCliVerbosityArguments(arguments []string) []string {
 func suggestCliCommand(
     arguments []string,
     availableCommands []commandSuggestion,
+    clockInstance clockcontract.Clock,
 ) error {
     if 2 > len(arguments) {
         return nil
@@ -317,7 +319,7 @@ func suggestCliCommand(
         }
     }
 
-    startedAt := time.Now()
+    startedAt := clockInstance.Now()
 
     option := output.NormalizeOption(
         output.Option{
@@ -389,7 +391,7 @@ func suggestCliCommand(
 
         envelope.Table = builder.Build()
 
-        envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
+        envelope.Meta.DurationMilliseconds = clockInstance.Now().Sub(startedAt).Milliseconds()
 
         printCliCommandNotFoundHeader(os.Stderr, commandName, startedAt)
 
@@ -459,7 +461,7 @@ func suggestCliCommand(
 
     envelope.Table = builder.Build()
 
-    envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
+    envelope.Meta.DurationMilliseconds = clockInstance.Now().Sub(startedAt).Milliseconds()
 
     printCliCommandNotFoundHeader(os.Stderr, commandName, startedAt)
 

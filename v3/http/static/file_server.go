@@ -438,6 +438,21 @@ func (instance *FileServer) resolveAndOpen(
         return nil, false
     }
 
+    /* only a regular file is served: a FIFO in the public directory blocks the reading goroutine for as long as nobody writes the other end — one request parks a goroutine forever, and a handful park a handful — while a device node or a socket answers bytes that are not a file's. The mode is read off the handle already opened, so the answer describes what was opened, not what a second look finds. */
+    if false == fileInfo.Mode().IsRegular() {
+        _ = file.Close()
+
+        logger.Info(
+            "static serve target is not a regular file",
+            loggingcontract.Context{
+                "relativePath": relativePath,
+                "mode":         fileInfo.Mode().String(),
+            },
+        )
+
+        return nil, false
+    }
+
     headers := nethttp.Header{}
 
     extension := path.Ext(relativePath)

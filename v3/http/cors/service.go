@@ -137,6 +137,7 @@ func (instance *Service) AllowMethodsString() string  { return instance.allowMet
 func (instance *Service) AllowHeadersString() string  { return instance.allowHeadersString }
 func (instance *Service) ExposeHeadersString() string { return instance.exposeHeadersString }
 
+/* OriginAllowed keeps the scheme-agnostic reading of scheme-less entries deliberately: "example.com" and "*.example.com" admit that host under ANY scheme, "http://" included. It is the short way to admit a development origin served over plaintext, and it withholds exactly the downgrade protection an allowlist usually exists for — that is the trade, and nothing reports it at runtime, so an allowlist that means https writes the scheme out ("https://example.com", "https://*.example.com"), where the scheme IS compared. The frozen majors read entries identically, so a configuration moves between majors without its match changing. */
 func (instance *Service) OriginAllowed(origin string) bool {
     if nil != instance.allowOriginFunc {
         return instance.allowOriginFunc(origin)

@@ -13,14 +13,14 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* NewDefaultRememberOption arms stampede protection with an unbounded wait and no cancelation. Under exactly these defaults a callback that never returns pins its key for the life of the process: the leader cannot be told to stop (a non-cancelable flight hands it a background context), the entry is deleted only by the leader's own return, and the one path that replaces a live entry requires a canceled flight, which a non-cancelable one never becomes — so every later caller of the key parks behind it, one goroutine each. A callback that can hang wants its own deadline, WithWaitTimeout on the waiters, or WithCancelable so an abandoned flight is canceled and replaced. */
+/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a cancelable flight. Cancelable is what keeps a hung callback from owning its key forever: when the last waiter leaves — by timeout, by its caller context, or by giving up — the flight's context is canceled, and the next caller of the key finds a canceled flight, replaces it, and leads a fresh computation. What the default does not bound is the wait itself: a waiter that brings neither a caller context nor a wait timeout parks for as long as the callback takes, so a callback that can hang still wants its own deadline inside, WithWaitTimeout on the waiters, or WithContext so an abandoned request takes its waiter out. */
 func NewDefaultRememberOption() *RememberOption {
     defaultWaitTimeout := time.Duration(-1)
 
     return &RememberOption{
         enableStampedeProtection: true,
         waitTimeout:              &defaultWaitTimeout,
-        isCancelable:             false,
+        isCancelable:             true,
     }
 }
 

@@ -103,7 +103,8 @@ func (instance *LessThan) Validate(value any, field string) validationcontract.V
 
     case reflect.Float32, reflect.Float64:
         actual := reflectedValue.Float()
-        if true == math.IsNaN(actual) || actual >= float64(instance.max) {
+        /* the comparison is exact at every magnitude: float64(instance.max) rounds a bound above 2^53 before comparing, which misjudged the values adjacent to the declared number */
+        if true == math.IsNaN(actual) || 0 <= compareFloat64ToIntBound(actual, instance.max) {
             return NewValidationError(
                 field,
                 fmt.Sprintf("value must be less than %d", instance.max),

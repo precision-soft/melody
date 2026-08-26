@@ -86,10 +86,10 @@ Userland code must treat `token.IsAuthenticated()` as the canonical guard for ac
 
 1. **Exact match** (`NewAccessControlExactRule`)
 2. **Prefix match** with **longest prefix wins**: `NewAccessControlRule` is bounded to a path SEGMENT — `/admin` governs `/admin` and `/admin/panel` but not `/administrator` — and is the rule to reach for by default; `NewAccessControlRuleWithSegmentPrefix` is a deprecated alias for it. `NewAccessControlRawPrefixRule` is the cross-segment form that matches every path beginning with the prefix, kept behind its own name because a raw rule shadows a correctly bounded denial, and it refuses `PUBLIC_ACCESS` for that reason
-3. **Regex match** (`NewAccessControlRegexRule`) with **first match wins** (declaration order)
+3. **Regex match** (`NewAccessControlRegexRule`) with **first match wins** (declaration order). The pattern is compiled **unanchored** and tested as a substring of the canonicalized path — `/public` matches `/admin/public-notes` as readily as `/public` — deliberately, mirroring the path regex of other frameworks; a rule meant to name one section must anchor itself: `^/public(/|$)`
 4. **Fallback** rule with an empty prefix (only `NewAccessControlRawPrefixRule("")` builds one; `NewAccessControlRule` refuses an empty prefix)
 
-The matcher folds the request path (`//admin`, `/x/../admin`) to its canonical spelling before matching, so a rule cannot be evaded by an alternate spelling of the same resource. This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).
+The matcher folds the request path (`//admin`, `/x/../admin`) to its canonical spelling before matching. The fold alone would not be sufficient — the router matches the path as sent — which is why the http kernel refuses a non-canonical request path before anything routes or authorizes it (`requestPathIsCanonical`); the matcher's own fold remains as its defence for a caller consulting `AccessControl` without that guard, and it can only make a rule match more, never open what a rule had closed. This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).
 
 ### Role checks
 
@@ -452,11 +452,11 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 ### Constructors
 
 - [`NewAccessControl(rules...)`](../../security/access_control.go)
-- [`NewAccessControlRule(pathPrefix string, attributes ...string)`](../../security/access_control.go)
-- [`NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string)`](../../security/access_control.go)
+- [`NewAccessControlRule(pathPrefix string, attributes ...string)`](../../security/access_control.go) — segment-bounded prefix rule (the default; refuses an empty prefix, permits `PUBLIC_ACCESS`)
+- [`NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string)`](../../security/access_control.go) — cross-segment prefix rule (refuses `PUBLIC_ACCESS`)
 - [`NewAccessControlExactRule(path string, attributes ...string)`](../../security/access_control.go)
-- [`NewAccessControlRegexRule(pattern string, attributes ...string)`](../../security/access_control.go)
-- [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go)
+- [`NewAccessControlRegexRule(pattern string, attributes ...string)`](../../security/access_control.go) — unanchored substring match; a rule meant to name one section anchors itself (`^/public(/|$)`)
+- [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go) — deprecated alias of `NewAccessControlRule`
 - [`NewRoleHierarchy(hierarchy map[string][]string)`](../../security/role_hierarchy.go)
 - [`NewAnonymousToken()`](../../security/anonymous_token.go)
 - [`NewAuthenticatedToken(userIdentifier string, roles []string)`](../../security/authenticated_token.go)

@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
+    "github.com/precision-soft/melody/v3/clock"
     "github.com/precision-soft/melody/v3/config"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/debug"
@@ -246,6 +247,7 @@ func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
         []commandSuggestion{
             {Name: "example:product", Description: "lists the products"},
         },
+        clock.NewSystemClock(),
     )
     if nil == suggestErr {
         t.Fatalf("expected the suggestion refusal")
@@ -270,6 +272,7 @@ func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
         []commandSuggestion{
             {Name: "example:product", Description: "lists the products"},
         },
+        clock.NewSystemClock(),
     )
     if nil == suggestErr {
         t.Fatalf("expected the refusal")

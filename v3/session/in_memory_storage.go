@@ -5,6 +5,8 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
@@ -15,9 +17,20 @@ func NewInMemoryStorage() *InMemoryStorage {
 }
 
 func NewInMemoryStorageWithCleanupInterval(cleanupInterval time.Duration) *InMemoryStorage {
+    return NewInMemoryStorageWithClock(cleanupInterval, clock.NewSystemClock())
+}
+
+/* NewInMemoryStorageWithClock reads every expiry instant — the one stored, the one compared, the sweep's tick — from the given clock, which is what lets a test freeze session time and what makes the framework-wired storage agree with the kernel's clock. The comparison this storage makes is monotonic where the process clock is: a *time.Time kept in memory carries the monotonic reading, so an NTP step does not lapse or resurrect a session, and no entry survives a restart anyway. FileStorage is the wall-clock half of that trade — SESSION.md names it. */
+func NewInMemoryStorageWithClock(cleanupInterval time.Duration, clockInstance clockcontract.Clock) *InMemoryStorage {
     if 0 >= cleanupInterval {
         exception.Panic(
             exception.NewError("cleanup interval must be greater than zero", nil, nil),
+        )
+    }
+
+    if true == internal.IsNilInterface(clockInstance) {
+        exception.Panic(
+            exception.NewError("session storage clock is not provided", nil, nil),
         )
     }
 
@@ -29,6 +42,7 @@ func NewInMemoryStorageWithCleanupInterval(cleanupInterval time.Duration) *InMem
         stopCleanup:     make(chan struct{}),
         cleanupDone:     make(chan struct{}),
         cleanupCancel:   cleanupCancel,
+        clock:           clockInstance,
     }
 
     go storage.cleanupLoop(cleanupCtx)
@@ -45,6 +59,7 @@ type InMemoryStorage struct {
     cleanupDone     chan struct{}
     stopCleanupOnce sync.Once
     cleanupCancel   context.CancelFunc
+    clock           clockcontract.Clock
 }
 
 type inMemorySessionEntry struct {
@@ -57,7 +72,7 @@ func (instance *InMemoryStorage) Load(sessionId string) (map[string]any, bool, e
         return nil, false, exception.NewError("session id is required in load session", nil, nil)
     }
 
-    now := time.Now()
+    now := instance.clock.Now()
 
     instance.mutex.RLock()
 
@@ -102,7 +117,7 @@ func (instance *InMemoryStorage) Save(sessionId string, data map[string]any, ttl
 
     var expiresAt *time.Time
     if 0 < ttl {
-        expiration := time.Now().Add(ttl)
+        expiration := instance.clock.Now().Add(ttl)
         expiresAt = &expiration
     }
 
@@ -180,12 +195,12 @@ func (instance *InMemoryStorage) Close() error {
 func (instance *InMemoryStorage) cleanupLoop(ctx context.Context) {
     defer close(instance.cleanupDone)
 
-    ticker := time.NewTicker(instance.cleanupInterval)
+    ticker := instance.clock.NewTicker(instance.cleanupInterval)
     defer ticker.Stop()
 
     for {
         select {
-        case <-ticker.C:
+        case <-ticker.Channel():
             instance.cleanupExpired()
         case <-instance.stopCleanup:
             return
@@ -197,16 +212,16 @@ func (instance *InMemoryStorage) cleanupLoop(ctx context.Context) {
 
 const sessionCleanupChunkSize = 1024
 
-/* the sweep takes the ids once and then expires them in chunks, releasing the lock between chunks: Load takes the same lock, so a single whole-map pass under one lock stalls every request in flight for as long as the map is large — this is the default session storage, the map grows with the number of signed-in users, and the stall lands on every one of them once per interval. Measured at two hundred thousand sessions, one pass held the lock for ten milliseconds and a concurrent Load waited exactly that long. The cache backend's sweep was cut the same way, for the same reason. */
+/* the sweep takes the ids once and then expires them in chunks, releasing the lock between chunks: Load takes the same lock, so a single whole-map pass under one lock stalls every request in flight for as long as the map is large — this is the default session storage, the map grows with the number of signed-in users, and the stall lands on every one of them once per interval. Measured at two hundred thousand sessions, one pass held the lock for ten milliseconds and a concurrent Load waited exactly that long. The cache backend's sweep was cut the same way, for the same reason — and like there, the snapshot itself only reads, so it holds the read lock and stalls only the writers. */
 func (instance *InMemoryStorage) cleanupExpired() {
-    now := time.Now()
+    now := instance.clock.Now()
 
-    instance.mutex.Lock()
+    instance.mutex.RLock()
     sessionIds := make([]string, 0, len(instance.sessions))
     for sessionId := range instance.sessions {
         sessionIds = append(sessionIds, sessionId)
     }
-    instance.mutex.Unlock()
+    instance.mutex.RUnlock()
 
     for start := 0; start < len(sessionIds); start = start + sessionCleanupChunkSize {
         end := start + sessionCleanupChunkSize

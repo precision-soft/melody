@@ -7,6 +7,8 @@ import (
     "testing"
     "time"
     "unicode/utf8"
+
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func TestTablePrinter_WrapsMultibyteRunesWithoutSplitting(t *testing.T) {
@@ -521,5 +523,66 @@ func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
         if rowWidth != lineWidth {
             t.Fatalf("expected every table row to hold the same width, got %d and %d in %q", rowWidth, lineWidth, written)
         }
+    }
+}
+
+/* the alignment oracle is display cells, not runes: with the rune measure a CJK cell measured 2 and rendered 4, so its own row's closing pipe sat two cells past every other row's */
+func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope.Table = &TableData{
+        Blocks: []TableBlock{
+            {
+                Columns: []string{"NAME", "NOTE"},
+                Rows: [][]string{
+                    {"世界", "cjk"},
+                    {"plain", "row"},
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+
+    option := DefaultOption()
+    option.Quiet = true
+
+    printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    rowWidth := -1
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if false == strings.HasPrefix(line, "|") {
+            continue
+        }
+
+        lineWidth := internal.DisplayWidth(line)
+        if -1 == rowWidth {
+            rowWidth = lineWidth
+
+            continue
+        }
+
+        if rowWidth != lineWidth {
+            t.Fatalf("expected every table row to render the same display width, got %d and %d in %q", rowWidth, lineWidth, buffer.String())
+        }
+    }
+    if -1 == rowWidth {
+        t.Fatalf("expected table rows in the output, got %q", buffer.String())
+    }
+}
+
+/* the wrap slices by the same display-cell measure the widths are computed in: sliced by rune count, a line of two ideograms and a line of four ascii letters both "fit" a width of four while rendering four and eight cells */
+func TestTablePrinter_WrapsByDisplayCellsNotRunes(t *testing.T) {
+    printer := NewDefaultTablePrinter()
+
+    lines := printer.wrapCellValue("世界世", 4)
+
+    if 2 != len(lines) {
+        t.Fatalf("expected two lines, got %#v", lines)
+    }
+    if "世界" != lines[0] || "世" != lines[1] {
+        t.Fatalf("expected the ideograms sliced two cells each, got %#v", lines)
     }
 }

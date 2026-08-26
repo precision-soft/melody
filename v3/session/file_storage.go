@@ -11,6 +11,8 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -18,6 +20,15 @@ import (
 )
 
 func NewFileStorageFromPath(path string) (*FileStorage, error) {
+    return NewFileStorageFromPathWithClock(path, clock.NewSystemClock())
+}
+
+/* NewFileStorageFromPathWithClock reads every expiry instant from the given clock. What this storage persists is the WALL reading — an entry carries expiresAt as unix nanoseconds, and no monotonic reading can survive a restart — so its expiry follows every step of the wall clock where the in-memory storage's monotonic comparison does not; SESSION.md names the trade. */
+func NewFileStorageFromPathWithClock(path string, clockInstance clockcontract.Clock) (*FileStorage, error) {
+    if true == internal.IsNilInterface(clockInstance) {
+        return nil, exception.NewError("session storage clock is not provided", nil, nil)
+    }
+
     trimmedPath := filepath.Clean(path)
     if "" == trimmedPath || "." == trimmedPath {
         return nil, exception.NewError(
@@ -52,6 +63,7 @@ func NewFileStorageFromPath(path string) (*FileStorage, error) {
         path:        trimmedPath,
         ownsFile:    true,
         sessionById: decoded,
+        clock:       clockInstance,
     }
 
     return storage, nil
@@ -61,8 +73,17 @@ func NewFileStorageFromPath(path string) (*FileStorage, error) {
 
 The handle must be seekable and must not be opened for appending. Both are refused here rather than at the first save, since both are properties of what the caller opened and neither can improve later: appending in particular used to be accepted and then to corrupt silently, because every write landed after the document it was replacing. */
 func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
+    return NewFileStorageFromFileWithClock(fileInstance, clock.NewSystemClock())
+}
+
+/* NewFileStorageFromFileWithClock is the handle-owning door with the clock injected, the way the path door takes one. */
+func NewFileStorageFromFileWithClock(fileInstance *os.File, clockInstance clockcontract.Clock) (*FileStorage, error) {
     if nil == fileInstance {
         return nil, exception.NewError("session storage file is nil", nil, nil)
+    }
+
+    if true == internal.IsNilInterface(clockInstance) {
+        return nil, exception.NewError("session storage clock is not provided", nil, nil)
     }
 
     if appendErr := refuseAppendModeHandle(fileInstance); nil != appendErr {
@@ -78,6 +99,7 @@ func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
         file:        fileInstance,
         ownsFile:    false,
         sessionById: decoded,
+        clock:       clockInstance,
     }
 
     return storage, nil
@@ -90,6 +112,7 @@ type FileStorage struct {
     file     *os.File
     ownsFile bool
     closed   bool
+    clock    clockcontract.Clock
 
     sessionById map[string]fileSessionEntry
 }
@@ -116,7 +139,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
         return nil, false, nil
     }
 
-    if 0 != entry.ExpiresAt && time.Now().UnixNano() >= entry.ExpiresAt {
+    if 0 != entry.ExpiresAt && instance.clock.Now().UnixNano() >= entry.ExpiresAt {
         /* the flush is what drops this entry: purgeExpiredLocked runs inside it against the same clock and the same predicate, so naming the session again here would only duplicate the removal.
 
            its failure is deliberately not returned. The answer to this load — no such session — was settled before the flush was attempted, and the flush is housekeeping no caller asked for; handing back its error instead would make Manager.Session panic, so an expired cookie on a store that cannot be written would answer 500 where a client holding no cookie at all is served a fresh session. The purge has already taken the entry out of the map, so nothing serves it again; only the file still carries it, until the next write that succeeds. */
@@ -136,7 +159,7 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     expiresAt := int64(0)
     if 0 < ttl {
         /* time.Time.UnixNano is only defined up to 2262-04-11 and wraps to a negative int64 past it; a caller using a very large ttl as a "never expire" value would otherwise land a negative ExpiresAt that Load and purgeExpiredLocked read as already lapsed and drop the session on the same Save, so saturate at the maximum representable instant the way InMemoryStorage keeps such sessions */
-        expiration := time.Now().Add(ttl)
+        expiration := instance.clock.Now().Add(ttl)
         if true == expiration.After(time.Unix(0, math.MaxInt64)) {
             expiresAt = math.MaxInt64
         } else {
@@ -238,7 +261,7 @@ func (instance *FileStorage) Close() error {
 
 This is the one place a lapsed entry is removed: no caller deletes the session it just found expired, they all rely on the flush below reaching this. Anything that narrows the predicate here — leaving a class of lapsed entries in place — has to give those callers their explicit delete back. */
 func (instance *FileStorage) purgeExpiredLocked() {
-    now := time.Now().UnixNano()
+    now := instance.clock.Now().UnixNano()
 
     for sessionId, entry := range instance.sessionById {
         if 0 != entry.ExpiresAt && now >= entry.ExpiresAt {

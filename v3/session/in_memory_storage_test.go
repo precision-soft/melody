@@ -5,6 +5,8 @@ import (
     "sync"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v3/clock"
 )
 
 func TestInMemoryStorageAndManager(t *testing.T) {
@@ -531,5 +533,33 @@ func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsed(t *testing.T) {
 
     if true == isLapsed(&expiration, expiration.Add(-time.Nanosecond)) {
         t.Fatalf("expected the instant before expiry to still be live")
+    }
+}
+
+/* the expiry follows the INJECTED clock: frozen, a session outlives any real time the test takes, and travelling past the ttl lapses it without a sleep — which is also the proof that no time.Now() is left inside the comparison */
+func TestInMemoryStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
+
+    storage := NewInMemoryStorageWithClock(time.Minute, frozenClock)
+    defer func() { _ = storage.Close() }()
+
+    saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour)
+    if nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr || false == exists {
+        t.Fatalf("expected the fresh session, got exists=%v err=%v", exists, loadErr)
+    }
+
+    frozenClock.Advance(2 * time.Hour)
+
+    _, exists, loadErr = storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+    if true == exists {
+        t.Fatalf("expected the session to lapse once the injected clock passed its ttl")
     }
 }

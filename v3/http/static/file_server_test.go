@@ -10,6 +10,7 @@ import (
     "path"
     "path/filepath"
     "strings"
+    "syscall"
     "testing"
     "testing/fstest"
     "time"
@@ -3337,5 +3338,52 @@ func TestNewFileServer_AcceptsAnEmptyEmbeddedPublicDirectory(t *testing.T) {
 
     if "body{}" != string(body) {
         t.Fatalf("unexpected body %q", body)
+    }
+}
+
+/* the sharp half of the guard is WHERE it runs: os.Open on a fifo blocks until a writer appears, so a refusal placed after the open would never run and the request goroutine parked forever — this test hanging is exactly the failure the pre-open mode check prevents */
+func TestFileServer_RefusesAFifoInThePublicDirectory(t *testing.T) {
+    directory := t.TempDir()
+
+    fifoPath := directory + "/pipe.html"
+    mkfifoErr := syscall.Mkfifo(fifoPath, 0o644)
+    if nil != mkfifoErr {
+        t.Fatalf("mkfifo error: %v", mkfifoErr)
+    }
+
+    config := NewFileServerConfig(
+        ModeFilesystem,
+        directory,
+        "index.html",
+        "",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            nil,
+        ),
+    )
+
+    done := make(chan bool, 1)
+    go func() {
+        _, _, _, served := server.Serve(
+            testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/pipe.html"),
+            logging.NewNopLogger(),
+        )
+        done <- served
+    }()
+
+    select {
+    case served := <-done:
+        if true == served {
+            t.Fatalf("expected the fifo not to be served")
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the request goroutine parked inside the open — the mode check did not run before it")
     }
 }

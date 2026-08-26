@@ -12,6 +12,8 @@ import (
     "syscall"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v3/clock"
 )
 
 func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
@@ -1426,5 +1428,36 @@ func TestSyncSessionDirectory_AnswersTheDirectoryItCouldNotOpen(t *testing.T) {
 func TestSyncSessionDirectory_AcceptsARealDirectory(t *testing.T) {
     if syncErr := syncSessionDirectory(t.TempDir()); nil != syncErr {
         t.Fatalf("unexpected error over a real directory: %v", syncErr)
+    }
+}
+
+/* the file storage persists the WALL reading of the injected clock, and compares against the same clock: frozen, nothing lapses; travelled past the ttl, the entry is gone — with no sleep and no dependence on the process clock */
+func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
+
+    storage, storageErr := NewFileStorageFromPathWithClock(filepath.Join(t.TempDir(), "sessions.json"), frozenClock)
+    if nil != storageErr {
+        t.Fatalf("storage error: %v", storageErr)
+    }
+    defer func() { _ = storage.Close() }()
+
+    saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour)
+    if nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr || false == exists {
+        t.Fatalf("expected the fresh session, got exists=%v err=%v", exists, loadErr)
+    }
+
+    frozenClock.Advance(2 * time.Hour)
+
+    _, exists, loadErr = storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+    if true == exists {
+        t.Fatalf("expected the session to lapse once the injected clock passed its ttl")
     }
 }

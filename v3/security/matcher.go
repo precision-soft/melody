@@ -36,7 +36,17 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
         return true
     }
 
-    return true == strings.HasPrefix(path, instance.prefix)
+    if true == strings.HasPrefix(path, instance.prefix) {
+        return true
+    }
+
+    /* the router reads "/admin/" and "/admin" as the same route, so a prefix written with the trailing slash also claims the bare spelling — without this, the unwritten spelling escaped the firewall that named the other, and the route was reachable both guarded and unguarded. Only the exact bare spelling is added: the comparison stays the plain prefix test otherwise, so "/admin/" still selects nothing under "/administrator", and the static excluded paths mirror the same reading. */
+    trimmedPrefix := strings.TrimRight(instance.prefix, "/")
+    if "" != trimmedPrefix && path == trimmedPrefix {
+        return true
+    }
+
+    return false
 }
 
 var _ securitycontract.Matcher = (*PathPrefixMatcher)(nil)

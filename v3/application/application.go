@@ -10,6 +10,7 @@ import (
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/clock"
     "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -421,6 +422,8 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
         resolveRuntimePath(kernelView.ProjectDir(), kernelView.LogPath()),
         kernelView.LogLevel(),
         instance.moduleConfigurations,
+        clock.NewSystemClock(),
+        false,
     )
 }
 

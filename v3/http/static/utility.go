@@ -58,7 +58,17 @@ func (instance *dirFileSystem) Open(name string) (fs.File, error) {
         return nil, fs.ErrPermission
     }
 
-    /* the path that was validated is the one that is opened: os.Open(fullPath) resolves every symlink component a second time, so a component swapped between the check and the open serves a file from outside the base directory. Opening realPath makes the bytes served the ones that were checked. */
+    /* the mode is asked BEFORE the open, because opening is not neutral for every kind: os.Open on a fifo blocks until a writer appears, so the request goroutine would park inside the open itself, ahead of any guard placed after it. A directory passes, because the caller dispatches directories itself; everything else that is not a regular file is refused here, and the caller's fstat on the opened handle asks the question again for the kinds whose open does return. */
+    pathInfo, statErr := os.Stat(realPath)
+    if nil != statErr {
+        return nil, statErr
+    }
+
+    if false == pathInfo.Mode().IsRegular() && false == pathInfo.IsDir() {
+        return nil, fs.ErrPermission
+    }
+
+    /* the path that was validated is the one that is opened: os.Open(fullPath) resolves every symlink component a second time, so a component swapped between the check and the open serves a file from outside the base directory. Opening realPath narrows that to the window between EvalSymlinks and this open — a component of realPath itself replaced inside it still redirects the open, and closing that window entirely needs openat2/RESOLVE_BENEATH, which is Linux-only; the residual window is deliberate and documented, and the bytes served are in every other case the ones that were checked. */
     return os.Open(realPath)
 }
 
@@ -96,10 +106,15 @@ func hasDotPrefixedPathElement(cleanedPath string, allowedDotPrefixList []string
     return false
 }
 
-/* an excluded prefix is the application claiming a part of the url. The file server is the outermost middleware, so what it declines is exactly what reaches the chain the application registered, which is where an authentication check or a policy of its own lives; answering such a request off the disk would step in front of all of it. The comparison is the plain prefix test security.NewPathPrefixMatcher makes against the request path as it arrived — before the strip prefix is removed and before the path is folded — so one spelling written in a firewall rule and here selects the same requests, and an entry that is empty names every path, which is why the configuration refuses one. */
+/* an excluded prefix is the application claiming a part of the url. The file server is the outermost middleware, so what it declines is exactly what reaches the chain the application registered, which is where an authentication check or a policy of its own lives; answering such a request off the disk would step in front of all of it. The comparison is the plain prefix test security.NewPathPrefixMatcher makes against the request path as it arrived — before the strip prefix is removed and before the path is folded — so one spelling written in a firewall rule and here selects the same requests, and an entry that is empty names every path, which is why the configuration refuses one. Like the firewall matcher, an entry written with a trailing slash also claims the bare spelling of its route, and nothing more. */
 func hasExcludedPathPrefix(requestPath string, excludedPathList []string) bool {
     for _, excludedPath := range excludedPathList {
         if true == strings.HasPrefix(requestPath, excludedPath) {
+            return true
+        }
+
+        trimmedExcludedPath := strings.TrimRight(excludedPath, "/")
+        if "" != trimmedExcludedPath && requestPath == trimmedExcludedPath {
             return true
         }
     }

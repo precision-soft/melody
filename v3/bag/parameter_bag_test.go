@@ -249,3 +249,32 @@ func TestParameterBag_SetAllocatesTheZeroValueMap(t *testing.T) {
         t.Fatalf("expected the zero value to accept a write, got %v (exists: %v)", value, exists)
     }
 }
+
+/* the separating probe mutates what Get answered and reads the bag again: with the live reference, the write went into the bag behind its lock — visible to every later reader and racing a concurrent All copy */
+func TestParameterBag_GetHandsBackACopyOfTheAliasingShapes(t *testing.T) {
+    bag := NewParameterBag()
+    bag.Set("roles", []string{"admin", "editor"})
+    bag.Set("labels", map[string]string{"env": "dev"})
+
+    gotSlice, exists := bag.Get("roles")
+    if false == exists {
+        t.Fatalf("expected the slice parameter")
+    }
+    gotSlice.([]string)[0] = "mutated"
+
+    storedSlice, _ := bag.Get("roles")
+    if "admin" != storedSlice.([]string)[0] {
+        t.Fatalf("expected the bag to keep its own slice, got %#v", storedSlice)
+    }
+
+    gotMap, exists := bag.Get("labels")
+    if false == exists {
+        t.Fatalf("expected the map parameter")
+    }
+    gotMap.(map[string]string)["env"] = "mutated"
+
+    storedMap, _ := bag.Get("labels")
+    if "dev" != storedMap.(map[string]string)["env"] {
+        t.Fatalf("expected the bag to keep its own map, got %#v", storedMap)
+    }
+}

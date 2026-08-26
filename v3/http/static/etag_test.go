@@ -2,6 +2,7 @@ package static
 
 import (
     "io/fs"
+    "regexp"
     "strings"
     "testing"
     "time"
@@ -60,16 +61,25 @@ func TestGenerateEtag_TheWeakFormDiffersOnlyByItsPrefix(t *testing.T) {
     strong := GenerateEtag(info, false)
     weak := GenerateEtag(info, true)
 
-    if `"1024-1754049600000000000"` != strong {
-        t.Fatalf("unexpected strong tag: %s", strong)
-    }
-
-    if `W/"1024-1754049600000000000"` != weak {
-        t.Fatalf("unexpected weak tag: %s", weak)
+    if false == regexp.MustCompile(`^"[0-9a-f]{16}"$`).MatchString(strong) {
+        t.Fatalf("expected a quoted sixteen-hex digest as the strong tag, got: %s", strong)
     }
 
     if "W/"+strong != weak {
         t.Fatalf("expected the weak form to be the strong one behind a W/ prefix: %s vs %s", weak, strong)
+    }
+}
+
+/* the tag is a digest, and that is a disclosure property, not a rendering choice: spelled out, the tag told every anonymous client the file's modification instant to the nanosecond, and the embedded branch told them the binary's build version, on every asset */
+func TestGenerateEtag_DisclosesNeitherTheTimestampNorTheBuildVersion(t *testing.T) {
+    dated := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 0)}, false)
+    if true == strings.Contains(dated, "1754049600") {
+        t.Fatalf("expected the modification instant not to be readable off the tag, got %q", dated)
+    }
+
+    undated := GenerateEtag(&staticEtagFileInfo{size: 1024}, false)
+    if "" != version.BuildVersion() && true == strings.Contains(undated, version.BuildVersion()) {
+        t.Fatalf("expected the build version not to be readable off the tag, got %q", undated)
     }
 }
 
@@ -101,21 +111,23 @@ func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     }
 }
 
-/* a filesystem that reports no modification time — every embedded one — used to make the tag degenerate into size alone, identical across rebuilds, so a redeployed asset that kept its length revalidated 304 and stayed served stale. The build version stands in for the timestamp there. */
-func TestGenerateEtag_AZeroModificationTimeCarriesTheBuildVersionInsteadOfTheTimestamp(t *testing.T) {
+/* a filesystem that reports no modification time — every embedded one — used to make the tag degenerate into size alone, identical across rebuilds, so a redeployed asset that kept its length revalidated 304 and stayed served stale. The build version stands in for the timestamp there, inside the digest: the undated derivation must differ from every dated one of the same size, and still tell two sizes apart. */
+func TestGenerateEtag_AZeroModificationTimeDerivesFromTheBuildVersionInsteadOfTheTimestamp(t *testing.T) {
     zeroTimed := GenerateEtag(&staticEtagFileInfo{size: 1024}, false)
 
-    if false == strings.Contains(zeroTimed, version.BuildVersion()) {
-        t.Fatalf("expected the build version in the tag of an undated file, got %q", zeroTimed)
-    }
-
-    if true == strings.Contains(zeroTimed, "-62135596800") {
-        t.Fatalf("expected the zero instant not to be rendered as a timestamp, got %q", zeroTimed)
-    }
-
     dated := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 0)}, false)
-    if true == strings.Contains(dated, version.BuildVersion()) {
-        t.Fatalf("expected a dated file to keep its per-file tag, got %q", dated)
+    if zeroTimed == dated {
+        t.Fatalf("expected the undated derivation to differ from the dated one, got %q for both", zeroTimed)
+    }
+
+    zeroTimedResized := GenerateEtag(&staticEtagFileInfo{size: 2048}, false)
+    if zeroTimed == zeroTimedResized {
+        t.Fatalf("expected two undated sizes to produce different tags, got %q for both", zeroTimed)
+    }
+
+    zeroTimedAgain := GenerateEtag(&staticEtagFileInfo{size: 1024}, false)
+    if zeroTimed != zeroTimedAgain {
+        t.Fatalf("expected the undated tag to be stable within one build, got %q and %q", zeroTimed, zeroTimedAgain)
     }
 }
 

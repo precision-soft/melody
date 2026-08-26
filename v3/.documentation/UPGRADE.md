@@ -106,6 +106,22 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None. What the escaping replaces is a record that could be ended early by its own payload, with a fully-formed fake record started after it at whatever level the payload named; the json sibling has always had the same guarantee from its encoder.
 
+### Config and bag: the float string grammar is decimal
+
+**What changed.** The shared parser behind `Parameter.Float` and `bag.Float64` narrows its **string** grammar to plain decimal: an optional sign, digits and at most one decimal point. It used to read `strconv.ParseFloat` in full — underscore spellings (`"1_000.5"`), hexadecimal floats (`"0x1p10"` is `1024`) and exponents (`"1e3"`) all parsed, which is wider than the strict base-10 grammar `Int` reads.
+
+**Symptom.** A configuration or bag value written in one of those spellings now fails the accessor with a refusal naming the decimal grammar, where it previously converted silently. Typed values (`float64`, `float32`, integers) are untouched, and `NaN`/`Inf` remain refused as before.
+
+**Remedy.** Write the value in decimal: `1000.5`, `1024`, `1000`. A value that genuinely needs scientific notation is a computed value, not a configuration literal — compute it, or store the decimal expansion.
+
+### Bag: `Get` answers a copy of the aliasing shapes
+
+**What changed.** [`ParameterBag.Get`](../bag/parameter_bag.go) copies a stored `[]string` or `map[string]string` before answering, at exactly the depth `All` already copied. Every other type is returned as stored.
+
+**Symptom.** A caller that mutated the value `Get` answered — and relied on the mutation reaching the bag — no longer writes through: the bag keeps its own value. That reliance was a data race with any concurrent reader and is exactly what the copy exists to prevent. Callers that treat the answer as read-only, which is what the documentation prescribed, see one allocation per slice- or map-valued `Get` and nothing else.
+
+**Remedy.** Mutate through the writing doors: `Set` replaces a value, `AppendString` appends under one critical section.
+
 ### Cache: the manager no longer closes a backend it was handed
 
 **What changed.** [`NewManager`](../cache/manager.go) builds a manager that does not own its backend: `Close` leaves the backend open, because on the container path both are registered services and the container closes each one itself — the cascade closed the backend twice, which a backend wrapping a connection typically reports as a failure on the second call. `NewManagerOwningBackend` keeps the cascade for the caller that builds both by hand.
@@ -161,6 +177,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 **Symptom.** Callers passing a literal option regain the single-flight callback the default promises; callers polling with a zero timeout receive a completed result instead of a guaranteed error.
 
 **Remedy.** None. A caller that genuinely wants protection off builds the option through `NewDefaultRememberOption().WithStampedeProtectionEnabled(false)`, which carries a non-zero shape and stays what it says.
+
+### Cache: the default Remember flight is cancelable
+
+**What changed.** [`NewDefaultRememberOption`](../cache/remember.go) arms a cancelable flight. Under the old non-cancelable default a hung callback owned its key for the life of the process: the leader could not be told to stop, the entry was deleted only by the leader's own return, and the one path that replaces a live entry requires a canceled flight, which a non-cancelable one never becomes. Now the last waiter leaving cancels the flight's context, and the next caller of the key finds the canceled flight, replaces it, and leads a fresh computation. The zero-value literal option reads as the constructor, so it carries the new default too.
+
+**Symptom.** A callback that outlives all its waiters now receives a canceled context and is recomputed by the next caller, where it previously kept running detached with its eventual result written into a record nothing reads; a callback that ignores its context changes nothing for itself, but its key stops being pinned once its waiters are gone. Callers on the old default and callers with `WithCancelable(true)` never shared a flight — the single-flight unit keys on cancelability — so nothing coalesces differently.
+
+**Remedy.** A callback whose computation must survive the departure of every caller asks for the detached shape explicitly: `NewDefaultRememberOption().WithCancelable(false)`. Long callbacks still want their own deadlines — the default bounds the computation's ownership of the key, not the wait, which stays unbounded without `WithWaitTimeout` or a caller context.
 
 ### Cache: a value-kind Cache no longer coalesces in Remember
 
@@ -344,6 +368,14 @@ debug.NewMiddlewareCommand(
 **Symptom.** A handle built over a request scope and used after the request stops answering the memoized value and returns `lazy service scope is closed`. `LazyService.Get` panics with that error rather than handing back a dead request's state.
 
 **Remedy.** Build the handle over the container where it is meant to outlive the request — every container resolution mints a fresh resolver context, so that is also the form safe for concurrent first uses. Code shared across requests resolves per call through `FromResolver` with the current request's resolver; the value is then keyed to the right scope by the scope's own instance map. A handle built over the container is untouched by this change, because the container does not answer the liveness question.
+
+### Http: `RedirectResponse` is relative-only
+
+**What changed.** [`RedirectResponse`](../http/response.go) — and `RedirectFound`/`RedirectMovedPermanently` through it — refuses by panic a location that leaves the application: one carrying a scheme (`https:`, `mailto:`, `javascript:`), a scheme-relative `//host`, or a backslash, which several browsers fold to a slash while `net/url` does not. [`RedirectExternalResponse`](../http/response.go) is the new unguarded form.
+
+**Symptom.** A handler that redirected to an absolute url through `RedirectResponse` now panics — caught by the kernel's recovery into a 500 — naming the door to use. A handler passing relative locations sees no change.
+
+**Remedy.** A redirect to a fixed or allowlisted external target moves to `RedirectExternalResponse`, whose name is the assertion that the target is the caller's own. A redirect whose target arrives from client input must not become external by remedy: validate it against an allowlist first, or keep it relative.
 
 ### Http: the kernel and router configuration doors are boot-only and refuse after serving starts
 

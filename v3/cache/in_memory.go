@@ -602,16 +602,16 @@ const evictionProbeLimit = 8
 /* how often one entry is allowed to cost the exclusive lock for its place in the recency list. Between two promotions of the same key the list says that key was read at most this long ago, which is all the eviction needs: the probe picks an expired victim first and falls back to the least recently promoted one, so the ordering only has to be right at a coarser grain than the reads. Every read still refreshes the access mark, which is atomic and costs nothing — what is bounded here is the LIST surgery, and with it the read path's need for the exclusive lock at all. */
 const recencyPromotionInterval = time.Second
 
-/* the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: every write takes the same exclusive lock, and a Get whose promotion is due takes it too, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. */
+/* the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: every write takes the same exclusive lock, and a Get whose promotion is due takes it too, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. The snapshot itself only reads, so it holds the read lock: concurrent Gets proceed under it, and only the writers wait for the enumeration. */
 func (instance *InMemoryBackend) cleanupExpired() {
     now := instance.clock.Now()
 
-    instance.mutex.Lock()
+    instance.mutex.RLock()
     keys := make([]string, 0, len(instance.entries))
     for key := range instance.entries {
         keys = append(keys, key)
     }
-    instance.mutex.Unlock()
+    instance.mutex.RUnlock()
 
     for start := 0; start < len(keys); start = start + cleanupChunkSize {
         end := start + cleanupChunkSize

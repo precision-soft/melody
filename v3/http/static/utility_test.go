@@ -254,3 +254,22 @@ func TestDirFileSystem_ABaseThatDoesNotResolveIsRefusedOnTheTargetFirst(t *testi
         t.Fatalf("expected the target's own resolution failure rather than the containment refusal, got %v", err)
     }
 }
+
+/* the mirror of the firewall matcher's trailing-slash reading: an entry written "/admin/" claims the bare "/admin" too, and nothing wider — the two comparisons promise to select the same requests */
+func TestHasExcludedPathPrefix_ATrailingSlashEntryClaimsTheBareSpelling(t *testing.T) {
+    excludedPathList := []string{"/admin/"}
+
+    excluded := []string{"/admin", "/admin/", "/admin/users.json"}
+    for _, requestPath := range excluded {
+        if false == hasExcludedPathPrefix(requestPath, excludedPathList) {
+            t.Fatalf("expected %q to be excluded by the trailing-slash entry", requestPath)
+        }
+    }
+
+    retained := []string{"/administrator", "/admi", "/"}
+    for _, requestPath := range retained {
+        if true == hasExcludedPathPrefix(requestPath, excludedPathList) {
+            t.Fatalf("expected %q not to be excluded by the trailing-slash entry", requestPath)
+        }
+    }
+}

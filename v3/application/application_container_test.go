@@ -448,6 +448,8 @@ func TestNewContainerLogger_LeavesNoDescriptorBehindWhenTheModuleConfigurationIs
                 map[string]any{
                     loggingcontract.LoggingConfigurationName: "not a logging configuration",
                 },
+                clock.NewSystemClock(),
+                false,
             )
         },
         "invalid logging configuration",
@@ -462,7 +464,7 @@ func TestNewContainerLogger_LeavesNoDescriptorBehindWhenTheModuleConfigurationIs
 func TestNewContainerLogger_OpensTheLogFileWhenEverythingItNeedsIsSound(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "application.log")
 
-    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil)
+    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false)
     if nil == logger {
         t.Fatalf("expected a logger")
     }
@@ -522,7 +524,7 @@ func TestBootContainer_AFailingLoggerProviderFailsTheBoot(t *testing.T) {
 func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "nested", "deep", "app.log")
 
-    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil)
+    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false)
 
     logger.Emergency("directory created", nil)
 

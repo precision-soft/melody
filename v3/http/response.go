@@ -7,11 +7,13 @@ import (
     "io"
     "mime"
     nethttp "net/http"
+    neturl "net/url"
     "os"
     "path/filepath"
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
@@ -220,6 +222,7 @@ func FileResponse(statusCode int, path string) (*Response, error) {
     }, nil
 }
 
+/* AttachmentResponse is FileResponse with a Content-Disposition, and inherits its whole contract — no folding, no root, no containment: never hand it a path built from client input without confining it first. The confined doors below are the form built for a client-steered name. */
 func AttachmentResponse(statusCode int, path string, filename string) (*Response, error) {
     response, err := FileResponse(statusCode, path)
     if nil != err {
@@ -229,6 +232,101 @@ func AttachmentResponse(statusCode int, path string, filename string) (*Response
     response.headers.Set("Content-Disposition", BuildContentDisposition("attachment", filename))
 
     return response, nil
+}
+
+/* ConfinedFileResponse serves a file selected by a name a client may steer, confined to the root directory: the name is refused when absolute or when it climbs (".."), the joined path is resolved through every symlink and checked to still lie under the resolved root, and only a regular file is answered — a directory is not a body, and a fifo would park the goroutine inside the open itself. It is the door FileResponse's own warning tells the caller to build; built here once, it cannot be built subtly wrong at every call site. The open re-resolves the already-resolved path, so what remains is the same narrow swap window the static file server documents, and nothing wider. */
+func ConfinedFileResponse(statusCode int, rootDirectory string, name string) (*Response, error) {
+    resolvedPath, confineErr := confineFileToRoot(rootDirectory, name)
+    if nil != confineErr {
+        return nil, confineErr
+    }
+
+    return FileResponse(statusCode, resolvedPath)
+}
+
+/* ConfinedAttachmentResponse is ConfinedFileResponse with a Content-Disposition, the confined twin of AttachmentResponse. */
+func ConfinedAttachmentResponse(statusCode int, rootDirectory string, name string, filename string) (*Response, error) {
+    response, err := ConfinedFileResponse(statusCode, rootDirectory, name)
+    if nil != err {
+        return nil, err
+    }
+
+    response.headers.Set("Content-Disposition", BuildContentDisposition("attachment", filename))
+
+    return response, nil
+}
+
+func confineFileToRoot(rootDirectory string, name string) (string, error) {
+    if "" == strings.TrimSpace(rootDirectory) {
+        return "", exception.NewError("the file root directory may not be empty", nil, nil)
+    }
+
+    trimmedName := strings.TrimSpace(name)
+    if "" == trimmedName {
+        return "", exception.NewError("the file name may not be empty", nil, nil)
+    }
+
+    if true == filepath.IsAbs(trimmedName) {
+        return "", exception.NewError(
+            "the file name may not be absolute",
+            map[string]any{
+                "name": name,
+            },
+            nil,
+        )
+    }
+
+    /* the climb is refused rather than folded away: a folded "../secret" quietly becomes a valid name, and the caller never learns a client probed the boundary */
+    cleanedName := filepath.Clean(trimmedName)
+    if ".." == cleanedName || true == strings.HasPrefix(cleanedName, ".."+string(os.PathSeparator)) {
+        return "", exception.NewError(
+            "the file name may not climb out of the root directory",
+            map[string]any{
+                "name": name,
+            },
+            nil,
+        )
+    }
+
+    fullPath := filepath.Join(rootDirectory, cleanedName)
+
+    realPath, evalErr := filepath.EvalSymlinks(fullPath)
+    if nil != evalErr {
+        return "", evalErr
+    }
+
+    realRoot, evalRootErr := filepath.EvalSymlinks(rootDirectory)
+    if nil != evalRootErr {
+        return "", evalRootErr
+    }
+
+    if realPath != realRoot && false == strings.HasPrefix(realPath, realRoot+string(os.PathSeparator)) {
+        return "", exception.NewError(
+            "the file resolves outside the root directory",
+            map[string]any{
+                "name": name,
+            },
+            nil,
+        )
+    }
+
+    pathInfo, statErr := os.Stat(realPath)
+    if nil != statErr {
+        return "", statErr
+    }
+
+    if false == pathInfo.Mode().IsRegular() {
+        return "", exception.NewError(
+            "the confined file is not a regular file",
+            map[string]any{
+                "name": name,
+                "mode": pathInfo.Mode().String(),
+            },
+            nil,
+        )
+    }
+
+    return realPath, nil
 }
 
 func BuildContentDisposition(disposition string, filename string) string {
@@ -300,7 +398,25 @@ func isRfc5987AttrChar(byteChar byte) bool {
     return false
 }
 
+/* RedirectResponse answers a redirect to a location WITHIN this application: an absolute target ("https://…", "mailto:…"), a scheme-relative one ("//host/…") and one carrying a backslash — which some browsers read as a slash — are refused by panic, because a location built from client input is exactly how an open redirect is minted, and the refusal makes the unsafe composition fail loudly at the first probe instead of shipping. A zero status code reads as 302. A redirect that genuinely leaves the application states it through RedirectExternalResponse, whose name is the assertion that the target is the caller's own. */
 func RedirectResponse(location string, statusCode int) *Response {
+    if true == isExternalRedirectLocation(location) {
+        exception.Panic(
+            exception.NewError(
+                "the redirect location must be relative; an external target goes through RedirectExternalResponse",
+                map[string]any{
+                    "location": location,
+                },
+                nil,
+            ),
+        )
+    }
+
+    return RedirectExternalResponse(location, statusCode)
+}
+
+/* RedirectExternalResponse answers a redirect to any location, unguarded on purpose: calling it is the caller's assertion that the target is trusted — a fixed url, an allowlisted origin — and never raw client input. */
+func RedirectExternalResponse(location string, statusCode int) *Response {
     if 0 == statusCode {
         statusCode = nethttp.StatusFound
     }
@@ -313,6 +429,24 @@ func RedirectResponse(location string, statusCode int) *Response {
         headers:    headers,
         bodyReader: nil,
     }
+}
+
+/* isExternalRedirectLocation reads the location the way a browser will: a scheme ("https:", "mailto:", "javascript:") or a leading "//" leaves the origin, and a backslash is treated as leaving too, because several browsers fold "\" to "/" while net/url does not — the disagreement is the exploit. */
+func isExternalRedirectLocation(location string) bool {
+    if true == strings.Contains(location, "\\") {
+        return true
+    }
+
+    if true == strings.HasPrefix(location, "//") {
+        return true
+    }
+
+    parsedLocation, parseErr := neturl.Parse(location)
+    if nil != parseErr {
+        return true
+    }
+
+    return "" != parsedLocation.Scheme
 }
 
 func RedirectFound(location string) *Response { return RedirectResponse(location, nethttp.StatusFound) }

@@ -1,8 +1,6 @@
 package security
 
 import (
-    "crypto/subtle"
-
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -54,10 +52,7 @@ func (instance *ApiKeyHeaderRule) Check(request httpcontract.Request) error {
 
     headerValue := request.HttpRequest().Header.Get(instance.headerName)
 
-    expectedBytes := []byte(instance.expectedValue)
-    headerBytes := []byte(headerValue)
-
-    if 1 == subtle.ConstantTimeCompare(expectedBytes, headerBytes) {
+    if true == constantTimeSecretEquals(instance.expectedValue, headerValue) {
         return nil
     }
 

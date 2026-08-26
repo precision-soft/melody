@@ -19,7 +19,7 @@ var signalContextForceExitDebounce = 500 * time.Millisecond
 /*
 NewSignalContext returns a context that is cancelled by the first SIGINT or SIGTERM, giving the application a graceful shutdown window. A second SIGINT or SIGTERM received while that shutdown is still running prints one line to stderr and forces the process to exit with the conventional 128+signal code, so an operator facing a hung shutdown is never reduced to SIGKILL; a second signal landing within half a second of the first is absorbed as a duplicate delivery of the same shutdown request, so a supervisor and a terminal both forwarding one interrupt do not skip the graceful shutdown. The forced exit deliberately runs no teardown: it exists for the shutdown that is already hung, and a teardown on its path could hang the same way — the escalation is the operator's demand for a process that is gone now, at the acknowledged price of whatever a Close would have flushed.
 
-The returned stop function unregisters the signal notifications, cancels the context, and releases the watcher goroutine; it is safe to call more than once and from concurrent goroutines.
+The returned stop function unregisters the signal notifications, cancels the context, and releases the watcher goroutine; it is safe to call more than once and from concurrent goroutines. Calling it is not optional in a process that outlives the application: a watcher left armed stays registered, so the next application cycle in the same process runs under two watchers, and the older one — already past its first signal — reads the next SIGTERM as the escalation and forces exit 143 where a graceful shutdown was owed.
 */
 func NewSignalContext() (context.Context, context.CancelFunc) {
     signalChannel := make(chan os.Signal, 2)

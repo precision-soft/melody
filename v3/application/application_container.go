@@ -2,8 +2,11 @@ package application
 
 import (
     "errors"
+    "io"
     "os"
     "path/filepath"
+    "syscall"
+    "time"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/cache"
@@ -165,6 +168,8 @@ func (instance *Application) bootContainer() {
                     resolveRuntimePath(configuration.Kernel().ProjectDir(), configuration.Kernel().LogPath()),
                     configuration.Kernel().LogLevel(),
                     instance.moduleConfigurations,
+                    kernelInstance.Clock(),
+                    true,
                 ), nil
             },
         )
@@ -279,15 +284,19 @@ func (instance *Application) bootContainer() {
     }
 }
 
-/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is acquired, because it panics on a configuration registered under the supported name with a type that does not implement the interface: a file opened above that would be left with no owner at all — the container stores only what a provider returned, so nothing would ever close it, and a creation failure is not memoized, so each later resolution opens another one. */
+/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is acquired, because it panics on a configuration registered under the supported name with a type that does not implement the interface: a file opened above that would be left with no owner at all — the container stores only what a provider returned, so nothing would ever close it, and a creation failure is not memoized, so each later resolution opens another one.
+
+The file journal is a reopenable writer, and the container-served logger arms it on SIGHUP: rename-based rotation moves the file away under the descriptor, so without the reopen the journal keeps flowing into the renamed inode and the fresh file stays empty. The exit-path caller does not arm it — that logger exists for a process that is dying, whose descriptor is surrendered to os.Exit, and a watcher armed there would outlive nothing and own nothing. */
 func newContainerLogger(
     logPath string,
     logLevel loggingcontract.Level,
     moduleConfigurations map[string]any,
+    clockInstance clockcontract.Clock,
+    armRotationReopen bool,
 ) loggingcontract.Logger {
     loggingConfigurationInstance := logging.LoggingConfigurationFromModules(moduleConfigurations)
 
-    writer := os.Stdout
+    var writer io.Writer = os.Stdout
 
     if "" != logPath {
         /* the directory is guaranteed the way ensureRuntimeDirectories guarantees the logs directory: only the default log path lives inside it, and an operator-supplied MELODY_LOG_PATH pointing anywhere else had no owner to create its parent */
@@ -304,11 +313,7 @@ func newContainerLogger(
             )
         }
 
-        file, openFileErr := os.OpenFile(
-            logPath,
-            os.O_CREATE|os.O_APPEND|os.O_WRONLY,
-            0o644,
-        )
+        fileWriter, openFileErr := logging.NewReopenableFileWriter(logPath)
         if nil != openFileErr {
             exception.Panic(
                 exception.NewError(
@@ -321,10 +326,25 @@ func newContainerLogger(
             )
         }
 
-        writer = file
+        if true == armRotationReopen {
+            armErr := fileWriter.ArmReopenOnSignal(syscall.SIGHUP)
+            if nil != armErr {
+                exception.Panic(
+                    exception.NewError(
+                        "failed to arm the log rotation signal watcher",
+                        exceptioncontract.Context{
+                            "path": logPath,
+                        },
+                        armErr,
+                    ),
+                )
+            }
+        }
+
+        writer = fileWriter
     }
 
-    return logging.NewJsonLoggerWithLabels(writer, logLevel, loggingConfigurationInstance.LevelLabels())
+    return logging.NewJsonLoggerWithClock(writer, logLevel, loggingConfigurationInstance.LevelLabels(), clockInstance)
 }
 
 func (instance *Application) registerCache() {
@@ -383,7 +403,7 @@ func (instance *Application) registerHttpSession() {
         instance.RegisterService(
             session.ServiceSessionStorage,
             func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
-                return session.NewInMemoryStorage(), nil
+                return session.NewInMemoryStorageWithClock(time.Minute, instance.kernel.Clock()), nil
             },
         )
     }

@@ -48,3 +48,28 @@ func TestPathPrefixMatcher_NilRequestDoesNotMatch(t *testing.T) {
         t.Fatalf("expected matcher to not match a nil request")
     }
 }
+
+/* the router reads "/admin/" and "/admin" as the same route, so a prefix written with the trailing slash must claim the bare spelling too — without it, the unwritten spelling escaped the firewall that named the other. The negative half pins the surgical scope: only the exact bare spelling is added, never a wider segment. */
+func TestPathPrefixMatcher_ATrailingSlashPrefixClaimsTheBareSpelling(t *testing.T) {
+    matcher := NewPathPrefixMatcher("/admin/")
+
+    matching := []string{"/admin", "/admin/", "/admin/products"}
+    for _, path := range matching {
+        httpRequest, _ := nethttp.NewRequest("GET", "http://localhost"+path, nil)
+        request := http.NewRequest(httpRequest, nil, nil, nil)
+
+        if false == matcher.Matches(request) {
+            t.Fatalf("expected the trailing-slash prefix to match %q", path)
+        }
+    }
+
+    notMatching := []string{"/administrator", "/admi", "/"}
+    for _, path := range notMatching {
+        httpRequest, _ := nethttp.NewRequest("GET", "http://localhost"+path, nil)
+        request := http.NewRequest(httpRequest, nil, nil, nil)
+
+        if true == matcher.Matches(request) {
+            t.Fatalf("expected the trailing-slash prefix not to match %q", path)
+        }
+    }
+}
