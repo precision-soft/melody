@@ -85,7 +85,7 @@ func nextUserId(existingIdList []string) string {
     return fmt.Sprintf("user-%d", highestIdSuffix(existingIdList, "user-")+1)
 }
 
-/* normalizedUsername is the form both implementations compare on. Usernames are matched without regard to case, and leaving that to the database collation would make the answer depend on how the table was created. */
-func normalizedUsername(username string) string {
+/* NormalizedUsername is the form both implementations compare on, exported because the cache key constructor folds through it: a username folded in one place and not another writes an entry under one key and clears it under another. Usernames are matched without regard to case, and leaving that to the database collation would make the answer depend on how the table was created. */
+func NormalizedUsername(username string) string {
     return strings.ToLower(strings.TrimSpace(username))
 }

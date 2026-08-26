@@ -140,12 +140,19 @@ func buildApiResponse(
 
     acceptHeader := ""
     if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().Header {
-        acceptHeader = request.HttpRequest().Header.Get("Accept")
+        /* every Accept line is joined before parsing: Get answers only the first line of a repeated field, and the accept header is list-typed, so a refusal the client sent on a second line would otherwise vanish */
+        acceptHeader = strings.Join(request.HttpRequest().Header.Values("Accept"), ", ")
     }
 
     serializerManager := melodyserializer.SerializerManagerFromRuntime(runtimeInstance)
     if nil != serializerManager {
         serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
+
+        /* a header that refuses every available media type is answered as not acceptable on the error path exactly as the result handler answers it on the success path: falling through would render the failure in the very representation the client rejected; the incident itself is already in the application log by the time a presenter runs */
+        if true == errors.Is(err, melodyserializer.ErrNotAcceptable) {
+            return melodyhttp.EmptyResponse(nethttp.StatusNotAcceptable)
+        }
+
         if nil == err && nil != serializerInstance {
             return serializeWith(statusCode, payload, serializerInstance)
         }

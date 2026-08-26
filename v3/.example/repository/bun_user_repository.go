@@ -121,7 +121,7 @@ func (instance *bunUserRepository) FindById(ctx context.Context, id string) (*en
 }
 
 func (instance *bunUserRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
     if "" == wanted {
         return nil, false, nil
     }
@@ -260,7 +260,7 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
 }
 
 func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
     if "" == wanted {
         return false, nil
     }

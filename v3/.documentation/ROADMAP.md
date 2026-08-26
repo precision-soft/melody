@@ -2,18 +2,9 @@
 
 This document lists high-level, forward-looking plans for the Melody repository.
 
-## Near-term
-
-- Static file serving enhancements
-    - Add explicit support for filesystem and embedded modes as a first-class feature set, aligned with the existing build tags (`melody_static_embedded`). See [`../http/`](../http/) and [`./package/HTTP.md`](./package/HTTP.md).
-
-- Firewall system
-    - Introduce a configurable firewall layer that can be composed with HTTP middleware and security integration points. See [`../security/`](../security/) and [`./package/SECURITY.md`](./package/SECURITY.md).
-
-## Mid-term
-
-- Router extensions
-    - Named routes, url generation, route grouping, and constraints. See [`../http/router.go`](../http/router.go) and [`./package/HTTP.md`](./package/HTTP.md).
+Every item this document used to carry has shipped — static file serving with its filesystem and embedded
+modes, the firewall system, and the router's named routes, url generation, grouping and constraints. What
+they do now is described where a current capability belongs, in [`./package/`](./package/), not here.
 
 ## Longer-term
 

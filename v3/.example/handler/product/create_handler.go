@@ -64,7 +64,8 @@ func apiJsonErrorResponder(
 
 /* bound by the openapi descriptor in config; keep it exported */
 type CreateRequest struct {
-    Id          string  `json:"id" validate:"max=60"`
+    /* the id becomes a cache key component and the backend grammar refuses spaces and newlines inside a key, so a spelling the grammar refuses is turned away here instead of landing in the database and failing every later cache write. The pattern is written in the subset OPENAPI.md requires — this tag reaches the published document as a pattern facet, and OpenAPI 3.0 prescribes ECMA-262, which has no POSIX class — so \S carries what the frozen majors spell as [[:space:]]. */
+    Id          string  `json:"id" validate:"max=60,regex=^\\S+$"`
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`
     CategoryId  string  `json:"categoryId" validate:"notBlank"`
