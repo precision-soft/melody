@@ -60,7 +60,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 
 The [`config/`](./config/) package keeps [`main.go`](./main.go) small by grouping all setup and integration logic in a single place, with each module hook in its own file:
 
-- [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module and the integration module facades (observability, otlp, encrypt, outbox, cron, websocket, awss3, rueidis), each gated on the configuration that enables it
+- [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module and the integration module facades (observability, otlp, encrypt, outbox, migrate, cron, websocket, awss3, rueidis), each gated on the configuration that enables it
 - [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + interface assertions for the module hooks the example implements
 - [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
 - [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs

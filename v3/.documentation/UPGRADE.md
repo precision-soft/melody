@@ -1146,7 +1146,7 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 }
 ```
 
-`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order that was built, and `debug:middleware` renders it.
+`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order a serving process actually built; `debug:middleware` lists the pipeline through its own description pass, leaving that report alone.
 
 ### Object storage: `awss3` `Put` enforces the declared size
 

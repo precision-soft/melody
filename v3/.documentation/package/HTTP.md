@@ -194,7 +194,7 @@ The chain is ordered by [`orderDefinitions`](../../http/middleware/pipeline/buil
 Position is not cosmetic, because a middleware that answers a request itself — returning a response without calling `next` — **short-circuits everything inside it**. Nothing ordered further in observes that request at all: no rate-limit accounting, no compression, no header the inner middleware would have added. The framework's own static middleware is one of those: [`StaticMiddleware`](../../http/middleware/static.go) returns the file it resolved and never calls `next`, so any middleware that must also apply to static assets has to sit **outside** it.
 
 That static middleware is contributed as a default definition ([`defaultDefinitions`](../../application/http_middleware.go)) at a priority **below** the one `Use` registers at, which puts it **outermost**: a request for a file that exists is answered there and nothing registered through the application observes it, so a rate limiter does not spend a client's budget on the forty assets of one page and an authentication middleware does not guard the stylesheet of its own login page. The cost is the other side of that: a static response is not compressed and does not reach an access log written as a middleware. A middleware that must also apply to static assets is registered with [`UseWithPriority`](../../application/http_middleware.go) at a priority below the static one; an application that wants a directory served *behind* its own middleware registers a file server of its own, which sits inside the built-in one and receives only what that one declines — and names that directory in [
-`MELODY_STATIC_EXCLUDED_PATHS`](#excluded-path-prefixes) so the built-in one does decline it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain that was actually built and `debug:middleware` renders it — read the order there rather than inferring it from the registration sites.
+`MELODY_STATIC_EXCLUDED_PATHS`](#excluded-path-prefixes) so the built-in one does decline it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain a serving process actually built. `debug:middleware` does not render it: the command is wired to `describe`, which answers what the chain would be without building it and deliberately leaves the last build report alone — a console process never builds the serving chain at all, and `--build` runs an inspection build of its own that leaves it alone too. Read the order from the command's own listing rather than inferring it from the registration sites.
 
 ## Controller return contract
 
@@ -654,13 +654,13 @@ Where the list itself comes from is the application's business — a constant as
 ### Middleware (`http/middleware`)
 
 * CORS:
-    * [`type CorsConfig`](../../http/middleware/cors.go)
-    * [`CorsMiddleware`](../../http/middleware/cors.go)
-    * [`DefaultCorsMiddleware`](../../http/middleware/cors.go)
-    * [`NewCorsConfig`](../../http/middleware/cors.go)
-    * [`DefaultCorsConfig`](../../http/middleware/cors.go)
-    * [`RestrictiveCorsConfig`](../../http/middleware/cors.go)
-    * [`RestrictiveCors`](../../http/middleware/cors.go)
+    * [`type CorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.Service`
+    * [`CorsMiddleware`](../../http/middleware/cors.go) — deprecated, use `http/cors.Middleware`
+    * [`DefaultCorsMiddleware`](../../http/middleware/cors.go) — deprecated, use `http/cors.DefaultMiddleware`
+    * [`NewCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.NewService`
+    * [`DefaultCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.DefaultService`
+    * [`RestrictiveCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.RestrictiveService`
+    * [`RestrictiveCors`](../../http/middleware/cors.go) — deprecated, use `http/cors.Restrictive`
 
 * Compression:
     * [`type CompressionConfig`](../../http/middleware/compression.go)

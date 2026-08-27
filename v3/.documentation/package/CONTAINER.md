@@ -239,7 +239,6 @@ A [`container.Lazy`](../../container/lazy.go) handle built over a scope follows 
 - [`type ScopeManager`](../../container/contract/scope.go)
 - [`type Scope`](../../container/contract/scope.go)
 - [`type ScopedRegistrar`](../../container/contract/scoped_registrar.go)
-- [`type ScopeManager`](../../container/contract/scope.go)
 - [`type OverrideServiceWithOptions`](../../container/contract/override.go)
 - [`type OverrideOption`](../../container/contract/override.go)
 - [`type OverrideOptions`](../../container/contract/override.go)
