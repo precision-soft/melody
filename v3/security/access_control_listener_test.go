@@ -35,13 +35,14 @@ func (instance *accessControlListenerTestEntryPoint) Start(runtimeInstance runti
 }
 
 type accessControlListenerTestAccessDeniedHandler struct {
-    err   error
-    calls int
+    response httpcontract.Response
+    err      error
+    calls    int
 }
 
-func (instance *accessControlListenerTestAccessDeniedHandler) Handle(runtimeInstance any, request httpcontract.Request, decisionErr error) (httpcontract.Response, error) {
+func (instance *accessControlListenerTestAccessDeniedHandler) Handle(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, decisionErr error) (httpcontract.Response, error) {
     instance.calls++
-    return nil, instance.err
+    return instance.response, instance.err
 }
 
 func TestMatchAccessControlRule_SetsMetadataCorrectly(t *testing.T) {
@@ -487,6 +488,78 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
 
     if nil == requestEvent.Response() {
         t.Fatalf("expected a fail-closed response when the entry point answered none, got nil (the request would reach its handler unauthorized)")
+    }
+}
+
+/* the entry point is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; carried through a bare nil check it is normalized back to nil by SetResponse and the unauthenticated request is served — the guard must read it through IsNilInterface and fall through to the fail-closed 401 */
+func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsClosed(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    entryPoint := &accessControlListenerTestEntryPoint{
+        response: (*httpPkg.Response)(nil),
+        err:      nil,
+    }
+
+    firewall := NewCompiledFirewall(
+        "main", nil, "m", nil, nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        nil, entryPoint, nil,
+        "/admin/login", "/admin/logout", nil, nil,
+        SourceFirewall, SourceFirewall, SourceFirewall, SourceFirewall, SourceNone,
+    )
+
+    securityContext := NewSecurityContext(firewall, NewAnonymousToken())
+    SecurityContextSetOnRuntime(runtimeInstance, securityContext)
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil == requestEvent.Response() || 401 != requestEvent.Response().StatusCode() {
+        t.Fatalf("expected the typed-nil entry point response to fail closed with 401, got %#v", requestEvent.Response())
+    }
+}
+
+/* the handler is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the DENIED request is served as granted — the guard must read it through IsNilInterface and answer through the fail-closed denial path instead */
+func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServed(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    firewall := NewCompiledFirewall(
+        "main", nil, "m", nil, nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
+        nil, nil,
+        &accessControlListenerTestAccessDeniedHandler{response: (*httpPkg.Response)(nil), err: nil},
+        "/admin/login", "/admin/logout", nil, nil,
+        SourceFirewall, SourceFirewall, SourceFirewall, SourceNone, SourceFirewall,
+    )
+
+    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}))
+    SecurityContextSetOnRuntime(runtimeInstance, securityContext)
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil == requestEvent.Response() {
+        t.Fatalf("expected the typed-nil handler answer to be refused with a fail-closed response, got nil (the denied request would be served)")
     }
 }
 

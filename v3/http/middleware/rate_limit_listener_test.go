@@ -66,6 +66,39 @@ func TestRegisterRateLimitRequestListener_AnswersTooManyRequestsOnceTheBudgetIsG
     }
 }
 
+/* OnLimitExceeded is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the refused request is served unmetered — the guard must read it through IsNilInterface and serve the 429 fallback */
+func TestRegisterRateLimitRequestListener_ATypedNilLimitResponseStillAnswers429(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewRateLimitConfig(
+            NewFixedWindowLimiter(1, time.Minute),
+            nil,
+            func(request httpcontract.Request) (httpcontract.Response, error) {
+                return (*http.Response)(nil), nil
+            },
+        ),
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    firstEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, firstErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, firstEvent); nil != firstErr {
+        t.Fatalf("unexpected dispatch error: %v", firstErr)
+    }
+
+    secondEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, secondErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, secondEvent); nil != secondErr {
+        t.Fatalf("expected the refusal to be a response rather than a dispatch error, got %v", secondErr)
+    }
+
+    response := secondEvent.Response()
+    if nil == response || nethttp.StatusTooManyRequests != response.StatusCode() {
+        t.Fatalf("expected the typed-nil limit response to fall through to the 429 fallback, got %#v", response)
+    }
+}
+
 func TestRegisterRateLimitRequestListener_LeavesAnAnsweredRequestAloneAndUncharged(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 

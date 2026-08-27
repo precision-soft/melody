@@ -1080,7 +1080,7 @@ func TestLogContext_AProviderWhoseContextPanicsIsContained(t *testing.T) {
         t.Fatalf("expected the record to survive the panicking context")
     }
 
-    if "" == logContext["contextPanicked"] {
+    if "context rendering gave up" != logContext["contextPanicked"] {
         t.Fatalf("expected the panic value to be kept in the context's place, got %#v", logContext)
     }
 
@@ -1099,7 +1099,7 @@ func TestFromError_AProviderWhoseContextPanicsIsContained(t *testing.T) {
         t.Fatalf("expected the conversion to survive the panicking context")
     }
 
-    if "" == converted.Context()["contextPanicked"] {
+    if "context rendering gave up" != converted.Context()["contextPanicked"] {
         t.Fatalf("expected the panic value to be kept in the context's place, got %#v", converted.Context())
     }
 }

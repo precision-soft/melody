@@ -514,6 +514,57 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
     }
 }
 
+/* the entry point is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; carried through a bare nil check it is normalized back to nil by SetResponse and the unauthenticated request is served — the guard must read it through IsNilInterface and fall through to the fail-closed 401 */
+func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsClosed(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    entryPoint := &accessControlListenerTestEntryPoint{response: (*httpPkg.Response)(nil), err: nil}
+
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        nil,
+        entryPoint,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+    )
+
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAnonymousToken()))
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != entryPoint.calls {
+        t.Fatalf("expected the entry point to be called once")
+    }
+    if nil == requestEvent.Response() || 401 != requestEvent.Response().StatusCode() {
+        t.Fatalf("expected the typed-nil entry point response to fail closed with 401, got %#v", requestEvent.Response())
+    }
+}
+
 /* when the kernel.exception dispatch produces no response (no exception listener registered, or propagation stopped) the listener must still write a fail-closed response rather than a nil the kernel serves the handler for */
 func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *testing.T) {
     kernel := newTestKernel()
@@ -920,6 +971,43 @@ func TestAccessControlListener_ADeniedHandlerAnsweringNilIsNamedInTheOneRecord(t
 
     if "nil_response" != capture.errorRecords[0].context["deniedHandlerOutcome"] {
         t.Fatalf("expected the record to name what the handler did, got %+v", capture.errorRecords[0].context)
+    }
+}
+
+/* the handler is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the DENIED request is served as granted — the guard must read it through IsNilInterface and land in the same nil-response refusal the interface nil earns */
+func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServed(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    firewall := NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()),
+        nil,
+        nil,
+        &accessControlListenerTestAccessDeniedHandler{response: (*httpPkg.Response)(nil), err: nil},
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+    )
+
+    dispatchRefusal(t, runtimeInstance, firewall)
+
+    if 1 != len(capture.errorRecords) || 0 != len(capture.warningRecords) {
+        t.Fatalf("expected exactly one error and no warning, got %v and %v", capture.errorRecords, capture.warningRecords)
+    }
+
+    if "nil_response" != capture.errorRecords[0].context["deniedHandlerOutcome"] {
+        t.Fatalf("expected the typed-nil answer to be refused as a nil response, got %+v", capture.errorRecords[0].context)
     }
 }
 

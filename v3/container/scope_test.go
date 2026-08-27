@@ -94,6 +94,46 @@ func TestScope_OverrideInstance_IsolatedFromContainer(t *testing.T) {
     }
 }
 
+/* an override of one name on a scope must not answer another service's type-keyed resolution: the scope exposes the override under the value's own canonical type only when that type is FREE, and here the container registered it for a service of its own — so the scope's GetByType keeps answering the registered service, not the override */
+func TestScopeOverride_OfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    interfaceRegisterErr := serviceContainer.Register(
+        "scope.poison.contract",
+        func(resolver containercontract.Resolver) (testInterface, error) {
+            return &testImplementation{name: "contract owner"}, nil
+        },
+    )
+    if nil != interfaceRegisterErr {
+        t.Fatalf("unexpected register error: %v", interfaceRegisterErr)
+    }
+
+    concreteRegisterErr := serviceContainer.Register(
+        "scope.poison.concrete",
+        func(resolver containercontract.Resolver) (*testImplementation, error) {
+            return &testImplementation{name: "concrete owner"}, nil
+        },
+    )
+    if nil != concreteRegisterErr {
+        t.Fatalf("unexpected register error: %v", concreteRegisterErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    overrideErr := scopeInstance.OverrideProtectedInstance("scope.poison.contract", &testImplementation{name: "override"})
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    concreteValue, concreteErr := scopeInstance.GetByType(reflect.TypeOf((*testImplementation)(nil)))
+    if nil != concreteErr {
+        t.Fatalf("unexpected get by type error: %v", concreteErr)
+    }
+    if implementation, isTyped := concreteValue.(*testImplementation); false == isTyped || "concrete owner" != implementation.name {
+        t.Fatalf("expected the concrete service to keep answering its own type through the scope, got %#v", concreteValue)
+    }
+}
+
 /* an override answers before anything else, and that holds for a name the container has ALREADY built: the container's own resolution reads its instance map without taking the exclusive lock when there is nothing to write, and a resolution layered over a scope must never be answered from there — the scope is the whole reason the caller asked through it. The container instance is built first here on purpose, because a name the container has not built yet cannot tell the two paths apart. */
 func TestScope_AnOverrideWinsOverAnInstanceTheContainerHasAlreadyBuilt(t *testing.T) {
     serviceContainer := NewContainer()

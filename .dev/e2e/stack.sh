@@ -1194,12 +1194,15 @@ else
 fi
 
 # the user table has no command of its own; resolving the user repository by name through debug:container
-# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs
+# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs;
+# the seeded rows are read back out of band, because a resolution that succeeds without reseeding
+# exits 0 all the same and the failure would surface only as login failures in the next run
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container service.example.user.repository >/dev/null 2>&1; echo status=\$?"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
-    check_pass "resolving the v3 user repository reseeded the user directory"
+V3_USER_ROW_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COUNT(*) FROM melody_example_v3_user")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0' && [[ "${V3_USER_ROW_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
+    check_pass "resolving the v3 user repository reseeded the user directory (rows read out of band)"
 else
-    check_fail "the v3 user repository resolution failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+    check_fail "the v3 user repository resolution did not restore the directory (status ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, rows ${V3_USER_ROW_COUNT_STRING:-<no answer>})"
 fi
 
 check_section_end "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
@@ -1312,12 +1315,15 @@ else
 fi
 
 # the user table has no command of its own; resolving the user repository by name through debug:container
-# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs
+# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs;
+# the seeded rows are read back out of band, because a resolution that succeeds without reseeding
+# exits 0 all the same and the failure would surface only as login failures in the next run
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . debug:container service.example.user.repository >/dev/null 2>&1; echo status=\$?"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
-    check_pass "resolving the v1 user repository reseeded the user directory"
+V1_USER_ROW_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v1" "SELECT COUNT(*) FROM melody_example_v1_user")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0' && [[ "${V1_USER_ROW_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
+    check_pass "resolving the v1 user repository reseeded the user directory (rows read out of band)"
 else
-    check_fail "the v1 user repository resolution failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+    check_fail "the v1 user repository resolution did not restore the directory (status ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, rows ${V1_USER_ROW_COUNT_STRING:-<no answer>})"
 fi
 
 check_section_end "V1 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
@@ -1597,12 +1603,15 @@ else
 fi
 
 # the user table has no command of its own; resolving the user repository by name through debug:container
-# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs
+# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs;
+# the seeded rows are read back out of band, because a resolution that succeeds without reseeding
+# exits 0 all the same and the failure would surface only as login failures in the next run
 run_in_dev_capture "${V2_EXAMPLE_DIRECTORY_STRING}" "go run . debug:container service.example.user.repository >/dev/null 2>&1; echo status=\$?"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
-    check_pass "resolving the v2 user repository reseeded the user directory"
+V2_USER_ROW_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v2" "SELECT COUNT(*) FROM melody_example_v2_user")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0' && [[ "${V2_USER_ROW_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
+    check_pass "resolving the v2 user repository reseeded the user directory (rows read out of band)"
 else
-    check_fail "the v2 user repository resolution failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+    check_fail "the v2 user repository resolution did not restore the directory (status ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, rows ${V2_USER_ROW_COUNT_STRING:-<no answer>})"
 fi
 
 check_section_end "V2 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"

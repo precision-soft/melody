@@ -1735,6 +1735,7 @@ func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
 type warningRecordingLogger struct {
     mutex           sync.Mutex
     warningMessages []string
+    warningContexts []loggingcontract.Context
 }
 
 func (instance *warningRecordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -1749,6 +1750,7 @@ func (instance *warningRecordingLogger) Warning(message string, context loggingc
     defer instance.mutex.Unlock()
 
     instance.warningMessages = append(instance.warningMessages, message)
+    instance.warningContexts = append(instance.warningContexts, context)
 }
 
 func (instance *warningRecordingLogger) Error(message string, context loggingcontract.Context) {}
@@ -1767,6 +1769,87 @@ func (instance *warningRecordingLogger) hasWarning(message string) bool {
     }
 
     return false
+}
+
+func (instance *warningRecordingLogger) warningContextFor(message string) (loggingcontract.Context, bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for index, loggedMessage := range instance.warningMessages {
+        if message == loggedMessage {
+            return instance.warningContexts[index], true
+        }
+    }
+
+    return nil, false
+}
+
+/* the no-route record is written for exactly the requests nobody routed, and a query string routinely carries a credential — the record keeps the parameter names for diagnosis and must not carry the values into the journal */
+func TestKernel_TheNoRouteRecordRedactsQueryValues(t *testing.T) {
+    router := NewRouter()
+
+    recordingLogger := &warningRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/missing?token=secret123&user=alice", nil)
+    handler.ServeHTTP(httptest.NewRecorder(), request)
+
+    warningContext, logged := recordingLogger.warningContextFor("no route matched")
+    if false == logged {
+        t.Fatalf("expected the unrouted request to leave its warning, got %v", recordingLogger.warningMessages)
+    }
+
+    query, _ := warningContext["query"].(string)
+    if true == strings.Contains(query, "secret123") || true == strings.Contains(query, "alice") {
+        t.Fatalf("expected every query value redacted in the no-route record, got %q", query)
+    }
+    if false == strings.Contains(query, "token") || false == strings.Contains(query, "user") {
+        t.Fatalf("expected the query parameter names kept in the no-route record, got %q", query)
+    }
+}
+
+/* the method-not-allowed record redacts the same way: the 405 is answered before any handler runs, so this record is the only trace of the request — names kept, values withheld */
+func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/only-post",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "posted"), nil
+        },
+    )
+
+    recordingLogger := &warningRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/only-post?token=secret123", nil)
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusMethodNotAllowed != recorder.Code {
+        t.Fatalf("expected the wrong method answered 405, got %d", recorder.Code)
+    }
+
+    warningContext, logged := recordingLogger.warningContextFor("method not allowed")
+    if false == logged {
+        t.Fatalf("expected the refused method to leave its warning, got %v", recordingLogger.warningMessages)
+    }
+
+    query, _ := warningContext["query"].(string)
+    if true == strings.Contains(query, "secret123") {
+        t.Fatalf("expected the query value redacted in the 405 record, got %q", query)
+    }
+    if false == strings.Contains(query, "token") {
+        t.Fatalf("expected the query parameter name kept in the 405 record, got %q", query)
+    }
 }
 
 /* A handler that commits its own response and then rotates the session loses everything the session held: the rotation deletes the previous entry, and the response path refuses to store the replacement because no Set-Cookie can reach the client on a committed response. Refusing the write is right, but it must not be silent — without a line in the log this is indistinguishable from the ordinary case the branch exists for, a first-time visitor on a stream with nothing worth storing. */

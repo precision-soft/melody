@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — the six migration commands take `clicontract.Context` where they took `*clicontract.CommandContext`, following the framework's melody-owned flag and context layer. `db:create` reads its migration name from `commandContext.Arguments()` rather than `Args().First()`, guarded on the length, which answers exactly what the engine's `First()` answered for no arguments. The v1 and v2 bindings are unchanged — the framework's `UPGRADE.md` writes the rewrite out line by line
+
 - the migration commands run on the dedicated migration connection when the provider offers one (`bunorm.MigrationProvider`), falling back to the ordinary pool otherwise; the resolved database label says `(dedicated migration connection)` so the run reports which connection carried it. A long migration — an ALTER TABLE adding cascade foreign keys on a large table — used to be cut by the request pool's 30s driver deadlines with `invalid connection` mid-sequence, where MySQL DDL leaves partially applied steps behind
 
 - the json envelope is one line, following the framework's printer: `db:status --format=json` and its siblings render a single closed document per run rather than an indented block, and `--format=json-pretty` renders the same document indented for reading by hand. Nothing that decodes the document is affected
