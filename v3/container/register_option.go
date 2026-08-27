@@ -44,6 +44,13 @@ func WithTeardownDependency(serviceNames ...string) containercontract.RegisterOp
     }
 }
 
+/* WithReplacesContainerService admits a SCOPED registration whose name — or whose registered type — the container already claims, so the scoped one answers inside a scope while the container's keeps its lifetime outside one. Without it the overlap is refused where it is made, because a scoped service silently shadowing a container singleton is a wiring mistake whose symptom appears one lifetime away from its cause; the wiring generator emits this option for exactly the scoped-shadows-container registrations its scan finds, so a deliberate shadow boots instead of panicking. It admits substitution, not decoration: a scoped provider that resolves the name it replaces re-enters itself and is reported as the circular dependency it is. The container-level registration paths do not read it. */
+func WithReplacesContainerService() containercontract.RegisterOption {
+    return func(option *containercontract.RegisterOptions) {
+        option.ReplacesContainerService = true
+    }
+}
+
 func buildRegisterServiceOption() *containercontract.RegisterOptions {
     return &containercontract.RegisterOptions{
         AlsoRegisterType:         true,

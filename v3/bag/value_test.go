@@ -249,3 +249,21 @@ func TestNewParameterBagFromValues_KeepsTheSingleAndTheRepeatedKeyApartByType(t 
         t.Fatalf("expected a key with no values to stay out of the bag")
     }
 }
+
+func TestBagString_NonStringScalarReportsAbsentAndFallsBackToDefault(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("port", 9000)
+
+    _, exists := String(parameterBag, "port")
+    if true == exists {
+        t.Fatalf("expected a non-string scalar to report absent, not present-but-empty")
+    }
+
+    if "8080" != StringOrDefault(parameterBag, "port", "8080") {
+        t.Fatalf("expected StringOrDefault to substitute the default for a non-string value")
+    }
+
+    if true == HasNonEmptyString(parameterBag, "port") {
+        t.Fatalf("expected HasNonEmptyString to report false for a non-string value")
+    }
+}

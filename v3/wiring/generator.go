@@ -173,6 +173,10 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     /* two constructors that register under one container key panic at the first boot of the generated file, far from the generation that reported success; the collision is keyed here exactly as the emitted registration keys it — by the returned type for a type registration, by the named constant for a named one — so it fails at generation, naming both sites. A name constant's VALUE is not read from the source, so a type registration and a name registration that happen to spell the same service name, or two distinct constants holding one value, stay out of reach of this check. */
     registrationSites := make(map[string]*Constructor)
 
+    /* the identity (name or type, no lifetime) of every CONTAINER registration, so a scoped registration that shares one is emitted with WithReplacesContainerService instead of panicking at boot: the container refuses a scoped registration whose name or type it already claims unless that option is set, and a scoped shadow of a container service is a deliberate, supported shape. A scoped constructor may be scanned before the container one it shadows, so the scoped render is deferred until the whole set of container identities is known. */
+    containerIdentityKeys := make(map[string]bool)
+    pendingScoped := make([]pendingScopedProvider, 0)
+
     for _, packageBinding := range request.BindSet.Packages() {
         /* both halves land in the generated file and in the walk: an empty import path renders an import of "", and an empty directory joins to the project root and silently scans the whole tree as one package */
         if "" == packageBinding.ImportPath() || "" == packageBinding.Directory() {
@@ -226,9 +230,13 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
             unusedDirectiveBinds = append(unusedDirectiveBinds, constructorUnusedDirectiveBinds...)
 
             if true == constructor.IsScoped {
-                scopedProviderBlocks = append(
-                    scopedProviderBlocks,
-                    renderProvider(constructor, resolvedArguments, importAliases),
+                /* deferred: whether it shadows a container service is decided after every container identity is known */
+                pendingScoped = append(
+                    pendingScoped,
+                    pendingScopedProvider{
+                        constructor:       constructor,
+                        resolvedArguments: resolvedArguments,
+                    },
                 )
 
                 report.ScopedConstructorCount = report.ScopedConstructorCount + 1
@@ -236,13 +244,25 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
                 continue
             }
 
+            containerIdentityKeys[serviceIdentityKey(constructor)] = true
+
             providerBlocks = append(
                 providerBlocks,
-                renderProvider(constructor, resolvedArguments, importAliases),
+                renderProvider(constructor, resolvedArguments, importAliases, false),
             )
 
             report.ConstructorCount = report.ConstructorCount + 1
         }
+    }
+
+    /* rendered now that every container identity is known: a scoped registration whose name or type the container also claims is emitted with WithReplacesContainerService, so the container admits the deliberate shadow instead of refusing it at boot */
+    for _, pending := range pendingScoped {
+        replacesContainerService := containerIdentityKeys[serviceIdentityKey(pending.constructor)]
+
+        scopedProviderBlocks = append(
+            scopedProviderBlocks,
+            renderProvider(pending.constructor, pending.resolvedArguments, importAliases, replacesContainerService),
+        )
     }
 
     report.UnusedBinds = collectUnusedBinds(request.BindSet, usedBinds, unusedDirectiveBinds)
@@ -259,22 +279,25 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     return source, report, nil
 }
 
-/* registrationKeyFor derives the key the emitted registration will claim in the container, so two constructors claiming one key fail at generation instead of at boot. A type registration is keyed by the returned type — import path and bare type name, with the pointer stars kept, since the container derives different names for T and *T — and a named registration by the constant that names it. The two lifetimes register through different registrars and do not collide with each other: a scoped registration of a type is what deliberately shadows the container one inside a scope. */
+/* registrationKeyFor derives the key the emitted registration will claim in the container, so two constructors claiming one key fail at generation instead of at boot. A type registration is keyed by the returned type — import path and bare type name — CANONICALIZED the way the container canonicalizes it: canonicalServiceType wraps a value type T in exactly one pointer and leaves a pointer as-is, so T and *T register under the identical name *T. Keeping the pointer stars raw would have derived different keys for T and *T while the container derives one, so a package declaring both a `func() Foo` and a `func() *Foo` passed generation and then panicked at boot on the second Register. A named registration is keyed by the constant that names it. The two lifetimes register through different registrars and do not collide with each other: a scoped registration of a type is what deliberately shadows the container one inside a scope, and that overlap is emitted with WithReplacesContainerService rather than left to fail at boot. */
 func registrationKeyFor(constructor *Constructor) string {
     lifetime := "container"
     if true == constructor.IsScoped {
         lifetime = "scoped"
     }
 
+    return lifetime + " " + serviceIdentityKey(constructor)
+}
+
+/* serviceIdentityKey is the name-or-type identity a registration claims, WITHOUT its lifetime — what the container refuses a duplicate on, and what a scoped registration shares with the container registration it shadows. It canonicalizes a type the way the container does (a single pointer star for T and *T alike), so the shadow detection and the collision detection both read the identity the container actually keys on. */
+func serviceIdentityKey(constructor *Constructor) string {
     if "" != constructor.ServiceNameIdentifier {
-        return lifetime + " name " + constructor.ImportPath + "." + constructor.ServiceNameIdentifier
+        return "name " + constructor.ImportPath + "." + constructor.ServiceNameIdentifier
     }
 
     typeName := constructor.ReturnType.Expression
 
-    stars := ""
     for true == strings.HasPrefix(typeName, "*") {
-        stars = stars + "*"
         typeName = strings.TrimPrefix(typeName, "*")
     }
 
@@ -282,13 +305,19 @@ func registrationKeyFor(constructor *Constructor) string {
         typeName = typeName[separatorIndex+1:]
     }
 
-    return lifetime + " type " + stars + constructor.ReturnType.ImportPath + "." + typeName
+    /* the single star is the canonical form: a value type and its pointer both name *T in the container, so both key on one star here */
+    return "type *" + constructor.ReturnType.ImportPath + "." + typeName
 }
 
 type resolvedArgument struct {
     argument      *Argument
     parameterName string
     variableName  string
+}
+
+type pendingScopedProvider struct {
+    constructor       *Constructor
+    resolvedArguments []*resolvedArgument
 }
 
 func resolveArguments(

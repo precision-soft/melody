@@ -688,3 +688,31 @@ func TestGenerate_ReportsAnUnusedExcludeWithItsImportPath(t *testing.T) {
         t.Fatalf("unexpected unused excludes: %v", report.UnusedExcludes)
     }
 }
+
+func TestServiceIdentityKey_ValueTypeAndItsPointerShareOneKey(t *testing.T) {
+    valueConstructor := &Constructor{
+        ImportPath: "example.com/app/domain",
+        ReturnType: &TypeReference{
+            Expression: "domain.Foo",
+            ImportPath: "example.com/app/domain",
+            IsPointer:  false,
+        },
+    }
+    pointerConstructor := &Constructor{
+        ImportPath: "example.com/app/domain",
+        ReturnType: &TypeReference{
+            Expression: "*domain.Foo",
+            ImportPath: "example.com/app/domain",
+            IsPointer:  true,
+        },
+    }
+
+    /* the container canonicalizes Foo and *Foo to one name (*Foo), so the generator's collision key must too, or two such constructors pass generation and panic at boot */
+    if serviceIdentityKey(valueConstructor) != serviceIdentityKey(pointerConstructor) {
+        t.Fatalf(
+            "expected a value type and its pointer to share one identity key; got %q and %q",
+            serviceIdentityKey(valueConstructor),
+            serviceIdentityKey(pointerConstructor),
+        )
+    }
+}

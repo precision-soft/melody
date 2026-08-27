@@ -3,6 +3,7 @@ package session
 import (
     "bytes"
     "encoding/json"
+    "errors"
     "io"
     "math"
     "os"
@@ -184,11 +185,13 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
 
     flushErr := instance.flushLocked()
     if nil != flushErr {
-        /* roll the in-memory entry back on a flush failure so a Save that returns an error is not observable through a later Load — the in-memory state must not diverge from what was persisted */
-        if true == hadPrevious {
-            instance.sessionById[sessionId] = previousEntry
-        } else {
-            delete(instance.sessionById, sessionId)
+        /* roll the in-memory entry back on a flush failure so a Save that returns an error is not observable through a later Load — the in-memory state must not diverge from what was persisted. The one exception is a failure that struck AFTER the new document was already written: there the disk holds the new snapshot, so keeping the in-memory entry is what matches it, and rolling back is what would diverge. */
+        if false == errors.Is(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
+            if true == hadPrevious {
+                instance.sessionById[sessionId] = previousEntry
+            } else {
+                delete(instance.sessionById, sessionId)
+            }
         }
 
         return flushErr
@@ -218,8 +221,10 @@ func (instance *FileStorage) Delete(sessionId string) error {
 
     flushErr := instance.flushLocked()
     if nil != flushErr {
-        /* restore the entry on a flush failure so a Delete that returns an error does not drop the session from the in-memory state while it is still persisted */
-        instance.sessionById[sessionId] = previousEntry
+        /* restore the entry on a flush failure so a Delete that returns an error does not drop the session from the in-memory state while it is still persisted — unless the failure struck after the new document (the one without this session) was already written, where the disk already reflects the deletion and keeping it deleted in memory is what matches. */
+        if false == errors.Is(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
+            instance.sessionById[sessionId] = previousEntry
+        }
 
         return flushErr
     }
@@ -498,17 +503,29 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
         return exception.NewError("failed to write session storage file", nil, err)
     }
 
+    /* past this point the new document sits at offset 0 in full, and readSessionFileFromHandle decodes exactly it — a single Decode consumes one JSON value and ignores any stale tail a shorter document leaves behind. So a Truncate or Sync failure now leaves the file already holding the NEW snapshot: rolling the in-memory entry back would make it disagree with what is on disk, the very divergence the rollback exists to prevent, only inverted. The failure is still reported, wrapped so Save/Delete keep the in-memory state that now matches the disk instead of undoing it. */
     err = fileInstance.Truncate(int64(buffer.Len()))
     if nil != err {
-        return exception.NewError("failed to truncate session storage file", nil, err)
+        return persistedDespiteFlushFailure("failed to truncate session storage file", err)
     }
 
     err = fileInstance.Sync()
     if nil != err {
-        return exception.NewError("failed to sync session storage file", nil, err)
+        return persistedDespiteFlushFailure("failed to sync session storage file", err)
     }
 
     return nil
+}
+
+/* errSessionStoragePersistedDespiteFlushFailure marks a flush failure that happened AFTER the new document was already laid down on disk, so the caller keeps its in-memory state rather than rolling it back to disagree with what is persisted. */
+var errSessionStoragePersistedDespiteFlushFailure = errors.New("session storage document was persisted before the flush step failed")
+
+func persistedDespiteFlushFailure(message string, cause error) error {
+    return exception.NewError(
+        message,
+        nil,
+        errors.Join(cause, errSessionStoragePersistedDespiteFlushFailure),
+    )
 }
 
 var _ sessioncontract.Storage = (*FileStorage)(nil)

@@ -327,16 +327,9 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
 ) eventcontract.ListenerRegistration {
     listenerProgramCounter := reflect.ValueOf(listener).Pointer()
 
+    /* the original event travels to the listener, not a reconstruction of it: the adapter is a drop-in for the plain dispatcher, which hands the listener the dispatched value itself, so a custom event type stays type-assertable and a field a listener writes is seen by the caller. Reconstructing through NewEventFromEvent discarded the concrete type and every non-propagation field, so the same listener saw a different object through the adapter than through the dispatcher. The wrapper stays only to carry the inspection metadata the registration records. */
     wrappedListener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-        contractEvent := NewEventFromEvent(eventValue)
-
-        listenerErr := listener(runtimeInstance, contractEvent)
-
-        if true == contractEvent.IsPropagationStopped() {
-            eventValue.StopPropagation()
-        }
-
-        return listenerErr
+        return listener(runtimeInstance, eventValue)
     }
 
     registration := instance.eventDispatcher.AddListener(

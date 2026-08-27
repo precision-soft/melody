@@ -206,6 +206,7 @@ func renderProvider(
     constructor *Constructor,
     resolvedArguments []*resolvedArgument,
     importAliases *importAliasTable,
+    replacesContainerService bool,
 ) string {
     assignVariableNames(constructor, resolvedArguments, importAliases)
 
@@ -299,6 +300,12 @@ func renderProvider(
     }
 
     builder.WriteString(indent + indent + "},\n")
+
+    /* a scoped registration whose name or type the container already claims declares WithReplacesContainerService, so the container admits the deliberate shadow rather than refusing it at boot */
+    if true == replacesContainerService {
+        builder.WriteString(indent + indent + containerAlias + ".WithReplacesContainerService(),\n")
+    }
+
     builder.WriteString(indent + ")\n")
 
     return builder.String()
