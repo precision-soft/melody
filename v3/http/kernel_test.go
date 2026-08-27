@@ -1488,47 +1488,6 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
     }
 }
 
-/* errorContextRecordingLogger captures every Error call with its context, so a test can assert not just that something was logged but what the record carries. */
-type errorContextRecordingLogger struct {
-    mutex         sync.Mutex
-    errorMessages []string
-    errorContexts []loggingcontract.Context
-}
-
-func (instance *errorContextRecordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
-}
-
-func (instance *errorContextRecordingLogger) Debug(message string, context loggingcontract.Context) {}
-
-func (instance *errorContextRecordingLogger) Info(message string, context loggingcontract.Context) {}
-
-func (instance *errorContextRecordingLogger) Warning(message string, context loggingcontract.Context) {
-}
-
-func (instance *errorContextRecordingLogger) Error(message string, context loggingcontract.Context) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.errorMessages = append(instance.errorMessages, message)
-    instance.errorContexts = append(instance.errorContexts, context)
-}
-
-func (instance *errorContextRecordingLogger) Emergency(message string, context loggingcontract.Context) {
-}
-
-func (instance *errorContextRecordingLogger) errorContextFor(message string) (loggingcontract.Context, bool) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    for index, loggedMessage := range instance.errorMessages {
-        if message == loggedMessage {
-            return instance.errorContexts[index], true
-        }
-    }
-
-    return nil, false
-}
-
 /* the recovery boundary must record the stack of the panic site: the error value alone names the symptom but not the line that raised it, and net/http's own stack print never fires for a panic this recovery absorbs — without the frames a production nil-pointer is unlocatable from the logs */
 
 func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {

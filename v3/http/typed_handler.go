@@ -3,10 +3,13 @@ package http
 import (
     nethttp "net/http"
     "reflect"
+    "runtime/debug"
 
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
+    "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -106,7 +109,7 @@ func boundBodyIsNil(body any) bool {
     return false
 }
 
-/* jsonHandlerError renders a pre-handler refusal. The application's responder runs under the kernel's own containment discipline — third-party code invoked from framework internals runs under a guard, because a panic here lands inside the failure path itself — and a responder that hands back no response leaves the original refusal standing: returned as it was, the kernel read the nil pair as a handler that answered nothing and served an empty 204, so a refused write reported success to its client with no record filed anywhere. */
+/* jsonHandlerError renders a pre-handler refusal. The application's responder runs under the kernel's own containment discipline — third-party code invoked from framework internals runs under a guard, because a panic here lands inside the failure path itself — and a responder that hands back no response leaves the original refusal standing: returned as it was, the kernel read the nil pair as a handler that answered nothing and served an empty 204, so a refused write reported success to its client with no record filed anywhere. A responder that panics leaves the same refusal standing, under a record of its own filed where the panic was caught. */
 func jsonHandlerError(
     settings *jsonHandlerOptions,
     runtimeInstance runtimecontract.Runtime,
@@ -143,6 +146,9 @@ func jsonHandlerError(
     return response, nil
 }
 
+/* invokeJsonHandlerErrorResponderSafely runs the application's responder under the kernel's own containment discipline, the one invokeErrorHandlerSafely keeps: the panic is recorded at the site that recovers it, with the stack of that site, because nothing downstream can still produce it — neither the recovered value nor the error the framework builds from it carries frames, so the journal held the refusal alone and named no place at all.
+
+   What stands is the refusal the responder was called to render, not the panic-derived error: replaced by it, a deliberate 400 recorded at warning was answered as a 500 recorded at error, and the decoder's own diagnosis was dropped on the way. */
 func invokeJsonHandlerErrorResponderSafely(
     responder JsonHandlerErrorResponder,
     runtimeInstance runtimecontract.Runtime,
@@ -158,10 +164,22 @@ func invokeJsonHandlerErrorResponderSafely(
         }
 
         response = nil
-        err = RecoverToError(recoveredValue)
-        if nil == err {
-            err = cause
+        err = cause
+
+        loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
+        if nil == loggerInstance {
+            return
         }
+
+        loggerInstance.Error(
+            "json handler error responder panicked",
+            exception.LogContext(
+                RecoverToError(recoveredValue),
+                exceptioncontract.Context{
+                    "panicStack": string(debug.Stack()),
+                },
+            ),
+        )
     }()
 
     return responder(runtimeInstance, request, status, message, cause)

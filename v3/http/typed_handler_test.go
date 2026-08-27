@@ -13,6 +13,8 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/internal/testhelper"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/precision-soft/melody/v3/session"
@@ -44,6 +46,21 @@ func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) runtimecontract
             config.HttpMaxRequestBodyBytesKey: strconv.Itoa(maxRequestBodyBytes),
         },
     )
+
+    serviceContainer.MustRegister(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            return validation.NewValidator(), nil
+        },
+    )
+
+    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+}
+
+/* the panicking-responder mirror needs the journal itself and not a nop: the record is filed at the recovery site, so the only reader that can see it is a logger installed on the runtime the handler is called with */
+func newJsonHandlerRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
 
     serviceContainer.MustRegister(
         validation.ServiceValidator,
@@ -354,7 +371,8 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
 }
 
 func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
-    runtimeInstance := newJsonHandlerRuntime()
+    recordingLogger := &errorContextRecordingLogger{}
+    runtimeInstance := newJsonHandlerRuntimeWithLogger(recordingLogger)
 
     handler := JsonHandler(
         func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
@@ -374,9 +392,31 @@ func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
 
-    _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
-    if nil == handleErr {
-        t.Fatalf("expected the contained panic to surface as an error")
+    response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != response {
+        t.Fatalf("expected no response from a responder that panicked, got %v", response)
+    }
+
+    /* the refusal the responder was called to render is what stands: the panic-derived error put in its place carried no status, so a deliberate 400 recorded at warning was answered as a 500 recorded at error */
+    requireJsonHandlerBadRequest(t, handleErr)
+
+    logContext, logged := recordingLogger.errorContextFor("json handler error responder panicked")
+    if false == logged {
+        t.Fatalf("expected the contained panic to be recorded where it was caught; nothing downstream can still produce it")
+    }
+
+    errorText, hasErrorText := logContext["error"].(string)
+    if false == hasErrorText || false == strings.Contains(errorText, "responder exploded") {
+        t.Fatalf("expected the record to name the panic, got context %v", logContext)
+    }
+
+    panicStack, hasStack := logContext["panicStack"].(string)
+    if false == hasStack || "" == panicStack {
+        t.Fatalf("expected the record to carry the panic-site stack, got context %v", logContext)
+    }
+
+    if false == strings.Contains(panicStack, "goroutine") {
+        t.Fatalf("expected a goroutine stack in the panicStack field, got %q", panicStack)
     }
 }
 

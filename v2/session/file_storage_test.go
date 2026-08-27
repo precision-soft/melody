@@ -1489,6 +1489,22 @@ func TestSyncSessionDirectory_AnswersTheDirectoryItCouldNotOpen(t *testing.T) {
     if false == strings.Contains(syncErr.Error(), "fsync") {
         t.Fatalf("expected the refusal to name the fsync step, got %v", syncErr)
     }
+
+    if false == errors.Is(syncErr, errSessionStoragePersistedDespiteFlushFailure) {
+        t.Fatalf("expected the post-rename refusal to carry the persisted-despite-flush mark, got %s", syncErr.Error())
+    }
+}
+
+/* fsync of a character device is refused, which is the directory flush failing after the open succeeded — the branch the missing directory never reaches. It carries the same mark for the same reason: the rename that preceded it already put the document at its path. */
+func TestSyncSessionDirectory_MarksTheRefusedFlushAsPersisted(t *testing.T) {
+    syncErr := syncSessionDirectory(os.DevNull)
+    if nil == syncErr {
+        t.Fatal("expected the character device to refuse the flush")
+    }
+
+    if false == errors.Is(syncErr, errSessionStoragePersistedDespiteFlushFailure) {
+        t.Fatalf("expected the post-rename refusal to carry the persisted-despite-flush mark, got %s", syncErr.Error())
+    }
 }
 
 func TestSyncSessionDirectory_AcceptsARealDirectory(t *testing.T) {

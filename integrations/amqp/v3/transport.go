@@ -162,14 +162,14 @@ func (instance *Transport) Send(
 func (instance *Transport) Receive(
     runtimeInstance runtimecontract.Runtime,
 ) (<-chan messagebuscontract.Envelope, error) {
-    channel, deliveries, subscribeErr := instance.subscribeWithRetry(runtimeInstance)
+    channel, generation, deliveries, subscribeErr := instance.subscribeWithRetry(runtimeInstance)
     if nil != subscribeErr {
         return nil, subscribeErr
     }
 
     out := make(chan messagebuscontract.Envelope)
 
-    if false == instance.startConsumeLoop(runtimeInstance, channel, deliveries, out) {
+    if false == instance.startConsumeLoop(runtimeInstance, channel, generation, deliveries, out) {
         channel.Close()
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)
@@ -180,7 +180,7 @@ func (instance *Transport) Receive(
 
 func (instance *Transport) subscribeWithRetry(
     runtimeInstance runtimecontract.Runtime,
-) (*amqp091.Channel, <-chan amqp091.Delivery, error) {
+) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
     backoff := clampedInitialBackoff(instance.reconnect)
 
     return instance.retrySubscribe(runtimeInstance, &backoff, true, "amqp initial subscribe failed, retrying")
@@ -281,7 +281,7 @@ func ignoringAlreadyClosed(closeErr error) error {
     return closeErr
 }
 
-/* the consume goroutine's own helpers (isClosing, currentGeneration, resetConsumeChannel) take instance.mutex, so the join must run with that mutex released or Close deadlocks against the goroutine it is waiting for. */
+/* the consume goroutine's own helpers (isClosing, resetConsumeChannel, ensureConsumeChannel on the reopen path) take instance.mutex, so the join must run with that mutex released or Close deadlocks against the goroutine it is waiting for. */
 func (instance *Transport) awaitConsumeLoop() {
     joined := make(chan struct{})
 
@@ -598,25 +598,26 @@ func (instance *Transport) resetConsumeChannel(failed *amqp091.Channel) {
     instance.consumeChannel = nil
 }
 
-/* subscribe returns the channel even when Consume refuses, so the retry path can reset exactly the channel it failed on rather than whatever is cached by then. */
-func (instance *Transport) subscribe() (*amqp091.Channel, <-chan amqp091.Delivery, error) {
-    channel, channelErr := instance.ensureConsumeChannel()
+/* subscribe returns the channel even when Consume refuses, so the retry path can reset exactly the channel it failed on rather than whatever is cached by then. The generation travels beside the channel all the way to the consume loop, so the deliveries of a subscription are always stamped with the generation of the channel that carried them. */
+func (instance *Transport) subscribe() (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
+    channel, generation, channelErr := instance.ensureConsumeChannel()
     if nil != channelErr {
-        return nil, nil, channelErr
+        return nil, 0, nil, channelErr
     }
 
     deliveries, consumeErr := channel.Consume(instance.queue, "", false, false, false, false, nil)
     if nil != consumeErr {
-        return channel, nil, exception.NewError("amqp consume failed", map[string]any{"queue": instance.queue}, consumeErr)
+        return channel, generation, nil, exception.NewError("amqp consume failed", map[string]any{"queue": instance.queue}, consumeErr)
     }
 
-    return channel, deliveries, nil
+    return channel, generation, deliveries, nil
 }
 
 /* the Add and the Done live together here so consumeLoop carries no precondition a caller must remember, and Close joins whatever this started. The Add is taken under the mutex Close sets closing under, so a loop can never be started after Close observed the count — which would both escape the join and race the Wait already in flight. */
 func (instance *Transport) startConsumeLoop(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
+    generation uint64,
     deliveries <-chan amqp091.Delivery,
     out chan messagebuscontract.Envelope,
 ) bool {
@@ -635,7 +636,7 @@ func (instance *Transport) startConsumeLoop(
     go func() {
         defer instance.wait.Done()
 
-        instance.consumeLoop(runtimeInstance, channel, deliveries, out)
+        instance.consumeLoop(runtimeInstance, channel, generation, deliveries, out)
     }()
 
     return true
@@ -644,6 +645,7 @@ func (instance *Transport) startConsumeLoop(
 func (instance *Transport) consumeLoop(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
+    generation uint64,
     deliveries <-chan amqp091.Delivery,
     out chan messagebuscontract.Envelope,
 ) {
@@ -653,7 +655,7 @@ func (instance *Transport) consumeLoop(
 
     for {
         startedAt := time.Now()
-        if forwardDone == instance.forwardDeliveries(runtimeInstance, channel, deliveries, out) {
+        if forwardDone == instance.forwardDeliveries(runtimeInstance, channel, generation, deliveries, out) {
             return
         }
 
@@ -691,7 +693,7 @@ func (instance *Transport) consumeLoop(
             backoff = nextReconnectBackoff(instance.reconnect, backoff)
         }
 
-        reopenedChannel, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
+        reopenedChannel, reopenedGeneration, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
         if nil != reopenErr {
             if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
                 instance.logError(runtimeInstance, "amqp consumer failed to reopen its channel and is stopping", reopenErr)
@@ -701,6 +703,7 @@ func (instance *Transport) consumeLoop(
         }
 
         channel = reopenedChannel
+        generation = reopenedGeneration
         deliveries = reopenedDeliveries
     }
 }
@@ -823,19 +826,19 @@ func (instance *Transport) retrySubscribe(
     backoff *time.Duration,
     resetEachAttempt bool,
     logMessage string,
-) (*amqp091.Channel, <-chan amqp091.Delivery, error) {
+) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
     for {
-        channel, deliveries, subscribeErr := instance.subscribe()
+        channel, generation, deliveries, subscribeErr := instance.subscribe()
         if nil == subscribeErr {
-            return channel, deliveries, nil
+            return channel, generation, deliveries, nil
         }
 
         if nil != runtimeInstance.Context().Err() || true == instance.isClosing() {
-            return nil, nil, subscribeErr
+            return nil, 0, nil, subscribeErr
         }
 
         if false == instance.subscribeRetryable() {
-            return nil, nil, subscribeErr
+            return nil, 0, nil, subscribeErr
         }
 
         instance.logError(runtimeInstance, logMessage, subscribeErr)
@@ -845,7 +848,7 @@ func (instance *Transport) retrySubscribe(
         }
 
         if false == instance.waitForRetry(runtimeInstance, *backoff) {
-            return nil, nil, subscribeErr
+            return nil, 0, nil, subscribeErr
         }
 
         *backoff = nextReconnectBackoff(instance.reconnect, *backoff)
@@ -855,7 +858,7 @@ func (instance *Transport) retrySubscribe(
 func (instance *Transport) reopenConsume(
     runtimeInstance runtimecontract.Runtime,
     backoff *time.Duration,
-) (*amqp091.Channel, <-chan amqp091.Delivery, error) {
+) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
     return instance.retrySubscribe(runtimeInstance, backoff, true, "amqp reconnect attempt failed, backing off")
 }
 
@@ -1046,14 +1049,14 @@ func (instance *Transport) currentGeneration() uint64 {
     return instance.consumeGeneration
 }
 
+/* the generation stamped on every delivery is the one handed down with the channel that carried it, never the transport-wide counter read here. A channel closed by the broker hands its buffered deliveries out as it tears down — the amqp client's buffer goroutine sees the closed signal and a waiting receiver at the same time and picks between them at random — so this loop can still be draining generation G's queue after a reconnect installed G+1. Stamping those with the counter makes them match consumeChannelForAck, the ack guard passes, and the ack lands on the FRESH channel under a delivery tag that restarts at one there: it acknowledges an unrelated in-flight message, or the broker refuses the precondition and kills the healthy channel. */
 func (instance *Transport) forwardDeliveries(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
+    generation uint64,
     deliveries <-chan amqp091.Delivery,
     out chan messagebuscontract.Envelope,
 ) forwardReason {
-    generation := instance.currentGeneration()
-
     for {
         select {
         case <-runtimeInstance.Context().Done():
@@ -1269,38 +1272,40 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp
     return channel, returns, nil
 }
 
-func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
+/* ensureConsumeChannel answers the generation belonging to the channel it answers, read under the same mutex hold that read the channel. The counter is transport-wide and only ever moves forward, so a later read of it is never the generation of an older channel — it is the generation of a NEWER one, and that is the direction that defeats the ack guard, which passes exactly when a stamp matches the current generation. The pairing therefore travels with the channel from here rather than being recovered from the counter afterwards. */
+func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, uint64, error) {
     instance.mutex.Lock()
     closing := instance.closing
     existing := instance.consumeChannel
+    existingGeneration := instance.consumeGeneration
     instance.mutex.Unlock()
 
     if true == closing {
-        return nil, exception.NewError("amqp transport is closing", nil, nil)
+        return nil, 0, exception.NewError("amqp transport is closing", nil, nil)
     }
 
     if nil != existing && false == existing.IsClosed() {
-        return existing, nil
+        return existing, existingGeneration, nil
     }
 
     connection, connectErr := instance.connect()
     if nil != connectErr {
-        return nil, connectErr
+        return nil, 0, connectErr
     }
 
     channel, channelErr := connection.Channel()
     if nil != channelErr {
-        return nil, exception.NewError("amqp channel open failed", map[string]any{"queue": instance.queue}, channelErr)
+        return nil, 0, exception.NewError("amqp channel open failed", map[string]any{"queue": instance.queue}, channelErr)
     }
 
     if topologyErr := instance.declareTopology(channel); nil != topologyErr {
         channel.Close()
-        return nil, topologyErr
+        return nil, 0, topologyErr
     }
 
     if qosErr := channel.Qos(instance.prefetch, 0, false); nil != qosErr {
         channel.Close()
-        return nil, exception.NewError("amqp qos failed", map[string]any{"queue": instance.queue}, qosErr)
+        return nil, 0, exception.NewError("amqp qos failed", map[string]any{"queue": instance.queue}, qosErr)
     }
 
     instance.mutex.Lock()
@@ -1308,18 +1313,18 @@ func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, error) {
 
     if true == instance.closing {
         channel.Close()
-        return nil, exception.NewError("amqp transport is closing", nil, nil)
+        return nil, 0, exception.NewError("amqp transport is closing", nil, nil)
     }
 
     if nil != instance.consumeChannel && false == instance.consumeChannel.IsClosed() {
         channel.Close()
-        return instance.consumeChannel, nil
+        return instance.consumeChannel, instance.consumeGeneration, nil
     }
 
     instance.consumeChannel = channel
     instance.consumeGeneration++
 
-    return channel, nil
+    return channel, instance.consumeGeneration, nil
 }
 
 func (instance *Transport) declareTopology(channel *amqp091.Channel) error {

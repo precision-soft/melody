@@ -4,6 +4,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "reflect"
     "strconv"
     "time"
 
@@ -122,7 +123,8 @@ func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(runErr, &provider) && nil != provider {
+    /* the As target is read through the typed-nil door, not through a plain nil comparison: a typed-nil link satisfies As, passes that comparison and then takes a read lock on a nil receiver inside Context(), panicking in the very rendering that was reporting the failure — and the panic unwinds finish, so the document the pipeline reads is never written and the failure is lost. bun's migrator produces exactly that link: it wraps the application's migration-function error with %w after a plain nil test, and fmt records the operand before formatting it. errorCauseOf below reaches the same conclusion through BuildCauseChain, which skips typed-nil links of its own accord. */
+    if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
         }
@@ -139,6 +141,22 @@ func errorCauseOf(runErr error) *output.ErrorCause {
     }
 
     return output.NewErrorCause(causeChain[0], map[string]any{"chain": causeChain})
+}
+
+/* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */
+func isNilInterface(value any) bool {
+    if nil == value {
+        return true
+    }
+
+    reflected := reflect.ValueOf(value)
+
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
 }
 
 /* pluralizeMigrations renders the applied count the way a log line reads it, so a single migration does not report "1 migrations" */

@@ -4,6 +4,7 @@ import (
     "bytes"
     "encoding/json"
     "errors"
+    "fmt"
     "strings"
     "testing"
     "time"
@@ -486,6 +487,52 @@ func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T
 
     if nil != document.Error.Cause {
         t.Fatalf("expected no cause for a failure that has none, got %#v", document.Error.Cause)
+    }
+}
+
+/* a typed-nil *exception.Error under a fmt wrap satisfies errors.As and passes a plain nil comparison, and Context() on the nil receiver takes a read lock on a nil pointer. The chain below is the shape bun's migrator produces: it wraps the application's migration-function error with %w after a plain nil test that a typed nil passes, and fmt records the operand before formatting it, so the wrap exists and carries the typed nil while its own text reads "<nil>". The panic would unwind the command's finish defer and the cli runner would re-panic it, so the json document — and with it the real failure — would never be written. */
+func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+
+    runErr := fmt.Errorf("20240101000000_create_users: up: %w", (*exception.Error)(nil))
+
+    var provider exceptioncontract.ContextProvider
+    if false == errors.As(runErr, &provider) {
+        t.Fatal("expected the typed-nil link to satisfy errors.As, otherwise this guard is aimed at nothing")
+    }
+    if nil == provider {
+        t.Fatal("expected the typed nil to pass a plain nil comparison, otherwise this guard is aimed at nothing")
+    }
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Message, "20240101000000_create_users") {
+        t.Fatalf("expected the wrap's own sentence in the message, got %q", document.Error.Message)
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the typed-nil link to contribute no details, got %#v", document.Error.Details)
     }
 }
 

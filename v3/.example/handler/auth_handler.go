@@ -63,7 +63,8 @@ func LoginHandler() melodyhttpcontract.Handler {
             password,
         )
         if nil != authenticationErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", authenticationErr.Error()), nil
+            /* the cause stays out of the errors list on purpose: it names internals — a cache refusal, a store address — and this is an unauthenticated door; ApiErrorWithErr keeps it in the debug-gated context instead */
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", authenticationErr), nil
         }
 
         if false == authenticated {

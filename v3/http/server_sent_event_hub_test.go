@@ -493,7 +493,7 @@ func TestServerSentEventHub_IsClosedTellsAShutDownHubFromAnEndedStream(t *testin
     }
 }
 
-/* a backplane whose Publish is held open, so the shutdown window can be forced rather than raced */
+/* a backplane whose Publish is held open, so the shutdown and replacement windows can be forced rather than raced */
 type gatedBackplane struct {
     entered  chan struct{}
     release  chan struct{}
@@ -557,5 +557,47 @@ func TestServerSentEventHub_ShutdownWaitsForAnInFlightPublishBeforeClosingTheBac
     case <-shutdownReturned:
     case <-time.After(2 * time.Second):
         t.Fatalf("shutdown did not return after the publish finished")
+    }
+}
+
+func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *testing.T) {
+    hub := NewServerSentEventHub()
+    backplane := newGatedBackplane()
+    hub.SetBackplane(backplane)
+
+    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+
+    <-backplane.entered
+
+    clearReturned := make(chan struct{})
+    go func() {
+        hub.SetBackplane(nil)
+        close(clearReturned)
+    }()
+
+    /* the sequence the contract prescribes is clear, close what you took out, install the replacement: a clear that returns while a publish is still inside the backplane hands the caller a backplane to close under that publish — a cancelled context on one shipped backplane and a shut channel on the other, both recorded as an outage that never happened, and the event in flight never reaching the other nodes */
+    select {
+    case <-clearReturned:
+        t.Fatalf("clearing the backplane returned while a publish was in flight")
+    case <-backplane.closed:
+        t.Fatalf("the backplane was closed under an in-flight publish")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    close(backplane.release)
+
+    select {
+    case <-clearReturned:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("clearing the backplane did not return after the publish finished")
+    }
+
+    /* what the caller took out is closed by its own hand, now that nothing holds it */
+    if closeErr := backplane.Close(); nil != closeErr {
+        t.Fatalf("expected the backplane taken out of the hub to close cleanly, got %v", closeErr)
+    }
+
+    if 0 != hub.BackplaneFailures() {
+        t.Fatalf("expected no backplane failure to be recorded, got %d", hub.BackplaneFailures())
     }
 }

@@ -246,9 +246,13 @@ func (instance *Manager) DeleteSession(sessionId string) error {
     sessionMutex.Lock()
     defer sessionMutex.Unlock()
 
-    instance.buryTombstone(sessionId)
+    /* only a removal that actually happened earns a tombstone. Nothing lifts a burial before its retention window lapses, so one laid over a storage refusal refuses every later save of an id whose entry is still there: the caller is handed a transient error, its next SaveSession answers ErrSessionDeleted, and the response path reads that refusal as a deliberate logout and expires the browser cookie — a storage blip logs the user out of a session that was never removed. The burial stays inside this section and follows the removal, so a save waiting on this lock still finds the tombstone whenever the entry did go. */
+    deleteErr := instance.storage.Delete(sessionId)
+    if nil == deleteErr {
+        instance.buryTombstone(sessionId)
+    }
 
-    return instance.storage.Delete(sessionId)
+    return deleteErr
 }
 
 /* sessionIdLogReference answers a short one-way reference to a session id for an error context that may be logged: a truncated SHA-256, enough to correlate records without carrying the id itself, so a log reader cannot present it as a cookie. The http response path folds a live id the same way; this one covers the ids the manager itself names in refusals. */

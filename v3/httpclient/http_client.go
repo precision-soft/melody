@@ -192,6 +192,11 @@ func sanitizeUrlForDiagnostics(urlString string) string {
         parsed.User = url.UserPassword(redactedValue, redactedValue)
     }
 
+    if "" != parsed.Opaque {
+        /* an opaque url keeps its whole reference in one unparsed span, so net/url finds no userinfo in it and the branch above has nothing to redact: "http:user:secret@host/path" parses with a nil User and String writes the span back verbatim. The credential is in the text and only a textual cut reaches it. */
+        parsed.Opaque = redactAuthorityUserinfo(parsed.Opaque, 0)
+    }
+
     if "" != parsed.RawQuery {
         queryValues := parsed.Query()
         for key := range queryValues {
@@ -209,7 +214,7 @@ func sanitizeUrlForDiagnostics(urlString string) string {
 
 const redactedValue = "xxxxx"
 
-/* sanitizeUrlTextually removes the userinfo and the whole query from a url net/url refused to parse. */
+/* sanitizeUrlTextually removes the userinfo and the whole query from a url net/url refused to parse. The userinfo is cut wherever the reference can carry one, not only after a scheme separator: net/url refuses on a bad port, a control character, a broken percent escape or an unclosed bracket, and a reference spelled "//user:secret@host:notaport/path" reaches this function with a credential and no "://" in it at all. */
 func sanitizeUrlTextually(urlString string) string {
     sanitized := urlString
 
@@ -217,28 +222,74 @@ func sanitizeUrlTextually(urlString string) string {
         sanitized = sanitized[:queryStart] + "?" + redactedValue
     }
 
-    schemeEnd := strings.Index(sanitized, "://")
-    if 0 > schemeEnd {
+    authorityStart, hasAuthority := authorityStartIndex(sanitized)
+    if false == hasAuthority {
         return sanitized
     }
 
-    authorityStart := schemeEnd + len("://")
+    return redactAuthorityUserinfo(sanitized, authorityStart)
+}
 
-    authorityEnd := strings.Index(sanitized[authorityStart:], "/")
+/* authorityStartIndex reports where the region that can hold a userinfo begins: after the "://" of an absolute url, after the leading "//" of a scheme-relative reference, or after the ":" of an opaque one, whose remainder spells a userinfo exactly the same way. A reference with none of the three is a relative path, it has no authority, and an "@" inside it belongs to the path. */
+func authorityStartIndex(value string) (int, bool) {
+    if schemeEnd := strings.Index(value, "://"); 0 <= schemeEnd {
+        return schemeEnd + len("://"), true
+    }
+
+    if true == strings.HasPrefix(value, "//") {
+        return len("//"), true
+    }
+
+    if schemeEnd := schemeSeparatorIndex(value); 0 <= schemeEnd {
+        return schemeEnd + len(":"), true
+    }
+
+    return 0, false
+}
+
+/* schemeSeparatorIndex reports the index of the ":" that closes a scheme at the head of the value, or -1 when the value does not open with one. The grammar is the one net/url applies: a letter, then letters, digits, "+", "-" and "."; a relative path that merely contains a colon is not a scheme, and neither is a value that opens with the colon itself. */
+func schemeSeparatorIndex(value string) int {
+    for index := 0; index < len(value); index++ {
+        currentByte := value[index]
+
+        switch {
+        case ':' == currentByte:
+            if 0 == index {
+                return -1
+            }
+
+            return index
+        case ('a' <= currentByte && 'z' >= currentByte) || ('A' <= currentByte && 'Z' >= currentByte):
+            continue
+        case 0 == index:
+            return -1
+        case ('0' <= currentByte && '9' >= currentByte) || '+' == currentByte || '-' == currentByte || '.' == currentByte:
+            continue
+        default:
+            return -1
+        }
+    }
+
+    return -1
+}
+
+/* redactAuthorityUserinfo replaces the userinfo of the authority beginning at authorityStart with the redacted pair, and returns the value as it stands when that authority carries none. The authority ends at the first path separator after it, so an "@" belonging to the path is left where it is. */
+func redactAuthorityUserinfo(value string, authorityStart int) string {
+    authorityEnd := strings.Index(value[authorityStart:], "/")
     if 0 > authorityEnd {
-        authorityEnd = len(sanitized)
+        authorityEnd = len(value)
     } else {
         authorityEnd += authorityStart
     }
 
-    userinfoEnd := strings.LastIndex(sanitized[authorityStart:authorityEnd], "@")
+    userinfoEnd := strings.LastIndex(value[authorityStart:authorityEnd], "@")
     if 0 > userinfoEnd {
-        return sanitized
+        return value
     }
 
-    return sanitized[:authorityStart] +
+    return value[:authorityStart] +
         redactedValue + ":" + redactedValue +
-        sanitized[authorityStart+userinfoEnd:]
+        value[authorityStart+userinfoEnd:]
 }
 
 func (instance *HttpClient) Get(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {

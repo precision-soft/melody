@@ -170,10 +170,10 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     scopedProviderBlocks := make([]string, 0)
     unusedDirectiveBinds := make([]string, 0)
 
-    /* two constructors that register under one container key panic at the first boot of the generated file, far from the generation that reported success; the collision is keyed here exactly as the emitted registration keys it — by the returned type for a type registration, by the named constant for a named one — so it fails at generation, naming both sites. A name constant's VALUE is not read from the source, so a type registration and a name registration that happen to spell the same service name, or two distinct constants holding one value, stay out of reach of this check. */
+    /* two constructors that register under one container key panic at the first boot of the generated file, far from the generation that reported success; the collision is keyed here exactly as the emitted registration keys it — a named registration claims its constant AND the returned type, a type registration claims the type — so it fails at generation, naming both sites. A name constant's VALUE is not read from the source, so a type registration and a name registration that happen to spell the same service name, or two distinct constants holding one value, stay out of reach of this check. */
     registrationSites := make(map[string]*Constructor)
 
-    /* the identity (name or type, no lifetime) of every CONTAINER registration, so a scoped registration that shares one is emitted with WithReplacesContainerService instead of panicking at boot: the container refuses a scoped registration whose name or type it already claims unless that option is set, and a scoped shadow of a container service is a deliberate, supported shape. A scoped constructor may be scanned before the container one it shadows, so the scoped render is deferred until the whole set of container identities is known. */
+    /* every identity (name and type, no lifetime) of every CONTAINER registration, so a scoped registration that shares one is emitted with WithReplacesContainerService instead of panicking at boot: the container refuses a scoped registration whose name or type it already claims unless that option is set, and a scoped shadow of a container service is a deliberate, supported shape. A scoped constructor may be scanned before the container one it shadows, so the scoped render is deferred until the whole set of container identities is known. */
     containerIdentityKeys := make(map[string]bool)
     pendingScoped := make([]pendingScopedProvider, 0)
 
@@ -204,8 +204,13 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         }
 
         for _, constructor := range scanResult.Constructors {
-            registrationKey := registrationKeyFor(constructor)
-            if existing, taken := registrationSites[registrationKey]; true == taken {
+            registrationKeys := registrationKeysFor(constructor)
+            for _, registrationKey := range registrationKeys {
+                existing, taken := registrationSites[registrationKey]
+                if false == taken {
+                    continue
+                }
+
                 return "", nil, exception.NewError(
                     "two constructors register the same service",
                     map[string]any{
@@ -215,7 +220,11 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
                     nil,
                 )
             }
-            registrationSites[registrationKey] = constructor
+
+            for _, registrationKey := range registrationKeys {
+                registrationSites[registrationKey] = constructor
+            }
+
             resolvedArguments, constructorUnusedDirectiveBinds, resolveErr := resolveArguments(
                 constructor,
                 packageBinding,
@@ -244,7 +253,9 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
                 continue
             }
 
-            containerIdentityKeys[serviceIdentityKey(constructor)] = true
+            for _, identityKey := range serviceIdentityKeys(constructor) {
+                containerIdentityKeys[identityKey] = true
+            }
 
             providerBlocks = append(
                 providerBlocks,
@@ -257,7 +268,14 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
 
     /* rendered now that every container identity is known: a scoped registration whose name or type the container also claims is emitted with WithReplacesContainerService, so the container admits the deliberate shadow instead of refusing it at boot */
     for _, pending := range pendingScoped {
-        replacesContainerService := containerIdentityKeys[serviceIdentityKey(pending.constructor)]
+        replacesContainerService := false
+        for _, identityKey := range serviceIdentityKeys(pending.constructor) {
+            if true == containerIdentityKeys[identityKey] {
+                replacesContainerService = true
+
+                break
+            }
+        }
 
         scopedProviderBlocks = append(
             scopedProviderBlocks,
@@ -279,22 +297,38 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     return source, report, nil
 }
 
-/* registrationKeyFor derives the key the emitted registration will claim in the container, so two constructors claiming one key fail at generation instead of at boot. A type registration is keyed by the returned type — import path and bare type name — CANONICALIZED the way the container canonicalizes it: canonicalServiceType wraps a value type T in exactly one pointer and leaves a pointer as-is, so T and *T register under the identical name *T. Keeping the pointer stars raw would have derived different keys for T and *T while the container derives one, so a package declaring both a `func() Foo` and a `func() *Foo` passed generation and then panicked at boot on the second Register. A named registration is keyed by the constant that names it. The two lifetimes register through different registrars and do not collide with each other: a scoped registration of a type is what deliberately shadows the container one inside a scope, and that overlap is emitted with WithReplacesContainerService rather than left to fail at boot. */
-func registrationKeyFor(constructor *Constructor) string {
+/* registrationKeysFor derives every key the emitted registration will claim in the container, each carrying its lifetime, so two constructors claiming one key fail at generation instead of at boot. The two lifetimes register through different registrars and do not collide with each other: a scoped registration is what deliberately shadows the container one inside a scope, and that overlap is emitted with WithReplacesContainerService rather than left to fail at boot. */
+func registrationKeysFor(constructor *Constructor) []string {
     lifetime := "container"
     if true == constructor.IsScoped {
         lifetime = "scoped"
     }
 
-    return lifetime + " " + serviceIdentityKey(constructor)
-}
-
-/* serviceIdentityKey is the name-or-type identity a registration claims, WITHOUT its lifetime — what the container refuses a duplicate on, and what a scoped registration shares with the container registration it shadows. It canonicalizes a type the way the container does (a single pointer star for T and *T alike), so the shadow detection and the collision detection both read the identity the container actually keys on. */
-func serviceIdentityKey(constructor *Constructor) string {
-    if "" != constructor.ServiceNameIdentifier {
-        return "name " + constructor.ImportPath + "." + constructor.ServiceNameIdentifier
+    keys := serviceIdentityKeys(constructor)
+    for index, identityKey := range keys {
+        keys[index] = lifetime + " " + identityKey
     }
 
+    return keys
+}
+
+/* serviceIdentityKeys are the identities a registration claims, WITHOUT its lifetime — what the container refuses a duplicate on, and what a scoped registration shares with the container registration it shadows.
+
+   The returned type is always among them, because the emitted registration always claims it: the container's default register option carries AlsoRegisterType with a STRICT type registration, and nothing emitted opts out of it, so a named registration claims its constant AND the type, and one type answered by two names is refused. Keying a named registration by its constant alone would model half of what it claims: two constructors under different names returning one type would pass generation and panic at boot on the second Register, and a scoped shadow of a NAMED container service would render bare, to be refused by the container that already claims its type.
+
+   A type registration claims a name too, derived from the type at runtime; it is not keyed here because a constant's VALUE is not read from the source and the two cannot be compared. */
+func serviceIdentityKeys(constructor *Constructor) []string {
+    keys := make([]string, 0, 2)
+
+    if "" != constructor.ServiceNameIdentifier {
+        keys = append(keys, "name "+constructor.ImportPath+"."+constructor.ServiceNameIdentifier)
+    }
+
+    return append(keys, serviceTypeIdentityKey(constructor))
+}
+
+/* serviceTypeIdentityKey keys the returned type — import path and bare type name — CANONICALIZED the way the container canonicalizes it: canonicalServiceType wraps a value type T in exactly one pointer and leaves a pointer as-is, so T and *T register under the identical name *T. Keeping the pointer stars raw would derive different keys for T and *T while the container derives one, so a package declaring both a `func() Foo` and a `func() *Foo` would pass generation and then panic at boot on the second Register. */
+func serviceTypeIdentityKey(constructor *Constructor) string {
     typeName := constructor.ReturnType.Expression
 
     for true == strings.HasPrefix(typeName, "*") {

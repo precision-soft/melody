@@ -1813,6 +1813,41 @@ func TestMatchesHost_ComparesThePortWhenTheRouteDeclaredOne(t *testing.T) {
     }
 }
 
+func TestMatchesHost_ReachesABracketedIpv6RouteBehindAPort(t *testing.T) {
+    /* the colons of a bracketed literal are the address's own: read as a declared port they made every route bound to one unreachable behind any port, which is every developer machine and every ipv6 deployment that does not answer on 443 */
+    if false == matchesHost("[::1]", "[::1]:8080") {
+        t.Fatalf("expected a route bound to a bracketed ipv6 literal to be reachable behind a port")
+    }
+
+    if false == matchesHost("[2001:db8::1]", "[2001:DB8::1]:8443") {
+        t.Fatalf("expected the bracketed literal to fold case the way every other host does")
+    }
+}
+
+func TestMatchesHost_ComparesThePortWhenTheBracketedRouteDeclaredOne(t *testing.T) {
+    if false == matchesHost("[::1]:8080", "[::1]:8080") {
+        t.Fatalf("expected the declared port of a bracketed route to match itself")
+    }
+
+    if true == matchesHost("[::1]:8080", "[::1]:9999") {
+        t.Fatalf("expected a bracketed route that declares a port to discriminate on it")
+    }
+
+    if true == matchesHost("[::1]:8080", "[::1]") {
+        t.Fatalf("expected a bracketed route that declares a port not to match a request without one")
+    }
+}
+
+func TestMatchesHost_StillRefusesADifferentIpv6Host(t *testing.T) {
+    if true == matchesHost("[::1]", "[::2]:8080") {
+        t.Fatalf("expected a different ipv6 host to be refused")
+    }
+
+    if true == matchesHost("[::1]", "api.example.com:8080") {
+        t.Fatalf("expected a name host to be refused by a route bound to an ipv6 literal")
+    }
+}
+
 func TestMatchesHost_StillRefusesADifferentHost(t *testing.T) {
     if true == matchesHost("api.example.com", "evil.example.com") {
         t.Fatalf("expected a different host to be refused")

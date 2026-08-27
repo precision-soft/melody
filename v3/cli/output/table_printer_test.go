@@ -586,3 +586,145 @@ func TestTablePrinter_WrapsByDisplayCellsNotRunes(t *testing.T) {
         t.Fatalf("expected the ideograms sliced two cells each, got %#v", lines)
     }
 }
+
+/* this printer keeps a newline as a real line break, so a cell's width is the width of its widest LINE. Measured whole, "12345\n67890" reads eleven cells wide — a column sized for text no line ever renders. */
+func TestTablePrinter_MeasuresAMultiLineCellByItsWidestLine(t *testing.T) {
+    printer := NewDefaultTablePrinter()
+
+    envelope := Envelope{
+        Table: &TableData{
+            Blocks: []TableBlock{
+                {
+                    Columns: []string{"trace", "note"},
+                    Rows: [][]string{
+                        {"12345\n67890", "ok"},
+                    },
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+    if err := printer.Print(buffer, envelope, Option{Quiet: true}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    separator := ""
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if true == strings.HasPrefix(line, "| -") {
+            separator = line
+        }
+    }
+    if "" == separator {
+        t.Fatalf("expected a separator row in the output, got %q", buffer.String())
+    }
+
+    if "| ----- | ---- |" != separator {
+        t.Fatalf("expected the multi-line cell measured by its widest line (5), got %q", separator)
+    }
+}
+
+/* the phantom width a whole-string measure invents is counted into the maximum-width arithmetic, so the sibling columns are shrunk to pay for it */
+func TestTablePrinter_DoesNotShrinkASiblingColumnForAMultiLineCellsPhantomWidth(t *testing.T) {
+    printer := NewTablePrinter(30)
+
+    tallCell := strings.TrimSuffix(strings.Repeat("abc\n", 10), "\n")
+
+    envelope := Envelope{
+        Table: &TableData{
+            Blocks: []TableBlock{
+                {
+                    Columns: []string{"trace", "description"},
+                    Rows: [][]string{
+                        {tallCell, "abcdefghijklmno"},
+                    },
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+    if err := printer.Print(buffer, envelope, Option{Quiet: true}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    separator := ""
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if true == strings.HasPrefix(line, "| -") {
+            separator = line
+        }
+    }
+    if "" == separator {
+        t.Fatalf("expected a separator row in the output, got %q", buffer.String())
+    }
+
+    /* ten lines of three cells measure three, not thirty-nine: the table fits the cap whole and neither column is shrunk */
+    if "| ----- | --------------- |" != separator {
+        t.Fatalf("expected both columns at their measured widths, got %q", separator)
+    }
+
+    if false == strings.Contains(buffer.String(), "abcdefghijklmno") {
+        t.Fatalf("expected the sibling cell to render unwrapped, got %q", buffer.String())
+    }
+}
+
+/* the width helper is the one place the multi-line measure lives, and it answers the widest line for every shape the sanitized cell can take */
+func TestCellDisplayWidth_AnswersTheWidestLine(t *testing.T) {
+    if 5 != cellDisplayWidth("12345\n67890") {
+        t.Fatalf("expected the widest line of two equal lines, got %d", cellDisplayWidth("12345\n67890"))
+    }
+
+    if 7 != cellDisplayWidth("ab\nabcdefg\nabc") {
+        t.Fatalf("expected the widest of three unequal lines, got %d", cellDisplayWidth("ab\nabcdefg\nabc"))
+    }
+
+    if 4 != cellDisplayWidth("世界") {
+        t.Fatalf("expected a single line measured in display cells, got %d", cellDisplayWidth("世界"))
+    }
+
+    if 0 != cellDisplayWidth("") {
+        t.Fatalf("expected an empty cell to measure nothing, got %d", cellDisplayWidth(""))
+    }
+
+    if 0 != cellDisplayWidth("\n\n") {
+        t.Fatalf("expected empty lines to measure nothing, got %d", cellDisplayWidth("\n\n"))
+    }
+}
+
+/* a column header is sanitized keeping its newlines and wrapped by the same renderer, so it is measured by its widest line exactly as a cell is — on both the measure pass and the minimum the shrink pass floors it at */
+func TestTablePrinter_MeasuresAMultiLineColumnHeaderByItsWidestLine(t *testing.T) {
+    printer := NewDefaultTablePrinter()
+
+    envelope := Envelope{
+        Table: &TableData{
+            Blocks: []TableBlock{
+                {
+                    Columns: []string{"abcde\nfg", "note"},
+                    Rows: [][]string{
+                        {"x", "ok"},
+                    },
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+    if err := printer.Print(buffer, envelope, Option{Quiet: true}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    separator := ""
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if true == strings.HasPrefix(line, "| -") {
+            separator = line
+        }
+    }
+    if "" == separator {
+        t.Fatalf("expected a separator row in the output, got %q", buffer.String())
+    }
+
+    /* the header's widest line is five cells; measured whole it reads eight */
+    if "| ----- | ---- |" != separator {
+        t.Fatalf("expected the multi-line header measured by its widest line (5), got %q", separator)
+    }
+}

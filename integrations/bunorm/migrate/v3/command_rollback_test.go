@@ -2,11 +2,13 @@ package migrate
 
 import (
     "context"
+    "encoding/json"
     "errors"
     "strings"
     "testing"
 
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/uptrace/bun/migrate"
 )
 
@@ -83,6 +85,59 @@ func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) 
 
     if false == strings.Contains(rendered, "20240101000000") {
         t.Fatalf("expected the group's migration named, got %q", rendered)
+    }
+}
+
+/* the count of the group a failed rollback was walking is promised on BOTH renderings, and the text block draws a fixed set of keys: a key of the caller's own naming reaches the machine document and is dropped from the block a person reads, silently and with no fallthrough. */
+func TestRollbackCommand_TheFailedGroupCountRendersOnBothRenderings(t *testing.T) {
+    newFailingRollback := func(t *testing.T) (runtimecontract.Runtime, *migrate.Migrations) {
+        t.Helper()
+
+        database, recorder := newFakeBunDatabase()
+        recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+
+        migrations := migrate.NewMigrations()
+        migrations.Add(migrate.Migration{
+            Name:    "20240101000000",
+            Comment: "create_users",
+            Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+                return nil
+            },
+            Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+                return errors.New("down refused")
+            },
+        })
+
+        return newRuntimeWithDatabase(t, database), migrations
+    }
+
+    textRuntime, textMigrations := newFailingRollback(t)
+    rendered, textErr := runMigrationCommand(t, textRuntime, NewRollbackCommand(textMigrations, DefaultOptions()), "--no-color", "--verbose")
+    if nil == textErr {
+        t.Fatal("expected the failing down to fail the command")
+    }
+
+    if false == strings.Contains(rendered, "1 migration in the group") {
+        t.Fatalf("expected the group's count in the text block, got %q", rendered)
+    }
+
+    jsonRuntime, jsonMigrations := newFailingRollback(t)
+    document, jsonErr := runMigrationCommand(t, jsonRuntime, NewRollbackCommand(jsonMigrations, DefaultOptions()), "--format=json")
+    if nil == jsonErr {
+        t.Fatal("expected the failing down to fail the command")
+    }
+
+    decoded := struct {
+        Data struct {
+            Details map[string]string `json:"details"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(document), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, document)
+    }
+
+    if "1 migration in the group" != decoded.Data.Details["status"] {
+        t.Fatalf("expected the same count in the machine document, got %#v", decoded.Data.Details)
     }
 }
 

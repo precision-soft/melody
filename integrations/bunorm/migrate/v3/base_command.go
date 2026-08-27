@@ -72,10 +72,13 @@ func (instance *baseCommand) resolveRegistry(resolver containercontract.Resolver
 
    The release ends the dedicated migration connection. That connection is not a request pool and must not live like one: it deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle. The registry memoizes it until the registry itself closes, so a single migration run inside a process that goes on to serve requests left a deadline-less connection open against the database for the life of that process.
 
-   It is handed back as a value rather than left to each command to remember, because a forgotten call compiles and a changed signature does not: every command had to be visited to keep building. It is safe on every path — a command whose provider offers no migration capability ran on the ordinary pool, which this never touches, and one that failed before opening has nothing to end. */
+   It is handed back as a value rather than left to each command to remember, because a forgotten call compiles and a changed signature does not: every command had to be visited to keep building. It is safe on every path — a command whose provider offers no migration capability ran on the ordinary pool, which this never touches, and one that failed before opening has nothing to end.
+
+   The command's output is taken so the release has somewhere to REPORT. The registry forgets the handle before it closes it, so its own teardown no longer covers what the close leaves behind, and a release with nowhere to speak dropped that failure entirely. It is a warning and not the command's verdict: the close is a COM_QUIT on a connection whose work is already done and it is not retryable, so the value is the record. The release runs before the json document is rendered — every command defers finish FIRST and this SECOND, and defers are last-in-first-out — so the warning reaches the document rather than corrupting it. */
 func (instance *baseCommand) resolveDatabase(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
+    outputInstance *commandOutput,
 ) (*bun.DB, string, func(), error) {
     noRelease := func() {}
 
@@ -111,7 +114,9 @@ func (instance *baseCommand) resolveDatabase(
 
         /* only the dedicated connection is ours to end. The ordinary pool belongs to the application for as long as the registry does, and ending it here would take the database away from everything else the process runs. */
         release = func() {
-            _ = registry.CloseMigrationDatabase(managerName)
+            if closeErr := registry.CloseMigrationDatabase(managerName); nil != closeErr {
+                outputInstance.printWarning("the dedicated migration connection did not close cleanly: " + closeErr.Error())
+            }
         }
     }
 

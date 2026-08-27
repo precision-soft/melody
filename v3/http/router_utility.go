@@ -819,7 +819,9 @@ func matchesMethod(methods []string, method string) bool {
     return false
 }
 
-/* matchesHost compares host names the way the host header is defined rather than the way two strings compare. A host name is case-insensitive, so a client sending Example.com reaches a route bound to example.com; and the port is a discriminator only when the route asked for one, so a route bound to example.com matches example.com:8443 while a route bound to example.com:8443 still matches only that port. The exact comparison this replaced made a route bound to a host unreachable behind any non-default port — the whole of local development and every non-443 deployment — and the request fell through to a broader route on the same pattern, or to a 404, with nothing recorded. The sibling matchesScheme already folds case for the same reason. */
+/* matchesHost compares host names the way the host header is defined rather than the way two strings compare. A host name is case-insensitive, so a client sending Example.com reaches a route bound to example.com; and the port is a discriminator only when the route asked for one, so a route bound to example.com matches example.com:8443 while a route bound to example.com:8443 still matches only that port. The exact comparison this replaced made a route bound to a host unreachable behind any non-default port — the whole of local development and every non-443 deployment — and the request fell through to a broader route on the same pattern, or to a 404, with nothing recorded. The sibling matchesScheme already folds case for the same reason.
+
+   Whether the route named a port is asked of net.SplitHostPort and not of a colon scan: the colons inside a bracketed IPv6 literal are the address's own, so a route bound to [::1] was read as a route that had named a port and became unreachable behind every port — the same outage the exact comparison used to cause, kept alive for the one host family every developer machine answers on. */
 func matchesHost(expectedHost string, actualHost string) bool {
     if "" == expectedHost {
         return true
@@ -829,17 +831,30 @@ func matchesHost(expectedHost string, actualHost string) bool {
         return true
     }
 
-    /* the route named a port, so the port is part of what it asked for and an unported request host cannot satisfy it */
-    if true == strings.Contains(expectedHost, ":") {
+    expectedHostWithoutPort, expectedNamedPort := splitHostAndPort(expectedHost)
+
+    /* the route named a port, so the port is part of what it asked for and a request host carrying another one, or none, cannot satisfy it */
+    if true == expectedNamedPort {
         return false
     }
 
-    actualHostWithoutPort, _, splitErr := net.SplitHostPort(actualHost)
-    if nil != splitErr {
-        return false
+    actualHostWithoutPort, _ := splitHostAndPort(actualHost)
+
+    return strings.EqualFold(expectedHostWithoutPort, actualHostWithoutPort)
+}
+
+/* splitHostAndPort reduces a host value to the bare host name and reports whether it carried a port at all. The bracketed IPv6 form is the reason both answers come from one reader: net.SplitHostPort strips the brackets along with the port, so a value that carries no port has to be unbracketed by hand for the two sides of a comparison to be the same shape — [::1] against the ::1 the ported side yields. */
+func splitHostAndPort(hostValue string) (string, bool) {
+    hostWithoutPort, _, splitErr := net.SplitHostPort(hostValue)
+    if nil == splitErr {
+        return hostWithoutPort, true
     }
 
-    return strings.EqualFold(expectedHost, actualHostWithoutPort)
+    if true == strings.HasPrefix(hostValue, "[") && true == strings.HasSuffix(hostValue, "]") {
+        return hostValue[1 : len(hostValue)-1], false
+    }
+
+    return hostValue, false
 }
 
 func matchesScheme(schemes []string, scheme string) bool {

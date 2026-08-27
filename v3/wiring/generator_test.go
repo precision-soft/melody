@@ -1,11 +1,16 @@
 package wiring
 
 import (
+    "errors"
     "go/parser"
     "go/token"
     "os"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 const (
@@ -748,7 +753,7 @@ func TestGenerate_ReportsAnUnusedExcludeWithItsImportPath(t *testing.T) {
     }
 }
 
-func TestServiceIdentityKey_ValueTypeAndItsPointerShareOneKey(t *testing.T) {
+func TestServiceTypeIdentityKey_ValueTypeAndItsPointerShareOneKey(t *testing.T) {
     valueConstructor := &Constructor{
         ImportPath: "example.com/app/domain",
         ReturnType: &TypeReference{
@@ -767,11 +772,264 @@ func TestServiceIdentityKey_ValueTypeAndItsPointerShareOneKey(t *testing.T) {
     }
 
     /* the container canonicalizes Foo and *Foo to one name (*Foo), so the generator's collision key must too, or two such constructors pass generation and panic at boot */
-    if serviceIdentityKey(valueConstructor) != serviceIdentityKey(pointerConstructor) {
+    if serviceTypeIdentityKey(valueConstructor) != serviceTypeIdentityKey(pointerConstructor) {
         t.Fatalf(
             "expected a value type and its pointer to share one identity key; got %q and %q",
-            serviceIdentityKey(valueConstructor),
-            serviceIdentityKey(pointerConstructor),
+            serviceTypeIdentityKey(valueConstructor),
+            serviceTypeIdentityKey(pointerConstructor),
         )
+    }
+}
+
+/* a NAMED registration claims the returned type as well as its constant: the container's default register option carries a strict type registration, so the emitted MustRegister files the service under both. The generator therefore keys it under both. */
+func TestServiceIdentityKeys_ANamedRegistrationClaimsItsNameAndItsType(t *testing.T) {
+    namedConstructor := &Constructor{
+        ImportPath:            "example.com/app/domain",
+        ServiceNameIdentifier: "ServiceMailer",
+        ReturnType: &TypeReference{
+            Expression: "*domain.Mailer",
+            ImportPath: "example.com/app/domain",
+            IsPointer:  true,
+        },
+    }
+
+    keys := serviceIdentityKeys(namedConstructor)
+    if 2 != len(keys) {
+        t.Fatalf("expected a named registration to claim two identities, got %v", keys)
+    }
+
+    if "name example.com/app/domain.ServiceMailer" != keys[0] {
+        t.Fatalf("expected the constant to be claimed, got %q", keys[0])
+    }
+
+    if serviceTypeIdentityKey(namedConstructor) != keys[1] {
+        t.Fatalf("expected the returned type to be claimed, got %q", keys[1])
+    }
+}
+
+/* two constructors naming DIFFERENT constants and returning ONE type both claim that type strictly, so the second emitted MustRegister is refused at the first boot of the generated file. The collision is refused at generation instead, naming both sites. */
+func TestGenerate_RefusesTwoNamedConstructorsReturningOneType(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+const (
+    ServiceMailer       = "app.mailer"
+    ServiceBackupMailer = "app.mailer.backup"
+)
+
+//melody:service ServiceMailer
+func NewMailer() *Mailer {
+    return &Mailer{}
+}
+
+//melody:service ServiceBackupMailer
+func NewBackupMailer() *Mailer {
+    return &Mailer{}
+}
+
+type Mailer struct {
+}
+`)
+
+    _, _, generateErr := Generate(&GenerateRequest{
+        ProjectDirectory: projectDirectory,
+        PackageName:      "config",
+        BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+    })
+    if nil == generateErr {
+        t.Fatalf("expected two named constructors returning one type to be refused")
+    }
+
+    if false == strings.Contains(generateErr.Error(), "two constructors register the same service") {
+        t.Fatalf("unexpected error: %v", generateErr)
+    }
+
+    var typedErr *exception.Error
+    if false == errors.As(generateErr, &typedErr) {
+        t.Fatalf("expected the refusal to carry a context, got %v", generateErr)
+    }
+
+    context := typedErr.Context()
+    first, _ := context["first"].(string)
+    second, _ := context["second"].(string)
+
+    /* the scan order of the two constructors decides which site is reported first, so both are read off the pair rather than off one field */
+    named := first + " " + second
+    if false == strings.Contains(named, "NewMailer (") || false == strings.Contains(named, "NewBackupMailer (") {
+        t.Fatalf("expected the refusal to name both sites, got %q and %q", first, second)
+    }
+}
+
+/* a scoped registration whose TYPE a NAMED container registration also claims is a deliberate shadow: the container claims the type strictly under the name, and the scoped registration reaches that claim whichever of the two is made first. It renders carrying WithReplacesContainerService, and the scan order of the two constructors does not decide it — the scoped render is deferred until every container identity is known. */
+func TestGenerate_ScopedShadowOfANamedContainerServiceCarriesTheReplacesOption(t *testing.T) {
+    for _, testCase := range []struct {
+        name   string
+        source string
+    }{
+        {
+            name: "container constructor first",
+            source: `package domain
+
+const ServiceClock = "app.clock"
+
+//melody:service ServiceClock
+func NewClock() *Clock {
+    return &Clock{}
+}
+
+//melody:scoped
+func NewRequestClock() *Clock {
+    return &Clock{}
+}
+
+type Clock struct {
+}
+`,
+        },
+        {
+            name: "scoped constructor first",
+            source: `package domain
+
+const ServiceClock = "app.clock"
+
+//melody:scoped
+func NewRequestClock() *Clock {
+    return &Clock{}
+}
+
+//melody:service ServiceClock
+func NewClock() *Clock {
+    return &Clock{}
+}
+
+type Clock struct {
+}
+`,
+        },
+        {
+            name: "the named side is the scoped one",
+            source: `package domain
+
+const ServiceRequestClock = "app.clock.request"
+
+func NewClock() *Clock {
+    return &Clock{}
+}
+
+//melody:scoped
+//melody:service ServiceRequestClock
+func NewRequestClock() *Clock {
+    return &Clock{}
+}
+
+type Clock struct {
+}
+`,
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            projectDirectory := t.TempDir()
+
+            writeFixtureFile(t, projectDirectory, "domain/service.go", testCase.source)
+
+            source, report, generateErr := Generate(&GenerateRequest{
+                ProjectDirectory: projectDirectory,
+                PackageName:      "config",
+                BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+            })
+            if nil != generateErr {
+                t.Fatalf("expected the scoped shadow to generate, got %v", generateErr)
+            }
+
+            if 1 != report.ConstructorCount || 1 != report.ScopedConstructorCount {
+                t.Fatalf("expected one constructor per lifetime, got %d and %d", report.ConstructorCount, report.ScopedConstructorCount)
+            }
+
+            if false == strings.Contains(source, "WithReplacesContainerService()") {
+                t.Fatalf("expected the scoped shadow registration to carry the replaces option, got:\n%s", source)
+            }
+        })
+    }
+}
+
+/* replayClock stands in for a scanned service type: what the container refuses turns on the type identity alone, so one declared type reproduces the shape the generator emits for a named container registration shadowed by a scoped one. */
+type replayClock struct {
+}
+
+/* the control the two guards above rest on, measured at the container: the emitted pair is refused in BOTH boot orders while the scoped side carries no option, and admitted in both once it carries WithReplacesContainerService. Register and RegisterScopedType are the very calls the emitted MustRegister forms delegate to, so the error is read instead of a panic. */
+func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOption(t *testing.T) {
+    registerContainerService := func(target containercontract.Container) error {
+        return container.Register[*replayClock](
+            target,
+            "app.clock",
+            func(resolver containercontract.Resolver) (*replayClock, error) {
+                return &replayClock{}, nil
+            },
+        )
+    }
+
+    registerScopedService := func(target containercontract.Container, options ...containercontract.RegisterOption) error {
+        return container.RegisterScopedType[*replayClock](
+            target,
+            func(resolver containercontract.Resolver) (*replayClock, error) {
+                return &replayClock{}, nil
+            },
+            options...,
+        )
+    }
+
+    for _, testCase := range []struct {
+        name             string
+        containerIsFirst bool
+    }{
+        {name: "container registration first", containerIsFirst: true},
+        {name: "scoped registration first", containerIsFirst: false},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            bare := container.NewContainer()
+            defer bare.Close()
+
+            var bareErr error
+            if true == testCase.containerIsFirst {
+                if registerErr := registerContainerService(bare); nil != registerErr {
+                    t.Fatalf("the first registration must succeed, got %v", registerErr)
+                }
+
+                bareErr = registerScopedService(bare)
+            } else {
+                if registerErr := registerScopedService(bare); nil != registerErr {
+                    t.Fatalf("the first registration must succeed, got %v", registerErr)
+                }
+
+                bareErr = registerContainerService(bare)
+            }
+
+            if nil == bareErr {
+                t.Fatalf("expected the container to refuse the unmarked shadow")
+            }
+
+            replacing := container.NewContainer()
+            defer replacing.Close()
+
+            var replacingErr error
+            if true == testCase.containerIsFirst {
+                if registerErr := registerContainerService(replacing); nil != registerErr {
+                    t.Fatalf("the first registration must succeed, got %v", registerErr)
+                }
+
+                replacingErr = registerScopedService(replacing, container.WithReplacesContainerService())
+            } else {
+                if registerErr := registerScopedService(replacing, container.WithReplacesContainerService()); nil != registerErr {
+                    t.Fatalf("the first registration must succeed, got %v", registerErr)
+                }
+
+                replacingErr = registerContainerService(replacing)
+            }
+
+            if nil != replacingErr {
+                t.Fatalf("expected the marked shadow to be admitted, got %v", replacingErr)
+            }
+        })
     }
 }

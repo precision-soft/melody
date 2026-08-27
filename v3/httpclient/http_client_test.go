@@ -1541,8 +1541,8 @@ func TestSanitizeUrlTextually_CutsTheQueryWholeWhateverFollowsIt(t *testing.T) {
     }
 }
 
-/* a string with no scheme separator has no authority to cut a userinfo out of, and it is returned as it stands — a relative target a client with no base url was handed, which the failure report still has to name. The probe carries an at sign on purpose: without the early return the arithmetic underneath measures an authority that is not there and splices a redaction into the middle of a plain path, which is the only way this branch is distinguishable from the no-userinfo one below it. */
-func TestSanitizeUrlTextually_AStringWithoutASchemeSeparatorIsReturnedUnchanged(t *testing.T) {
+/* a relative path carries no authority to cut a userinfo out of, and it is returned as it stands — a relative target a client with no base url was handed, which the failure report still has to name. Nothing in it opens an authority: no "://", no leading "//", and no scheme before a colon. The probe carries an at sign on purpose: without the early return the arithmetic underneath measures an authority that is not there and splices a redaction into the middle of a plain path, which is the only way this branch is distinguishable from the no-userinfo one below it. */
+func TestSanitizeUrlTextually_AStringWithoutAnAuthorityIsReturnedUnchanged(t *testing.T) {
     sanitized := sanitizeUrlTextually("/relative@path\x7f")
 
     if "/relative@path\x7f" != sanitized {
@@ -2086,5 +2086,128 @@ func TestNewHttpClient_ASetZeroReachesTheTransportVerbatim(t *testing.T) {
 
     if 0 != transport.IdleConnTimeout {
         t.Fatalf("expected the set zero IdleConnTimeout to reach the transport, got %v", transport.IdleConnTimeout)
+    }
+}
+
+/* a scheme-relative reference carries an authority with no "://" anywhere in it, and net/url refuses it for a reason that has nothing to do with the credential: a port that is not a number, a control character, a broken percent escape, an unclosed bracket. Each of those routes the string to the textual fallback with the userinfo still in it, and the fallback is the only sanitizer left — the sibling that reports the parse failure drops the url whole precisely so this one holds it. The four refusal reasons are entered separately because they enter net/url at four different places and only the shared shape is what the cut relies on. */
+func TestSanitizeUrlTextually_ASchemeRelativeAuthorityLosesItsUserinfo(t *testing.T) {
+    for _, currentCase := range []struct {
+        name  string
+        value string
+    }{
+        {"a port that is not a number", "//user:SECRET@host:notaport/path"},
+        {"a control character in the authority", "//user:SECRET@host\x00/path"},
+        {"a broken percent escape", "//user:SECRET@ho%zzst/path"},
+        {"an unclosed bracket", "//user:SECRET@[fe80::1/path"},
+    } {
+        if _, err := url.Parse(currentCase.value); nil == err {
+            t.Fatalf("%s: the probe no longer reaches the textual fallback — net/url parsed %q", currentCase.name, currentCase.value)
+        }
+
+        sanitized := sanitizeUrlTextually(currentCase.value)
+
+        if true == strings.Contains(sanitized, "SECRET") {
+            t.Fatalf("%s: the credential survived the textual fallback: %q", currentCase.name, sanitized)
+        }
+
+        if false == strings.HasPrefix(sanitized, "//"+redactedValue+":"+redactedValue+"@") {
+            t.Fatalf("%s: expected the userinfo replaced in place, got %q", currentCase.name, sanitized)
+        }
+    }
+}
+
+/* an opaque url never reaches the textual fallback at all: net/url parses "http:user:SECRET@host/path" without complaint, keeps the whole reference in Opaque and reports no User, so the parsed branch used to hand the credential straight back. The spelling without a scheme is the same shape — net/url reads "user" as the scheme — and both are what a caller who forgot the slashes writes. */
+func TestSanitizeUrlForDiagnostics_AnOpaqueUrlLosesItsUserinfo(t *testing.T) {
+    for _, currentCase := range []struct {
+        name  string
+        value string
+    }{
+        {"a scheme with one slash missing", "http:user:SECRET@host/path"},
+        {"no slashes at all", "user:SECRET@host/path"},
+        {"an authority ending the reference", "http:user:SECRET@host"},
+    } {
+        parsed, err := url.Parse(currentCase.value)
+        if nil != err {
+            t.Fatalf("%s: the probe no longer exercises the parsed branch — net/url refused %q", currentCase.name, currentCase.value)
+        }
+
+        if "" == parsed.Opaque {
+            t.Fatalf("%s: the probe no longer parses in opaque form: %#v", currentCase.name, parsed)
+        }
+
+        if nil != parsed.User {
+            t.Fatalf("%s: the probe no longer bypasses the userinfo branch: %v", currentCase.name, parsed.User)
+        }
+
+        sanitized := sanitizeUrlForDiagnostics(currentCase.value)
+
+        if true == strings.Contains(sanitized, "SECRET") {
+            t.Fatalf("%s: the credential survived the parsed sanitizer: %q", currentCase.name, sanitized)
+        }
+
+        if false == strings.Contains(sanitized, "host") {
+            t.Fatalf("%s: expected the host to survive so a failure stays diagnosable, got %q", currentCase.name, sanitized)
+        }
+    }
+}
+
+/* a scheme-relative url net/url accepts is redacted by the parsed branch and must stay that way: it is the one spelling of this shape that was never a leak, and a repair reaching for the textual side could only make it worse. */
+func TestSanitizeUrlForDiagnostics_AParsableSchemeRelativeUrlKeepsItsRedaction(t *testing.T) {
+    sanitized := sanitizeUrlForDiagnostics("//user:SECRET@host/path")
+
+    if true == strings.Contains(sanitized, "SECRET") {
+        t.Fatalf("the credential survived: %q", sanitized)
+    }
+
+    if "//"+redactedValue+":"+redactedValue+"@host/path" != sanitized {
+        t.Fatalf("expected the parsed branch to redact in place, got %q", sanitized)
+    }
+}
+
+/* the scheme grammar is what separates an opaque url from a relative path that merely carries a colon, and the authority cut hangs on it: read too loosely it splices a redaction into a path, read too strictly it hands back a credential. */
+func TestSchemeSeparatorIndex_ReadsOnlyARealScheme(t *testing.T) {
+    for _, currentCase := range []struct {
+        value    string
+        expected int
+    }{
+        {"http:rest", 4},
+        {"a:rest", 1},
+        {"ab+c-d.e:rest", 8},
+        {"HTTP:rest", 4},
+        {":rest", -1},
+        {"1http:rest", -1},
+        {"/relative@path", -1},
+        {"no-colon-at-all", -1},
+        {"has space:rest", -1},
+        {"/path:with@colon", -1},
+    } {
+        if currentCase.expected != schemeSeparatorIndex(currentCase.value) {
+            t.Fatalf("expected %q to report %d, got %d", currentCase.value, currentCase.expected, schemeSeparatorIndex(currentCase.value))
+        }
+    }
+}
+
+/* an opaque reference net/url refuses reaches the textual fallback with no "://" and no leading "//" in it, and the only thing that opens its authority is the scheme before the colon. Reading the scheme too loosely splices a redaction into a plain path; not reading it at all hands the credential back, which is what a reference spelled with one slash missing used to do the moment anything else in it made net/url refuse. */
+func TestSanitizeUrlTextually_AnOpaqueReferenceLosesItsUserinfo(t *testing.T) {
+    for _, currentCase := range []struct {
+        name  string
+        value string
+    }{
+        {"a scheme with one slash missing", "http:user:SECRET@host\x00/path"},
+        {"no slashes at all", "user:SECRET@host\x00/path"},
+    } {
+        if _, err := url.Parse(currentCase.value); nil == err {
+            t.Fatalf("%s: the probe no longer reaches the textual fallback — net/url parsed %q", currentCase.name, currentCase.value)
+        }
+
+        sanitized := sanitizeUrlTextually(currentCase.value)
+
+        if true == strings.Contains(sanitized, "SECRET") {
+            t.Fatalf("%s: the credential survived the textual fallback: %q", currentCase.name, sanitized)
+        }
+
+        if false == strings.Contains(sanitized, redactedValue+":"+redactedValue+"@host") {
+            t.Fatalf("%s: expected the userinfo replaced in place, got %q", currentCase.name, sanitized)
+        }
     }
 }

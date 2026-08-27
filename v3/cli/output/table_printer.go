@@ -222,13 +222,27 @@ func sanitizeTableBlock(block TableBlock) TableBlock {
     }
 }
 
+/* cellDisplayWidth measures a cell by its widest line, because this printer is the one renderer that keeps a newline as a real line break instead of escaping it before measuring. A whole-string measure sums every line of a multi-line cell into a single column, and under the maximum width the sibling columns are then shrunk to pay for width no line ever renders. */
+func cellDisplayWidth(value string) int {
+    widestLineWidth := 0
+
+    for _, line := range strings.Split(value, "\n") {
+        lineWidth := internal.DisplayWidth(line)
+        if widestLineWidth < lineWidth {
+            widestLineWidth = lineWidth
+        }
+    }
+
+    return widestLineWidth
+}
+
 func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock, maxWidth int) []int {
     columnCount := len(block.Columns)
     widths := make([]int, columnCount)
 
     /* the measure is display cells, not runes: a CJK ideogram or an emoji occupies two terminal cells and a combining mark none, so a rune count rendered exactly those columns out of line with the separators it measured */
     for index, column := range block.Columns {
-        widths[index] = internal.DisplayWidth(column)
+        widths[index] = cellDisplayWidth(column)
     }
 
     for _, row := range block.Rows {
@@ -240,7 +254,7 @@ func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock
             if index >= len(row) {
                 continue
             }
-            cellWidth := internal.DisplayWidth(row[index])
+            cellWidth := cellDisplayWidth(row[index])
             if widths[index] < cellWidth {
                 widths[index] = cellWidth
             }
@@ -265,7 +279,7 @@ func (instance *TablePrinter) shrinkWidthsToFitMaxWidth(block TableBlock, widths
 
     for index := 0; index < columnCount; index++ {
         minWidth := defaultTableMinColumnWidth
-        columnWidth := internal.DisplayWidth(block.Columns[index])
+        columnWidth := cellDisplayWidth(block.Columns[index])
         if minWidth < columnWidth {
             minWidth = columnWidth
         }

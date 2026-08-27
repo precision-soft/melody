@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "errors"
     "os"
     "path/filepath"
     "strings"
@@ -211,5 +212,103 @@ func TestReopenableFileWriter_ASighupReopensTheJournalWhileArmed(t *testing.T) {
         }
 
         time.Sleep(10 * time.Millisecond)
+    }
+}
+
+/* the swap is committed before the replaced descriptor is closed and is never rolled back, so a refused close reports a rotation that HAPPENED. Sharing a headline with a failed open told the operator the journal was stuck on the renamed file while it was in fact healthy on the fresh one. */
+func TestReopenableFileWriter_ARefusedCloseOfTheReplacedDescriptorIsStillARotation(t *testing.T) {
+    directory := t.TempDir()
+    logPath := filepath.Join(directory, "application.log")
+    rotatedPath := filepath.Join(directory, "application.log.1")
+
+    writer, newErr := NewReopenableFileWriter(logPath)
+    if nil != newErr {
+        t.Fatalf("unexpected constructor error: %v", newErr)
+    }
+    defer func() { _ = writer.Close() }()
+
+    _, _ = writer.Write([]byte("before rotation\n"))
+
+    renameErr := os.Rename(logPath, rotatedPath)
+    if nil != renameErr {
+        t.Fatalf("unexpected rename error: %v", renameErr)
+    }
+
+    /* surrender the descriptor under the writer so the rotation's own close of it refuses — the shape a deferred write surfacing at close(2) takes on a remote or failing device */
+    writer.mutex.Lock()
+    _ = writer.file.Close()
+    writer.mutex.Unlock()
+
+    reopenErr := writer.Reopen()
+    if nil == reopenErr {
+        t.Fatalf("expected the refused close of the replaced descriptor to be reported")
+    }
+
+    if false == errors.Is(reopenErr, ErrRotatedDescriptorNotClosed) {
+        t.Fatalf("expected the refused close to be told apart from a failed rotation, got %v", reopenErr)
+    }
+
+    /* the writer is on the fresh file and healthy, which is exactly what the sentinel promises the caller */
+    _, writeErr := writer.Write([]byte("after rotation\n"))
+    if nil != writeErr {
+        t.Fatalf("expected the rotated writer to keep writing, got %v", writeErr)
+    }
+
+    freshContent, readErr := os.ReadFile(logPath)
+    if nil != readErr {
+        t.Fatalf("expected a fresh file at the path after the rotation, got %v", readErr)
+    }
+    if "after rotation\n" != string(freshContent) {
+        t.Fatalf("expected the record in the fresh file, got %q", string(freshContent))
+    }
+
+    rotatedContent, _ := os.ReadFile(rotatedPath)
+    if "before rotation\n" != string(rotatedContent) {
+        t.Fatalf("expected the renamed file to keep only the first record, got %q", string(rotatedContent))
+    }
+}
+
+/* the negative half: a rotation that did NOT happen must never carry the sentinel, or the caller announces a healthy journal while the writer is still on the renamed inode */
+func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentinel(t *testing.T) {
+    directory := t.TempDir()
+    logPath := filepath.Join(directory, "application.log")
+    rotatedPath := filepath.Join(directory, "application.log.1")
+
+    writer, newErr := NewReopenableFileWriter(logPath)
+    if nil != newErr {
+        t.Fatalf("unexpected constructor error: %v", newErr)
+    }
+    defer func() { _ = writer.Close() }()
+
+    renameErr := os.Rename(logPath, rotatedPath)
+    if nil != renameErr {
+        t.Fatalf("unexpected rename error: %v", renameErr)
+    }
+
+    /* a directory at the path makes the append open fail whoever runs the test — a permission probe does not, because the container test user is root */
+    mkdirErr := os.Mkdir(logPath, 0o755)
+    if nil != mkdirErr {
+        t.Fatalf("unexpected mkdir error: %v", mkdirErr)
+    }
+
+    reopenErr := writer.Reopen()
+    if nil == reopenErr {
+        t.Fatalf("expected the reopen to fail over a directory at the path")
+    }
+
+    if true == errors.Is(reopenErr, ErrRotatedDescriptorNotClosed) {
+        t.Fatalf("expected a failed open to stay a failed rotation, got %v", reopenErr)
+    }
+
+    closedWriter, closedWriterErr := NewReopenableFileWriter(filepath.Join(directory, "other.log"))
+    if nil != closedWriterErr {
+        t.Fatalf("unexpected constructor error: %v", closedWriterErr)
+    }
+    if closeErr := closedWriter.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if true == errors.Is(closedWriter.Reopen(), ErrRotatedDescriptorNotClosed) {
+        t.Fatalf("expected a closed writer's refusal to stay a failed rotation")
     }
 }

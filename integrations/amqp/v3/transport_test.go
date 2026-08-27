@@ -552,7 +552,7 @@ func TestConnect_DialFailureIsWrapped(t *testing.T) {
 func TestSubscribeWithRetry_NoDialerDoesNotLoop(t *testing.T) {
     instance := &Transport{queue: "orders", closeSignal: make(chan struct{})}
 
-    _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(context.Background()))
+    _, _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(context.Background()))
     if nil == subscribeErr {
         t.Fatalf("expected an error when no connection and no dialer are configured")
     }
@@ -576,7 +576,7 @@ func TestSubscribeWithRetry_RetriesThenStopsOnContextCancel(t *testing.T) {
         },
     }
 
-    _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx))
+    _, _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx))
     if nil == subscribeErr {
         t.Fatalf("expected an error after the context is cancelled")
     }
@@ -606,7 +606,7 @@ func TestSubscribeWithRetry_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
         cancel()
     }()
 
-    _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx))
+    _, _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx))
     if nil == subscribeErr {
         t.Fatalf("expected an error after the context is cancelled")
     }
@@ -638,7 +638,7 @@ func TestConsumeLoop_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
     done := make(chan struct{})
 
     go func() {
-        instance.consumeLoop(newReconnectRuntime(ctx), nil, deliveries, out)
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
         close(done)
     }()
 
@@ -692,7 +692,7 @@ func TestForwardDeliveries_ChannelLost(t *testing.T) {
     instance := &Transport{queue: "orders"}
     out := make(chan messagebuscontract.Envelope, 1)
 
-    reason := instance.forwardDeliveries(newReconnectRuntime(context.Background()), nil, deliveries, out)
+    reason := instance.forwardDeliveries(newReconnectRuntime(context.Background()), nil, 0, deliveries, out)
     if forwardChannelLost != reason {
         t.Fatalf("expected forwardChannelLost, got %v", reason)
     }
@@ -706,7 +706,7 @@ func TestForwardDeliveries_ContextDone(t *testing.T) {
     deliveries := make(chan amqp091.Delivery)
     out := make(chan messagebuscontract.Envelope, 1)
 
-    reason := instance.forwardDeliveries(newReconnectRuntime(ctx), nil, deliveries, out)
+    reason := instance.forwardDeliveries(newReconnectRuntime(ctx), nil, 0, deliveries, out)
     if forwardDone != reason {
         t.Fatalf("expected forwardDone, got %v", reason)
     }
@@ -719,7 +719,7 @@ func TestConsumeLoop_NoDialerClosesOut(t *testing.T) {
     instance := &Transport{queue: "orders"}
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(newReconnectRuntime(context.Background()), nil, deliveries, out)
+    go instance.consumeLoop(newReconnectRuntime(context.Background()), nil, 0, deliveries, out)
 
     select {
     case _, open := <-out:
@@ -741,7 +741,7 @@ func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
     instance := &Transport{queue: "orders"}
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(runtimeInstance, nil, deliveries, out)
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
 
     awaitClosedOutput(t, out)
 
@@ -765,7 +765,7 @@ func TestConsumeLoop_ClosingTransportStopsWithoutLogging(t *testing.T) {
     instance := &Transport{queue: "orders", closing: true, closeSignal: make(chan struct{})}
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(runtimeInstance, nil, deliveries, out)
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
 
     awaitClosedOutput(t, out)
 
@@ -786,7 +786,7 @@ func TestConsumeLoop_CancelledContextStopsWithoutLogging(t *testing.T) {
     instance := &Transport{queue: "orders", closeSignal: make(chan struct{})}
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(runtimeInstance, nil, deliveries, out)
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
 
     awaitClosedOutput(t, out)
 
@@ -872,7 +872,7 @@ func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.
     done := make(chan struct{})
 
     go func() {
-        instance.consumeLoop(newReconnectRuntime(ctx), nil, deliveries, out)
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
         close(done)
     }()
 
@@ -1074,7 +1074,7 @@ func TestConsumeLoop_ContextDoneClosesOut(t *testing.T) {
     deliveries := make(chan amqp091.Delivery)
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(newReconnectRuntime(ctx), nil, deliveries, out)
+    go instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
 
     cancel()
 
@@ -1120,7 +1120,7 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
     done := make(chan forwardReason, 1)
 
     go func() {
-        done <- transport.forwardDeliveries(runtimeInstance, nil, deliveries, out)
+        done <- transport.forwardDeliveries(runtimeInstance, nil, 0, deliveries, out)
     }()
 
     time.Sleep(50 * time.Millisecond)
@@ -1154,7 +1154,7 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     done := make(chan error, 1)
 
     go func() {
-        _, _, reopenErr := transport.reopenConsume(runtimeInstance, &backoff)
+        _, _, _, reopenErr := transport.reopenConsume(runtimeInstance, &backoff)
         done <- reopenErr
     }()
 
@@ -1202,7 +1202,7 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
     out := make(chan messagebuscontract.Envelope)
 
-    instance.startConsumeLoop(runtimeInstance, nil, deliveries, out)
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
 
     select {
     case <-serializer.entered:
@@ -1270,7 +1270,7 @@ func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
     out := make(chan messagebuscontract.Envelope)
 
-    instance.startConsumeLoop(runtimeInstance, nil, deliveries, out)
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
 
     select {
     case <-dialing:
@@ -1498,7 +1498,7 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         Registry:   NewMessageRegistry(),
     })
 
-    first, firstErr := transport.ensureConsumeChannel()
+    first, firstGeneration, firstErr := transport.ensureConsumeChannel()
     if nil != firstErr {
         t.Fatalf("first ensureConsumeChannel: %v", firstErr)
     }
@@ -1508,9 +1508,14 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         t.Fatalf("expected the channel to report closed after Close")
     }
 
-    second, secondErr := transport.ensureConsumeChannel()
+    second, secondGeneration, secondErr := transport.ensureConsumeChannel()
     if nil != secondErr {
         t.Fatalf("second ensureConsumeChannel: %v", secondErr)
+    }
+
+    /* a freshly installed channel is answered with the generation minted for it, under the mutex that installed it */
+    if secondGeneration != firstGeneration+1 {
+        t.Fatalf("expected the fresh channel answered with the generation minted for it (%d), got %d", firstGeneration+1, secondGeneration)
     }
     if true == second.IsClosed() {
         t.Fatalf("expected a fresh open channel, got a closed one (the stale channel was reused)")
@@ -1843,7 +1848,7 @@ func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
     deliveries := make(chan amqp091.Delivery)
     out := make(chan messagebuscontract.Envelope)
 
-    if true == instance.startConsumeLoop(runtimeInstance, nil, deliveries, out) {
+    if true == instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out) {
         t.Fatalf("expected a closing transport to refuse a new consume loop")
     }
 
@@ -2154,7 +2159,7 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
     out := make(chan messagebuscontract.Envelope)
 
-    instance.startConsumeLoop(runtimeInstance, nil, deliveries, out)
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
 
     <-dialing
 
@@ -2178,5 +2183,109 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
         }
     case <-time.After(5 * time.Second):
         t.Fatal("the dialer never completed against the live broker")
+    }
+}
+
+/* the generation stamped on a delivery names the channel that carried it, not the transport-wide counter. A channel the broker closed still hands its buffered deliveries out while it tears down, so this loop can be draining generation 2 long after a reconnect installed generation 3: stamped with the counter, those deliveries match what consumeChannelForAck answers, the ack guard passes, and a tag from the dead channel is acknowledged on the fresh one — where the tags restart at one. */
+func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCounter(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.paired-generation")
+
+    serializer := melodyserializer.NewJsonSerializer()
+
+    transport := NewTransport(TransportConfig{
+        Dialer:     func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
+        Queue:      "melody.amqp.paired-generation",
+        Registry:   registry,
+        Serializer: serializer,
+    })
+
+    /* the reconnect already happened: the counter stands at 3 while this loop still holds the channel of generation 2 */
+    transport.mutex.Lock()
+    transport.consumeGeneration = 3
+    transport.mutex.Unlock()
+
+    body, serializeErr := serializer.Serialize(reconnectMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance := newReconnectRuntime(ctx)
+
+    deliveries := make(chan amqp091.Delivery, 1)
+    deliveries <- amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: "amqp.test.paired-generation"},
+        Body:        body,
+        DeliveryTag: 7,
+    }
+    close(deliveries)
+
+    out := make(chan messagebuscontract.Envelope)
+    done := make(chan forwardReason, 1)
+
+    go func() {
+        done <- transport.forwardDeliveries(runtimeInstance, nil, 2, deliveries, out)
+    }()
+
+    var envelopeInstance messagebuscontract.Envelope
+
+    select {
+    case envelopeInstance = <-out:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("forwardDeliveries did not forward the buffered delivery")
+    }
+
+    select {
+    case reason := <-done:
+        if forwardChannelLost != reason {
+            t.Fatalf("expected forwardChannelLost after the deliveries channel closed, got %v", reason)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("forwardDeliveries did not return after the deliveries channel closed")
+    }
+
+    stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
+    if false == exists {
+        t.Fatalf("expected a delivery stamp on the forwarded envelope")
+    }
+
+    if 2 != stamp.Generation {
+        t.Fatalf("expected the delivery stamped with the generation of its own channel (2), got %d", stamp.Generation)
+    }
+
+    if stamp.Generation == transport.currentGeneration() {
+        t.Fatalf("expected the stamp to disagree with the transport counter, so the ack guard refuses the dead channel's tag")
+    }
+}
+
+/* the counter and the cached channel are written together under the mutex, so the generation answered beside a channel must be read under the same hold — a generation recovered afterwards is never OLDER than the channel's, only newer, which is the direction that defeats the ack guard */
+func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *testing.T) {
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
+        Queue:    "melody.amqp.cached-generation",
+        Registry: NewMessageRegistry(),
+    })
+
+    cachedChannel := &amqp091.Channel{}
+
+    transport.mutex.Lock()
+    transport.consumeChannel = cachedChannel
+    transport.consumeGeneration = 4
+    transport.mutex.Unlock()
+
+    channel, generation, channelErr := transport.ensureConsumeChannel()
+    if nil != channelErr {
+        t.Fatalf("ensureConsumeChannel: %v", channelErr)
+    }
+
+    if channel != cachedChannel {
+        t.Fatalf("expected the cached open channel to be answered")
+    }
+
+    if 4 != generation {
+        t.Fatalf("expected the cached channel answered with its own generation 4, got %d", generation)
     }
 }

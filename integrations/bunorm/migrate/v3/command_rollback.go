@@ -46,7 +46,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
     SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer(), option))
 
-    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
+    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
     if nil != dbErr {
         return dbErr
     }
@@ -137,7 +137,9 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
 var _ clicontract.Command = (*RollbackCommand)(nil)
 
-/* printRollbackGroupOnFailure reports the group a failed rollback was walking, on both renderings — the text block and the machine document finish assembles beside the error. It is silent for a failure that named no group, so a refusal before the walk does not print an empty block. */
+/* printRollbackGroupOnFailure reports the group a failed rollback was walking, on both renderings — the text block and the machine document finish assembles beside the error. It is silent for a failure that named no group, so a refusal before the walk does not print an empty block.
+
+   The count travels under "status", which is the details renderer's own free-form slot — the sibling commands fill it with "initialized" and "3 pending". The text renderer draws a fixed, ordered set of keys and drops every other one silently, and its key column is seven characters wide: a key of its own naming would have rendered in the machine document alone while the block a person reads showed the manager and the group and no count at all, and widening the table for one key would move every row every other command prints. */
 func printRollbackGroupOnFailure(outputInstance *commandOutput, managerName string, group *migrate.MigrationGroup) {
     names := migrationNamesOf(group)
     if 0 == len(names) {
@@ -145,9 +147,9 @@ func printRollbackGroupOnFailure(outputInstance *commandOutput, managerName stri
     }
 
     outputInstance.printDetailsBlock(map[string]string{
-        "manager":    managerName,
-        "group":      strconv.FormatInt(group.ID, 10),
-        "migrations": strconv.Itoa(len(names)),
+        "manager": managerName,
+        "group":   strconv.FormatInt(group.ID, 10),
+        "status":  pluralizeMigrations(len(names)) + " in the group",
     })
 
     outputInstance.printMigrationsBlock("rollbackGroup", "ROLLBACK GROUP MIGRATIONS", names)

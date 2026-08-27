@@ -29,7 +29,7 @@ type ServerSentEventHub struct {
     backplane          ServerSentEventBackplane
     logger             loggingcontract.Logger
 
-    /* the publishes that have passed the closed check and not yet returned. Shutdown waits on it before it closes the backplane, which is what makes the contract sentence — a broadcast during a graceful stop is not pushed — true rather than merely intended. The counter is incremented under the read lock, so a shutdown cannot start between the check and the increment. */
+    /* the publishes that have passed the closed check and not yet returned. Shutdown waits on it before it closes the backplane, and the clear path of SetBackplane waits on it before handing the caller a backplane to close, which is what makes the contract sentence — a broadcast during a graceful stop is not pushed — true rather than merely intended. The counter is incremented under the read lock, so neither a shutdown nor a clear can start between the check and the increment. */
     publishesInFlight sync.WaitGroup
 
     dropped           atomic.Uint64
@@ -146,12 +146,15 @@ func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubsc
 
    Installing a backplane OVER a live one is refused rather than performed. The hub is the only holder of the reference, so the overwrite left the previous one running with nothing in the process able to reach it — but closing it here cannot be the remedy, because the shipped backplanes clear themselves from the hub as the first step of their own Close, so a close issued from this door would re-enter it and clear the backplane just installed. The refusal names the situation instead; clear the hub first, close what you took out, and install the replacement.
 
-   Clearing is always allowed, on a live hub and on a shut-down one, because that re-entry is exactly what a backplane's Close performs and Shutdown must be able to close what it owns. Installing a live backplane into a hub that has already shut down is refused: replicate would never publish through it while its own listen loop kept running forever. */
+   Clearing is always allowed, on a live hub and on a shut-down one, because that re-entry is exactly what a backplane's Close performs and Shutdown must be able to close what it owns. It waits for the publishes already holding the backplane the way Shutdown does, so what the caller takes out is closed by nobody's hand but its own. Installing a live backplane into a hub that has already shut down is refused: replicate would never publish through it while its own listen loop kept running forever. */
 func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackplane) {
     if true == internal.IsNilInterface(backplane) {
         instance.mutex.Lock()
         instance.backplane = nil
         instance.mutex.Unlock()
+
+        /* the same discipline Shutdown keeps, for the same reason and outside the lock the publish itself needs: a publish that read the reference under the read lock counted itself in before this write lock could be taken, so when the clear returns nothing is left inside the backplane the caller is about to close. Returning while one was still in there closed it under the call — a cancelled context on one shipped backplane, a shut channel on the other, both filed as a backplane outage that never happened, and the event that was in flight lost to the other nodes. The wait is on publishes, so the clear a backplane performs belongs in its Close, where the shipped ones put it and where nothing of its own is in flight; issued from inside its own Publish it would wait on itself. */
+        instance.publishesInFlight.Wait()
 
         return
     }

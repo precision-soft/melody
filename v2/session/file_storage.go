@@ -375,7 +375,7 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
         return exception.NewError("failed to replace session storage file", nil, err)
     }
 
-    /* the rename is durable only once the directory itself is flushed: without this, a power loss after a save could resurface the previous snapshot — the session that was just written is gone and its user silently logged out. The cron generator's atomic writer holds the same rule for the same reason. */
+    /* the rename is durable only once the directory itself is flushed: without this, a power loss after a save could resurface the previous snapshot — the session that was just written is gone and its user silently logged out. The cron generator's atomic writer holds the same rule for the same reason. Its refusal travels back as it comes: the failure is already marked persisted-despite-flush, because the rename above committed the document before this step could fail. */
     if directorySyncErr := syncSessionDirectory(filepath.Dir(path)); nil != directorySyncErr {
         return directorySyncErr
     }
@@ -383,11 +383,13 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
     return nil
 }
 
-/* syncSessionDirectory fsyncs the directory that just received a rename, which is where the file's NAME lives — the temp file's own Sync covered only its bytes. */
+/* syncSessionDirectory fsyncs the directory that just received a rename, which is where the file's NAME lives — the temp file's own Sync covered only its bytes.
+
+   Every failure it answers is therefore a failure over a document that is ALREADY at its path: the rename committed before this ran, so the disk holds the new snapshot whatever this step reports. That is why each one carries the persisted-despite-flush mark, the same one the in-place writer puts on its own post-write steps — without it Save and Delete roll the in-memory entry back and memory starts serving values the file no longer holds, and a restart resurrects the write the caller was told had failed. A caller that wants a directory flushed BEFORE its commit point must not reach for this one. */
 func syncSessionDirectory(path string) error {
     directory, openErr := os.Open(path)
     if nil != openErr {
-        return exception.NewError(
+        return persistedDespiteFlushFailure(
             "failed to open session storage directory for fsync",
             exceptioncontract.Context{
                 "path": path,
@@ -400,7 +402,7 @@ func syncSessionDirectory(path string) error {
     closeErr := directory.Close()
 
     if nil != syncErr {
-        return exception.NewError(
+        return persistedDespiteFlushFailure(
             "failed to fsync session storage directory",
             exceptioncontract.Context{
                 "path": path,
@@ -410,7 +412,7 @@ func syncSessionDirectory(path string) error {
     }
 
     if nil != closeErr {
-        return exception.NewError(
+        return persistedDespiteFlushFailure(
             "failed to close session storage directory after fsync",
             exceptioncontract.Context{
                 "path": path,
@@ -483,12 +485,12 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
     /* past this point the new document sits at offset 0 in full, and readSessionFileFromHandle decodes exactly it — a single Decode consumes one JSON value and ignores any stale tail a shorter document leaves behind. So a Truncate or Sync failure now leaves the file already holding the NEW snapshot: rolling the in-memory entry back would make it disagree with what is on disk, the very divergence the rollback exists to prevent, only inverted. The failure is still reported, wrapped so Save/Delete keep the in-memory state that now matches the disk instead of undoing it. */
     err = fileInstance.Truncate(int64(buffer.Len()))
     if nil != err {
-        return persistedDespiteFlushFailure("failed to truncate session storage file", err)
+        return persistedDespiteFlushFailure("failed to truncate session storage file", nil, err)
     }
 
     err = fileInstance.Sync()
     if nil != err {
-        return persistedDespiteFlushFailure("failed to sync session storage file", err)
+        return persistedDespiteFlushFailure("failed to sync session storage file", nil, err)
     }
 
     return nil
@@ -497,10 +499,10 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
 /* errSessionStoragePersistedDespiteFlushFailure marks a flush failure that happened AFTER the new document was already laid down on disk, so the caller keeps its in-memory state rather than rolling it back to disagree with what is persisted. */
 var errSessionStoragePersistedDespiteFlushFailure = errors.New("session storage document was persisted before the flush step failed")
 
-func persistedDespiteFlushFailure(message string, cause error) error {
+func persistedDespiteFlushFailure(message string, context exceptioncontract.Context, cause error) error {
     return exception.NewError(
         message,
-        nil,
+        context,
         errors.Join(cause, errSessionStoragePersistedDespiteFlushFailure),
     )
 }

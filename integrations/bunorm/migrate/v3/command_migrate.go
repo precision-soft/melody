@@ -52,7 +52,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
 
     SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer(), option))
 
-    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
+    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
     if nil != dbErr {
         return dbErr
     }

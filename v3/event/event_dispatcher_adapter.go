@@ -38,7 +38,7 @@ type EventDispatcherAdapter struct {
 
     /* nextSubscriberId issues the identity AddSubscriber answers with, this bookkeeping's own — the wrapped dispatcher issues its own for the same installation, and neither is read through the other. */
     nextSubscriberId uint64
-    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it. The per-step mutex keeps each individual record consistent, but a subscriber spans several of them: without this outer section, two concurrent AddSubscriber calls for one identity both pass the duplicate refusal and install every listener twice, and a RemoveSubscriber interleaved with an AddSubscriber removes the half already installed while the rest keeps arriving under a record the remover was just told is gone. */
+    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it. The per-step mutex keeps each individual record consistent, but a subscriber spans several of them: without this outer section, a RemoveSubscriber interleaved with the AddSubscriber that issued its registration removes the half already installed while the rest keeps arriving under a record the remover was just told is gone. */
     subscriberMutex sync.Mutex
 }
 

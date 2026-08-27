@@ -5,6 +5,7 @@ import (
     "fmt"
     "io"
     "os"
+    "reflect"
     "sync"
     "sync/atomic"
     "time"
@@ -197,29 +198,102 @@ func (instance *jsonLogger) Enabled(level loggingcontract.Level) bool {
 var _ loggingcontract.Logger = (*jsonLogger)(nil)
 var _ loggingcontract.LevelReporter = (*jsonLogger)(nil)
 
-/* normalizeJsonContextMaxDepth bounds the recursive normalization: the shapes this package itself nests — a cause context chain holding provider maps holding error values — sit two or three levels down, and the cap keeps a pathological self-referencing structure from recursing without end. A value below the cap is passed to the encoder as it is. */
-const normalizeJsonContextMaxDepth = 6
+/* normalizeJsonContextMaxDepth bounds the recursive normalization. The cycle keying below answers the context that holds itself; this answers the one that is merely very deep, which nothing else does — a deep enough acyclic context walks until the goroutine stack is gone, and a stack overflow is a fatal error that no recover turns into a reported failure. It is a backstop rather than a shape bound: the shapes this package nests — a cause context chain holding provider maps holding error values — sit two or three levels down. */
+const normalizeJsonContextMaxDepth = 10000
+
+/* the two markers say different things to whoever reads the rendered record: a cycle is a structure that closes on itself, the depth marker is one that goes deeper than anything worth printing. Both exist so that what reaches the encoder is finite — a cycle that survives this walk makes json.Marshal answer with its cycle ERROR, which routes the record into the fmt fallback in Log, and fmt has no cycle detection of its own: the fallback written to save the record kills the process instead. */
+const normalizeJsonContextCycleMarker = "<cycle>"
+const normalizeJsonContextDepthMarker = "<depth limit>"
+
+/* the plain shapes the walk descends into; a defined type sharing their underlying type is converted to them below, which keeps the backing pointer and so the cycle keying */
+var plainJsonContextMapType = reflect.TypeOf(map[string]any(nil))
+var plainJsonContextSliceType = reflect.TypeOf([]any(nil))
+
+/* the length distinguishes two slices that share a backing array, which are the same container for the walk only when they span the same elements */
+type jsonContextVisitKey struct {
+    pointer uintptr
+    length  uintptr
+}
 
 func normalizeJsonContext(input map[string]any) map[string]any {
     if nil == input {
         return map[string]any{}
     }
 
-    return normalizeJsonMap(input, normalizeJsonContextMaxDepth)
+    return normalizeJsonMap(input, normalizeJsonContextMaxDepth, map[jsonContextVisitKey]struct{}{})
 }
 
-func normalizeJsonMap(input map[string]any, remainingDepth int) map[string]any {
+func normalizeJsonMap(input map[string]any, remainingDepth int, seen map[jsonContextVisitKey]struct{}) map[string]any {
     normalized := make(map[string]any, len(input))
 
     for key, value := range input {
-        normalized[key] = normalizeJsonValue(value, remainingDepth)
+        normalized[key] = normalizeJsonValue(value, remainingDepth, seen)
     }
 
     return normalized
 }
 
+/* the walk keys the containers on the CURRENT path rather than every container it has ever seen: a context that names the same map from two sibling keys is a lattice, not a cycle, and renders whole. */
+func normalizeJsonContextMap(
+    value map[string]any,
+    remainingDepth int,
+    seen map[jsonContextVisitKey]struct{},
+) any {
+    key := jsonContextVisitKey{pointer: reflect.ValueOf(value).Pointer()}
+    if _, visited := seen[key]; true == visited {
+        return normalizeJsonContextCycleMarker
+    }
+
+    seen[key] = struct{}{}
+    defer delete(seen, key)
+
+    return normalizeJsonMap(value, remainingDepth-1, seen)
+}
+
+func normalizeJsonContextSlice(
+    value []any,
+    remainingDepth int,
+    seen map[jsonContextVisitKey]struct{},
+) any {
+    pointer := reflect.ValueOf(value).Pointer()
+    if 0 != pointer {
+        key := jsonContextVisitKey{pointer: pointer, length: uintptr(len(value)) + 1}
+        if _, visited := seen[key]; true == visited {
+            return normalizeJsonContextCycleMarker
+        }
+
+        seen[key] = struct{}{}
+        defer delete(seen, key)
+    }
+
+    normalized := make([]any, len(value))
+    for index, element := range value {
+        normalized[index] = normalizeJsonValue(element, remainingDepth-1, seen)
+    }
+
+    return normalized
+}
+
+/* isJsonContextContainer answers for the shapes the walk descends into, which are exactly the ones that can carry a cycle past the encoder */
+func isJsonContextContainer(value any) bool {
+    switch value.(type) {
+    case map[string]any, loggingcontract.Context, []any, []map[string]any:
+        return true
+    }
+
+    reflectedValue := reflect.ValueOf(value)
+    switch reflectedValue.Kind() {
+    case reflect.Map:
+        return reflectedValue.Type().ConvertibleTo(plainJsonContextMapType)
+    case reflect.Slice:
+        return reflectedValue.Type().ConvertibleTo(plainJsonContextSliceType)
+    }
+
+    return false
+}
+
 /* normalizeJsonValue renders every error in the context as its message, however deep the containers this package nests put it: an error left to the encoder marshals as an empty object — every field unexported, no marshaler — so a cause carried inside a chain entry survived as "{}" while the same error one level up rendered fine. A typed nil is the nil its producer meant and renders as null instead of panicking on the Error call; the normalization descends the map and slice shapes the package itself produces and leaves every other value to the encoder. */
-func normalizeJsonValue(value any, remainingDepth int) any {
+func normalizeJsonValue(value any, remainingDepth int, seen map[jsonContextVisitKey]struct{}) any {
     if nil == value {
         return nil
     }
@@ -230,6 +304,11 @@ func normalizeJsonValue(value any, remainingDepth int) any {
             if _, isMarshaler := value.(json.Marshaler); false == isMarshaler {
                 return err.Error()
             }
+        }
+
+        /* a container is the one value the floor may not hand on as it is: nothing has walked what it holds, so a cycle closing below the bound would reach the encoder — and from there the fmt fallback that cannot survive one. A scalar carries no such risk and passes through. */
+        if true == isJsonContextContainer(value) {
+            return normalizeJsonContextDepthMarker
         }
 
         return value
@@ -250,27 +329,39 @@ func normalizeJsonValue(value any, remainingDepth int) any {
 
     switch typedValue := value.(type) {
     case map[string]any:
-        return normalizeJsonMap(typedValue, remainingDepth-1)
+        return normalizeJsonContextMap(typedValue, remainingDepth, seen)
 
     /* the exception contract's Context is an alias of this one, so the single case covers the context maps both packages put into a record */
     case loggingcontract.Context:
-        return normalizeJsonMap(typedValue, remainingDepth-1)
+        return normalizeJsonContextMap(typedValue, remainingDepth, seen)
 
     case []any:
-        normalized := make([]any, len(typedValue))
-        for index, element := range typedValue {
-            normalized[index] = normalizeJsonValue(element, remainingDepth-1)
-        }
-
-        return normalized
+        return normalizeJsonContextSlice(typedValue, remainingDepth, seen)
 
     case []map[string]any:
         normalized := make([]any, len(typedValue))
         for index, element := range typedValue {
-            normalized[index] = normalizeJsonMap(element, remainingDepth-1)
+            normalized[index] = normalizeJsonValue(element, remainingDepth-1, seen)
         }
 
         return normalized
+    }
+
+    /* a defined type whose underlying type is one of the shapes above — the exception contract's Context is one, and it is what a producer reaches for when nesting structured data — fails every assertion above while carrying the same shape. Left unconverted it rides past the cycle keying, and the cycle it holds reaches the encoder. The conversion keeps the backing pointer, which is what the keying is built on. */
+    reflectedValue := reflect.ValueOf(value)
+    switch reflectedValue.Kind() {
+    case reflect.Map:
+        if true == reflectedValue.Type().ConvertibleTo(plainJsonContextMapType) {
+            converted := reflectedValue.Convert(plainJsonContextMapType).Interface().(map[string]any)
+
+            return normalizeJsonContextMap(converted, remainingDepth, seen)
+        }
+    case reflect.Slice:
+        if true == reflectedValue.Type().ConvertibleTo(plainJsonContextSliceType) {
+            converted := reflectedValue.Convert(plainJsonContextSliceType).Interface().([]any)
+
+            return normalizeJsonContextSlice(converted, remainingDepth, seen)
+        }
     }
 
     return value

@@ -51,7 +51,7 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return err
     }
 
-    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
+    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
     if nil != dbErr {
         return dbErr
     }

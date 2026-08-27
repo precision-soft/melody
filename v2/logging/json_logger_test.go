@@ -27,6 +27,20 @@ func testNewJsonLoggerWithMinLevel(minLevel loggingcontract.Level) (loggingcontr
     return NewJsonLogger(buffer, minLevel), buffer
 }
 
+
+/* the encoder escapes the angle brackets the markers are spelled with, so an assertion written against the marker's own text never matches the record. Asking the encoder for its rendering keeps the assertion honest whichever way the escaping is configured. */
+func testEncodedJsonString(t *testing.T, value string) string {
+    t.Helper()
+
+    encoded, err := json.Marshal(value)
+    if nil != err {
+        t.Fatalf("could not encode %q: %v", value, err)
+    }
+
+    return string(encoded)
+}
+
+
 func TestJsonLogger_WritesJsonLine(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -842,7 +856,7 @@ func TestJsonLogger_NilContextValue_RendersAsNull(t *testing.T) {
     }
 }
 
-/* the descent is bounded: a context that nests deeper than the bound is handed to the encoder as it is instead of recursing without end, which is what keeps a pathological self-referencing structure from taking the process down inside the logger. The assertion is written at the boundary itself — one level above it the error still renders as its message, one level below it reaches the encoder unconverted and marshals as an empty object — because a bound asserted from far away survives being moved by one */
+/* the descent is bounded so that a context which is merely very deep cannot walk until the stack is gone. The assertion is written at the boundary itself — one level above it the error still renders as its message, one level below it the container is replaced by the depth marker — because a bound asserted from far away survives being moved by one. The container may not be handed on raw: nothing has walked what it holds, and a cycle closing below the bound would reach the encoder and from there the fmt fallback. */
 func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testing.T) {
     buildNestedContext := func(depth int) loggingcontract.Context {
         nested := any(map[string]any{"cause": errors.New("at the bound")})
@@ -862,7 +876,7 @@ func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testi
         t.Fatalf("expected the error just above the bound to render as its message, got %q", buffer.String())
     }
 
-    /* the floor bounds the DESCENT, not the scalar conversion: an error handed to the walk at the floor still renders as its message, while the container one level further sits below the floor whole and goes to the encoder raw — which is where the empty object honestly remains */
+    /* the floor bounds the DESCENT, not the scalar conversion: an error handed to the walk at the floor still renders as its message */
     logger, buffer = testNewJsonLogger()
     logger.Error("message", buildNestedContext(normalizeJsonContextMaxDepth-1))
 
@@ -873,8 +887,87 @@ func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testi
     logger, buffer = testNewJsonLogger()
     logger.Error("message", buildNestedContext(normalizeJsonContextMaxDepth))
 
-    if false == strings.Contains(buffer.String(), `"cause":{}`) {
-        t.Fatalf("expected the container below the bound to reach the encoder unconverted, got %q", buffer.String())
+    if false == strings.Contains(buffer.String(), `"level":`+testEncodedJsonString(t, normalizeJsonContextDepthMarker)) {
+        t.Fatalf("expected the container below the bound to be replaced by the depth marker, got %q", buffer.String())
+    }
+
+    if true == strings.Contains(buffer.String(), `"cause":{}`) {
+        t.Fatalf("expected no unwalked container to reach the encoder, got %q", buffer.String())
+    }
+}
+
+/* the two shapes an application declares for itself: neither has a case in the walk, so both reach the cycle keying only through the conversion */
+type testForeignContext map[string]any
+
+type testForeignList []any
+
+/* a context that closes on itself is renderable, and rendering it is the whole point: without the cycle keying the walk hands the loop to json.Marshal, whose cycle ERROR routes the record into the fmt fallback — and fmt recurses on a cyclic map until the goroutine stack is gone. That failure is `fatal error: stack overflow`, which no recover reaches, so the record written to report a failure kills the process instead, holding the write mutex as it goes. The three shapes are the three a producer can actually build: the plain map, the defined context type the framework itself nests, and the slice. */
+func TestJsonLogger_ACyclicContextRendersTheCycleMarkerInsteadOfTakingTheProcessDown(t *testing.T) {
+    selfNamingMap := map[string]any{"name": "outer"}
+    selfNamingMap["self"] = selfNamingMap
+
+    selfNamingContext := loggingcontract.Context{"name": "typed"}
+    selfNamingContext["self"] = selfNamingContext
+
+    selfNamingSlice := make([]any, 2)
+    selfNamingSlice[0] = "first"
+    selfNamingSlice[1] = selfNamingSlice
+
+    /* a defined type the walk has no case for reaches the keying only through the conversion, and an application is free to declare one */
+    selfNamingForeignMap := testForeignContext{"name": "foreign"}
+    selfNamingForeignMap["self"] = selfNamingForeignMap
+
+    selfNamingForeignSlice := make(testForeignList, 2)
+    selfNamingForeignSlice[0] = "first"
+    selfNamingForeignSlice[1] = selfNamingForeignSlice
+
+    testCases := []struct {
+        name  string
+        value any
+    }{
+        {name: "a plain map holding itself", value: selfNamingMap},
+        {name: "a defined context type holding itself", value: selfNamingContext},
+        {name: "a slice holding itself", value: selfNamingSlice},
+        {name: "a foreign defined map type holding itself", value: selfNamingForeignMap},
+        {name: "a foreign defined slice type holding itself", value: selfNamingForeignSlice},
+    }
+
+    for _, testCase := range testCases {
+        t.Run(testCase.name, func(t *testing.T) {
+            logger, buffer := testNewJsonLogger()
+            logger.Error("failure", loggingcontract.Context{"detail": testCase.value})
+
+            rendered := buffer.String()
+            if false == strings.Contains(rendered, testEncodedJsonString(t, normalizeJsonContextCycleMarker)) {
+                t.Fatalf("expected the cycle to render as the marker, got %q", rendered)
+            }
+
+            /* the record has to survive whole: the marker replaces the loop, not the keys beside it, and the fallback must not have been reached at all */
+            if false == strings.Contains(rendered, `"message":"failure"`) {
+                t.Fatalf("expected the record to keep its message, got %q", rendered)
+            }
+
+            if true == strings.Contains(rendered, "marshalError") {
+                t.Fatalf("expected the encoder to succeed rather than fall back, got %q", rendered)
+            }
+        })
+    }
+}
+
+/* the keying follows the current path rather than every container the walk has seen, so a context naming one map from two sibling keys is a lattice and renders whole. Keyed on every visit instead, the second sibling would read as a cycle and the record would lose data that is plainly there. */
+func TestJsonLogger_AContextNamingOneMapTwiceRendersItBothTimes(t *testing.T) {
+    shared := map[string]any{"shared": "value"}
+
+    logger, buffer := testNewJsonLogger()
+    logger.Error("message", loggingcontract.Context{"first": shared, "second": shared})
+
+    rendered := buffer.String()
+    if true == strings.Contains(rendered, testEncodedJsonString(t, normalizeJsonContextCycleMarker)) {
+        t.Fatalf("expected two sibling references to render whole, got %q", rendered)
+    }
+
+    if 2 != strings.Count(rendered, `"shared":"value"`) {
+        t.Fatalf("expected the shared map to render under both keys, got %q", rendered)
     }
 }
 

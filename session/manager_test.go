@@ -123,6 +123,10 @@ func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing
     if true == sessionInstance.IsCleared() {
         t.Fatalf("expected the original session to stay usable when the rotation failed")
     }
+
+    if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("expected the session whose entry could not be removed to stay saveable, got %s", saveErr.Error())
+    }
 }
 
 func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {

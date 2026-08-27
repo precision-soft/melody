@@ -43,7 +43,7 @@ func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
     }()
 
-    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
+    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
     if nil != dbErr {
         return dbErr
     }

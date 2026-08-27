@@ -1,7 +1,9 @@
 package migrate
 
 import (
+    "bytes"
     "context"
+    "encoding/json"
     "errors"
     "strings"
     "testing"
@@ -10,6 +12,7 @@ import (
 
     "github.com/precision-soft/melody/integrations/bunorm/v3"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -56,13 +59,15 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
         runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+            resolveOutput, _ := newBufferedOutput(true)
+
             defer func() {
                 if recovered := recover(); nil != recovered {
                     didPanic = true
                 }
             }()
 
-            _, _, _, resolveErr = base.resolveDatabase(runtimeInstance, commandContext)
+            _, _, _, resolveErr = base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
 
             return nil
         },
@@ -120,7 +125,9 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
         runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
-            _, name, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            resolveOutput, _ := newBufferedOutput(true)
+
+            _, name, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %s", resolveErr.Error())
                 return nil
@@ -281,7 +288,9 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
         runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
-            database, label, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            resolveOutput, _ := newBufferedOutput(true)
+
+            database, label, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %s", resolveErr.Error())
                 return nil
@@ -416,7 +425,9 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
         runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
-            database, label, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            resolveOutput, _ := newBufferedOutput(true)
+
+            database, label, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %s", resolveErr.Error())
 
@@ -434,7 +445,7 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
             releaseDatabase()
 
             /* the memo is gone, so this dials the provider a second time */
-            if _, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext); nil != secondErr {
+            if _, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput); nil != secondErr {
                 t.Errorf("unexpected resolve error on the second call: %s", secondErr.Error())
             }
 
@@ -451,6 +462,153 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     }
 }
 
+/* a release that FAILS must reach a channel. The registry forgets the handle before it closes it and its own teardown snapshots the map, so nothing downstream covers what this close leaves behind; a release that swallowed the failure reported it nowhere at all. The record is a warning rather than the command's verdict, and it belongs in the json document as much as on the terminal — the release is deferred after finish and defers are last-in-first-out, so it runs while the document is still being assembled. */
+func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
+    ordinaryDatabase, _ := newFakeBunDatabase()
+    migrationDatabase, _ := newFakeBunDatabase()
+
+    provider := &migrationCapableTestProvider{
+        ordinaryDatabase:  ordinaryDatabase,
+        migrationDatabase: migrationDatabase,
+    }
+
+    registry, registryErr := bunorm.NewManagerRegistry(
+        logging.NewNopLogger(),
+        bunorm.ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    options := DefaultOptions()
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[*bunorm.ManagerRegistry](
+        serviceContainer,
+        options.ManagerRegistryServiceId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+    )
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    base := &baseCommand{options: options}
+
+    documentBuffer := &bytes.Buffer{}
+    resolveOutput := newCommandOutput(documentBuffer, output.Option{Format: output.FormatJson})
+
+    command := &probeCommand{
+        nameValue:  "migrate",
+        flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+            _, _, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
+            if nil != resolveErr {
+                t.Errorf("unexpected resolve error: %s", resolveErr.Error())
+
+                return nil
+            }
+
+            /* the registry goes down first, so the release meets a refusal it cannot retry — the shape of every close that fails after the handle is already forgotten */
+            if closeErr := registry.Close(); nil != closeErr {
+                t.Errorf("unexpected registry close error: %s", closeErr.Error())
+            }
+
+            releaseDatabase()
+
+            return nil
+        },
+    }
+
+    if runErr := dispatchProbeCommand(command, runtimeInstance, []string{"migrate"}); nil != runErr {
+        t.Fatalf("unexpected command error: %s", runErr.Error())
+    }
+
+    if finishErr := resolveOutput.finish("db:migrate", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected finish error: %s", finishErr.Error())
+    }
+
+    document := struct {
+        Warnings []struct {
+            Message string `json:"message"`
+        } `json:"warnings"`
+    }{}
+    if decodeErr := json.Unmarshal(documentBuffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, documentBuffer.String())
+    }
+
+    if 1 != len(document.Warnings) {
+        t.Fatalf("expected the failed release to be recorded once, got %#v", document.Warnings)
+    }
+
+    if false == strings.Contains(document.Warnings[0].Message, "dedicated migration connection") {
+        t.Fatalf("expected the record to name the connection it failed to close, got %q", document.Warnings[0].Message)
+    }
+
+    if false == strings.Contains(document.Warnings[0].Message, bunorm.ErrManagerRegistryClosed.Error()) {
+        t.Fatalf("expected the record to carry the refusal itself, got %q", document.Warnings[0].Message)
+    }
+}
+
+/* a release that succeeds says nothing: a warning on every migration run would teach the operator to ignore the one that matters. */
+func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
+    ordinaryDatabase, _ := newFakeBunDatabase()
+    migrationDatabase, _ := newFakeBunDatabase()
+
+    provider := &migrationCapableTestProvider{
+        ordinaryDatabase:  ordinaryDatabase,
+        migrationDatabase: migrationDatabase,
+    }
+
+    registry, registryErr := bunorm.NewManagerRegistry(
+        logging.NewNopLogger(),
+        bunorm.ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    options := DefaultOptions()
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[*bunorm.ManagerRegistry](
+        serviceContainer,
+        options.ManagerRegistryServiceId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+    )
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    base := &baseCommand{options: options}
+
+    resolveOutput, resolveBuffer := newBufferedOutput(true)
+
+    command := &probeCommand{
+        nameValue:  "migrate",
+        flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+            _, _, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
+            if nil != resolveErr {
+                t.Errorf("unexpected resolve error: %s", resolveErr.Error())
+
+                return nil
+            }
+
+            releaseDatabase()
+
+            return nil
+        },
+    }
+
+    if runErr := dispatchProbeCommand(command, runtimeInstance, []string{"migrate"}); nil != runErr {
+        t.Fatalf("unexpected command error: %s", runErr.Error())
+    }
+
+    if "" != resolveBuffer.String() {
+        t.Fatalf("expected the successful release to say nothing, got %q", resolveBuffer.String())
+    }
+}
+
 /* a provider with no migration capability ran on the ordinary POOL, which belongs to the application; the release must leave it alone, or a migration command would take the database away from everything else the process runs. */
 func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
     database, _ := newFakeBunDatabase()
@@ -463,7 +621,9 @@ func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
         runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
-            resolved, label, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext)
+            resolveOutput, _ := newBufferedOutput(true)
+
+            resolved, label, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %s", resolveErr.Error())
 
@@ -481,7 +641,7 @@ func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
             releaseDatabase()
 
             /* the same pool is still the answer, and still usable: nothing was ended */
-            secondResolved, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext)
+            secondResolved, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != secondErr {
                 t.Errorf("unexpected resolve error on the second call: %s", secondErr.Error())
             }

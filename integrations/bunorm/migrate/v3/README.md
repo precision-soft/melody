@@ -118,7 +118,8 @@ text blocks print. `data.database.database` is json `null` when the connection r
 where the text block renders `<null>`. One consequence is worth knowing: a json run performs the
 database-identity query a text run only performs under `--verbose`.
 
-The plain-text rendering escapes C0 control characters and DEL visibly (`\n`, `\r`, `\t`, the rest as `\xNN`)
+The plain-text rendering escapes every control character visibly — the named C0 ones as `\n`, `\r`, `\t`, every
+other C0 one, DEL and the C1 block as `\xNN`, and the Unicode line and paragraph separators as `\uNNNN` —
 in every string the commands did not write themselves — the error text off the wire, the failed statement,
 the query names, the identity block the server answers and the migration names — and it does so before the
 table cells are measured, so the alignment counts the escaped spelling. The failed statement alone keeps its
