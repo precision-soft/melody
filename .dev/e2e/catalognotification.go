@@ -63,24 +63,33 @@ func runCatalogNotificationCheck(baseUrl string, mysqlDsn string, redisAddress s
 
     socketUrl := strings.Replace(strings.TrimRight(baseUrl, "/"), "http", "ws", 1) + "/ws"
 
-    first, _, firstDialErr := coderwebsocket.Dial(dialCtx, socketUrl, nil)
-    if nil != firstDialErr {
-        fail("%s: dial the first client on %s: %v", catalogNotificationLabel, socketUrl, firstDialErr)
+    /* the socket bridges the RoleEditor-gated catalog feed, so the anonymous handshake must be refused before any client is admitted: this is the assertion that sees the route's access rule — an ungated /ws served the whole mutation feed to a client that never signed in */
+    if _, _, anonymousDialErr := coderwebsocket.Dial(dialCtx, socketUrl, nil); nil == anonymousDialErr {
+        fail("%s: the anonymous handshake on %s was admitted; the socket serves the RoleEditor-gated catalog feed and must refuse it", catalogNotificationLabel, socketUrl)
     }
-    defer first.Close(coderwebsocket.StatusNormalClosure, "")
 
-    second, _, secondDialErr := coderwebsocket.Dial(dialCtx, socketUrl, nil)
-    if nil != secondDialErr {
-        fail("%s: dial the second client: %v", catalogNotificationLabel, secondDialErr)
-    }
-    defer second.Close(coderwebsocket.StatusNormalClosure, "")
-
-    pass("two clients are connected to the running application's socket")
+    pass("the anonymous handshake is refused")
 
     resetExampleRateLimitCounters(catalogNotificationLabel, redisAddress, catalogNotificationRateLimit)
 
     client := newExampleHttpClient()
     signInExampleHttpEditor(client, baseUrl, "")
+
+    dialOptions := &coderwebsocket.DialOptions{HTTPClient: client}
+
+    first, _, firstDialErr := coderwebsocket.Dial(dialCtx, socketUrl, dialOptions)
+    if nil != firstDialErr {
+        fail("%s: dial the first client on %s: %v", catalogNotificationLabel, socketUrl, firstDialErr)
+    }
+    defer first.Close(coderwebsocket.StatusNormalClosure, "")
+
+    second, _, secondDialErr := coderwebsocket.Dial(dialCtx, socketUrl, dialOptions)
+    if nil != secondDialErr {
+        fail("%s: dial the second client: %v", catalogNotificationLabel, secondDialErr)
+    }
+    defer second.Close(coderwebsocket.StatusNormalClosure, "")
+
+    pass("two signed-in clients are connected to the running application's socket")
 
     productId := createCatalogNotificationProbe(client, baseUrl)
 

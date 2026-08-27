@@ -1,6 +1,7 @@
 package migrate
 
 import (
+    "strconv"
     "time"
 
     clicontract "github.com/precision-soft/melody/v2/cli/contract"
@@ -89,6 +90,9 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
     group, rollbackErr := migrator.Rollback(runtimeInstance.Context())
     if nil != rollbackErr {
+        /* a rollback walks its group backwards, unapplying each migration once its Down returned, and bun hands the group back beside the failure: everything BEHIND the one that broke is already rolled back and recorded as such. The group comes back whole, so which of them landed cannot be read from it — what can be said, and used to go unsaid, is WHICH group the partial rollback was walking, so the operator inspecting the migrations table checks these names instead of reconstructing the set by hand. The migrate sibling reports its landed half the same way. */
+        printRollbackGroupOnFailure(outputInstance, managerName, group)
+
         return rollbackErr
     }
 
@@ -131,3 +135,19 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 }
 
 var _ clicontract.Command = (*RollbackCommand)(nil)
+
+/* printRollbackGroupOnFailure reports the group a failed rollback was walking, on both renderings — the text block and the machine document finish assembles beside the error. It is silent for a failure that named no group, so a refusal before the walk does not print an empty block. */
+func printRollbackGroupOnFailure(outputInstance *commandOutput, managerName string, group *migrate.MigrationGroup) {
+    names := migrationNamesOf(group)
+    if 0 == len(names) {
+        return
+    }
+
+    outputInstance.printDetailsBlock(map[string]string{
+        "manager":    managerName,
+        "group":      strconv.FormatInt(group.ID, 10),
+        "migrations": strconv.Itoa(len(names)),
+    })
+
+    outputInstance.printMigrationsBlock("rollbackGroup", "ROLLBACK GROUP MIGRATIONS", names)
+}

@@ -668,6 +668,76 @@ func TestMigrateRun_RefusesANullPrimaryKeyCursor(t *testing.T) {
     }
 }
 
+/* the keyset cursor of an integer key is bound as the integer itself: bound as its text, MySQL compares the integer column against the string parameter as double-precision floats, where keys at and above 2^53 collapse onto shared doubles — the next page silently skips the rows that round onto the cursor and the update guard can match a neighbouring key. */
+func TestMigrateRun_BindsAnIntegerPrimaryKeyCursorAsAnInteger(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment: "NOT LIKE",
+            columns:  []string{"longest"},
+            rows:     [][]driver.Value{{int64(10)}},
+        },
+        {
+            fragment: "information_schema.COLUMNS",
+            columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+            rows:     [][]driver.Value{{"varchar", int64(4096), int64(16384)}},
+        },
+        {
+            fragment:    "WHERE",
+            columns:     []string{"id", "iban"},
+            columnTypes: []string{"BIGINT", "VARCHAR"},
+            rows:        nil,
+        },
+        {
+            fragment:    "ORDER BY",
+            columns:     []string{"id", "iban"},
+            columnTypes: []string{"BIGINT", "VARCHAR"},
+            rows:        [][]driver.Value{{"9007199254740993", "plaintext"}},
+        },
+    })
+
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}, BatchSize: 1})
+    if nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    keysetArguments := ([]driver.Value)(nil)
+    for _, recorded := range stub.recordedArguments() {
+        if true == strings.Contains(recorded.query, "WHERE") && true == strings.Contains(recorded.query, "ORDER BY") {
+            keysetArguments = recorded.arguments
+        }
+    }
+
+    if nil == keysetArguments || 0 == len(keysetArguments) {
+        t.Fatalf("expected the second page's keyset query to have been recorded, got %+v", stub.recordedArguments())
+    }
+
+    if int64(9007199254740993) != keysetArguments[0] {
+        t.Fatalf("expected the cursor bound as the integer itself, got %T %v", keysetArguments[0], keysetArguments[0])
+    }
+}
+
+func TestTypedPrimaryKeyArgument_ConvertsByTheColumnType(t *testing.T) {
+    if int64(42) != typedPrimaryKeyArgument("42", "BIGINT") {
+        t.Fatalf("expected a signed integer column bound as int64")
+    }
+
+    if uint64(18446744073709551615) != typedPrimaryKeyArgument("18446744073709551615", "UNSIGNED BIGINT") {
+        t.Fatalf("expected an unsigned value past MaxInt64 bound as uint64")
+    }
+
+    if "42" != typedPrimaryKeyArgument("42", "VARCHAR") {
+        t.Fatalf("expected a string column to keep the string binding")
+    }
+
+    if "42" != typedPrimaryKeyArgument("42", "") {
+        t.Fatalf("expected a driver that reports no type to keep the string binding")
+    }
+
+    if int64(7) != typedPrimaryKeyArgument("7", "INT8") {
+        t.Fatalf("expected the postgres integer spelling to bind as int64")
+    }
+}
+
 /* a SIGTERM mid-bulk used to surface as "migrate select failed", indistinguishable from a broken column */
 func TestClassifyRunError_NamesAnInterruptedRun(t *testing.T) {
     migrator := &Migrator{}

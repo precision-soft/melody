@@ -105,6 +105,15 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             }
         }
 
+        /* a rename leaves the by-username entry keyed on the OLD spelling: cleared only under the new one, the old key kept authenticating the pre-rename credentials for as long as the entry lived, and the old name could never be re-registered — the deleted event carries its username for exactly this reason */
+        previousUsernameCacheKey := userUsernameCacheKey(payloadInstance.PreviousUsername())
+        if "" != previousUsernameCacheKey && previousUsernameCacheKey != usernameCacheKey {
+            previousUsernameDeleteErr := cacheInstance.Delete(previousUsernameCacheKey)
+            if nil != previousUsernameDeleteErr {
+                return previousUsernameDeleteErr
+            }
+        }
+
         listDeleteErr := cacheInstance.Delete(service.CacheKeyUserList)
         if nil != listDeleteErr {
             return listDeleteErr

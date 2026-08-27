@@ -89,6 +89,11 @@ func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxi
             counts[status] = count
         }
 
+        /* an iteration error ends the loop exactly like exhaustion does, with the failure parked on the rows: unread, a connection dropped after the first row served a truncated counts map as a 200 — an existing dead count silently reading as no dead rows */
+        if rowsErr := rows.Err(); nil != rowsErr {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status"), nil
+        }
+
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, counts), nil
     }
 }

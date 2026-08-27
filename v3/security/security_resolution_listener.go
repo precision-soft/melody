@@ -2,6 +2,7 @@ package security
 
 import (
     "fmt"
+    nethttp "net/http"
     "runtime/debug"
 
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
@@ -67,14 +68,37 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
             if nil != resolveErr {
                 setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 
+                /* normalized before the record is written so the logged mark has a link to live on: a token source is free to return a plain error, and a mark that does not stick would have the kernel exception listener file the same failure a second time */
+                resolveErr = exception.FromError(resolveErr)
+
                 logger := logging.LoggerFromRuntime(runtimeInstance)
                 if nil != logger {
-                    logger.Error(
-                        "security token source resolution failed",
-                        exception.LogContext(resolveErr),
+                    method := ""
+                    path := ""
+                    if nil != requestEvent.Request().HttpRequest() {
+                        method = requestEvent.Request().HttpRequest().Method
+                        if nil != requestEvent.Request().HttpRequest().URL {
+                            path = requestEvent.Request().HttpRequest().URL.Path
+                        }
+                    }
+
+                    /* a token the client got wrong — an expired jwt, a malformed Authorization, a bad signature — surfaces as a sub-500 HttpException, and that is a refusal recorded at warning, the classification its api-key sibling already earns by travelling to the exception listener. Depositing it at error, and then marking it so the listener adds nothing, made every client with an expired token page whoever reads the error stream. A token backend that is genuinely down, or any error that is not a deliberate 4xx, keeps the error level. The switch is on the named methods rather than Log, so a capture logger that overrides only one level is not stepped past. */
+                    resolutionMessage := "security token source resolution failed"
+                    resolutionContext := exception.LogContext(
+                        resolveErr,
+                        exceptioncontract.Context{
+                            "method": method,
+                            "path":   path,
+                        },
                     )
 
-                    /* mark the error logged so the exception listener the dispatch below reaches does not file a second record for the one failure — the duplicate-suppression discipline every kernel writer follows, and the one the frozen majors already keep here */
+                    httpException := exception.AsHttpException(resolveErr)
+                    if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+                        logger.Warning(resolutionMessage, resolutionContext)
+                    } else {
+                        logger.Error(resolutionMessage, resolutionContext)
+                    }
+
                     _ = exception.MarkLogged(resolveErr)
                 }
 

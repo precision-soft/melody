@@ -7,6 +7,7 @@ import (
     "strings"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
@@ -29,8 +30,9 @@ func (instance *RouteManifestCommand) Description() string {
     return "export the exposed routes as a JSON manifest for frontend URL generation"
 }
 
+/* the standard set joins the command's own so the machine-readable output has the quiet contract: without it the flag did not exist here, quiet could not suppress the run banner, and the manifest printed to stdout arrived framed inside it — unparseable from the first byte for the pipeline reading it */
 func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
-    return []clicontract.Flag{
+    return output.MergeFlags(output.StandardFlags(), []clicontract.Flag{
         &clicontract.StringFlag{
             Name:  "out",
             Usage: "path to write the route manifest to; prints to stdout when empty",
@@ -39,7 +41,7 @@ func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
             Name:  "zone",
             Usage: "restrict the manifest to a single zone (public, internal, frontend, client); all zones when empty",
         },
-    }
+    })
 }
 
 /* Run emits the manifest. It mirrors the openapi generate command in the four places that decide whether the artifact is trustworthy, none of which it used to: a relative --out is anchored at the project directory rather than at whatever directory the process happened to start in, a target that is not a JSON document is refused rather than destroyed, the write lands through a temp file and a rename so an interrupted run leaves the previous manifest intact, and the output travels through the command writer rather than process stdout — the cli layer redirects that writer, and in json mode a raw print splices the document into the machine-readable stream. */

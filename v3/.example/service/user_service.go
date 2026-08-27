@@ -186,11 +186,15 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    user.Username = username
-    user.Password = passwordHash
-    user.Roles = roles
+    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: written in place, a rename the repository then REFUSED ("username already exists") had already renamed the stored account — the directory held two accounts folding onto one username while the caller was told the update failed */
+    previousUsername := user.Username
 
-    updated, updateErr := instance.userRepository.Update(ctx, user)
+    modified := *user
+    modified.Username = username
+    modified.Password = passwordHash
+    modified.Roles = roles
+
+    updated, updateErr := instance.userRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -198,7 +202,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(user)
+    updatedEvent := event.NewUserUpdatedEvent(&modified, previousUsername)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
@@ -208,7 +212,7 @@ func (instance *UserService) Update(
         return nil, true, dispatchErr
     }
 
-    return user, true, nil
+    return &modified, true, nil
 }
 
 func (instance *UserService) DeleteById(

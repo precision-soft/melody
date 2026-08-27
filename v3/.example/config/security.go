@@ -25,7 +25,6 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/health", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/metrics", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/openapi.json", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/ws", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/platform/check", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/messagebus/dispatch", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/encrypt/roundtrip", melodysecuritycontract.AttributePublicAccess),
@@ -36,6 +35,9 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         /* publishing injects a frame into every stream open across the CLUSTER, so it is the write role the catalog writes themselves carry; streaming carries the catalog writes made behind those roles, so it is at least an authenticated reader, and the handler gates the topic on top of that. Both used to sit under a public "^/events" rule. */
         melodysecurity.NewAccessControlRule(route.EventsPublishPattern, entity.RoleEditor),
         melodysecurity.NewAccessControlRule(route.EventsStreamPattern, entity.RoleUser),
+
+        /* the websocket door bridges onto the same hub topic the SSE stream gates behind RoleEditor — the catalog topic, carrying every product and user write — and it has no per-topic gate of its own, so the route carries the topic's whole requirement. Public, an anonymous client watched the RoleEditor-gated mutation feed go by. */
+        melodysecurity.NewAccessControlRegexRule("^/ws", entity.RoleEditor),
 
         melodysecurity.NewAccessControlRule(route.ProductsPrefix, entity.RoleEditor),
         melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),

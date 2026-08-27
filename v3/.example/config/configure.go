@@ -75,14 +75,20 @@ func Configure(app *melodyapplication.Application) {
     /* the SSE stream and the websocket handler both block on this hub; http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so without closing the hub a single connected client holds the whole shutdown timeout and is then cut mid-flight */
     app.OnHttpShutdown(moduleInstance.serverSentEventHub.Shutdown)
 
+    /* the redis backplane owns a listen goroutine and a pub/sub subscription; the composition root that builds one owes it a Close, the duty its amqp twin's module documents. Unclosed, its reconnect loop outlived the shared client's teardown and retried forever against a client that can only answer closed — silent in the shipped binary, a leaked goroutine per lifecycle in any host that builds and tears the application down more than once. */
+    if nil != moduleInstance.serverSentEventBackplane {
+        app.OnHttpShutdown(func() {
+            _ = moduleInstance.serverSentEventBackplane.Close()
+        })
+    }
+
     app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
         Hub:       moduleInstance.serverSentEventHub,
         Path:      "/ws",
         RouteName: "example.websocket",
-        /* IdleTimeout is required: the keepalive ping is the only thing that reaps a browser tab that went away without a fin, and 30s is a comfortable interval for one. */
+        /* IdleTimeout is required: the keepalive ping is the only thing that reaps a browser tab that went away without a fin, and 30s is a comfortable interval for one. OriginPatterns stays unset on purpose — the upgrade authenticates through the session cookie, which a browser attaches cross-site too, so the library's same-origin default is what stops a foreign page from riding a signed-in visitor's session onto the feed; a client that sends no Origin header (a script, the e2e band) is not origin-checked at all. */
         Options: melodywebsocket.Options{
-            OriginPatterns: []string{"*"},
-            IdleTimeout:    30 * time.Second,
+            IdleTimeout: 30 * time.Second,
         },
     }))
 

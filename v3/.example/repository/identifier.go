@@ -1,6 +1,7 @@
 package repository
 
 import (
+    "math"
     "strconv"
     "strings"
 )
@@ -23,6 +24,11 @@ func highestIdSuffix(identifierList []string, prefix string) int64 {
         if suffix > highest {
             highest = suffix
         }
+    }
+
+    /* the answer is capped one below the int64 ceiling: every caller mints the NEXT id as this plus one, and a stored suffix at the very ceiling would wrap that addition into a negative id — stored once, the wrapped id collides with itself on every later mint and empty-id creation is refused forever. Capped, the mint lands on the ceiling and collides with the existing row, which the caller reports as the ordinary "id already exists". */
+    if math.MaxInt64-1 < highest {
+        return math.MaxInt64 - 1
     }
 
     return highest

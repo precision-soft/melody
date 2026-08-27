@@ -5,6 +5,7 @@ import (
     "database/sql"
     "errors"
     "fmt"
+    "strconv"
     "strings"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -416,7 +417,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
         quoteIdentifier(spec.PrimaryKey),
     )
 
-    var cursor string
+    var cursor any
     hasCursor := false
     processed := 0
     skippedCount := 0
@@ -447,7 +448,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
         }
 
         for _, row := range batch {
-            cursor = row.primaryKey
+            cursor = row.primaryKeyArgument
             hasCursor = true
 
             applied, updateErr := instance.applyRow(ctx, spec, row, transform)
@@ -538,7 +539,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
 
     arguments := make([]any, 0, len(setArguments)+1+len(valueArguments))
     arguments = append(arguments, setArguments...)
-    arguments = append(arguments, row.primaryKey)
+    arguments = append(arguments, row.primaryKeyArgument)
     arguments = append(arguments, valueArguments...)
 
     /* guard each assignment on the value read for this row so a concurrent application write between the select and this update is not silently reverted; a row that changed under us matches zero rows and is re-encrypted on the next run. The comparison is byte-exact, which is what makes the guard hold at all — see binaryComparison. */
@@ -570,11 +571,19 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
 
 type migrateRow struct {
     primaryKey string
+    /* the value the primary key is BOUND as, in the keyset predicate and the update guard alike. On an integer column it is the parsed integer, never the scanned text: MySQL compares an integer column against a string parameter as double-precision floats, so a string-bound cursor above 2^53 lands between representable doubles — pages silently skip rows, and the update guard's `pk = ?` can match a whole bucket of adjacent keys. The decimal text of an integer column parses losslessly, so the conversion cannot fail for a value the column actually held. */
+    primaryKeyArgument any
     values     []sql.NullString
 }
 
 func scanMigrateRows(rows *sql.Rows, columnCount int) ([]migrateRow, error) {
     var batch []migrateRow
+
+    /* the primary key's database type decides how the cursor is bound back: read once per page, before the first row, from the driver's own answer. A driver that does not report column types answers the empty string, which keeps the string binding — the shape every non-integer key needs anyway. */
+    primaryKeyTypeName := ""
+    if columnTypes, columnTypesErr := rows.ColumnTypes(); nil == columnTypesErr && 0 < len(columnTypes) {
+        primaryKeyTypeName = columnTypes[0].DatabaseTypeName()
+    }
 
     for rows.Next() {
         primaryKey := sql.NullString{}
@@ -595,7 +604,11 @@ func scanMigrateRows(rows *sql.Rows, columnCount int) ([]migrateRow, error) {
             return nil, exception.NewError("migrate read a NULL primary key value; the --primary-key column cannot serve as the pagination cursor", nil, nil)
         }
 
-        batch = append(batch, migrateRow{primaryKey: primaryKey.String, values: values})
+        batch = append(batch, migrateRow{
+            primaryKey:         primaryKey.String,
+            primaryKeyArgument: typedPrimaryKeyArgument(primaryKey.String, primaryKeyTypeName),
+            values:             values,
+        })
     }
 
     if rowsErr := rows.Err(); nil != rowsErr {
@@ -603,6 +616,37 @@ func scanMigrateRows(rows *sql.Rows, columnCount int) ([]migrateRow, error) {
     }
 
     return batch, nil
+}
+
+/* typedPrimaryKeyArgument converts a scanned primary key back to the type its column holds, so the keyset predicate and the update guard compare in the column's own domain. A string bound against an integer column is compared by MySQL as double-precision floats — the one comparison rule left when neither side is of the other's class — so keys at or above 2^53 collapse onto shared doubles: the next page's `pk > ?` skips the rows that round down onto the cursor, none of them counted as skipped, and the guard's `pk = ?` matches every key in the bucket. Signed first and unsigned as the fallback, because a BIGINT UNSIGNED holds values past MaxInt64; text that parses as neither is not the rendering of an integer column and keeps the string, exactly as a non-integer type name does. */
+func typedPrimaryKeyArgument(primaryKey string, databaseTypeName string) any {
+    if false == isIntegerDatabaseType(databaseTypeName) {
+        return primaryKey
+    }
+
+    if signedValue, signedErr := strconv.ParseInt(primaryKey, 10, 64); nil == signedErr {
+        return signedValue
+    }
+
+    if unsignedValue, unsignedErr := strconv.ParseUint(primaryKey, 10, 64); nil == unsignedErr {
+        return unsignedValue
+    }
+
+    return primaryKey
+}
+
+/* isIntegerDatabaseType answers for the spellings the two drivers this module meets report — mysql's INT family, with the UNSIGNED prefix its driver keeps on the name, and postgres's INT2/INT4/INT8. */
+func isIntegerDatabaseType(databaseTypeName string) bool {
+    normalized := strings.ToUpper(strings.TrimSpace(databaseTypeName))
+    normalized = strings.TrimPrefix(normalized, "UNSIGNED ")
+    normalized = strings.TrimSuffix(normalized, " UNSIGNED")
+
+    switch normalized {
+    case "TINYINT", "SMALLINT", "MEDIUMINT", "INT", "INTEGER", "BIGINT", "INT2", "INT4", "INT8":
+        return true
+    default:
+        return false
+    }
 }
 
 /* binaryComparison renders a column so the pre-image guard compares bytes rather than characters.

@@ -554,6 +554,40 @@ func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T)
     }
 }
 
+/* the late mark reaches a reader spelled with the kernel.* alias of the marked MELODY_* key: the aliased pair is one parameter under two names, so the propagation seeds every spelling — a scan over the marked spelling alone left the alias-spelled reader printing the derived value in full */
+func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
+    environment := &Environment{values: map[string]string{
+        LogPathKey: "/var/log/app.log",
+    }}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("observability.sink", "file://%kernel.log_path%")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if true == configuration.MustGet("observability.sink").IsSecret() {
+        t.Fatalf("expected the alias-spelled reader to start unmarked")
+    }
+
+    if false == configuration.MarkSecret(LogPathKey) {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet(KernelLogPath).IsSecret() {
+        t.Fatalf("expected the kernel spelling of the marked key to be marked")
+    }
+
+    if false == configuration.MustGet("observability.sink").IsSecret() {
+        t.Fatalf("expected the late marking to reach the reader through the kernel alias")
+    }
+}
+
 /* a runtime registration that fails to resolve leaves nothing behind: publishing before resolving served the raw template to every reader that outlived the recovered panic and burnt the name for the corrected retry */
 func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}

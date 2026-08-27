@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcors "github.com/precision-soft/melody/v3/http/cors"
     melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
@@ -78,9 +79,14 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
         return
     }
 
+    /* a malformed value is refused by name rather than read as unset: swallowed, a typo in the key disarmed the global budget with no signal on any channel, indistinguishable from never having asked — the cron heartbeat opt-in refuses its malformed value for the same reason */
     budget, parseErr := strconv.Atoi(budgetValue)
     if nil != parseErr || 0 >= budget {
-        return
+        melodyexception.Panic(melodyexception.NewError(
+            "the request budget switch does not hold a positive integer; unset it to keep the door unwired",
+            map[string]any{"key": environmentKeyRequestBudgetPerHour, "value": budgetValue},
+            parseErr,
+        ))
     }
 
     melodyhttpmiddleware.RegisterRateLimitRequestListener(

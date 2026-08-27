@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Breaking**, v3 binding only — the six migration commands take `clicontract.Context` where they took `*clicontract.CommandContext`, following the framework's melody-owned flag and context layer. `db:create` reads its migration name from `commandContext.Arguments()` rather than `Args().First()`, guarded on the length, which answers exactly what the engine's `First()` answered for no arguments. The v1 and v2 bindings are unchanged — the framework's `UPGRADE.md` writes the rewrite out line by line
 
+### Fixed
+
+- rollback: a rollback that fails part way names the group it was walking, on the text block and in the machine document alike — bun hands the group back beside the failure, with everything behind the broken migration already rolled back and recorded as such, and the command reported only the failing migration, leaving which schema changes were already undone to be reconstructed from the migrations table by hand
+
 ## [v1.3.0] - 2026-08-18 - Machine-Readable Envelopes, Lock Remedies and Visible Control Characters
 
 ### Added

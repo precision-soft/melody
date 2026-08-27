@@ -1036,6 +1036,86 @@ func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
     }
 }
 
+type replacedFailingProbe struct {
+    failure error
+}
+
+func (instance *replacedFailingProbe) Close() error {
+    return instance.failure
+}
+
+type secondReplacedFailingProbe struct {
+    failure error
+}
+
+func (instance *secondReplacedFailingProbe) Close() error {
+    return instance.failure
+}
+
+/* two replaced built instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so a shared constant key let the second failure overwrite the first's record, naming one failure where two happened */
+func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerFirstErr := serviceContainer.Register(
+        "app.replaced.failing.first",
+        func(resolver containercontract.Resolver) (*replacedFailingProbe, error) {
+            return &replacedFailingProbe{failure: errors.New("refusing to close app.replaced.failing.first")}, nil
+        },
+    )
+    if nil != registerFirstErr {
+        t.Fatalf("unexpected register error: %v", registerFirstErr)
+    }
+
+    registerSecondErr := serviceContainer.Register(
+        "app.replaced.failing.second",
+        func(resolver containercontract.Resolver) (*secondReplacedFailingProbe, error) {
+            return &secondReplacedFailingProbe{failure: errors.New("refusing to close app.replaced.failing.second")}, nil
+        },
+    )
+    if nil != registerSecondErr {
+        t.Fatalf("unexpected register error: %v", registerSecondErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.replaced.failing.first"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.replaced.failing.second"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.first", &replacedFailingProbe{}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.second", &secondReplacedFailingProbe{}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the two failing replaced closes to be reported")
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected a failures map in the close error context, got %+v", typedError.Context())
+    }
+
+    if "refusing to close app.replaced.failing.first" != failures["container.replacedInstance[0]"] {
+        t.Fatalf("expected the first replaced failure under its own key, got %+v", failures)
+    }
+
+    if "refusing to close app.replaced.failing.second" != failures["container.replacedInstance[1]"] {
+        t.Fatalf("expected the second replaced failure under its own key, got %+v", failures)
+    }
+}
+
 /* an override evicting an EARLIER override closes nothing: an installed override belongs to whoever installed it, and only what the container itself built enters the graveyard. */
 func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
     serviceContainer := NewContainer()

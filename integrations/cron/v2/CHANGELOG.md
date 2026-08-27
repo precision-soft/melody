@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- generate: the machine document's error details read the failure's context through the typed-nil door the runner sibling reads through — a typed-nil link in the chain satisfies `errors.As` and passes a plain nil comparison, and rendering its context panicked inside the very report that was describing the failure
 - `--prune` recognises ownership by an EXACT marker line among a candidate's leading lines, not by a substring anywhere in its first 8KiB: emptying is irreversible, and an operator's README or commented backup that merely QUOTED the marker in its opening kilobytes was emptied as if the generator had written it. Exactness also keeps two markers apart when one extends the other — a custom dialect that suffixes the builtin marker declares files of its own, which the substring match claimed for a builtin run; the builtin dialects share one identical marker line, so the deliberate cross-dialect reconciliation between them is untouched
 
 ## [v2.7.0] - 2026-08-18 - Prune-Capable Generation, Deadline-Bounded Runs and Capability-Aware Dialects

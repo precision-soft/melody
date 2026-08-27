@@ -348,7 +348,13 @@ func resolveErrorCauseChain(resolveErr error) []string {
         return nil
     }
 
-    return exception.BuildCauseChain(errors.Unwrap(resolveErr), 8)
+    /* built from the failure itself with the head dropped, rather than from a bare errors.Unwrap: a joined failure answers Unwrap with nothing — its causes live behind the []error shape — so the whole chain vanished from the report exactly when there was more than one cause to show. BuildCauseChain walks both unwrap shapes. */
+    chain := exception.BuildCauseChain(resolveErr, 9)
+    if 1 >= len(chain) {
+        return nil
+    }
+
+    return chain[1:]
 }
 
 /* populateServiceList is the --build sweep: every windowed service is resolved and the failures report their causes. A scoped registration resolves through the run's own scope — the scope a console command's services live in — never through the container that refuses it. */

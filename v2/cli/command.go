@@ -106,6 +106,9 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 /* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file must not carry escape codes around an output that honoured the flag */
                 noColor := resolvedOption.NoColor
 
+                /* the banner is decoration, and quiet is the documented governor of decoration: StandardFlags defaults it to true so a scripted invocation stays clean without asking, DebugFlags to false so an introspection command keeps its frame, and a command that declares neither reads false and keeps the banner it always had. The banner ignored the flag entirely, so the one output the contract promises quiet suppresses was the one it never touched. */
+                quiet := resolvedOption.Quiet
+
                 printGreenFullLine := func(writer io.Writer) {
                     if true == noColor {
                         return
@@ -161,24 +164,30 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     )
                 }
 
-                printGreenFullLine(writer)
+                if false == quiet {
+                    printGreenFullLine(writer)
 
-                printGreenStatusLine(
-                    writer,
-                    fmt.Sprintf(
-                        "%s [%s] [started] [%s] %s",
-                        logFiller,
-                        normalizedCommandName,
-                        startedAt.Format(time.DateTime),
-                        logFiller,
-                    ),
-                )
+                    printGreenStatusLine(
+                        writer,
+                        fmt.Sprintf(
+                            "%s [%s] [started] [%s] %s",
+                            logFiller,
+                            normalizedCommandName,
+                            startedAt.Format(time.DateTime),
+                            logFiller,
+                        ),
+                    )
 
-                printGreenFullLine(writer)
+                    printGreenFullLine(writer)
+                }
 
                 var commandErr error
 
                 defer func() {
+                    if true == quiet {
+                        return
+                    }
+
                     finishedAt := time.Now()
                     duration := finishedAt.Sub(startedAt)
 

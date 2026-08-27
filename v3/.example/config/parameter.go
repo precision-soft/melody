@@ -31,9 +31,10 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     /* the empty-string fallback: the export endpoint is genuinely absent in most environments, so the parameter resolves to "" instead of every environment having to define a key it does not use */
     registrar.RegisterParameter("app.reporting.export_endpoint", "%env(default::APP_REPORTING_EXPORT_ENDPOINT)%")
 
-    /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them */
+    /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them. AMQP_DSN is on the list because it carries its credentials INLINE: unlike the database dsn, assembled from the marked password so the mark propagates to it, the amqp credentials sit whole in this one key and no marked source exists to propagate from. */
     registrar.MarkParameterSecret("MYSQL_PASSWORD")
     registrar.MarkParameterSecret("S3_SECRET_KEY")
+    registrar.MarkParameterSecret(environmentKeyAmqpDsn)
 
     /* the dsn reads the marked password — through a parameter reference and through %env(KEY)% alike — so the secret marking travels to it and debug:parameters redacts the assembled value beside the password itself */
     registrar.RegisterParameter(

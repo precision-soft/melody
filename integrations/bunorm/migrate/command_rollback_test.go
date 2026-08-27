@@ -7,6 +7,7 @@ import (
     "testing"
 
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    "github.com/uptrace/bun/migrate"
 )
 
 func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
@@ -47,6 +48,41 @@ func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
 
     if false == (lockIndex < markUnappliedIndex && markUnappliedIndex < unlockIndex) {
         t.Fatalf("rollback did not run inside the migration lock: %v", recorder.recordedQueries())
+    }
+}
+
+/* a rollback that fails part way names the group it was walking on the way out: bun hands the group back beside the failure, and reporting nothing left the operator with only the failing migration — which schema changes were already undone could only be reconstructed from the migrations table by hand */
+func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{
+        Name:    "20240101000000",
+        Comment: "create_users",
+        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return nil
+        },
+        Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return errors.New("down refused")
+        },
+    })
+
+    command := NewRollbackCommand(migrations, DefaultOptions())
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil == runErr {
+        t.Fatalf("expected the failing down to fail the command")
+    }
+
+    if false == strings.Contains(rendered, "ROLLBACK GROUP MIGRATIONS") {
+        t.Fatalf("expected the report to name the group the failed rollback was walking, got %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "20240101000000") {
+        t.Fatalf("expected the group's migration named, got %q", rendered)
     }
 }
 

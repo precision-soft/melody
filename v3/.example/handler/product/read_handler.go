@@ -113,7 +113,8 @@ func mapProduct(product *entity.Product) ProductResponse {
         Price:       priceRounded,
         CurrencyId:  product.CurrencyId,
         Stock:       product.Stock,
-        CreatedAt:   product.CreatedAt.Format(nethttp.TimeFormat),
-        UpdatedAt:   product.UpdatedAt.Format(nethttp.TimeFormat),
+        /* http.TimeFormat spells a literal GMT suffix, so the instant is converted first: formatted as the local wall time it was stamped in, the rendered string misstated the instant by the process zone's whole offset and a client parsing it read a moment hours away */
+        CreatedAt:   product.CreatedAt.UTC().Format(nethttp.TimeFormat),
+        UpdatedAt:   product.UpdatedAt.UTC().Format(nethttp.TimeFormat),
     }
 }

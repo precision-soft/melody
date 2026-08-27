@@ -1,6 +1,7 @@
 package session
 
 import (
+    "errors"
     "math"
     "os"
     "os/exec"
@@ -1071,6 +1072,77 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
     }
     if false == exists || "old" != data["v"].(string) {
         t.Fatalf("a failed update must restore the previous in-memory value, got exists=%v data=%v", exists, data)
+    }
+}
+
+/* a flush that fails only past the persisted write keeps the NEW in-memory state: the document already sits on disk in full, so rolling back would make memory disagree with what was persisted — the divergence the rollback exists to prevent, inverted. A character device accepts the write at offset zero and refuses the truncation, which is exactly the after-the-persist failure. */
+func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *testing.T) {
+    devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+    if nil != openErr {
+        t.Fatalf("unexpected open error: %s", openErr.Error())
+    }
+
+    defer func() {
+        _ = devNull.Close()
+    }()
+
+    storage, storageErr := NewFileStorageFromFile(devNull)
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %s", storageErr.Error())
+    }
+
+    saveErr := storage.Save("kept", map[string]any{"v": "new"}, 0)
+    if nil == saveErr {
+        t.Fatalf("expected the truncation refusal to be reported")
+    }
+
+    if false == errors.Is(saveErr, errSessionStoragePersistedDespiteFlushFailure) {
+        t.Fatalf("expected the failure to carry the persisted-despite-flush mark, got %s", saveErr.Error())
+    }
+
+    data, exists, loadErr := storage.Load("kept")
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    }
+
+    if false == exists || "new" != data["v"].(string) {
+        t.Fatalf("expected the entry persisted before the failed flush to stay, got exists=%v data=%v", exists, data)
+    }
+}
+
+/* the deletion twin of the kept-entry rule: the document without the session already sits on disk when the flush failure strikes, so restoring the entry in memory would resurrect a session the persisted state no longer holds. */
+func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist(t *testing.T) {
+    devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+    if nil != openErr {
+        t.Fatalf("unexpected open error: %s", openErr.Error())
+    }
+
+    defer func() {
+        _ = devNull.Close()
+    }()
+
+    storage, storageErr := NewFileStorageFromFile(devNull)
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %s", storageErr.Error())
+    }
+
+    if saveErr := storage.Save("gone", map[string]any{"v": "old"}, 0); false == errors.Is(saveErr, errSessionStoragePersistedDespiteFlushFailure) {
+        t.Fatalf("expected the seeding save to fail only past the persist, got %v", saveErr)
+    }
+
+    deleteErr := storage.Delete("gone")
+    if nil == deleteErr {
+        t.Fatalf("expected the truncation refusal to be reported")
+    }
+
+    if false == errors.Is(deleteErr, errSessionStoragePersistedDespiteFlushFailure) {
+        t.Fatalf("expected the failure to carry the persisted-despite-flush mark, got %s", deleteErr.Error())
+    }
+
+    if _, exists, loadErr := storage.Load("gone"); nil != loadErr {
+        t.Fatalf("unexpected load error: %s", loadErr.Error())
+    } else if true == exists {
+        t.Fatalf("expected the entry deleted before the failed flush to stay deleted")
     }
 }
 

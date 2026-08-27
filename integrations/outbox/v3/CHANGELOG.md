@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- relay: the stored `last_error` cap cuts on a rune boundary — a byte-offset cut through a multi-byte rune left an invalid string a strict utf8mb4 column refuses, failing the very resolution write the cap exists to protect, so the row re-surfaced every visibility timeout with nothing recorded
 - `relay.go` — a dead-lettered or rescheduled row's `last_error` records the failure's CAUSE CHAIN, not the message alone. The error string of a melody error is its message, so a dead letter used to read `amqp publish failed` with no broker verdict, no reply code, nothing — the one place an operator looks to diagnose a dead letter was undiagnosable. The rendering is capped so the narrowest default column the store's own schema can produce still accepts the write
 - `relay.go` — a failed resolution write reports the delivery failure it was recording instead of replacing it: when `MarkDead`/`Reschedule` itself hiccuped, only the write error surfaced, the decode/send cause reached neither the log nor the row, and the row silently re-surfaced after the visibility timeout with nothing recorded anywhere
 - `relay.go` — the lease-refresh cadence is anchored at acquisition, before the claim: the lease's clock starts at `Acquire`, and a claim that blocked on a contended database consumed lease lifetime the old post-claim anchor never accounted for, so the first refresh could land after the lease had already lapsed — with another replica free to acquire it and drain alongside

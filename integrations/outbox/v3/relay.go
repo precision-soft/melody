@@ -7,6 +7,7 @@ import (
     "strconv"
     "strings"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -242,7 +243,13 @@ func storedLastError(prefix string, err error) string {
 
     rendered := strings.Join(parts, " <- ")
     if maximumStoredErrorLength < len(rendered) {
-        rendered = rendered[:maximumStoredErrorLength]
+        /* the cut backs off to a rune boundary: a byte-offset cut through a multi-byte rune leaves an invalid string, which a strict utf8mb4 column refuses — failing the very resolution write the cap exists to protect, so the row re-surfaced every visibility timeout with nothing recorded */
+        cut := maximumStoredErrorLength
+        for 0 < cut && false == utf8.RuneStart(rendered[cut]) {
+            cut--
+        }
+
+        rendered = rendered[:cut]
     }
 
     return rendered

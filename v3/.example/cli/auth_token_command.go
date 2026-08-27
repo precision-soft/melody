@@ -6,6 +6,7 @@ import (
     "encoding/base64"
     "encoding/json"
     "fmt"
+    "math"
     "time"
 
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
@@ -70,6 +71,12 @@ func (instance *AuthTokenCommand) Run(
     ttl := int64(commandContext.Int("ttl"))
     if 0 >= ttl {
         ttl = 3600
+    }
+
+    /* the seconds-to-nanoseconds multiplication below wraps for a ttl past MaxInt64 nanoseconds (~292 years), minting a token whose exp sits centuries in the PAST — refused by every verifier as expired the moment it is printed. Saturating keeps an absurdly large ttl meaning "far future". */
+    const maxTtlSeconds = math.MaxInt64 / int64(time.Second)
+    if maxTtlSeconds < ttl {
+        ttl = maxTtlSeconds
     }
 
     now := time.Now()

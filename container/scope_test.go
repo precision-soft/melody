@@ -853,6 +853,95 @@ func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
     }
 }
 
+type secondEvictedFailingService struct {
+    failure error
+}
+
+func (instance *secondEvictedFailingService) Close() error {
+    return instance.failure
+}
+
+/* two evicted created instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so a shared constant key let the second failure overwrite the first's record, naming one failure where two happened */
+func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerFirstErr := serviceContainer.RegisterScoped(
+        "app.evicted.failing.first",
+        func(resolver containercontract.Resolver) (*scopeCloseFailingService, error) {
+            return &scopeCloseFailingService{failure: errors.New("refusing to close app.evicted.failing.first")}, nil
+        },
+    )
+    if nil != registerFirstErr {
+        t.Fatalf("unexpected register error: %v", registerFirstErr)
+    }
+
+    registerSecondErr := serviceContainer.RegisterScoped(
+        "app.evicted.failing.second",
+        func(resolver containercontract.Resolver) (*secondEvictedFailingService, error) {
+            return &secondEvictedFailingService{failure: errors.New("refusing to close app.evicted.failing.second")}, nil
+        },
+    )
+    if nil != registerSecondErr {
+        t.Fatalf("unexpected register error: %v", registerSecondErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    overridingScope, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
+    if false == hasOptions {
+        t.Fatalf("expected the scope to implement OverrideServiceWithOptions")
+    }
+
+    if _, getErr := scopeInstance.Get("app.evicted.failing.first"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if _, getErr := scopeInstance.Get("app.evicted.failing.second"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    firstOverrideErr := overridingScope.OverrideProtectedInstanceWithOptions(
+        "app.evicted.failing.first",
+        &scopeCloseFailingService{},
+        ClosedWithScope(),
+    )
+    if nil != firstOverrideErr {
+        t.Fatalf("unexpected override error: %v", firstOverrideErr)
+    }
+
+    secondOverrideErr := overridingScope.OverrideProtectedInstanceWithOptions(
+        "app.evicted.failing.second",
+        &secondEvictedFailingService{},
+        ClosedWithScope(),
+    )
+    if nil != secondOverrideErr {
+        t.Fatalf("unexpected override error: %v", secondOverrideErr)
+    }
+
+    closeErr := scopeInstance.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the two failing evicted closes to be reported")
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected a failures map in the close error context, got %+v", typedError.Context())
+    }
+
+    if "refusing to close app.evicted.failing.first" != failures["scope.evictedInstance[0]"] {
+        t.Fatalf("expected the first evicted failure under its own key, got %+v", failures)
+    }
+
+    if "refusing to close app.evicted.failing.second" != failures["scope.evictedInstance[1]"] {
+        t.Fatalf("expected the second evicted failure under its own key, got %+v", failures)
+    }
+}
+
 /* the three panicking override doors on a scope had never been executed. Two of them are not on the Scope interface at all — they are reached through the optional options companion, which is exactly the shape a caller gets wrong — and all three have to carry their own message: a request-scoped substitution that failed has to say whether the protected door or the plain one refused it. */
 func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()

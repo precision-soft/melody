@@ -602,6 +602,65 @@ type Clock struct {
     }
 }
 
+/* a scoped registration whose type the container also claims renders carrying WithReplacesContainerService — without it the deliberate shadow reaches the container's own refusal and panics at boot — while a scoped registration shadowing nothing renders without the option. */
+func TestGenerate_ScopedShadowOfAContainerTypeCarriesTheReplacesOption(t *testing.T) {
+    shadowDirectory := t.TempDir()
+
+    writeFixtureFile(t, shadowDirectory, "domain/service.go", `package domain
+
+func NewClock() *Clock {
+    return &Clock{}
+}
+
+//melody:scoped
+func NewRequestClock() *Clock {
+    return &Clock{}
+}
+
+type Clock struct {
+}
+`)
+
+    shadowSource, _, shadowErr := Generate(&GenerateRequest{
+        ProjectDirectory: shadowDirectory,
+        PackageName:      "config",
+        BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+    })
+    if nil != shadowErr {
+        t.Fatalf("expected the scoped shadow to generate, got %v", shadowErr)
+    }
+
+    if false == strings.Contains(shadowSource, "WithReplacesContainerService()") {
+        t.Fatalf("expected the scoped shadow registration to carry the replaces option, got:\n%s", shadowSource)
+    }
+
+    plainDirectory := t.TempDir()
+
+    writeFixtureFile(t, plainDirectory, "domain/service.go", `package domain
+
+//melody:scoped
+func NewRequestClock() *Clock {
+    return &Clock{}
+}
+
+type Clock struct {
+}
+`)
+
+    plainSource, _, plainErr := Generate(&GenerateRequest{
+        ProjectDirectory: plainDirectory,
+        PackageName:      "config",
+        BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+    })
+    if nil != plainErr {
+        t.Fatalf("expected the unshadowed scoped registration to generate, got %v", plainErr)
+    }
+
+    if true == strings.Contains(plainSource, "WithReplacesContainerService()") {
+        t.Fatalf("expected the unshadowed scoped registration to render without the replaces option, got:\n%s", plainSource)
+    }
+}
+
 /* an empty import path renders an import of "", and an empty directory joins to the project root and silently scans the whole tree as one package. */
 func TestGenerate_RefusesAPackageBindingWithAnEmptyHalf(t *testing.T) {
     for _, testCase := range []struct {

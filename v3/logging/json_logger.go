@@ -255,6 +255,13 @@ func normalizeJsonValue(value any, remainingDepth int) any {
     }
 
     if 0 >= remainingDepth {
+        /* the floor bounds the DESCENT, not the scalar conversion: an error sitting at the floor still renders as its message, because handed to the encoder raw it marshals as the empty object — losing exactly the failure the record nested this deep to carry */
+        if err, ok := value.(error); true == ok && false == internal.IsNilInterface(err) {
+            if _, isMarshaler := value.(json.Marshaler); false == isMarshaler {
+                return err.Error()
+            }
+        }
+
         return value
     }
 

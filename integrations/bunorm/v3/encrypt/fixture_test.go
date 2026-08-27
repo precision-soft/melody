@@ -48,16 +48,23 @@ func deterministicCandidateMatches(t *testing.T, cipher Cipher, plaintext string
 
 /* scriptedSqlDriver answers each query by the first matching fragment, so a test can shape the information_schema answer, the keyset pages and the update results independently. */
 type scriptedSqlResponse struct {
-    fragment string
-    columns  []string
-    rows     [][]driver.Value
-    err      error
+    fragment    string
+    columns     []string
+    columnTypes []string
+    rows        [][]driver.Value
+    err         error
+}
+
+type recordedScriptedQuery struct {
+    query     string
+    arguments []driver.Value
 }
 
 type scriptedSqlDriver struct {
-    mutex     sync.Mutex
-    responses []scriptedSqlResponse
-    queries   []string
+    mutex           sync.Mutex
+    responses       []scriptedSqlResponse
+    queries         []string
+    queryArguments  []recordedScriptedQuery
 }
 
 func (instance *scriptedSqlDriver) Open(name string) (driver.Conn, error) {
@@ -69,6 +76,13 @@ func (instance *scriptedSqlDriver) recorded() []string {
     defer instance.mutex.Unlock()
 
     return append([]string(nil), instance.queries...)
+}
+
+func (instance *scriptedSqlDriver) recordedArguments() []recordedScriptedQuery {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]recordedScriptedQuery(nil), instance.queryArguments...)
 }
 
 type scriptedSqlConnection struct {
@@ -111,6 +125,10 @@ func (instance *scriptedSqlStatement) Exec(arguments []driver.Value) (driver.Res
 func (instance *scriptedSqlStatement) Query(arguments []driver.Value) (driver.Rows, error) {
     instance.shared.mutex.Lock()
     responses := instance.shared.responses
+    instance.shared.queryArguments = append(instance.shared.queryArguments, recordedScriptedQuery{
+        query:     instance.query,
+        arguments: append([]driver.Value(nil), arguments...),
+    })
     instance.shared.mutex.Unlock()
 
     for _, response := range responses {
@@ -122,19 +140,29 @@ func (instance *scriptedSqlStatement) Query(arguments []driver.Value) (driver.Ro
             return nil, response.err
         }
 
-        return &scriptedSqlRows{columns: response.columns, remaining: response.rows}, nil
+        return &scriptedSqlRows{columns: response.columns, columnTypes: response.columnTypes, remaining: response.rows}, nil
     }
 
     return nil, errors.New("the scripted driver has no response for: " + instance.query)
 }
 
 type scriptedSqlRows struct {
-    columns   []string
-    remaining [][]driver.Value
+    columns     []string
+    columnTypes []string
+    remaining   [][]driver.Value
 }
 
 func (instance *scriptedSqlRows) Columns() []string {
     return instance.columns
+}
+
+/* ColumnTypeDatabaseTypeName reports the scripted type name, empty when the script declared none — the same silence a driver without the capability answers. */
+func (instance *scriptedSqlRows) ColumnTypeDatabaseTypeName(index int) string {
+    if index >= len(instance.columnTypes) {
+        return ""
+    }
+
+    return instance.columnTypes[index]
 }
 
 func (instance *scriptedSqlRows) Close() error {

@@ -889,6 +889,12 @@ func TestResolveErrorCauseChain_StartsBelowTheErrorItself(t *testing.T) {
     if nil != resolveErrorCauseChain(errors.New("no cause below this")) {
         t.Fatalf("expected no chain for an error that wraps nothing")
     }
+
+    /* a joined failure answers a bare errors.Unwrap with nothing — its causes live behind the []error shape — so the chain walked from the head is what keeps both branches in the report */
+    joinedChain := resolveErrorCauseChain(errors.Join(errors.New("first cause"), errors.New("second cause")))
+    if 2 != len(joinedChain) || "first cause" != joinedChain[0] || "second cause" != joinedChain[1] {
+        t.Fatalf("expected both branches of a joined failure below the head, got %v", joinedChain)
+    }
 }
 
 /* the noise filter is a display concern, so full verbosity turns it off: an operator who asks for everything gets the context whole, stack keys included — below that the frames would flood the table, and the drop stands */

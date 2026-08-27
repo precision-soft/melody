@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- rollback: a rollback that fails part way names the group it was walking, on the text block and in the machine document alike — bun hands the group back beside the failure, with everything behind the broken migration already rolled back and recorded as such, and the command reported only the failing migration, leaving which schema changes were already undone to be reconstructed from the migrations table by hand
+
 ## [v2.3.0] - 2026-08-18 - Machine-Readable Envelopes, Lock Remedies and Visible Control Characters
 
 ### Added

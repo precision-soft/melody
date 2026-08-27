@@ -9,6 +9,7 @@ import (
     "sync"
     "testing"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -684,6 +685,21 @@ func TestRelay_DeadLetterRecordsTheCauseChainNotTheMessageAlone(t *testing.T) {
     stored := repository.calls[0].lastError
     if false == strings.Contains(stored, "amqp publish failed") || false == strings.Contains(stored, "NO_ROUTE to queue welcome_email") {
         t.Fatalf("expected last_error to carry the cause chain, not the message alone; got %q", stored)
+    }
+}
+
+/* the cap's cut lands on a rune boundary: a byte cut through a multi-byte rune leaves an invalid string, which a strict utf8mb4 column refuses — failing the very resolution write the cap exists to protect, so the row re-surfaced every visibility timeout with nothing recorded */
+func TestStoredLastError_TruncatesOnARuneBoundary(t *testing.T) {
+    prefix := strings.Repeat("a", maximumStoredErrorLength-1)
+
+    rendered := storedLastError(prefix, errors.New("ăăăă"))
+
+    if maximumStoredErrorLength < len(rendered) {
+        t.Fatalf("expected the stored error capped at %d bytes, got %d", maximumStoredErrorLength, len(rendered))
+    }
+
+    if false == utf8.ValidString(rendered) {
+        t.Fatalf("expected the cap to cut on a rune boundary, got invalid utf-8: %q", rendered)
     }
 }
 

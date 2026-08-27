@@ -864,11 +864,19 @@ func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testi
         t.Fatalf("expected the error just above the bound to render as its message, got %q", buffer.String())
     }
 
+    /* the floor bounds the DESCENT, not the scalar conversion: an error handed to the walk at the floor still renders as its message, while the container one level further sits below the floor whole and goes to the encoder raw — which is where the empty object honestly remains */
     logger, buffer = testNewJsonLogger()
     logger.Error("message", buildNestedContext(normalizeJsonContextMaxDepth-1))
 
+    if false == strings.Contains(buffer.String(), `"cause":"at the bound"`) {
+        t.Fatalf("expected the error at the floor to render as its message, got %q", buffer.String())
+    }
+
+    logger, buffer = testNewJsonLogger()
+    logger.Error("message", buildNestedContext(normalizeJsonContextMaxDepth))
+
     if false == strings.Contains(buffer.String(), `"cause":{}`) {
-        t.Fatalf("expected the error below the bound to reach the encoder unconverted, got %q", buffer.String())
+        t.Fatalf("expected the container below the bound to reach the encoder unconverted, got %q", buffer.String())
     }
 }
 

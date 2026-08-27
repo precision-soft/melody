@@ -54,6 +54,11 @@ func (instance *Manager) HasMessage(messageId string, domain string, locale stri
 }
 
 func (instance *Manager) lookup(messageId string, domain string, locale string) (string, string, bool) {
+    /* the empty domain resolves HERE, at the one door every catalog is asked through: the shipped MapCatalog coerces it too, but the contract does not oblige an application's catalog to, and a lookup handing "" through verbatim missed in exactly the catalogs that took the contract at its word */
+    if "" == domain {
+        domain = DefaultDomain
+    }
+
     for _, candidate := range instance.localeChain(locale) {
         catalog, exists := instance.catalogsByLocale[candidate]
         if false == exists {

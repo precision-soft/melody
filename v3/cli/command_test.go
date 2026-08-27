@@ -344,6 +344,61 @@ func TestRegister_ActionEmitsNothingButTheDocumentInJsonFormat(t *testing.T) {
     }
 }
 
+func runRegisteredStandardFlagsCommand(
+    t *testing.T,
+    arguments []string,
+) string {
+    t.Helper()
+
+    runtimeInstance := newTestRuntime()
+
+    rootCommand := NewRoot("app", "desc")
+
+    buffer := &bytes.Buffer{}
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.StandardFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            _, _ = fmt.Fprint(commandContext.Writer(), "{\"meta\":{}}\n")
+
+            return nil
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    rootCommand.SetWriter(buffer)
+    rootCommand.SetErrorWriter(buffer)
+
+    commandArguments := make([]string, 0, len(arguments)+2)
+    commandArguments = append(commandArguments, "app", "hello")
+    commandArguments = append(commandArguments, arguments...)
+
+    runErr := rootCommand.Run(context.Background(), commandArguments)
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    return buffer.String()
+}
+
+/* quiet is the documented governor of decoration and the banner is decoration: StandardFlags defaults it to true, so a scripted invocation reads the command's own output alone, and the frame comes back with one explicit --quiet=false */
+func TestRegister_ActionHonoursQuietForTheBanner(t *testing.T) {
+    written := runRegisteredStandardFlagsCommand(t, nil)
+
+    if "{\"meta\":{}}\n" != written {
+        t.Fatalf("expected the command's own output alone under the quiet default, got %q", written)
+    }
+
+    written = runRegisteredStandardFlagsCommand(t, []string{"--quiet=false"})
+
+    if false == strings.Contains(written, "[hello] [started]") || false == strings.Contains(written, "[hello] [finished]") {
+        t.Fatalf("expected the banner back under --quiet=false, got %q", written)
+    }
+}
+
 func TestRegister_ActionEmitsTheBannerInTableFormat(t *testing.T) {
     written := runRegisteredCommand(t, []string{"--format=table"})
 
