@@ -94,6 +94,15 @@ func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
 
+/* Closed reports whether the scope this resolution reads has ended, so a LazyService that captured a provider's resolver — the shape the godoc recommends for teardown ordering — turns terminal with that scope instead of serving a dead request's state. A resolution with no scope is a container one and ends when the container closes. The suspension is not consulted: it hides the scope from a container provider's own wiring, not from the liveness question a handle asks after the request is over. */
+func (instance *resolverContext) Closed() bool {
+    if nil != instance.scopeInstance {
+        return instance.scopeInstance.Closed()
+    }
+
+    return instance.containerInstance.IsClosed()
+}
+
 /* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */
 func containerNameStore(
     containerInstance *container,

@@ -73,6 +73,9 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                         "security token source resolution failed",
                         exception.LogContext(resolveErr),
                     )
+
+                    /* mark the error logged so the exception listener the dispatch below reaches does not file a second record for the one failure — the duplicate-suppression discipline every kernel writer follows, and the one the frozen majors already keep here */
+                    _ = exception.MarkLogged(resolveErr)
                 }
 
                 exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), resolveErr)

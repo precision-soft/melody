@@ -113,12 +113,7 @@ func (instance *LazyService[T]) sourceIsClosedLocked() bool {
         return true
     }
 
-    closedChecker, isChecker := instance.source.(interface{ Closed() bool })
-    if false == isChecker {
-        return false
-    }
-
-    if false == closedChecker.Closed() {
+    if false == sourceReportsClosed(instance.source) {
         return false
     }
 
@@ -130,4 +125,17 @@ func (instance *LazyService[T]) sourceIsClosedLocked() bool {
     instance.sourceClosed = true
 
     return true
+}
+
+/* sourceReportsClosed asks the resolver whether the scope it reads has ended, through whichever liveness method the resolver carries: a scope and a provider's resolver context answer Closed(), the container answers IsClosed() — the two spellings the check used to see only the first of, so a handle built over the container (or over a provider's resolver context, the shape the godoc recommends) never learned its scope closed and served the dead request's state forever. A resolver that carries neither method — a foreign Resolver implementation — is read as open, the same way the exit handler reads a logger that cannot answer. */
+func sourceReportsClosed(source any) bool {
+    if closedChecker, isChecker := source.(interface{ Closed() bool }); true == isChecker {
+        return closedChecker.Closed()
+    }
+
+    if isClosedChecker, isChecker := source.(interface{ IsClosed() bool }); true == isChecker {
+        return isClosedChecker.IsClosed()
+    }
+
+    return false
 }

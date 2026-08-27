@@ -200,8 +200,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                         return nil
                     }
 
-                    /* an entry point that produced no response must not let the request through: fall through to the fail-closed 401 rather than writing a nil response the kernel reads as "no decision" */
-                    if nil != response {
+                    /* an entry point that produced no response must not let the request through: fall through to the fail-closed 401 rather than writing a nil response the kernel reads as "no decision". IsNilInterface and not `nil !=`: the entry point is the application's, so a typed nil of its own response type is a non-nil interface a bare check would carry through, and SetResponse normalizes it back to the nil that lets the request past authentication. */
+                    if false == internal.IsNilInterface(response) {
                         requestEvent.SetResponse(response)
                         return nil
                     }
@@ -250,12 +250,13 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
             if nil != accessDeniedHandler {
                 response, handlerErr := accessDeniedHandler.Handle(runtimeInstance, requestEvent.Request(), decisionErr)
-                if nil == handlerErr && nil != response {
+                /* IsNilInterface and not `nil !=`/`nil ==`: the handler is the application's, so a typed nil of its own response type is a non-nil interface a bare check reads as a live response — SetResponse then normalizes it to nil and the denial is served as a granted request. The nil-response branch below must catch the same typed nil to raise its refusal. */
+                if nil == handlerErr && false == internal.IsNilInterface(response) {
                     requestEvent.SetResponse(response)
                     return nil
                 }
 
-                if nil == handlerErr && nil == response {
+                if nil == handlerErr && true == internal.IsNilInterface(response) {
                     decisionErr = exception.NewError(
                         "access denied handler returned nil response",
                         exceptioncontract.Context{

@@ -289,11 +289,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     instance.instances[serviceName] = value
     instance.recordCreationOrderLocked(containerNameNodeKey(serviceName))
 
-    if _, typeRegistered := instance.typeRegistrationNamesByType[canonicalType]; true == typeRegistered {
-        instance.typeInstances[canonicalType] = value
-        instance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalType))
-    }
-
+    /* the override propagates only to the types this NAME is registered under, by the loop below: the previous block also wrote it under the override value's own canonical type whenever that type was registered by ANY service, so overriding one name answered a different service's GetByType with this value. A canonical type this name owns is already reached by the loop; a type another service owns must not learn this override; and a free type is deliberately left out here (unlike the scope, which exposes it) because a container value-type service filed under a second, uncollapsed node closes twice at teardown. */
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName == registeredServiceName {
@@ -327,6 +323,14 @@ func (instance *container) NewScope() containercontract.Scope {
 }
 
 /* registeredTypesForServiceName answers every type the name is registered under, for the scope override that propagates to them; the scope calls it before taking its own lock, container-then-scope being the only order the two locks are ever taken in. */
+/* serviceNamesForRegisteredType lists the service names a type is registered under, so a caller deciding whether a type is free can see who, if anyone, already claims it. */
+func (instance *container) serviceNamesForRegisteredType(canonicalType reflect.Type) []string {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.typeRegistrationNamesByType[canonicalType]
+}
+
 func (instance *container) registeredTypesForServiceName(serviceName string) []reflect.Type {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()

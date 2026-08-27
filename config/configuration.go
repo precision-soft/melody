@@ -256,6 +256,9 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
 
             parameter.storeValue(resolvedValue)
         }
+    } else if stringValue, isString := value.(string); true == isString && true == strings.Contains(stringValue, "%") {
+        /* a pre-boot registration whose value still carries a template is marked deferred, so a module that reads it before the boot pass refuses loudly the way a .env parameter with an unsettled reference does, instead of receiving the raw %env(...)% as the value. The boot pass resolves every parameter's environmentValue and clears the flag; a value with no percent carries no template and stays readable. */
+        parameter.deferred.Store(true)
     }
 }
 
@@ -273,15 +276,16 @@ func (instance *Configuration) MarkSecret(name string) bool {
 
     parameter.isSecret.Store(true)
 
-    /* the marking travels to every parameter whose template reads this one, exactly as it does when the marking precedes the resolution: without this, a MarkSecret arriving after the boot resolve redacted the key but left the dsn assembled from it printing in full, and the late marking reported success while covering half of what the early one covers. The scan reads the raw templates, so it reaches the same direct readers the resolution-time propagation reaches. */
+    /* the marking travels to every parameter whose template reads this one, exactly as it does when the marking precedes the resolution: without this, a MarkSecret arriving after the boot resolve redacted the key but left the dsn assembled from it printing in full, and the late marking reported success while covering half of what the early one covers. The scan reads the raw templates under every spelling this parameter answers to, so a reader that referenced the kernel.* alias of a MELODY_* key is reached too. */
     instance.propagateSecretMarkLocked(name)
 
     return true
 }
 
-/* propagateSecretMarkLocked marks every parameter whose raw template reads the named one — through %env(NAME)%, through the default processor's fallback, or through a %NAME% reference — and follows the marking to a fixpoint: a reader of a freshly marked name is scanned in turn, so a derivation chain is covered whole however late the mark arrives. A match inside doubled-percent escaped text over-marks, which errs toward redacting more, never less. */
+/* propagateSecretMarkLocked marks every parameter whose raw template reads the named one — through %env(NAME)%, through the default processor's fallback, or through a %NAME% reference — under every spelling the named parameter answers to, and follows the marking to a fixpoint: a reader of a freshly marked name is scanned in turn, itself expanded to its aliases, so a derivation chain is covered whole through either the MELODY_* or the kernel.* spelling however late the mark arrives. A match inside doubled-percent escaped text over-marks, which errs toward redacting more, never less. */
 func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
-    markedNames := []string{markedName}
+    /* seeded with every spelling the marked parameter answers to, not just the one MarkSecret was given: a kernel-aliased parameter is one object under two names, and a template reading the other spelling would otherwise never be scanned */
+    markedNames := aliasesOfName(markedName)
 
     for 0 < len(markedNames) {
         currentName := markedNames[0]
@@ -299,7 +303,7 @@ func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
 
             if true == templateReadsName(templateValue, currentName) {
                 parameter.isSecret.Store(true)
-                markedNames = append(markedNames, name)
+                markedNames = append(markedNames, aliasesOfName(name)...)
             }
         }
     }
@@ -534,7 +538,16 @@ func (instance *Configuration) buildHttpConfiguration() error {
 func (instance *Configuration) registerEnvironmentParameters() error {
     environment := instance.environment.All()
 
-    for environmentKey, environmentValue := range environment {
+    /* the keys are walked in sorted order so the boot fails on the same reserved-prefix key every run, the way resolveAll and expandDotEnvReferences sort for the same reason: a map walk named a different offending key each time, and the operator who fixed one saw the same failure return under a new name and read it as a regression */
+    environmentKeys := make([]string, 0, len(environment))
+    for environmentKey := range environment {
+        environmentKeys = append(environmentKeys, environmentKey)
+    }
+    sort.Strings(environmentKeys)
+
+    for _, environmentKey := range environmentKeys {
+        environmentValue := environment[environmentKey]
+
         if true == instance.isReserved(environmentKey) {
             return exception.NewError(
                 "environment key uses reserved parameter prefix",

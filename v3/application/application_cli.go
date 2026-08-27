@@ -478,7 +478,7 @@ func suggestCliCommand(
     return exception.NewExitError(2, matchesFoundErr)
 }
 
-/* printCliCommandNotFoundHeader writes plain text: the suggestion table below it is rendered under NoColor, and a header carrying ansi sequences around a colorless table would contradict the very option it was rendered with */
+/* printCliCommandNotFoundHeader writes plain text: the suggestion table below it is rendered under NoColor, and a header carrying ansi sequences around a colorless table would contradict the very option it was rendered with. The command name comes from argv and is escaped the way every sibling channel escapes it — the run banners and the suggestion table below — so an embedded carriage return or escape sequence cannot repaint this line as another verdict. */
 func printCliCommandNotFoundHeader(writer io.Writer, commandName string, startedAt time.Time) {
     const logFiller = "======================================"
 
@@ -486,7 +486,7 @@ func printCliCommandNotFoundHeader(writer io.Writer, commandName string, started
         writer,
         "%s [command not found] [%s] [%s] %s\n",
         logFiller,
-        commandName,
+        internal.EscapeControlCharacters(commandName),
         startedAt.Format(time.DateTime),
         logFiller,
     )

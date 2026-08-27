@@ -301,11 +301,12 @@ func (instance *container) closeInternal() error {
     }
 
     /* the container-built instances an override evicted from the maps close after the ordered walk: they carry no edges anymore, and the identity marks below keep an instance a provider handed to several names from closing twice. */
-    for _, replacedValue := range instance.replacedBuiltInstances {
+    for replacedIndex, replacedValue := range instance.replacedBuiltInstances {
         candidates = append(
             candidates,
             closeCandidate{
-                nodeKey: "container.replacedInstance",
+                /* keyed by position: the replaced instances carry no node key, and one shared constant key let a second replaced close that failed overwrite the first's record in the failure map, naming one failure where two happened */
+                nodeKey: fmt.Sprintf("container.replacedInstance[%d]", replacedIndex),
                 value:   replacedValue,
             },
         )

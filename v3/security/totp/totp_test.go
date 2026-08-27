@@ -222,3 +222,12 @@ func TestNormalizeCode_StripsEveryWhitespaceForm(t *testing.T) {
         }
     }
 }
+
+func TestConfig_ResolveClampsAnOverflowingPeriod(t *testing.T) {
+    /* a Period at or above 1<<63 converts through int64 to a non-positive value in VerifyAt (base = at.Unix() / int64(Period)), freezing the counter at 0 so one code verifies at every instant forever; the clamp sends it back to the default */
+    resolved := Config{Period: 1 << 63}.Resolve()
+
+    if defaultPeriod != resolved.Period {
+        t.Fatalf("expected an overflowing period to clamp to the default %d, got %d", defaultPeriod, resolved.Period)
+    }
+}

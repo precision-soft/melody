@@ -106,7 +106,8 @@ func RegisterRateLimitRequestListener(
                 return nil
             }
 
-            if nil != response {
+            /* IsNilInterface and not `nil !=`: OnLimitExceeded is the application's, so a typed nil of its own response type is a non-nil interface a bare check reads as a live response — SetResponse normalizes it to nil, the fallback below never runs, and the refused request is served unmetered. */
+            if false == internal.IsNilInterface(response) {
                 requestEvent.SetResponse(response)
 
                 return nil

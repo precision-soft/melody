@@ -457,3 +457,30 @@ func TestLazyService_AContainerBackedHandleIsUntouchedByScopeLifecycles(t *testi
         t.Fatalf("expected one build, got %d", buildCount)
     }
 }
+
+func TestLazyService_AContainerBackedHandleTurnsTerminalAfterContainerClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.shared",
+        func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+            return &lazyProbeItem{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    lazyService := Lazy[*lazyProbeItem](serviceContainer, "app.shared")
+
+    _ = lazyService.Get()
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    _, resolveErr := lazyService.Resolve()
+    if nil == resolveErr {
+        t.Fatalf("expected the container-backed handle to refuse after the container closed, not serve the dead value")
+    }
+}

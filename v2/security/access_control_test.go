@@ -275,7 +275,32 @@ func TestNewAccessControlRegexRule_InvalidPatternPanics(t *testing.T) {
         }
     }()
 
-    _ = NewAccessControlRegexRule("(", "PUBLIC_ACCESS")
+    /* a non-public attribute, so the compile failure is what panics rather than the unanchored-public refusal that would fire first for PUBLIC_ACCESS */
+    _ = NewAccessControlRegexRule("(", "ROLE_ADMIN")
+}
+
+func TestNewAccessControlRegexRule_UnanchoredPublicPatternPanics(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected an unanchored public regex rule to be refused at construction")
+        }
+    }()
+
+    _ = NewAccessControlRegexRule("/status", "PUBLIC_ACCESS")
+}
+
+func TestNewAccessControlRegexRule_AnchoredPublicPatternIsAllowed(t *testing.T) {
+    accessControl := NewAccessControl(
+        NewAccessControlRegexRule("^/status(/|$)", "PUBLIC_ACCESS"),
+    )
+
+    attributes, matched := accessControl.Match("/status")
+    if false == matched {
+        t.Fatalf("expected the anchored public rule to match")
+    }
+    if 1 != len(attributes) || "PUBLIC_ACCESS" != attributes[0] {
+        t.Fatalf("expected PUBLIC_ACCESS, got %v", attributes)
+    }
 }
 
 func TestNewAccessControlExactRule_EmptyPathPanics(t *testing.T) {

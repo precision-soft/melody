@@ -1,6 +1,7 @@
 package container
 
 import (
+    "fmt"
     "reflect"
     "strings"
     "sync"
@@ -402,6 +403,14 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
 
     propagatedTypes := containerInstance.registeredTypesForServiceName(serviceName)
 
+    /* whether the override value's own canonical type is FREE — registered by no service anywhere — decides if the override is exposed under it: exposing it under a type another service registered would answer that service's GetByType with this value. The container and the plan are read here, before the scope lock, in the container-then-scope order; the scope's own registrations are read under the lock below. */
+    canonicalTypeClaimed := 0 < len(containerInstance.serviceNamesForRegisteredType(canonicalType))
+    if false == canonicalTypeClaimed {
+        if planNames, exists := instance.plan.typeRegistrationNamesByType[canonicalType]; true == exists && 0 < len(planNames) {
+            canonicalTypeClaimed = true
+        }
+    }
+
     for registeredType, registeredServiceNames := range instance.plan.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName == registeredServiceName {
@@ -421,6 +430,12 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
             nil,
             nil,
         )
+    }
+
+    if false == canonicalTypeClaimed {
+        if ownNames, exists := instance.ownTypeRegistrationNamesByType[canonicalType]; true == exists && 0 < len(ownNames) {
+            canonicalTypeClaimed = true
+        }
     }
 
     for registeredType, registeredServiceNames := range instance.ownTypeRegistrationNamesByType {
@@ -459,10 +474,15 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         instance.recordCreationOrderLocked(scopedNameNodeKey(serviceName))
     }
 
+    /* the override is exposed under the value's own canonical type only when that type is FREE, so a caller can resolve the override by the concrete type it installed without poisoning a type another service owns — the container-level sibling makes the same choice. A canonical type this name is registered under is already in propagatedTypes and is reached below regardless. */
     overriddenTypes := make([]reflect.Type, 0, 1+len(propagatedTypes))
-    overriddenTypes = append(overriddenTypes, canonicalType)
+    seenTypes := map[reflect.Type]struct{}{}
 
-    seenTypes := map[reflect.Type]struct{}{canonicalType: {}}
+    if false == canonicalTypeClaimed {
+        overriddenTypes = append(overriddenTypes, canonicalType)
+        seenTypes[canonicalType] = struct{}{}
+    }
+
     for _, registeredType := range propagatedTypes {
         if _, seen := seenTypes[registeredType]; true == seen {
             continue
@@ -704,8 +724,9 @@ func closeCreatedScopeInstances(
         closeCandidateValue(nodeKey, valueOfNodeKey[nodeKey])
     }
 
-    for _, evictedValue := range evictedCreatedInstances {
-        closeCandidateValue("scope.evictedInstance", evictedValue)
+    /* the evicted instances carry no node key of their own, so the failure map is keyed by position: with one shared constant key a second evicted close that failed overwrote the first, and the scope-close error named one failure where two happened — the half-diagnosis the dependency-cycle key above guards against. */
+    for evictedIndex, evictedValue := range evictedCreatedInstances {
+        closeCandidateValue(fmt.Sprintf("scope.evictedInstance[%d]", evictedIndex), evictedValue)
     }
 
     if 0 == len(failures) {

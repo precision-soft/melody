@@ -67,6 +67,15 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         nonceGuard = NewMemoryNonceGuardWithClock(clockInstance)
     }
 
+    /* a negative future-expiry cap is refused rather than carried, the way JwtConfig refuses a negative revocation skew: verifyTimeWindow gates the check on `0 < maxFutureExpiry`, so a negative value — reachable from a config typo like signerTtl - safetyMargin computed below zero — behaves identically to the zero "unbounded" case and silently reopens the memory-pinning window the cap exists to close, a holder of a valid secret minting far-future-expiry envelopes whose nonces the guard remembers until they expire. */
+    if 0 > config.MaxFutureExpiry {
+        exception.Panic(exception.NewError(
+            "hmac token source max future expiry may not be negative; a negative value disables the future-expiry cap the field exists to enforce",
+            map[string]any{"maxFutureExpiry": config.MaxFutureExpiry.String()},
+            nil,
+        ))
+    }
+
     return &HmacTokenSource{
         secrets:               config.Secrets,
         apps:                  config.Apps,

@@ -160,7 +160,7 @@ func copyStringList(values []string) []string {
 }
 
 func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
-    /* building the handler is the moment configuration stops and serving begins, so the freeze is raised here rather than at the first request: it is deterministic, it happens once, and it closes the window in which a mutator could race the very first connection. The router is frozen with it, through a package-private door — a router from outside this package cannot be reached that way and keeps only the written contract, which is all a foreign implementation can be held to. */
+    /* building the handler is the moment configuration stops and serving begins, so the freeze is raised here rather than at the first request: it is deterministic and it happens once. It refuses every mutator that BEGINS after the flag is stored; it is not a lock, so a mutator already past its own serving check when the store lands is not caught — but such a caller was already violating the single-threaded boot contract this flag makes enforceable, and was already racing the request goroutines. The freeze turns the common misuse into a refusal at the door rather than a corrupted read elsewhere; it does not serialize a caller that mutates configuration concurrently with serving. The router is frozen with it, through a package-private door — a router from outside this package cannot be reached that way and keeps only the written contract, which is all a foreign implementation can be held to. */
     instance.serving.Store(true)
     freezeRouterForServing(instance.router)
 

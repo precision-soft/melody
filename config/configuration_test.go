@@ -166,6 +166,45 @@ func TestConfigurationRegisterRuntime_SuccessfullyRegisters(t *testing.T) {
     }
 }
 
+func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{"APP_URL": "https://example.test"}}
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.callback", "%env(APP_URL)%/callback")
+
+    parameter := configuration.Get("app.callback")
+    if nil == parameter {
+        t.Fatalf("expected parameter to exist after RegisterRuntime")
+    }
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected a pre-boot read of a templated runtime parameter to refuse, not serve the raw template")
+            }
+        }()
+
+        _ = parameter.String()
+    }()
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if "https://example.test/callback" != parameter.String() {
+        t.Fatalf("expected the resolved value after boot, got: %s", parameter.String())
+    }
+}
+
 func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 

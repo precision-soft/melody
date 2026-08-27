@@ -134,7 +134,7 @@ func TestMatchAccessControlRule_FallbackRuleSelectedOnce(t *testing.T) {
 
 func TestMatchAccessControlRule_RegexRuleIsHonoredAndNotShadowedByEarlierRegex(t *testing.T) {
     accessControl := NewAccessControl(
-        NewAccessControlRegexRule("^/health", securitycontract.AttributePublicAccess),
+        NewAccessControlRegexRule("^/health(/|$)", securitycontract.AttributePublicAccess),
         NewAccessControlRegexRule("^/admin", "ROLE_ADMIN"),
     )
 

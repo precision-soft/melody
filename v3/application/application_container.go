@@ -329,6 +329,9 @@ func newContainerLogger(
         if true == armRotationReopen {
             armErr := fileWriter.ArmReopenOnSignal(syscall.SIGHUP)
             if nil != armErr {
+                /* the descriptor opened above is closed before the panic: the container stores only what a provider returns, so a file left open here has no owner and a creation failure is not memoized — each later resolution would open another. This is the same orphan the module configuration is read before the open to avoid. */
+                _ = fileWriter.Close()
+
                 exception.Panic(
                     exception.NewError(
                         "failed to arm the log rotation signal watcher",

@@ -809,3 +809,17 @@ func TestHmacTokenSource_TimeWindowRunsOnTheInjectedClock(t *testing.T) {
         t.Fatal("the injected clock passed the expiry and the envelope still verified, so the source read some other clock")
     }
 }
+
+func TestNewHmacTokenSource_NegativeMaxFutureExpiryPanics(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a negative max future expiry to be refused at construction")
+        }
+    }()
+
+    _ = NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:         hmacTestSecrets(),
+        Apps:            hmacTestApps(),
+        MaxFutureExpiry: -1 * time.Minute,
+    })
+}

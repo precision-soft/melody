@@ -57,7 +57,7 @@ var _ securitycontract.AccessDeniedHandler = (*accessControlListenerTestAccessDe
 
 func TestMatchAccessControlRule_RegexRuleIsHonoredAndNotShadowedByEarlierRegex(t *testing.T) {
     accessControl := NewAccessControl(
-        NewAccessControlRegexRule("^/health", securitycontract.AttributePublicAccess),
+        NewAccessControlRegexRule("^/health(/|$)", securitycontract.AttributePublicAccess),
         NewAccessControlRegexRule("^/admin", "ROLE_ADMIN"),
     )
 
