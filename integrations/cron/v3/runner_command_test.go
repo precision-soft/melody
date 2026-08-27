@@ -2331,38 +2331,6 @@ func TestRunnerCommand_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
     }
 }
 
-/* panicCause is the guard itself, so it is proved where it lives: a typed nil boxed into a non-nil error interface must not become the cause, because every later reader of that chain calls Error() on a nil receiver. */
-func TestPanicCause_ATypedNilAnswersNoCause(t *testing.T) {
-    var typedNil *exception.Error
-
-    if nil != panicCause(typedNil) {
-        t.Fatal("expected a typed-nil panic value to answer no cause")
-    }
-}
-
-func TestPanicCause_AnErrorShapedPanicTravelsAsTheCause(t *testing.T) {
-    rootCause := errors.New("connection refused")
-
-    cause := panicCause(exception.NewError("config parameter is not defined", nil, rootCause))
-    if nil == cause {
-        t.Fatal("expected the error-shaped panic value to answer as the cause")
-    }
-
-    if false == errors.Is(cause, rootCause) {
-        t.Fatalf("expected the cause chain to survive, got %v", cause)
-    }
-}
-
-func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
-    if nil != panicCause("scheduled command panicked on purpose") {
-        t.Fatal("expected a non-error panic value to answer no cause")
-    }
-
-    if nil != panicCause(nil) {
-        t.Fatal("expected a nil panic value to answer no cause")
-    }
-}
-
 type idiomaticPanickingCommand struct {
     commandName string
     panicValue  any

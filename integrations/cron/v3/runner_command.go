@@ -744,7 +744,7 @@ func reconcileWallClock(previousTarget time.Time, current time.Time) ([]minuteEv
     return evaluations, previousTarget, ""
 }
 
-/* invoke runs one command on a child runtime: a fresh scope so scoped services do not bleed across ticks, and a context derived from the runner's so a shutdown reaches the command in flight, carrying the entry's deadline so a command that never finishes does not run for the life of the process. The command line is dispatched through cli.DispatchCommand with the command's declared flags, so unset flags read their declared defaults, the output writers are usable and the parsed arguments are initialized — the same surface a command sees under the cli entry point, minus the banner, the scope close and the exit handling the registration path adds around a command. An error carrying an exit code comes back as an error rather than ending the process: both doors onto the parsing engine install melody's inert exit handler in place of the engine's own, which calls os.Exit on such an error and here would take the whole scheduler down with the one job. A panic inside the command is recovered and reported as an error, and a child scope close failure is joined onto the command's own error, so one bad job neither takes the scheduler down nor hides a shutdown failure.
+/* invoke runs one command on a child runtime: a fresh scope so scoped services do not bleed across ticks, and a context derived from the runner's so a shutdown reaches the command in flight, carrying the entry's deadline so a command that never finishes does not run for the life of the process. The command line is dispatched through cli.DispatchCommand with the command's declared flags, so unset flags read their declared defaults, the output writers are usable and the parsed arguments are initialized — the same surface a command sees under the cli entry point, minus the banner, the scope close and the exit handling the registration path adds around a command. An error carrying an exit code comes back as an error rather than ending the process: both doors onto the parsing engine install melody's inert exit handler in place of the engine's own, which calls os.Exit on such an error and here would take the whole scheduler down with the one job. A panic inside the command is recovered and reported as an error, and a child scope close failure travels beside the command's own error in its context, so one bad job neither takes the scheduler down nor hides a shutdown failure.
 
    The command runs on its own goroutine, which is what lets the deadline be enforced against a command that never looks at its context. The escalation is deliberate and has three steps. The deadline cancels the command's context — a signal, not a kill. A command that watches it unwinds inside the graceful window and has its own error reported together with the timeout, which is the path essentially every command takes. Only a command that ignores the cancellation reaches the third step: once the window lapses the run is abandoned, the failure is reported at warning naming the entry and how long it overran, the scope is closed under it, and it stops counting towards the shutdown wait.
 
@@ -1079,7 +1079,7 @@ func runScheduledCommand(
                     "panicValue":  fmt.Sprintf("%v", recovered),
                     "panicStack":  string(debug.Stack()),
                 },
-                panicCause(recovered),
+                exception.PanicCause(recovered),
             )
 
             if nil == runErr {
@@ -1111,16 +1111,6 @@ func runScheduledCommand(
         append([]string{entry.commandName}, entry.arguments...),
         capturedOutput,
     )
-}
-
-/* panicCause reads a recovered panic value as the cause of the error the recovery boundary fabricates in its place. It mirrors the PanicCause reading of the frozen majors' framework rather than calling a framework door, because melody/v3 exposes none for an integration to call. A typed nil answers no cause: its Error() would dereference a nil receiver at the first render. */
-func panicCause(recovered any) error {
-    recoveredErr, isRecoveredError := recovered.(error)
-    if false == isRecoveredError || true == isNilInterface(recoveredErr) {
-        return nil
-    }
-
-    return recoveredErr
 }
 
 /* isNilInterface duplicates the framework's internal helper, which an integration module may not import. */

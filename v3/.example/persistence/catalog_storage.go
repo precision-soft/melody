@@ -81,7 +81,7 @@ func (instance *CatalogStorage) Tracker() *melodyaudit.Tracker {
     return instance.tracker
 }
 
-/* EnsureAuditSchema creates the trail's tables when they are absent. The example carries no migration runner, so the storage owns the tables it writes, exactly as each repository owns its own. */
+/* EnsureAuditSchema creates the trail's tables when they are absent. They are deliberately outside the example's migration set — the audit registry opens its schema through the door of the module that owns it, as the set's own document says — so the storage that writes the trail is the door that creates it. */
 func (instance *CatalogStorage) EnsureAuditSchema(ctx context.Context) error {
     if nil == instance.auditRegistry {
         return nil
