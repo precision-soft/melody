@@ -729,6 +729,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - runtime: `runtime.New` and the runtime resolvers judge their arguments through the interface.
 - documentation: `CACHE.md`, `SERIALIZER.md` and `CLOCK.md` state what this major now does
 - documentation: `README.md` states the back-port rule the frozen majors actually follow — v1 and v2 receive any defect fix that fits a patch release plus security fixes, until v4 is released — where it limited them to security and critical correctness fixes, narrower than the rule applied
+- security: `RoleVoter` and `RoleHierarchyVoter` read the token they are handed through the interface instead of comparing it to nil. A nil pointer of the application's own token type arrives as a non-nil interface, `IsAuthenticated` answers true without touching its receiver, and the `Roles()` call that follows dereferences the nil — a panic on the path that decides whether the request is allowed, raised by an application token source that returns an unassigned token. `ResolverTokenSource.Resolve` already read the same value the same way, and its comment names this exact call as what panics.
+- http: the kernel profiling listener reads the request's attributes through the interface instead of comparing them to nil. `Attributes()` answers an interface on a contract the application may implement, so a nil pointer of its own bag type read as live dereferenced its nil receiver inside `Get`, in a response listener no recover covers; the router's own reader of that identical expression already guarded it this way.
 
 ### Security
 

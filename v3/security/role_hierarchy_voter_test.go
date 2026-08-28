@@ -44,3 +44,16 @@ func TestRoleHierarchyVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
         t.Fatalf("expected an unauthenticated token carrying the role to be denied, got %v", result)
     }
 }
+
+/* The same typed nil the sibling voter refuses: read as live, IsAuthenticated answers true and the
+ExpandRoles call below dereferences the nil receiver inside Roles(). */
+func TestRoleHierarchyVoter_DeniesATypedNilToken(t *testing.T) {
+    voter := NewRoleHierarchyVoter(NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}}), NewRoleVoter())
+
+    var unassignedToken *AuthenticatedToken
+
+    result := voter.Vote(unassignedToken, "ROLE_USER", nil)
+    if securitycontract.VoteDenied != result {
+        t.Fatalf("expected a typed nil token to be denied, got %v", result)
+    }
+}

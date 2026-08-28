@@ -1,6 +1,7 @@
 package http
 
 import (
+    "github.com/precision-soft/melody/v3/bag"
     nethttp "net/http"
     "testing"
     "time"
@@ -92,3 +93,63 @@ type staticRequestContext struct {
 func (instance *staticRequestContext) RequestId() string { return instance.requestId }
 
 func (instance *staticRequestContext) StartedAt() time.Time { return instance.startedAt }
+
+/* The request is the application's and Attributes() returns an interface, so a nil pointer of the
+application's own bag type arrives as a non-nil interface. Read with a bare comparison it was taken for a
+live bag and Get dereferenced the nil receiver inside a response listener, where no recover covers it. */
+func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelHttpProfilerListener(dispatcher)
+
+    var capturedProfile *HttpRequestProfile
+    dispatcher.AddListener(
+        EventHttpRequestProfile,
+        func(_ runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            capturedProfile, _ = eventValue.Payload().(*HttpRequestProfile)
+
+            return nil
+        },
+        0,
+    )
+
+    var unassignedAttributes *bag.ParameterBag
+
+    request := &typedNilAttributesRequest{
+        nilAttributesRequest: nilAttributesRequest{
+            requestContext: &staticRequestContext{
+                requestId: "request-typed-nil",
+                startedAt: time.Now(),
+            },
+        },
+        attributes: unassignedAttributes,
+    }
+
+    responseEvent := NewKernelResponseEvent(request, nil)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, responseEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil == capturedProfile {
+        t.Fatalf("expected a profile to be emitted for a typed nil attributes bag")
+    }
+
+    if "request-typed-nil" != capturedProfile.RequestId() {
+        t.Fatalf("unexpected request id: %q", capturedProfile.RequestId())
+    }
+}
+
+/* the same double as its embedded parent, except Attributes() hands back a typed nil rather than the
+untyped one a plain comparison already catches */
+type typedNilAttributesRequest struct {
+    nilAttributesRequest
+    attributes bagcontract.ParameterBag
+}
+
+func (instance *typedNilAttributesRequest) Attributes() bagcontract.ParameterBag {
+    return instance.attributes
+}
