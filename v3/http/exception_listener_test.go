@@ -395,6 +395,11 @@ func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *test
 
     body := readResponseBody(t, response)
 
+    /* the body reader is allowed to be absent, and the helper answers "" for that, so a negative assertion on its own reports success for a response that carries nothing at all. The flat message is what says the envelope was rendered and the refusal below is a real one. */
+    if false == strings.Contains(body, "bad request") {
+        t.Fatalf("expected the flat message to be rendered, got %s", body)
+    }
+
     if true == strings.Contains(body, "must not leak") {
         t.Fatalf("expected non-validationErrors context to stay out of the body, got %s", body)
     }

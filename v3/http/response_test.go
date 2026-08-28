@@ -438,6 +438,20 @@ func TestConfinedFileResponse_ServesANameUnderTheRootAndNothingOutsideIt(t *test
             t.Fatalf("expected the name %q to be refused", name)
         }
     }
+
+    /* every name above is caught by a guard that runs before the mode is ever asked — containment, or the empty name — so the last refusal in the chain has no input of its own. A name that resolves INSIDE the root and is not a regular file is the only one that reaches it, and a directory is the shape a deployment produces by accident. */
+    if mkdirErr := os.Mkdir(rootDirectory+"/archive", 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir error: %v", mkdirErr)
+    }
+
+    _, directoryErr := ConfinedFileResponse(200, rootDirectory, "archive")
+    if nil == directoryErr {
+        t.Fatalf("expected a contained name that is not a regular file to be refused")
+    }
+
+    if false == strings.Contains(directoryErr.Error(), "the confined file is not a regular file") {
+        t.Fatalf("expected the mode refusal rather than an earlier guard, got %v", directoryErr)
+    }
 }
 
 /* the symlink is the escape the textual checks cannot see: the name is clean, the join is under the root, and the target is not */

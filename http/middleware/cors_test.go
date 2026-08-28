@@ -254,8 +254,24 @@ func TestCorsConfig_AllowOriginFuncIsReportedAndDecidesTheOrigin(t *testing.T) {
 
 /* the deprecated door reads nil as the default service, the reading its replacement gives the same absence; it used to die on the dereference. */
 func TestCorsMiddleware_NilConfigReadsAsTheDefaultService(t *testing.T) {
-    middleware := CorsMiddleware(nil)
-    if nil == middleware {
-        t.Fatal("expected a middleware for the nil config")
+    handler := CorsMiddleware(nil)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    request := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
+    request.Header.Set("Access-Control-Request-Method", nethttp.MethodPost)
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nethttp.StatusNoContent != response.StatusCode() {
+        t.Fatalf("expected the default service to answer the preflight, got status %d", response.StatusCode())
+    }
+
+    if "https://example.com" != response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the default service to allow the origin, got %q", response.Headers().Get("Access-Control-Allow-Origin"))
     }
 }

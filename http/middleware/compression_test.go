@@ -1195,3 +1195,149 @@ func TestCompressionMiddleware_AnInvalidCompressionLevelIsRefused(t *testing.T) 
         t.Fatalf("expected a level below HuffmanOnly to be refused")
     }
 }
+
+/* a gzip body is shorter than the plain one the handler measured, so a Content-Length that survived the compression names bytes that are never sent: a client reading that many either truncates the frame or waits for a remainder that never arrives, and a shared cache stores the mismatch. The header describes what is actually on the wire, so compressing has to drop it. */
+func TestCompressionMiddleware_DropsTheContentLengthTheUncompressedBodyDeclared(t *testing.T) {
+    config := NewCompressionConfig(6, 10, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    body := strings.Repeat("melody ", 200)
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            responseHeaders.Set("Content-Length", strconv.Itoa(len(body)))
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the body to be compressed, got Content-Encoding %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+
+    if "" != resultResponse.Headers().Get("Content-Length") {
+        t.Fatalf(
+            "a compressed body must not carry the plain body's length, got Content-Length %q over %d plain bytes",
+            resultResponse.Headers().Get("Content-Length"),
+            len(body),
+        )
+    }
+
+    gzipReader, gzipErr := gzip.NewReader(resultResponse.BodyReader())
+    if nil != gzipErr {
+        t.Fatalf("gzip reader: %v", gzipErr)
+    }
+
+    decompressed, readErr := io.ReadAll(gzipReader)
+    if nil != readErr {
+        t.Fatalf("read decompressed: %v", readErr)
+    }
+
+    if body != string(decompressed) {
+        t.Fatalf("expected the original body to survive compression, got %d bytes", len(decompressed))
+    }
+}
+
+/* the short circuit takes the length the handler declared and passes the response through without buffering a byte of it, which is the whole reason it sits above the peek loop. For a body that really is that small the peek loop reaches the same verdict, so the two are indistinguishable there; the input that separates them is a header that under-declares, where the short circuit answers on the handler's word and the peek loop reads the body and compresses it. */
+func TestCompressionMiddleware_ADeclaredLengthBelowTheMinimumIsTakenWithoutReadingTheBody(t *testing.T) {
+    config := NewCompressionConfig(6, 4096, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    body := strings.Repeat("melody ", 2000)
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            responseHeaders.Set("Content-Length", "12")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf(
+            "expected the declared length to be taken at its word and the body left alone, got Content-Encoding %q",
+            resultResponse.Headers().Get("Content-Encoding"),
+        )
+    }
+
+    if "12" != resultResponse.Headers().Get("Content-Length") {
+        t.Fatalf("expected the declared length to survive untouched, got %q", resultResponse.Headers().Get("Content-Length"))
+    }
+
+    passedThrough, readErr := io.ReadAll(resultResponse.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read passed-through body: %v", readErr)
+    }
+
+    if body != string(passedThrough) {
+        t.Fatalf("expected the body to pass through verbatim, got %d of %d bytes", len(passedThrough), len(body))
+    }
+}
+
+/* a Vary field is a comma-separated list, so the token this middleware needs can already be sitting beside another one that some other layer added. Comparing the whole field against the single token misses it and appends a second entry naming Accept-Encoding twice — a shared cache reads the repeated key as a different set of dimensions than the one the response was stored under. */
+func TestAddVaryAcceptEncoding_ReadsAnExistingFieldTokenByToken(t *testing.T) {
+    headers := nethttp.Header{}
+    headers.Set("Vary", "Origin, Accept-Encoding")
+
+    addVaryAcceptEncoding(headers)
+
+    if 1 != len(headers.Values("Vary")) {
+        t.Fatalf("expected the token already in the list to be found, got: %v", headers.Values("Vary"))
+    }
+
+    if "Origin, Accept-Encoding" != headers.Get("Vary") {
+        t.Fatalf("expected the existing list to be left as it was, got: %q", headers.Get("Vary"))
+    }
+}
+
+/* header field names are case-insensitive, so a layer that wrote the token in another case named the same dimension. The lowercase spelling is the one the comparison already carries, so it separates nothing; an upper-case one is recognised only if the case is folded, and nothing else in this package writes it. */
+func TestAddVaryAcceptEncoding_ReadsAnExistingTokenInAnyCase(t *testing.T) {
+    headers := nethttp.Header{}
+    headers.Set("Vary", "ACCEPT-ENCODING")
+
+    addVaryAcceptEncoding(headers)
+
+    if 1 != len(headers.Values("Vary")) {
+        t.Fatalf("expected the upper-case spelling to be recognised, got: %v", headers.Values("Vary"))
+    }
+
+    if "ACCEPT-ENCODING" != headers.Get("Vary") {
+        t.Fatalf("expected the existing spelling to be left as it was, got: %q", headers.Get("Vary"))
+    }
+}

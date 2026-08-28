@@ -3422,3 +3422,47 @@ func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
         t.Fatalf("expected ServeReader's own refusal to be the one that answered, got %v", readerLogger.warningMessages)
     }
 }
+
+/* the pre-open refusal in the directory mode asks the mode off os.Stat and never lets a fifo reach the open, which is exactly why it exists — os.Open on one blocks until a writer appears. That leaves this guard, the second look taken off the opened handle, with no input in that mode at all; in the embedded mode there is no pre-open stat, and a filesystem frozen at compile time is the one place a non-regular entry can be handed straight to it. A device or a socket answers bytes that are not a file's, so the answer is refused rather than streamed. */
+func TestFileServer_Embedded_RefusesAnEntryThatIsNotARegularFile(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "pipe.txt": &fstest.MapFile{
+            Data: []byte("would be served"),
+            Mode: fs.ModeNamedPipe,
+        },
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "",
+        "",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(NewOptions(config, "", fileSystem))
+    logger := &levelRecordingLogger{}
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/pipe.txt"),
+        logger,
+    )
+
+    if true == served {
+        t.Fatalf("expected a named pipe to be refused, got status %d and %d bytes", statusCode, len(body))
+    }
+
+    /* the directory guard three lines above answers the same "not served", so the record is what says which of the two refused */
+    found := false
+    for _, message := range logger.infoMessages {
+        if "static serve target is not a regular file" == message {
+            found = true
+        }
+    }
+
+    if false == found {
+        t.Fatalf("expected the mode refusal to be recorded, got info %v", logger.infoMessages)
+    }
+}

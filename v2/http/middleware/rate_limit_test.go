@@ -1273,7 +1273,9 @@ func (instance *rateLimitCaptureLogger) Error(message string, context loggingcon
     instance.errorCalls++
 }
 
-type alreadyReportingRuntimeLimiter struct{}
+type alreadyReportingRuntimeLimiter struct {
+    allowWithRuntimeCalls int
+}
 
 func (instance *alreadyReportingRuntimeLimiter) Allow(key string) bool {
     return true
@@ -1283,6 +1285,8 @@ func (instance *alreadyReportingRuntimeLimiter) Reset(key string) {
 }
 
 func (instance *alreadyReportingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+    instance.allowWithRuntimeCalls++
+
     return true, exception.MarkLogged(
         exception.NewError("rate limiter store failure", exceptioncontract.Context{"key": "actor"}, nil),
     )
@@ -1297,7 +1301,8 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
-    middleware := RateLimitMiddleware(NewRateLimitConfig(&alreadyReportingRuntimeLimiter{}, nil, nil))
+    limiter := &alreadyReportingRuntimeLimiter{}
+    middleware := RateLimitMiddleware(NewRateLimitConfig(limiter, nil, nil))
 
     handler := middleware(
         func(
@@ -1311,6 +1316,11 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
 
     request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
     _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    /* an empty journal is also what a middleware that never metered the request leaves behind, so the silence means nothing until the limiter says it was asked */
+    if 1 != limiter.allowWithRuntimeCalls {
+        t.Fatalf("expected the middleware to meter the request exactly once, got %d calls", limiter.allowWithRuntimeCalls)
+    }
 
     if 0 != capture.warningCalls || 0 != capture.errorCalls {
         t.Fatalf(

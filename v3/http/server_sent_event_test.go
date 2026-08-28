@@ -97,10 +97,19 @@ func TestServerSentEventWriter_CarriageReturnDataCannotInjectControlLine(t *test
 
     body := recorder.Body.String()
 
-    for _, line := range strings.Split(body, "\n") {
+    /* the injection vector is the carriage return itself, and a reader that splits on "\n" alone never sees it start a line: the assertion below is satisfied identically with the sanitisation in place and with it gone. A client splits on CR, LF and CRLF alike, so the wire must carry no CR at all. */
+    if true == strings.Contains(body, "\r") {
+        t.Fatalf("expected no carriage return to survive onto the wire, got %q", body)
+    }
+
+    for _, line := range strings.FieldsFunc(body, func(value rune) bool { return '\n' == value || '\r' == value }) {
         if true == strings.HasPrefix(line, "event: ") {
             t.Fatalf("a carriage return inside data must not produce an event control line, got %q", body)
         }
+    }
+
+    if false == strings.Contains(body, "data: hello") {
+        t.Fatalf("expected the data before the carriage return to be delivered, got %q", body)
     }
 }
 
@@ -388,12 +397,21 @@ func TestServerSentEventWriter_SerializesConcurrentFrames(t *testing.T) {
 
     waitGroup.Wait()
 
+    dataFrames, pingFrames := 0, 0
     for _, line := range strings.Split(recorder.Body.String(), "\n") {
         if "" == line {
             continue
         }
 
-        if "data: 0123456789" == line || ": " == line {
+        if "data: 0123456789" == line {
+            dataFrames++
+
+            continue
+        }
+
+        if ": " == line {
+            pingFrames++
+
             continue
         }
 
@@ -402,6 +420,11 @@ func TestServerSentEventWriter_SerializesConcurrentFrames(t *testing.T) {
         }
 
         t.Fatalf("interleaved frame line: %q", line)
+    }
+
+    /* the walk above only refuses a line it does not recognise, so a writer that emitted nothing at all walks zero lines and reports success; the counts are what say all sixty-four frames arrived whole */
+    if 32 != dataFrames || 32 != pingFrames {
+        t.Fatalf("expected every frame to arrive whole, got %d data and %d keepalive frames", dataFrames, pingFrames)
     }
 }
 

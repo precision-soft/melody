@@ -1,6 +1,7 @@
 package http
 
 import (
+    "io"
     nethttp "net/http"
     "testing"
 
@@ -24,61 +25,6 @@ func TestRouteRegistry_RefusesAnExactDispatchDuplicate(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
     }, "route already registered")
-}
-
-func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherMethod(t *testing.T) {
-    router := NewRouter()
-
-    router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
-    router.Handle(nethttp.MethodPost, "/health", routeRegistryTestHandler())
-}
-
-func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherHost(t *testing.T) {
-    router := NewRouter()
-
-    router.HandleWithOptions(
-        "/health",
-        routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "one.example.test", nil, nil, nil, nil, 0, nil),
-    )
-
-    router.HandleWithOptions(
-        "/health",
-        routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "two.example.test", nil, nil, nil, nil, 0, nil),
-    )
-}
-
-func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherRequirement(t *testing.T) {
-    router := NewRouter()
-
-    router.HandleWithOptions(
-        "/item/:id",
-        routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, map[string]string{"id": "[0-9]+"}, nil, nil, 0, nil),
-    )
-
-    router.HandleWithOptions(
-        "/item/:id",
-        routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, map[string]string{"id": "[a-z]+"}, nil, nil, 0, nil),
-    )
-}
-
-func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
-    router := NewRouter()
-
-    router.HandleWithOptions(
-        "/ranked",
-        routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
-    )
-
-    router.HandleWithOptions(
-        "/ranked",
-        routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 10, nil),
-    )
 }
 
 /* the name stays out of the dispatch identity on purpose: two differently named routes the matcher cannot tell apart are still one route at dispatch, and the later one is still dead. */
@@ -164,5 +110,141 @@ func TestRouteRegistry_ARecorderDefersTheNameDuplicateAndBothRoutesStayDispatcha
 
     if "/first" != definition.Pattern() {
         t.Fatalf("expected the name to keep pointing at the first claimant, got %q", definition.Pattern())
+    }
+}
+
+/* the word Accepts is the claim: the second registration is kept AND stays reachable. Without an assertion the only failure a test like this can report is a panic, so it reads as green for a registry that silently dropped the second route. */
+func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherMethod(t *testing.T) {
+    registry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(registry)
+
+    router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
+    router.Handle(nethttp.MethodPost, "/health", routeRegistryTestHandler())
+
+    if 2 != len(registry.RouteDefinitions()) {
+        t.Fatalf("expected both methods to stay registered, got %d routes", len(registry.RouteDefinitions()))
+    }
+
+    for _, method := range []string{nethttp.MethodGet, nethttp.MethodPost} {
+        if _, matched := router.Match(method, "/health", "", ""); false == matched {
+            t.Fatalf("expected %s /health to be reachable", method)
+        }
+    }
+
+    if _, matched := router.Match(nethttp.MethodDelete, "/health", "", ""); true == matched {
+        t.Fatalf("expected a method neither registration names to stay unmatched")
+    }
+}
+
+func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherHost(t *testing.T) {
+    registry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(registry)
+
+    router.HandleWithOptions(
+        "/health",
+        routeRegistryTestHandler(),
+        NewRouteOptions("", []string{nethttp.MethodGet}, "one.example.test", nil, nil, nil, nil, 0, nil),
+    )
+
+    router.HandleWithOptions(
+        "/health",
+        routeRegistryTestHandler(),
+        NewRouteOptions("", []string{nethttp.MethodGet}, "two.example.test", nil, nil, nil, nil, 0, nil),
+    )
+
+    if 2 != len(registry.RouteDefinitions()) {
+        t.Fatalf("expected both hosts to stay registered, got %d routes", len(registry.RouteDefinitions()))
+    }
+
+    for _, host := range []string{"one.example.test", "two.example.test"} {
+        if _, matched := router.Match(nethttp.MethodGet, "/health", host, ""); false == matched {
+            t.Fatalf("expected /health on %s to be reachable", host)
+        }
+    }
+
+    if _, matched := router.Match(nethttp.MethodGet, "/health", "three.example.test", ""); true == matched {
+        t.Fatalf("expected a host neither registration names to stay unmatched")
+    }
+}
+
+func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherRequirement(t *testing.T) {
+    registry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(registry)
+
+    router.HandleWithOptions(
+        "/item/:id",
+        routeRegistryTestHandler(),
+        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, map[string]string{"id": "[0-9]+"}, nil, nil, 0, nil),
+    )
+
+    router.HandleWithOptions(
+        "/item/:id",
+        routeRegistryTestHandler(),
+        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, map[string]string{"id": "[a-z]+"}, nil, nil, 0, nil),
+    )
+
+    if 2 != len(registry.RouteDefinitions()) {
+        t.Fatalf("expected both requirements to stay registered, got %d routes", len(registry.RouteDefinitions()))
+    }
+
+    /* each registration owns the spelling the other one refuses, so a dropped second route shows up as one of these two going unmatched */
+    for _, identifier := range []string{"7", "abc"} {
+        routeMatch, matched := router.Match(nethttp.MethodGet, "/item/"+identifier, "", "")
+        if false == matched {
+            t.Fatalf("expected /item/%s to be reachable", identifier)
+        }
+
+        if identifier != routeMatch.Params["id"] {
+            t.Fatalf("expected the identifier to be bound to %q, got %q", identifier, routeMatch.Params["id"])
+        }
+    }
+
+    if _, matched := router.Match(nethttp.MethodGet, "/item/7a", "", ""); true == matched {
+        t.Fatalf("expected a spelling neither requirement admits to stay unmatched")
+    }
+}
+
+func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
+    registry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(registry)
+
+    router.HandleWithOptions(
+        "/ranked",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "declared-first"), nil
+        },
+        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+    )
+
+    router.HandleWithOptions(
+        "/ranked",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(200, "higher-priority"), nil
+        },
+        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 10, nil),
+    )
+
+    if 2 != len(registry.RouteDefinitions()) {
+        t.Fatalf("expected both priorities to stay registered, got %d routes", len(registry.RouteDefinitions()))
+    }
+
+    routeMatch, matched := router.Match(nethttp.MethodGet, "/ranked", "", "")
+    if false == matched {
+        t.Fatalf("expected /ranked to be reachable")
+    }
+
+    /* priority outranks registration order, so the route declared second is the one that answers — which is also what tells the two registrations apart */
+    response, handlerErr := routeMatch.Handler(nil, nil, nil)
+    if nil != handlerErr {
+        t.Fatalf("unexpected handler error: %v", handlerErr)
+    }
+
+    body, readErr := io.ReadAll(response.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read body: %v", readErr)
+    }
+
+    if "higher-priority" != string(body) {
+        t.Fatalf("expected the higher priority route to answer, got %q", string(body))
     }
 }

@@ -2504,15 +2504,24 @@ func TestKernel_ARuntimePanicFilesOneRecordNotTwo(t *testing.T) {
 
 /* the recovery reads the mark through exception.IsAlreadyLogged: a handler that panics with an error it already recorded — through exception.Logged, or wrapped around a marked carrier — is not filed a second time under "unhandled http error". */
 func TestKernel_APanicWithAnAlreadyLoggedErrorFilesNoSecondRecord(t *testing.T) {
+    handlerRan := false
+
     countingLogger := serveAndCountErrorRecords(
         t,
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerRan = true
+
             markedErr := exception.NewError("already recorded by the handler", nil, nil)
             _ = exception.MarkLogged(markedErr)
 
             panic(markedErr)
         },
     )
+
+    /* an empty journal is also what a request that never reached the handler leaves behind — a route that stopped matching, a container that refused to build — and the helper drops the recorder, so nothing else here can tell the two apart. The three siblings assert a record was written and are non-vacuous for that reason; this one asserts an absence and needs its own witness. */
+    if false == handlerRan {
+        t.Fatalf("expected the request to reach the handler that panics")
+    }
 
     if 0 != len(countingLogger.errorMessages) {
         t.Fatalf("expected no record for a panic carrying an already-logged error, got %v", countingLogger.errorMessages)
