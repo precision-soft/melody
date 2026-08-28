@@ -67,7 +67,7 @@ func (instance *LazyService[T]) Resolve() (T, error) {
 
         var zero T
 
-        return zero, exception.NewError("lazy service scope is closed", nil, nil)
+        return zero, exception.NewError("lazy service scope is closed", nil, ErrScopeClosed)
     }
 
     if true == instance.resolved {
@@ -98,7 +98,7 @@ func (instance *LazyService[T]) Resolve() (T, error) {
     if true == instance.sourceClosed {
         var zero T
 
-        return zero, exception.NewError("lazy service scope is closed", nil, nil)
+        return zero, exception.NewError("lazy service scope is closed", nil, ErrScopeClosed)
     }
 
     if false == instance.resolved {

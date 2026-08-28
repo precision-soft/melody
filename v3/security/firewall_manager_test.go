@@ -106,9 +106,14 @@ func TestNewFirewallManager_SkipsUnnamedFirewalls(t *testing.T) {
         ),
     )
 
+    /* asking through Firewall("") proves nothing about the constructor: the empty name is refused before any lookup happens, so the refusal reads the same whether the unnamed firewall was filed or skipped. The map is what the constructor writes, and it is what this reads. */
+    if 0 != len(manager.firewalls) {
+        t.Fatalf("expected the unnamed firewall to be skipped at construction, got %d filed", len(manager.firewalls))
+    }
+
     _, err := manager.Firewall("")
     if nil == err {
-        t.Fatalf("expected the unnamed firewall to be unreachable")
+        t.Fatalf("expected the empty name to be refused at the door as well")
     }
 }
 

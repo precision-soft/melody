@@ -642,3 +642,64 @@ func TestSecurityResolutionListener_MarksTheRecordItWrites(t *testing.T) {
         t.Fatalf("expected the resolution failure to carry the logged mark when it reaches the exception event")
     }
 }
+
+/* the twin above hands back an UNWRAPPED nil, which a bare comparison catches just as well — so the guard this listener carries, which reads the interface rather than the word nil, has no test of its own. A token source is the application's code, and a nil pointer of its own token type arrives here as a non-nil interface: read as live, it is published into the security context every voter then reads, and the first Roles() call dereferences it. */
+func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAnonymousToken(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    var unassignedToken *AuthenticatedToken
+
+    firewall := NewCompiledFirewall(
+        "main",
+        &resolutionListenerTestMatcher{matches: true},
+        "matcher:main",
+        []securitycontract.Rule{},
+        &resolutionListenerTestTokenSource{
+            resolveToken: unassignedToken,
+            resolveErr:   nil,
+        },
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+    )
+
+    registerTestKernelExceptionListener(kernel)
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    if _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+    if false == exists {
+        t.Fatalf("expected security context to be set on runtime")
+    }
+
+    /* the anonymous token answers Roles without panicking, which the typed nil would not: this is the assertion the bare-nil twin cannot make */
+    if 0 != len(securityContext.Token().Roles()) {
+        t.Fatalf("expected the anonymous token to carry no roles")
+    }
+
+    if true == securityContext.Token().IsAuthenticated() {
+        t.Fatalf("expected an anonymous token when the source hands back a typed nil")
+    }
+}

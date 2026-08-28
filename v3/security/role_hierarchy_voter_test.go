@@ -3,17 +3,21 @@ package security
 import (
     "testing"
 
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-func TestRoleHierarchyVoter_PanicsOnNilDependencies(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
+/* one case named both dependencies and supplied only the first as nil, asserting nothing but that something panicked — so the delegate's own guard had no test at all, and either refusal would have satisfied it. Each is asked for separately, and the message says which answered. */
+func TestRoleHierarchyVoter_PanicsOnANilRoleHierarchy(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewRoleHierarchyVoter(nil, NewRoleVoter())
+    }, "the role hierarchy is nil for role hierarchy voter")
+}
 
-    _ = NewRoleHierarchyVoter(nil, NewRoleVoter())
+func TestRoleHierarchyVoter_PanicsOnANilDelegate(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewRoleHierarchyVoter(NewRoleHierarchy(nil), nil)
+    }, "the delegate is nil for role hierarchy voter")
 }
 
 func TestRoleHierarchyVoter_ExpandsRolesBeforeVoting(t *testing.T) {

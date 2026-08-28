@@ -88,9 +88,10 @@ func (instance *scope) registerOnScope(
         return exception.NewError(
             "scope is closed",
             map[string]any{
+                "refusedAt":   "entry",
                 "serviceName": serviceName,
             },
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -118,9 +119,10 @@ func (instance *scope) registerOnScope(
         return exception.NewError(
             "scope is closed",
             map[string]any{
+                "refusedAt":   "lockHandOff",
                 "serviceName": serviceName,
             },
-            nil,
+            ErrScopeClosed,
         )
     }
 

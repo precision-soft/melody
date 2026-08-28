@@ -329,7 +329,7 @@ func newContainerClosedError(creatingKey string) error {
         map[string]any{
             "creatingKey": creatingKey,
         },
-        nil,
+        ErrContainerClosed,
     )
 }
 

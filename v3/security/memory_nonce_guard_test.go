@@ -88,3 +88,12 @@ func TestNewMemoryNonceGuardWithClock_RefusesANilClock(t *testing.T) {
         NewMemoryNonceGuardWithClock(nil)
     }, "nonce guard clock is nil")
 }
+
+/* the twin above hands an UNWRAPPED nil, which a bare comparison refuses just as well; the guard reads the interface, and a nil pointer of a caller's own clock type arrives as a non-nil interface that dereferences on the first Now(). */
+func TestNewMemoryNonceGuardWithClock_RefusesATypedNilClock(t *testing.T) {
+    var unassignedClock *clock.FrozenClock
+
+    testhelper.AssertPanicsWithError(t, func() {
+        NewMemoryNonceGuardWithClock(unassignedClock)
+    }, "nonce guard clock is nil")
+}

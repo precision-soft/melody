@@ -256,15 +256,11 @@ func TestRules_ReturnsCopy(t *testing.T) {
     }
 }
 
+/* the attribute is ROLE_ADMIN and not PUBLIC_ACCESS, the precaution the invalid-pattern sibling already takes: with PUBLIC_ACCESS the unanchored refusal below panics for an empty pattern too, so this test passed with its own guard deleted and only observed the neighbour's. The message is what pins which one answered. */
 func TestNewAccessControlRegexRule_EmptyPatternPanics(t *testing.T) {
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    _ = NewAccessControlRegexRule("", "PUBLIC_ACCESS")
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewAccessControlRegexRule("", "ROLE_ADMIN")
+    }, "access control regex pattern may not be empty")
 }
 
 func TestNewAccessControlRegexRule_InvalidPatternPanics(t *testing.T) {

@@ -417,10 +417,12 @@ func (instance *Application) registerHttpSession() {
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
                 storage := session.SessionStorageMustFromResolver(resolver)
 
-                return session.NewManagerWithTombstoneRetention(
+                /* the manager reads the kernel's clock for the same reason the storage above does: the tombstone record and the entry expiry are two halves of one lifetime, and a manager left on the wall clock would keep a second timeline that a fixed-clock deployment cannot move */
+                return session.NewManagerWithClock(
                     storage,
                     instance.configuration.Http().SessionTtl(),
                     instance.configuration.Http().SessionTombstoneRetention(),
+                    instance.kernel.Clock(),
                 ), nil
             },
         )

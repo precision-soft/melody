@@ -96,7 +96,7 @@ func (instance *scope) Get(serviceName string) (any, error) {
         return nil, exception.NewError(
             "scope is closed",
             nil,
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -137,7 +137,7 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
         return nil, exception.NewError(
             "scope is closed",
             nil,
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -397,8 +397,10 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
     if nil == containerInstance {
         return exception.NewError(
             "scope is closed",
-            nil,
-            nil,
+            map[string]any{
+                "refusedAt": "entry",
+            },
+            ErrScopeClosed,
         )
     }
 
@@ -425,11 +427,13 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
     defer instance.mutex.Unlock()
 
     if nil == instance.container.Load() {
-        /* mirror Get: closed scope yields an error, not a panic; MustOverrideProtectedInstance keeps the panic */
+        /* mirror Get: closed scope yields an error, not a panic; MustOverrideProtectedInstance keeps the panic. The stage is what lets a test say this guard answered rather than the entry one — the two refusals are otherwise identical, and the window between them is the whole reason this one exists. */
         return exception.NewError(
             "scope is closed",
-            nil,
-            nil,
+            map[string]any{
+                "refusedAt": "lockHandOff",
+            },
+            ErrScopeClosed,
         )
     }
 
@@ -921,7 +925,7 @@ func (instance *scope) lookupInstanceByName(serviceName string) (any, bool, erro
         return nil, false, exception.NewError(
             "scope is closed",
             nil,
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -951,7 +955,7 @@ func (instance *scope) lookupInstanceByType(canonicalType reflect.Type) (any, bo
         return nil, false, exception.NewError(
             "scope is closed",
             nil,
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -980,7 +984,7 @@ func (instance *scope) storeCreatedInstance(
             map[string]any{
                 "serviceName": serviceName,
             },
-            nil,
+            ErrScopeClosed,
         )
     }
 

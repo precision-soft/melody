@@ -580,7 +580,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
             time.Sleep(200 * time.Millisecond)
 
             _, getErr := runtimeInstance.Scope().Get("service")
-            if nil != getErr && true == strings.Contains(getErr.Error(), "scope is closed") {
+            if true == errors.Is(getErr, container.ErrScopeClosed) {
                 resolveOutcome <- "scope-closed"
 
                 return

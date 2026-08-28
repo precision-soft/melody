@@ -21,4 +21,13 @@ func TestConstantTimeSecretEquals_AnswersEqualityWhateverTheLengths(t *testing.T
     if true == constantTimeSecretEquals("expected-key", "") {
         t.Fatalf("expected the empty guess to compare unequal")
     }
+
+    /* the mismatch the other way round: every case above hands a guess no longer than the secret, so a form that compared lengths first would only ever have been asked the one question */
+    if true == constantTimeSecretEquals("short", "expected-key-that-is-much-longer") {
+        t.Fatalf("expected the longer guess to compare unequal")
+    }
+
+    if false == constantTimeSecretEquals("", "") {
+        t.Fatalf("expected two empty secrets to compare equal, which is why an empty expected value is refused at construction")
+    }
 }

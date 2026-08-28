@@ -348,9 +348,18 @@ func TestLazyService_AClosedScopeTurnsTheHandleTerminal(t *testing.T) {
         t.Fatalf("expected the scope-is-closed refusal, got %q", resolveErr.Error())
     }
 
+    /* the handle carries the scope's own cause, so a caller classifying a dead request need not know the value came through a lazy handle */
+    if false == errors.Is(resolveErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed")
+    }
+
     _, secondErr := lazyService.Resolve()
     if nil == secondErr || false == strings.Contains(secondErr.Error(), "lazy service scope is closed") {
         t.Fatalf("expected the terminal state to answer the same on every later call, got %v", secondErr)
+    }
+
+    if false == errors.Is(secondErr, ErrScopeClosed) {
+        t.Fatalf("expected the terminal refusal to classify as ErrScopeClosed too")
     }
 }
 

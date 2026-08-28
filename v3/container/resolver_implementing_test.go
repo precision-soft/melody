@@ -366,6 +366,10 @@ func TestAllImplementing_RefusesAClosedScope(t *testing.T) {
     if nil == allImplementingErr {
         t.Fatalf("expected the collection on a closed scope to be refused")
     }
+
+    if false == errors.Is(allImplementingErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed")
+    }
 }
 
 /* equal priorities keep the stable type-and-name order, and a negative one sorts after every service that declared nothing */

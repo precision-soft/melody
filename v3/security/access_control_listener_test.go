@@ -5,22 +5,33 @@ import (
     "testing"
 
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
+    "github.com/precision-soft/melody/v3/exception"
     httpPkg "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
+/* the two decisions answer separately and each records that it was the one asked: a stub that returns one field for both cannot tell the listener's DecideAll apart from a DecideAny, and every rule in this file carrying a single attribute means the two agree on the input as well. The recorded attributes are the other half — the listener has to hand the rule's whole set to the decision, not the first of them. */
 type accessControlListenerTestAccessDecisionManager struct {
-    decideAllErr error
+    decideAllErr     error
+    decideAnyErr     error
+    calledMethod     string
+    calledAttributes []string
 }
 
 func (instance *accessControlListenerTestAccessDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
+    instance.calledMethod = "DecideAll"
+    instance.calledAttributes = append([]string{}, attributes...)
+
     return instance.decideAllErr
 }
 
 func (instance *accessControlListenerTestAccessDecisionManager) DecideAny(token securitycontract.Token, attributes []string, subject any) error {
-    return instance.decideAllErr
+    instance.calledMethod = "DecideAny"
+    instance.calledAttributes = append([]string{}, attributes...)
+
+    return instance.decideAnyErr
 }
 
 type accessControlListenerTestEntryPoint struct {
@@ -224,19 +235,58 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
     }
 }
 
+/* the security context is PUT on the runtime here, carrying a nil token. Without that the listener never reaches the token check at all — it answers from the missing-context branch above, which is a different refusal for a different reason, and the whole nil-token block could be deleted with this test still green. The reason is what tells the two apart, so it is what this asserts. */
 func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorizationDeniedAndSets401(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
+
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+    )
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN"))),
     )
 
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, nil))
+
     deniedCount := 0
+    deniedReason := ""
     kernel.EventDispatcher().AddListener(
         securitycontract.EventSecurityAuthorizationDenied,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             deniedCount++
+
+            deniedEvent, isDeniedEvent := eventValue.Payload().(*AuthorizationDeniedEvent)
+            if false == isDeniedEvent {
+                t.Fatalf("expected an authorization denied event, got %T", eventValue.Payload())
+            }
+
+            melodyErr, isMelodyErr := deniedEvent.Err().(*exception.Error)
+            if false == isMelodyErr {
+                t.Fatalf("expected the refusal to carry its reason, got %T", deniedEvent.Err())
+            }
+
+            deniedReason, _ = melodyErr.Context()["reason"].(string)
+
             return nil
         },
         0,
@@ -258,6 +308,10 @@ func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorization
 
     if 1 != deniedCount {
         t.Fatalf("expected one authorization denied event")
+    }
+
+    if "missing_token" != deniedReason {
+        t.Fatalf("expected the nil-token branch to answer, got reason %q", deniedReason)
     }
 
     if nil == requestEvent.Response() {
@@ -624,5 +678,76 @@ func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
 
     if nil != requestEvent.Response() {
         t.Fatalf("expected no response for a request the listener cannot read")
+    }
+}
+
+/* the listener asks for ALL of a rule's attributes, and nothing in this file could tell that apart from ANY: the stub answered one field for both decisions and every rule carried a single attribute, so DecideAny(token, nil, nil) would have satisfied the whole suite. Here the two decisions disagree — all refuses, any accepts — and the rule carries two attributes of which the token holds one, which is exactly the input on which the semantics differ. */
+func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    decisionManager := &accessControlListenerTestAccessDecisionManager{
+        decideAllErr: errors.New("access denied"),
+        decideAnyErr: nil,
+    }
+
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN", "ROLE_AUDITOR")),
+        decisionManager,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceNone,
+    )
+
+    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}))
+    SecurityContextSetOnRuntime(runtimeInstance, securityContext)
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+    )
+
+    grantedCount := 0
+    kernel.EventDispatcher().AddListener(
+        securitycontract.EventSecurityAuthorizationGranted,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            grantedCount++
+            return nil
+        },
+        0,
+    )
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    if _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "DecideAll" != decisionManager.calledMethod {
+        t.Fatalf("expected the listener to ask for every attribute, got %q", decisionManager.calledMethod)
+    }
+
+    if 2 != len(decisionManager.calledAttributes) {
+        t.Fatalf("expected the rule's whole attribute set to reach the decision, got %v", decisionManager.calledAttributes)
+    }
+
+    if 0 != grantedCount {
+        t.Fatalf("expected the refusal of the all-decision to stand, not the acceptance of the any-decision")
     }
 }

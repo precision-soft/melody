@@ -135,6 +135,14 @@ func TestScopeRegisterScoped_ClosedScopeRefused(t *testing.T) {
     if "scope is closed" != registerErr.Error() {
         t.Fatalf("unexpected refusal message: %q", registerErr.Error())
     }
+
+    if false == errors.Is(registerErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed")
+    }
+
+    if "entry" != refusalStageOf(t, registerErr) {
+        t.Fatalf("expected the entry guard to answer, got %q", refusalStageOf(t, registerErr))
+    }
 }
 
 func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
@@ -164,6 +172,15 @@ func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing
     registerErr := <-registrationDone
     if nil == registerErr {
         t.Fatalf("expected the registration to be refused by the scope that closed under it")
+    }
+
+    if false == errors.Is(registerErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed")
+    }
+
+    /* the stage is what makes this test about the window rather than about the sleep: a run whose goroutine had not yet reached the container read lock is refused by the entry check instead, which is a pass this assertion refuses to give. */
+    if "lockHandOff" != refusalStageOf(t, registerErr) {
+        t.Fatalf("expected the guard after the lock hand-off to answer, got %q", refusalStageOf(t, registerErr))
     }
 
     scopeInstance.mutex.RLock()

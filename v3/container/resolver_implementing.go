@@ -59,7 +59,7 @@ func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
             map[string]any{
                 "interface": interfaceType.String(),
             },
-            nil,
+            ErrScopeClosed,
         )
     }
 

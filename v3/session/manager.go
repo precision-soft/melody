@@ -7,6 +7,8 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
@@ -22,7 +24,9 @@ const TombstoneRetention = 5 * time.Minute
 const sessionStripeCount = 256
 
 type Manager struct {
-    storage            sessioncontract.Storage
+    storage sessioncontract.Storage
+    /* every instant the tombstone record reads — the burial's and the one the retention window is measured from — comes from here, the way both storages already take theirs, so a test can sit the window exactly on its boundary and a manager wired by the framework agrees with the kernel's clock instead of keeping a second timeline. The default is the system clock, whose Now carries the monotonic reading time.Since used, so the window is measured the same way it always was. */
+    clock              clockcontract.Clock
     ttl                time.Duration
     ownsStorage        bool
     tombstoneRetention time.Duration
@@ -42,7 +46,7 @@ type tombstone struct {
 
 /* NewManager takes a storage it does not own: Close leaves it open, because a storage handed in was built by someone else and is closed by whoever built it. That is the same rule NewFileStorageFromFile follows for an injected file handle, and it is what the container path needs — the storage is a registered service the container closes itself, so a manager that closed it too would close it twice, which a storage wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. Use NewManagerOwningStorage to get the cascade back. */
 func NewManager(storage sessioncontract.Storage, ttl time.Duration) *Manager {
-    return newManager(storage, ttl, false, TombstoneRetention)
+    return newManager(storage, ttl, false, TombstoneRetention, clock.NewSystemClock())
 }
 
 /* NewManagerWithTombstoneRetention sizes the write-back refusal window to the deployment instead of the default: the window has to cover the longest a request can still be holding a session snapshot loaded before a delete, and only the deployment knows its slowest legitimate request. Only a positive window can refuse anything — zero or negative would disarm the logout defence entirely, so they are refused here the way the negative ttl is, rather than carried silently. */
@@ -63,15 +67,47 @@ func NewManagerWithTombstoneRetention(
         )
     }
 
-    return newManager(storage, ttl, false, tombstoneRetention)
+    return newManager(storage, ttl, false, tombstoneRetention, clock.NewSystemClock())
 }
 
 /* NewManagerOwningStorage takes a storage it closes when it is closed itself, for the caller that builds both by hand and wants one Close to end both. Do not use it for a storage that is also registered as a service: the container closes every service it created, so the storage would be closed once by this manager and once by the container. */
 func NewManagerOwningStorage(storage sessioncontract.Storage, ttl time.Duration) *Manager {
-    return newManager(storage, ttl, true, TombstoneRetention)
+    return newManager(storage, ttl, true, TombstoneRetention, clock.NewSystemClock())
 }
 
-func newManager(storage sessioncontract.Storage, ttl time.Duration, ownsStorage bool, tombstoneRetention time.Duration) *Manager {
+/* NewManagerWithClock reads every instant of the tombstone record from the given clock — the burial's, and the one the retention window is measured against — the way both storages take theirs. It is the widest door: it names the retention window as well, because a manager wired with a clock is one whose window a caller means to control. Two things need it. A test can put a burial exactly on the boundary of the window, which no wall-clock manager lets it do: the refusal that keeps a deleted session from being written back is otherwise provable only by waiting out the real window. And a framework-wired manager reads the same clock as the kernel, so a deployment that fixes its clock for a replay fixes this record with it instead of leaving one timeline running free. */
+func NewManagerWithClock(
+    storage sessioncontract.Storage,
+    ttl time.Duration,
+    tombstoneRetention time.Duration,
+    clockInstance clockcontract.Clock,
+) *Manager {
+    if 0 >= tombstoneRetention {
+        exception.Panic(
+            exception.NewError(
+                "session tombstone retention must be positive",
+                map[string]any{
+                    "tombstoneRetention": tombstoneRetention.String(),
+                },
+                nil,
+            ),
+        )
+    }
+
+    if true == internal.IsNilInterface(clockInstance) {
+        exception.Panic(exception.NewError("session manager clock is nil", nil, nil))
+    }
+
+    return newManager(storage, ttl, false, tombstoneRetention, clockInstance)
+}
+
+func newManager(
+    storage sessioncontract.Storage,
+    ttl time.Duration,
+    ownsStorage bool,
+    tombstoneRetention time.Duration,
+    clockInstance clockcontract.Clock,
+) *Manager {
     if true == internal.IsNilInterface(storage) {
         exception.Panic(exception.NewError("session storage is nil", nil, nil))
     }
@@ -104,6 +140,7 @@ func newManager(storage sessioncontract.Storage, ttl time.Duration, ownsStorage 
 
     return &Manager{
         storage:            storage,
+        clock:              clockInstance,
         ttl:                ttl,
         ownsStorage:        ownsStorage,
         tombstoneRetention: tombstoneRetention,
@@ -283,7 +320,7 @@ func (instance *Manager) Close() error {
 }
 
 func (instance *Manager) buryTombstone(sessionId string) {
-    instance.buryTombstoneAt(sessionId, time.Now())
+    instance.buryTombstoneAt(sessionId, instance.clock.Now())
 }
 
 /* buryTombstoneAt records a burial at a given instant, which is what lets the pruning be driven by the order of the burials rather than by a walk of the whole record.
@@ -337,7 +374,7 @@ func (instance *Manager) isTombstonedLocked(sessionId string) bool {
         return false
     }
 
-    return instance.tombstoneRetention > time.Since(deletedAt)
+    return instance.tombstoneRetention > instance.clock.Now().Sub(deletedAt)
 }
 
 func (instance *Manager) uniqueSessionId() string {

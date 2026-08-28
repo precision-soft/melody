@@ -1,6 +1,7 @@
 package security
 
 import (
+    "errors"
     "net/http/httptest"
     "testing"
     "time"
@@ -323,5 +324,44 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
 
     if true == lateToken.IsAuthenticated() {
         t.Fatal("the injected clock left the skew window and the code still authenticated, so the authenticator read some other clock")
+    }
+}
+
+/* fixedEnrollmentStore never fails, so the fail-closed refusal below it had no fixture that could reach it: inverting that refusal to return the primary token would have let every enrolled user past the second factor whenever the enrollment store was down, with the suite green. */
+type failingEnrollmentStore struct {
+    lookupErr error
+}
+
+func (instance *failingEnrollmentStore) FindTotpSecret(
+    _ runtimecontract.Runtime,
+    _ string,
+) (string, bool, error) {
+    return "", false, instance.lookupErr
+}
+
+func TestTotpSecondFactor_AFailingEnrollmentLookupRefusesInsteadOfPassingThrough(t *testing.T) {
+    lookupErr := errors.New("enrollment store unavailable")
+
+    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Enrollments: &failingEnrollmentStore{lookupErr: lookupErr},
+        ReplayGuard: nil,
+    })
+
+    token, err := authenticator.Authenticate(totpRequest(""))
+    if nil == err {
+        t.Fatalf("expected an unavailable enrollment store to refuse rather than pass the primary token through")
+    }
+
+    if nil != token {
+        t.Fatalf("expected no token to be handed out when the second factor cannot be decided, got %#v", token)
+    }
+
+    if false == errors.Is(err, lookupErr) {
+        t.Fatalf("expected the store's own failure to stay classifiable beneath the refusal, got %v", err)
+    }
+
+    if "could not look up two-factor enrollment" != err.Error() {
+        t.Fatalf("unexpected refusal message: %q", err.Error())
     }
 }

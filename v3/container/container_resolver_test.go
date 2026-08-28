@@ -52,6 +52,15 @@ func TestResolve_AfterCloseFailsInsteadOfCreating(t *testing.T) {
     if nil == getErr {
         t.Fatalf("expected resolution after Close to fail instead of creating a service that would never be closed")
     }
+
+    /* the container's own cause, distinct from a scope's: a caller telling a request that ended from an application shutting down reads them apart here */
+    if false == errors.Is(getErr, ErrContainerClosed) {
+        t.Fatalf("expected the refusal to classify as ErrContainerClosed")
+    }
+
+    if true == errors.Is(getErr, ErrScopeClosed) {
+        t.Fatalf("expected the container's refusal not to classify as a closed scope")
+    }
 }
 
 func TestResolve_DuringCloseClosesTheCreatedValueInsteadOfLeakingIt(t *testing.T) {
@@ -291,6 +300,11 @@ func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) 
     getErr := <-resolutionDone
     if nil == getErr {
         t.Fatalf("expected the resolution to fail on the closed scope")
+    }
+
+    /* the store is the door this window reaches — the entry check let the resolution through while the scope was still open — so classifying here is what tells this refusal apart from a provider that simply failed */
+    if false == errors.Is(getErr, ErrScopeClosed) {
+        t.Fatalf("expected the store's refusal to classify as ErrScopeClosed")
     }
 
     if false == builtService.wasClosed() {

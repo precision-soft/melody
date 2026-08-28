@@ -752,3 +752,24 @@ func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T
         t.Fatal("the epoch store failing to answer is the platform's failure and must carry the infrastructure mark")
     }
 }
+
+/* the acceptance above is the only nbf case the suite had, so the whole not-before block could be deleted with it still green — a token that says it is not usable yet would have validated. This is the refusal half: no leeway, activation an hour out. */
+func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
+    secret := []byte("super-secret-value")
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: 0})
+
+    tokenString := signJwtHs256(secret, map[string]any{
+        "sub": "user-1",
+        "exp": time.Now().Add(2 * time.Hour).Unix(),
+        "nbf": time.Now().Add(time.Hour).Unix(),
+    })
+
+    _, validateErr := validator.Validate(testRuntime(), tokenString)
+    if nil == validateErr {
+        t.Fatalf("expected a token whose activation is an hour away to be refused")
+    }
+
+    if "jwt is not yet valid" != validateErr.Error() {
+        t.Fatalf("expected the not-yet-valid refusal, got %q", validateErr.Error())
+    }
+}

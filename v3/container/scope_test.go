@@ -8,6 +8,7 @@ import (
     "sync"
     "sync/atomic"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -180,6 +181,10 @@ func TestScope_CloseReturnsErrorOnGet(t *testing.T) {
     if nil == getErr {
         t.Fatalf("expected closed-scope error")
     }
+
+    if false == errors.Is(getErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed")
+    }
 }
 
 func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
@@ -232,6 +237,14 @@ func TestScope_OverrideAfterCloseReturnsError(t *testing.T) {
     if nil == overrideErr {
         t.Fatalf("expected closed-scope error on override after close")
     }
+
+    if false == errors.Is(overrideErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed")
+    }
+
+    if "entry" != refusalStageOf(t, overrideErr) {
+        t.Fatalf("expected the entry guard to answer, got %q", refusalStageOf(t, overrideErr))
+    }
 }
 
 func TestScope_OverrideAfterCloseKeepsMustPanicking(t *testing.T) {
@@ -258,6 +271,10 @@ func TestScope_GetByTypeAfterCloseReturnsError(t *testing.T) {
     _, getByTypeErr := scopeInstance.GetByType(reflect.TypeOf((*scopeTestService)(nil)))
     if nil == getByTypeErr {
         t.Fatalf("expected closed-scope error on get-by-type after close")
+    }
+
+    if false == errors.Is(getByTypeErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed")
     }
 }
 
@@ -1729,5 +1746,119 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
 
     if "holder" != recorded[0] || "dependency" != recorded[1] {
         t.Fatalf("expected the holder to close before the override its type alias also files, got %v", recorded)
+    }
+}
+
+/* the override guards twice — once before the container's registered types are read and once after the scope lock is taken — and only the second one covers a scope that closes while the first read is in flight. The container's write lock is held here so the goroutine parks inside registeredTypesForServiceName, which is what puts it demonstrably between the two checks. */
+func TestScope_OverrideClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
+    serviceContainer := NewContainer()
+    containerInstance := serviceContainer.(*container)
+
+    scopeInstance := serviceContainer.NewScope().(*scope)
+
+    overrideEntered := make(chan struct{})
+    overrideDone := make(chan error, 1)
+
+    containerInstance.mutex.Lock()
+
+    go func() {
+        close(overrideEntered)
+
+        overrideDone <- scopeInstance.OverrideProtectedInstance("service.after_hand_off", &scopeTestService{value: "late"})
+    }()
+
+    <-overrideEntered
+    time.Sleep(50 * time.Millisecond)
+
+    scopeInstance.container.Store(nil)
+    containerInstance.mutex.Unlock()
+
+    overrideErr := <-overrideDone
+    if nil == overrideErr {
+        t.Fatalf("expected the override to be refused by the scope that closed under it")
+    }
+
+    if false == errors.Is(overrideErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed")
+    }
+
+    if "lockHandOff" != refusalStageOf(t, overrideErr) {
+        t.Fatalf("expected the guard after the lock hand-off to answer, got %q", refusalStageOf(t, overrideErr))
+    }
+
+    scopeInstance.mutex.RLock()
+    _, nameWritten := scopeInstance.instances["service.after_hand_off"]
+    scopeInstance.mutex.RUnlock()
+
+    if true == nameWritten {
+        t.Fatalf("expected nothing to be written into a scope that closed during the hand-off")
+    }
+}
+
+/* Get guards at entry and the scope's own instance lookup guards again, and only the second one covers a scope that closes while the resolution is already in flight. A scoped resolution takes no container lock before the lookup — the memo fast path is skipped whenever a scope is visible — so the scope's own write lock is what the goroutine parks on, inside the scoped-provider read that precedes the lookup. */
+func TestScope_GetClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope().(*scope)
+
+    getEntered := make(chan struct{})
+    getDone := make(chan error, 1)
+
+    scopeInstance.mutex.Lock()
+
+    go func() {
+        close(getEntered)
+
+        _, getErr := scopeInstance.Get("service.absent")
+        getDone <- getErr
+    }()
+
+    <-getEntered
+    time.Sleep(50 * time.Millisecond)
+
+    scopeInstance.container.Store(nil)
+    scopeInstance.mutex.Unlock()
+
+    getErr := <-getDone
+    if nil == getErr {
+        t.Fatalf("expected the resolution to be refused by the scope that closed under it")
+    }
+
+    if false == errors.Is(getErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed, got %v", getErr)
+    }
+}
+
+/* the by-type twin of the lookup above: GetByType's entry check and lookupInstanceByType's are two guards, and this reaches the second. */
+func TestScope_GetByTypeClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    scopeInstance := serviceContainer.NewScope().(*scope)
+
+    getEntered := make(chan struct{})
+    getDone := make(chan error, 1)
+
+    scopeInstance.mutex.Lock()
+
+    go func() {
+        close(getEntered)
+
+        _, getByTypeErr := scopeInstance.GetByType(reflect.TypeOf((*scopeTestService)(nil)))
+        getDone <- getByTypeErr
+    }()
+
+    <-getEntered
+    time.Sleep(50 * time.Millisecond)
+
+    scopeInstance.container.Store(nil)
+    scopeInstance.mutex.Unlock()
+
+    getByTypeErr := <-getDone
+    if nil == getByTypeErr {
+        t.Fatalf("expected the by-type resolution to be refused by the scope that closed under it")
+    }
+
+    if false == errors.Is(getByTypeErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to classify as ErrScopeClosed, got %v", getByTypeErr)
     }
 }

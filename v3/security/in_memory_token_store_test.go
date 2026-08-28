@@ -566,3 +566,25 @@ func TestInMemoryTokenStore_ConcurrentRevokeAndLookupIsRaceFree(t *testing.T) {
 
     waitGroup.Wait()
 }
+
+/* every revocation case in this file puts the token a minute away from the boundary, where a comparison written either way answers the same. The instant the boundary NAMES is the decisive one: a token stamped exactly at it is revoked, and only a frozen clock can stamp one there. Its JWT twin is probed at the boundary already; the store was not. */
+func TestInMemoryTokenStore_ATokenIssuedExactlyAtTheRevocationBoundaryIsRevoked(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := NewInMemoryTokenStoreWithClock(frozen)
+    rt := tokenStoreRuntime()
+
+    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"})
+
+    store.RevokeBefore("u1", "", frozen.Now())
+
+    if _, found, err := store.Lookup(rt, "tok"); true == found || nil != err {
+        t.Fatalf("expected a token stamped at the boundary instant to be revoked, got found=%v err=%v", found, err)
+    }
+
+    frozen.Advance(time.Nanosecond)
+    store.Put("fresh", securitycontract.Claims{UserIdentifier: "u1"})
+
+    if _, found, err := store.Lookup(rt, "fresh"); false == found || nil != err {
+        t.Fatalf("expected a token stamped one unit after the boundary to survive it, got found=%v err=%v", found, err)
+    }
+}

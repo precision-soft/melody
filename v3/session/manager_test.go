@@ -6,6 +6,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
 )
@@ -1115,4 +1116,48 @@ func TestManager_SaveSession_RefusalNamesTheSessionByAOneWayReferenceNotTheRawId
     if false == ok || 16 != len(reference) {
         t.Fatalf("expected a sixteen character reference, got %v", sessionRef)
     }
+}
+
+/* the retention window is a strict comparison, so the instant it names is the first one OUTSIDE it — and no wall-clock manager can be asked about that instant: every test before this one approximated the window with an offset from time.Now and asserted somewhere in its middle, where a boundary written one unit either way answers exactly the same. The frozen clock is what makes the question askable at all. */
+func TestNewManagerWithClock_TheRetentionWindowRefusesUpToItsBoundaryButNotAtIt(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2020, time.March, 1, 12, 0, 0, 0, time.UTC))
+
+    manager := NewManagerWithClock(NewInMemoryStorage(), time.Minute, time.Hour, frozenClock)
+    defer func() { _ = manager.Close() }()
+
+    buriedId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+    manager.buryTombstone(buriedId)
+
+    frozenClock.Advance(time.Hour - time.Nanosecond)
+
+    if false == manager.isTombstoned(buriedId) {
+        t.Fatalf("expected a burial one nanosecond inside the window to still refuse the write-back")
+    }
+
+    frozenClock.Advance(time.Nanosecond)
+
+    if true == manager.isTombstoned(buriedId) {
+        t.Fatalf("expected the burial to have lapsed at the instant the window names, which the comparison excludes")
+    }
+}
+
+func TestNewManagerWithClock_RefusesANonPositiveRetention(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewManagerWithClock(NewInMemoryStorage(), time.Minute, 0, clock.NewSystemClock())
+        },
+        "session tombstone retention must be positive",
+    )
+}
+
+func TestNewManagerWithClock_RefusesANilClock(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = NewManagerWithClock(NewInMemoryStorage(), time.Minute, time.Hour, nil)
+        },
+        "session manager clock is nil",
+    )
 }

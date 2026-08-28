@@ -823,3 +823,69 @@ func TestNewHmacTokenSource_NegativeMaxFutureExpiryPanics(t *testing.T) {
         MaxFutureExpiry: -1 * time.Minute,
     })
 }
+
+/* the expiry refusal and the nonce guard's ttl refusal cover overlapping windows — anything past the deadline trips both — so through Resolve either mutant is answered by its sibling and both read as an anonymous token. The two doors are asked here directly, each asserted on the message it writes, which is the only thing that says WHICH refused. The instant that separates them is the deadline itself: the time window deliberately admits it, and the nonce guard deliberately refuses it, because a nonce it cannot record is a nonce that can be replayed. */
+func TestHmacTokenSource_TheTimeWindowAdmitsTheDeadlineTheNonceGuardRefuses(t *testing.T) {
+    now := time.Unix(1_700_000_000, 0)
+    frozen := clock.NewFrozenClock(now)
+
+    /* the clock is injected because guardNonce measures the ttl against the SOURCE's clock, not against the instant handed to verifyTimeWindow: with the system clock the ttl lands hours out and the boundary this test is named for is never reached — the refusal comes from being far past expiry, which a window written one unit narrower produces just as well */
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:    hmacTestSecrets(),
+        Apps:       hmacTestApps(),
+        NonceGuard: NewMemoryNonceGuardWithClock(frozen),
+        Clock:      frozen,
+    })
+
+    envelope := hmacEnvelope{ExpiresAt: now.Unix(), Nonce: "n1"}
+
+    if timeErr := source.verifyTimeWindow(envelope, now); nil != timeErr {
+        t.Fatalf("expected the deadline instant itself to stay inside the accepted window, got %v", timeErr)
+    }
+
+    guardErr := source.guardNonce(testRuntime(), "k1", envelope)
+    if nil == guardErr {
+        t.Fatalf("expected the nonce guard to refuse an envelope it cannot record")
+    }
+
+    if "internal-auth envelope is too close to expiry to guard against replay" != guardErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", guardErr.Error())
+    }
+}
+
+func TestHmacTokenSource_AnEnvelopePastTheDeadlineIsRefusedByTheTimeWindow(t *testing.T) {
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    now := time.Unix(1_700_000_000, 0)
+    envelope := hmacEnvelope{ExpiresAt: now.Add(-time.Second).Unix(), Nonce: "n1"}
+
+    timeErr := source.verifyTimeWindow(envelope, now)
+    if nil == timeErr {
+        t.Fatalf("expected an envelope a second past its deadline to be refused")
+    }
+
+    if "internal-auth envelope is expired" != timeErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", timeErr.Error())
+    }
+}
+
+/* the not-yet-valid refusal had no test of any kind: an envelope stamped in the future validated, which is the half of the window that stops a caller minting credentials ahead of a rotation. */
+func TestHmacTokenSource_AnEnvelopeIssuedInTheFutureIsRefused(t *testing.T) {
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    now := time.Unix(1_700_000_000, 0)
+    envelope := hmacEnvelope{
+        IssuedAt:  now.Add(time.Hour).Unix(),
+        ExpiresAt: now.Add(2 * time.Hour).Unix(),
+        Nonce:     "n1",
+    }
+
+    timeErr := source.verifyTimeWindow(envelope, now)
+    if nil == timeErr {
+        t.Fatalf("expected an envelope issued an hour in the future to be refused")
+    }
+
+    if "internal-auth envelope is not yet valid" != timeErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", timeErr.Error())
+    }
+}
