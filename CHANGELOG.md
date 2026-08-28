@@ -47,6 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: the abort sentinel no longer leaks the response it aborts. `http.ErrAbortHandler` was re-raised ten lines before the kernel captured the response in flight and seventy before either close ran, so a deliberate abort raised by a middleware after its `next()` returned dropped the only reference to a file-backed response — `FileResponse`, `ServeReader` — and leaked one descriptor per aborted request. The comment on `invokeErrorHandlerSafely` already refused to honour the sentinel for exactly this reason
 - exception: a foreign error whose `Context()` panics no longer takes down the recovery that is reporting it. `renderErrorText` already contained a panicking `Error()`, but the provider's context ran bare in five places — at `LogContext`'s top provider, in its cause-context walk, and in the three `FromError*` constructors that run on the same recovery paths — so the panic unwound through the recovery defer as a second panic while the first was being rendered. The context is read under a recover, and a panicking one costs the context alone, with the panic value kept in its place
 - documentation: the policy documents state the back-port rule the frozen majors actually follow — v1 and v2 receive any defect fix that fits a patch release (no new public symbols, no signature changes, nothing breaking) plus security fixes, until v4 is released. `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, the pull request template, this changelog's banner and `.documentation/UPGRADE.md` all limited back-ports to security and critical correctness fixes — narrower than the rule applied, so a reporter reading them could conclude a reproducible defect on a frozen major would not be repaired
+- documentation: the released `v1.19.0` section carries its classification markers and its document pointers again. Compressing that section to the first sentence of every entry, for the 125,000 character cap on a GitHub release body, dropped every marker that sat in a later sentence — 25 Breaking, 166 Behavioural change, two Operational note and one Breaking at source — together with the five references to `UPGRADE.md` and the two to `SECURITY.md`, so a reader of the release could not tell which of its 630 entries breaks them; one entry was cut inside a code span as well, where the splitter read the ellipsis of `debug:container ... -vvv` as the end of a sentence. Every marker is back as the bare tag this tree already writes, every pointer as the sentence that carries it, and the truncated entry as its whole first sentence
 
 ### Security
 
@@ -79,7 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: `(*Kernel).OpenRequestScopes` reports how many request scopes are open right now — one per request being served, hijacked connections included, because the scope belongs to `ServeHttp` rather than to the connection.
 - cache: `RememberOption.WithContext` ties a caller's wait to the request that opened it, and `Context` reads it back.
 - cli: `--format=json-pretty` renders the same envelope indented for a person reading it by hand.
-- security: `NewAccessControlRawPrefixRule` names the cross-segment prefix rule, and `NewAccessControlRule` now builds the segment-bounded one — the plain name is the bounded tool.
+- security: `NewAccessControlRawPrefixRule` names the cross-segment prefix rule, and `NewAccessControlRule` now builds the segment-bounded one — the plain name is the bounded tool. **Behavioural change**
 - security: `RolesReplacer`, the optional capability a `Token` implements to answer its own twin under another role set, and `(*AuthenticatedToken).WithRoles`, which implements it.
 - logging: `RunShieldedStep` runs one step under the exit handler's own budget and answers whether it finished, so the normal return of `Run` tears down under the same shield the panic path has had since the exit-step budget was installed
 - example: the example carries the source of its own frontend bundle, in `.example/assets/` — `app.ts`, the `melody-routes.ts` URL generator, and the `package.json` that bundles them into `public/assets/app.js` with esbuild.
@@ -89,7 +90,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - example: a second live database in the same process — the catalog journal moves onto `bunorm/pgsql` while the catalogue stays on mysql, which is what shows the provider is a choice rather than an assumption.
 - example: the request-scoped change attribution, `service.ChangeAttribution` — the example's own demonstration of `RegisterScopedServices` and of `container.Lazy`.
 - security: `RoleHierarchyAware`, the optional capability an `AccessDecisionManager` implements to receive the declared role hierarchy at compilation, and `(*AccessDecisionManager).WithRoleHierarchy`, which implements it for the built-in manager by wrapping its own role voters.
-- http: `Kernel.SetMethodPolicy` installs the method policy the kernel reads on every request — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header.
+- http: `Kernel.SetMethodPolicy` installs the method policy the kernel reads on every request — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header. **Breaking**
 - exception: `PanicCause` reads a recovered panic value as the cause of the error a recovery boundary fabricates in its place — the error itself when the panic was error-shaped, and nothing when it was a typed nil whose `Error()` would dereference a nil receiver at the first render.
 - validation: `IsRuleWiringErrorCode`, `ValidationErrors.HasRuleWiringError` and `ValidationErrors.WithoutRuleWiringContext` tell a mistake in the rule DECLARATION — `unknownRule`, `invalidRuleSyntax`, `invalidPattern` — apart from a refusal of the submitted value.
 - exception: `Logged` answers an error that reports itself already logged, and is what a writer returns after filing its record.
@@ -98,32 +99,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - logging: `NewStandardErrorLogger` adapts a melody logger to the `*log.Logger` net/http's `Server.ErrorLog` wants, so the connection-level failures the http kernel never sees — a TLS handshake that fails before any request exists, a malformed request line, a superfluous `WriteHeader`, a listener degrading — reach the application's journal instead of being printed to stderr as unstructured text
 - bunorm: `SecretParameterProvider`, the optional capability of naming the configuration parameters that hold a provider's credentials (see the integration's own changelog)
 - container: `contract.ContainerCarrier` — the door a resolver answers its container through — implemented by the container itself, by the concrete scope and by the resolution context a provider receives.
-- config: a `.env` value may reference a parameter the composition root registers between construction and boot.
-- config: `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`) sets how long a stopping http server waits for the requests it has already admitted, reaching the server through `Configuration.Http().ShutdownTimeout()`.
+- config: a `.env` value may reference a parameter the composition root registers between construction and boot. **Behavioural change**
+- config: `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`) sets how long a stopping http server waits for the requests it has already admitted, reaching the server through `Configuration.Http().ShutdownTimeout()`. **Breaking**
 - bag: `*ParameterBag.AppendString` appends inside one critical section.
 - cache: `NewManagerOwningBackend` builds a manager that closes its backend when it is closed itself, for the caller that builds both by hand and wants one Close to end both.
 - cache: `DeserializationError` marks a read that found a payload the serializer cannot decode, with `NewDeserializationError` and `IsDeserializationError` beside it.
 - example: the development stack serves all three example applications at once, each under a name that says which it is — `v1-example.`, `v2-example.` and `example.melody.localhost.precision-soft.com`.
 - example: the example application is a working nomenclature rather than a set of routes that exist to be driven.
 - example: every redis key and every table the example writes carries its major.
-- config: `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`) names the path prefixes the built-in file server declines without touching the disk, comma separated.
+- config: `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`) names the path prefixes the built-in file server declines without touching the disk, comma separated. **Breaking**
 - http: `SimpleRateLimitWithResolver`, `IpRateLimitWithResolver` and `UserRateLimitWithResolver` take the client-ip resolver the convenience helpers could not reach.
 - http: `static.FileServerConfig.SetAllowedDotPrefixList` names the dot-prefixed first path elements the file server may retrieve.
-- http: `RegenerateRequestSession` rotates the session id of a request and republishes the rotated session in one call, which is the whole session-fixation defence a login handler needs; write the authenticated identity to the session it returns.
+- http: `RegenerateRequestSession` rotates the session id of a request and republishes the rotated session in one call, which is the whole session-fixation defence a login handler needs; write the authenticated identity to the session it returns. **Breaking**
 - config: `MELODY_HTTP_SESSION_TTL` (`kernel.http.session_ttl`) sets how long a stored session stays valid, reaching the session manager through `Configuration.Http().SessionTtl()`.
 - http: `SessionCookiePolicy.Secure` takes a `SessionCookieSecurePolicy`.
 - cache: `Manager.GetCounter` reads a key written by `Increment` or `Decrement`.
 - application: two boot warnings name a resource melody supplied that nothing will ever reclaim, so the deployment learns it from a log line rather than from a memory graph.
-- container: a scope is a registrar in its own right, layered over the container it came from.
+- container: a scope is a registrar in its own right, layered over the container it came from. **Breaking**
 - container: `Replacing()` admits a registration whose name — or whose registered type — the other lifetime already claims.
 - container: `ClosedWithScope()` hands an installed override to the scope's teardown, through the new `OverrideInstanceWithOptions` and `OverrideProtectedInstanceWithOptions`.
 - application: `ScopedServiceModule` is the module hook for request-lifetime services, with `RegisterScopedServices(kernelInstance, registrar)` running at boot beside `RegisterServices`.
 - http: `RequestContextMustFromResolver` and `RequestContextFromResolver` resolve the current request's context — its id and start moment — out of the request scope.
 - application: `ProcessContext` — `ServiceProcessContext`, `NewProcessContext`, `ProcessContextMustFromResolver`, `ProcessContextFromResolver` — is the console counterpart of the http request context: the generated process id every log record of the run is correlated under, and the moment the run started.
-- logging: `NewProcessLogger` is the console sibling of `NewRequestLogger`, and the cli entry point now decorates with it.
+- logging: `NewProcessLogger` is the console sibling of `NewRequestLogger`, and the cli entry point now decorates with it. **Behavioural change**
 - http: `cors.RegisterListeners` wires the two cors listener doors at once, and `cors.RegisterRequestListener` is the new half of the pair: a kernel.request listener at `cors.RequestListenerPriority` (100) that answers a well-formed preflight from an allowed origin before the security chain runs.
 - http: `middleware.RegisterRateLimitRequestListener` meters requests on kernel.request at `RateLimitRequestListenerPriority` (200), ahead of token resolution (50) and access control (20), sharing `RateLimitConfig` with the middleware.
-- config: `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`) sets how long a deleted session id keeps refusing a write-back, reaching the session manager through `Configuration.Http().SessionTombstoneRetention()`.
+- config: `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`) sets how long a deleted session id keeps refusing a write-back, reaching the session manager through `Configuration.Http().SessionTombstoneRetention()`. **Breaking**
 - session: `NewManagerWithTombstoneRetention` builds a manager whose write-back refusal window is sized by the caller, for wiring the manager by hand; it refuses a non-positive window with a panic naming the rule, the same answer the constructor gives a negative ttl.
 - http: `Kernel.HasErrorHandler` reports whether the application installed an error handler.
 - container: `ServiceDescriptions` on the built container answers what it can say WITHOUT running a provider — every name either lifetime knows, with the type read from the built instance when one exists and from the provider's declared return type otherwise, which the container now records at registration.
@@ -133,35 +134,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - example: each major's example application holds its schema in a database of its own rather than the one all three shared.
-- cli, logging: text of unknown origin reaching a terminal or a plain-text log line is escaped rather than obeyed.
-- example: the catalog migration set holds four migrations — the journal's `20260814000005` moves, with its name, into the postgres-dialect `JournalMigrations` set (see the Added entry), so `db:migrate` over an emptied catalog database reports `applied 4 migrations`.
+- cli, logging: text of unknown origin reaching a terminal or a plain-text log line is escaped rather than obeyed. **Behavioural change**
+- example: the catalog migration set holds four migrations — the journal's `20260814000005` moves, with its name, into the postgres-dialect `JournalMigrations` set (see the Added entry), so `db:migrate` over an emptied catalog database reports `applied 4 migrations`. **Behavioural change**. **Operational note**
 - example: the static cache is armed in the shipped `.env` — `MELODY_STATIC_ENABLE_CACHE=true`, `MELODY_STATIC_CACHE_MAX_AGE=3600` — where every example previously opted out of the framework's own default.
-- example: the seeded passwords are bcrypt.
-- example: a validation refusal answers one `errors` entry per violated field — `presenter.ApiValidationError`, which both product write handlers now answer through — instead of the single semicolon-joined, alphabetically sorted string the presenter used to receive from `ValidationErrors.Error()`.
-- example: the four example commands — `app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh` — render through the framework's `cli/output` envelope instead of `fmt`, so each accepts the standard flag set and answers one machine-readable json document under `--format=json`.
+- example: the seeded passwords are bcrypt. **Operational note**
+- example: a validation refusal answers one `errors` entry per violated field — `presenter.ApiValidationError`, which both product write handlers now answer through — instead of the single semicolon-joined, alphabetically sorted string the presenter used to receive from `ValidationErrors.Error()`. **Behavioural change**
+- example: the four example commands — `app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh` — render through the framework's `cli/output` envelope instead of `fmt`, so each accepts the standard flag set and answers one machine-readable json document under `--format=json`. **Behavioural change**
 - example: the cron wiring moves onto the module facade — `configure.go` registers `cron.NewModule` with the configuration factory and the three scheduled commands, instantiated, as its runner commands, and the hand-wired registration of the generate command is gone.
 - example: the database schema is owned by a migration set, `migration/` — five DDL migrations whose column definitions were captured from the tables the repositories used to create — and the repository-owned `EnsureSchema` is gone from the five bun repositories and from the journal repository's public interface.
-- cli: `--format=json` writes one document on one line, terminated by a newline, instead of an indented block.
-- cache: `InMemoryBackend.Get` and `Many` take the exclusive lock only when an entry's place in the recency list has actually gone stale, where they used to take it on every hit just to move the entry to the front.
-- container: the teardown breaks a tie the dependency graph leaves open on **creation order, latest first**, not on the node key descending.
-- container: closing has two states, and a service's own `Close` may still resolve.
-- logging: the json logger takes its timestamp inside the write mutex, together with the encoding, so the order of the stamps is the order of the writes — which is what `LOGGING.md` has always promised and what the comment on that line claimed the precision was paying for.
-- security/config: a firewall's access decision manager, entry point and access denied handler are refused at compilation when they hold a **typed nil**, by firewall name and naming which of the two configurations declared it; `Builder.SetGlobal` refuses the same three at the door.
-- http: `Router.AllowedMethods` applies the locale filter the matcher applies, so it no longer announces the methods of a route the path's locale excludes.
+- cli: `--format=json` writes one document on one line, terminated by a newline, instead of an indented block. **Behavioural change**
+- cache: `InMemoryBackend.Get` and `Many` take the exclusive lock only when an entry's place in the recency list has actually gone stale, where they used to take it on every hit just to move the entry to the front. **Behavioural change**
+- container: the teardown breaks a tie the dependency graph leaves open on **creation order, latest first**, not on the node key descending. **Behavioural change**
+- container: closing has two states, and a service's own `Close` may still resolve. **Behavioural change**
+- logging: the json logger takes its timestamp inside the write mutex, together with the encoding, so the order of the stamps is the order of the writes — which is what `LOGGING.md` has always promised and what the comment on that line claimed the precision was paying for. **Behavioural change**
+- security/config: a firewall's access decision manager, entry point and access denied handler are refused at compilation when they hold a **typed nil**, by firewall name and naming which of the two configurations declared it; `Builder.SetGlobal` refuses the same three at the door. **Breaking**
+- http: `Router.AllowedMethods` applies the locale filter the matcher applies, so it no longer announces the methods of a route the path's locale excludes. **Behavioural change**
 - config: `Parameter.Int` reads the same grammar its sibling accessors read, delegating to the shared parser instead of a hand-written `strconv.Atoi`.
 - http: the in-process rate limiters say on their constructors that their counters live in the process and nowhere else — a restart hands every caller a full budget back, and each replica enforces the limit on its own — with the pointer to the distributed drop-in in `integrations/rueidis`.
 - cache: `NewJsonSerializer` writes down the hazard of a bare json document with no schema discriminant — a value written by one release decodes cleanly in the next, so a field added since reads as the zero value with no decoding error, and an entry cached with a ttl of zero never lapses to heal it.
 - security/config: `Compile` says what its argument implies — `Configuration` has only unexported fields and no constructor, and `Builder` never hands one out, so a caller outside the package can only pass the empty value, whose answer is a nil compiled configuration and a nil error.
-- http/static: in the embedded mode the cache validators stop being derived from a modification time that does not exist.
-- cron: `Configuration.Entries` hands out copies all the way down — the list, each `ScheduledCommand` and each `EntryConfig` behind it, schedule included.
+- http/static: in the embedded mode the cache validators stop being derived from a modification time that does not exist. **Behavioural change**: every embedded asset revalidates once after a deploy that linked a new version — see `UPGRADE.md`
+- cron: `Configuration.Entries` hands out copies all the way down — the list, each `ScheduledCommand` and each `EntryConfig` behind it, schedule included. **Behavioural change**
 - http: a 400 whose validation errors blame the rule declaration is recorded at **error**, not at the warning a deliberate 4xx earns.
-- http: the per-field validation errors in a 400 body no longer carry the internal context of a rule-declaration fault.
+- http: the per-field validation errors in a 400 body no longer carry the internal context of a rule-declaration fault. **Behavioural change** on the response body — see `UPGRADE.md`
 - http: a session another request ended while this one was running is recorded at **warning**, under its own name.
 - http: the session-persistence records carry a one-way reference to the session id — a SHA-256 truncated to 16 hex characters — beside the request method and the path.
 - http: the rate-limit request listener records the caller's own cancellation at warning under its own name instead of as a store failure at error.
-- cache: the two recovery boundaries of `Remember` hand the panic value on as the cause and capture the stack of the goroutine that raised it.
-- httpclient: `SetHeader` stores the header under its canonical spelling, the one the constructor stores under.
-- config: a parameter registered after boot is published before its own template is resolved, so the resolution's secret propagation — which marks the reader it finds by name in the parameter map — can see it.
+- cache: the two recovery boundaries of `Remember` hand the panic value on as the cause and capture the stack of the goroutine that raised it. **Behavioural change**
+- httpclient: `SetHeader` stores the header under its canonical spelling, the one the constructor stores under. **Behavioural change**
+- config: a parameter registered after boot is published before its own template is resolved, so the resolution's secret propagation — which marks the reader it finds by name in the parameter map — can see it. **Behavioural change**
 - application: the http server's `ErrorLog` routes net/http's own reports into the application logger, at warning with the line in the record's context.
 - security: the access-control merge strategies state what they decide — the strategy orders the merged rule LIST, while the matcher resolves by category first (exact beats prefix, longer prefix beats shorter, prefix beats regex, fallback last), so position decides only what the categories leave tied; the names carried a first-match connotation the matcher's documented longest-prefix design never honoured, in an authorization decision.
 - session: `FileStorage` states the shape degradation its own flush makes invisible until the first redeploy — values reload from JSON at construction, so a session survives a restart with an `int` reading back `float64` and a struct reading back `map[string]any`, while the same session read in-process keeps the types the handler stored
@@ -174,80 +175,80 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - cli: `output.StandardFlags` and `output.DebugFlags` document the quiet defaults the two have always carried: quiet defaults to true on the standard set — a command's essential output is never gated on quiet, so the flag governs headers and decoration alone — and the debug set flips it to false, because an introspection command's headers are part of its answer
 - application: the http shutdown wait's documentation names the deliberate outcome of an exceeded budget — the deadline error surfaces and the process exits non-zero, because requests were lost; a graceful drain that ran out of time is the operator's signal, not a success to smooth over
 - documentation: the package documents catch up with the code they describe.
-- cache: the key grammar is part of the `cachecontract.Backend` promise — non-empty, no spaces or newlines, at most 1024 bytes — and the in-memory backend enforces it with the exact refusals the redis backend answers.
-- application: the application's own http routes register before any module's.
-- application: a module's identity is its instance — the same instance reached through two providers, or registered twice, boots once.
-- application: `RegisterModuleProvider` handed a provider that itself implements `Module` registers it as that module, own hooks included, followed by its children — the door used to keep only the children and silently drop the provider's own registrations, so the two registration doors registered different applications from the same value.
-- application: both module doors refuse a registration arriving from inside a module boot hook, and `RegisterHttpRoute` refuses during the same window.
+- cache: the key grammar is part of the `cachecontract.Backend` promise — non-empty, no spaces or newlines, at most 1024 bytes — and the in-memory backend enforces it with the exact refusals the redis backend answers. **Behavioural change**
+- application: the application's own http routes register before any module's. **Behavioural change**
+- application: a module's identity is its instance — the same instance reached through two providers, or registered twice, boots once. **Behavioural change**
+- application: `RegisterModuleProvider` handed a provider that itself implements `Module` registers it as that module, own hooks included, followed by its children — the door used to keep only the children and silently drop the provider's own registrations, so the two registration doors registered different applications from the same value. **Behavioural change**
+- application: both module doors refuse a registration arriving from inside a module boot hook, and `RegisterHttpRoute` refuses during the same window. **Breaking**
 - application: the second module boot phase runs one loop per hook for the event, middleware, http and cli hooks, the granularity every other phase already had — each hook runs across every module before the next hook begins, in registration order inside each group — and the contracts now document that rule.
-- application: the firewall manager is registered whenever a security configuration compiled, whatever the process mode — configured means resolvable.
-- cli, application: the container is closed by the recover handler that owns the process exit, on the linear path exactly as on the panic path — the cli action no longer closes it after the command returns.
-- http: the kernel exception listener records a 4xx at warning level.
+- application: the firewall manager is registered whenever a security configuration compiled, whatever the process mode — configured means resolvable. **Behavioural change**
+- cli, application: the container is closed by the recover handler that owns the process exit, on the linear path exactly as on the panic path — the cli action no longer closes it after the command returns. **Behavioural change**
+- http: the kernel exception listener records a 4xx at warning level. **Behavioural change**
 - application: the logger registration is gated behind `Has`, like the cache, the session storage and the firewall manager beside it.
-- logging: `LogOnRecoverAndExit` and `LogOnRecoverAndExitAfter` refuse an exit code outside 1..255 with a panic naming the rule — the rule `exception.NewExitError` has always enforced, applied to the code the handler itself would exit with.
-- logging: a recovered `*exception.ExitError` carrying an out-of-range code is no longer honored as an exit.
-- logging: each step of the exit handler — the record, the before-exit teardown — is abandoned after ten seconds instead of being waited on forever.
-- security: `AccessDecisionManager.DecideAll` refuses an empty attribute list instead of granting it.
-- security: a typed nil is refused where a nil is refused, on every interface-typed piece of a firewall — the matcher, the token source, the login and logout handlers, a rule, an authenticator, a decision voter and the token a security token wraps.
+- logging: `LogOnRecoverAndExit` and `LogOnRecoverAndExitAfter` refuse an exit code outside 1..255 with a panic naming the rule — the rule `exception.NewExitError` has always enforced, applied to the code the handler itself would exit with. **Breaking**
+- logging: a recovered `*exception.ExitError` carrying an out-of-range code is no longer honored as an exit. **Behavioural change**
+- logging: each step of the exit handler — the record, the before-exit teardown — is abandoned after ten seconds instead of being waited on forever. **Behavioural change**
+- security: `AccessDecisionManager.DecideAll` refuses an empty attribute list instead of granting it. **Behavioural change**
+- security: a typed nil is refused where a nil is refused, on every interface-typed piece of a firewall — the matcher, the token source, the login and logout handlers, a rule, an authenticator, a decision voter and the token a security token wraps. **Breaking**
 - security: the constructors that keep a caller's slice copy it, matching the copy they already make when handing it back.
-- internal: `Duration` refuses a bare `int`/`int64`.
-- internal: `Float64` refuses NaN and the infinities on every branch.
-- internal: `MapStringString` reports a typed-nil map as absent.
-- clock: `FrozenClock.Advance` is forward-only and panics on a negative duration.
+- internal: `Duration` refuses a bare `int`/`int64`. **Behavioural change**
+- internal: `Float64` refuses NaN and the infinities on every branch. **Behavioural change**
+- internal: `MapStringString` reports a typed-nil map as absent. **Behavioural change**
+- clock: `FrozenClock.Advance` is forward-only and panics on a negative duration. **Behavioural change**
 - clock: the frozen ticker's `Stop` returns only after its relay goroutine has exited, so no tick can be minted after `Stop` returns.
 - clock: the `Ticker` and `Clock` contracts state their obligations in the GoDoc, and the documentation carries them.
-- internal: `testhelper.AssertPanics` is removed.
+- internal: `testhelper.AssertPanics` is removed. **Breaking**
 - internal: `testhelper.HttpTestRequest.Header` mirrors the production request and dereferences its underlying request unguarded.
-- httpclient: a client configured with a base url refuses an absolute url that leaves that origin.
-- httpclient: a basic credential travels whenever the caller asked for one, empty halves included.
-- httpclient: an empty target names the base resource itself.
-- httpclient: a nil `RequestOption` is refused instead of called.
-- httpclient: `NewHttpClient` refuses a nil configuration where the wiring mistake is made.
-- httpclient: a negative per-request timeout bounds a stream instead of unbounding it.
-- event: a dispatch that skipped a listener marked required refuses the response the stopping listener produced.
-- event: a listener that stops propagation and fails in the same call is reported for the listeners it skipped.
-- event: an event that arrives already stopped runs no listener.
-- event: `AddSubscriber` refuses a second registration of a subscriber already registered, naming the type.
-- event: `AddSubscriber` validates every subscribed event before registering any listener.
-- event: `AddSubscriber` refuses a subscriber that declares no subscribed events, and an event name mapped to an empty list.
-- event: `MarkListenerRequired` and `MarkListenerMaySkipRequiredListeners` refuse a registration the dispatcher does not hold, naming the event and the listener id.
-- event: `EventDispatcherAdapter` refuses to mark a required listener over a wrapped dispatcher that cannot mark one, naming the wrapped type.
-- event: `contract.RegisteredListener` reports the required-listener marks a listener carries, and `debug:events --verbose` renders them in a `required` column.
-- event: `NewEventDispatcherAdapter` takes the dispatcher alone.
-- event: an `*exception.ExitError` raised by a listener travels to whoever owns the process boundary instead of being folded into a listener error.
-- cli: `output.MergeFlags` refuses a duplicated flag name at the line that declares it.
-- cli: `TableBlockBuilder.AddRow` refuses a row whose cell count disagrees with the block's declared columns, naming the block and both counts.
-- cli: the standard integer flags — `--verbosity`, `--limit`, `--offset`, `--table-width` — refuse a negative value at parsing, naming the flag, the way `--format` and `--order` have always refused an unsupported one.
-- cli: the table format prints the warnings under `--quiet` too, and renders the envelope error whole — message, code, details, cause.
-- cli: a failure reported through the rendered envelope reaches the application log.
-- cli: a table printing failure fails the command.
-- http/bag: the request bags keep the single and the repeated key apart by type, and `Request.Input` delivers the query and form values it silently lost.
-- http: a form that does not parse is refused the way a body that does not read is.
-- config: the template scanner finds the real `")%"` closer and refuses what silently survived as text.
-- config: a braced `${...}` reference in a `.env` value whose name breaks the key grammar is refused instead of surviving literally — `${DB-PASS}` rode into the dsn as text with no signal, while nobody types `${...}` into a password by accident; the bare-dollar grammar that keeps `pa$sword` and `$1.50` data is untouched, and the refusal names the enclosing key, never the content.
-- config: the `.env` trailing comment is cut once, by godotenv's own countback.
-- config: the `.env` preprocessor walks bytes, not runes.
-- config: `MarkSecret` after the boot resolution travels to every parameter that reads the marked key, and follows the marking to a fixpoint — a reader of a freshly marked name is scanned in turn, so a whole derivation chain is covered however late the mark arrives, the way the early marking always did — the late call redacted the key while the dsn assembled from it printed in full in `debug:parameters`, and the end-of-boot retry reported that unapplied markings had landed when their propagation had nothing left to travel through.
-- config: `IntWithDefault` answers the default only for an absent (or typed-nil) parameter; one that exists but does not parse panics — `1O0` silently became the default and the operator believed the configured value was live.
-- config: a runtime parameter name is judged trimmed: the whitespace-only name passed the empty guard and registered a phantom, the padded name registered a parameter no exact-match lookup could ever reach; both are refused at the registration line, the whitespace-only one as the empty name it is.
-- bag: `ParameterBag.All` copies as deep as the bag's own writers go — a `[]string` or `map[string]string` handed back live aliased the stored value, and a caller mutating the copy wrote into the bag behind its lock.
-- cache: `NewManager` builds a manager that does not own its backend — Close leaves it open.
-- cache: a closed `InMemoryBackend` refuses every operation with `cache backend is closed` instead of silently serving a map whose cleanup goroutine is gone — an entry written after Close was never reclaimed by anything and grew the map for the rest of the process, while Close had already reported the backend gone; Close itself stays idempotent.
-- cache: the in-memory backend refuses the degenerate inputs it silently absorbed.
-- cache: a payload the serializer cannot decode is a miss for `Remember`, not a terminal failure.
-- cache: `Manager.Many` no longer discards the whole answer over one corrupt entry, and the error finally names its culprits.
-- cache: the zero-value `RememberOption` reads as the constructor defaults.
-- cache: `Remember` coalesces concurrent callers only for pointer-kind `Cache` implementations, whose address tells instances apart.
-- validation: a parameterized rule named without parameters fails closed instead of silently validating with the registered singleton.
-- validation: the regex constraint refuses an empty pattern.
-- validation: a numeric rule parameter is an integer in its entirety or it is refused.
-- validation: the string-form constraints — `regex`, `email`, `alpha`, `alphanumeric`, `numeric` — refuse a value that is not a string instead of silently passing it.
-- validation: `min`, `max` and `notBlank` measure strings, not Go renderings.
-- validation: a `validate` tag that parses to no rule at all is refused.
-- http: the per-field detail of a failed validation reaches the client.
-- security: a global access control declared without any firewall is enforced rather than silently discarded.
-- security: the zero value of `config.FirewallOverrideConfiguration` inherits the global access control the way its constructor does.
-- security: `RoleVoter` and `RoleHierarchyVoter` deny a token that is not authenticated even when it carries roles.
+- httpclient: a client configured with a base url refuses an absolute url that leaves that origin. **Behavioural change**
+- httpclient: a basic credential travels whenever the caller asked for one, empty halves included. **Behavioural change**
+- httpclient: an empty target names the base resource itself. **Behavioural change**
+- httpclient: a nil `RequestOption` is refused instead of called. **Behavioural change**
+- httpclient: `NewHttpClient` refuses a nil configuration where the wiring mistake is made. **Behavioural change**
+- httpclient: a negative per-request timeout bounds a stream instead of unbounding it. **Behavioural change**
+- event: a dispatch that skipped a listener marked required refuses the response the stopping listener produced. **Behavioural change**
+- event: a listener that stops propagation and fails in the same call is reported for the listeners it skipped. **Behavioural change**
+- event: an event that arrives already stopped runs no listener. **Behavioural change**
+- event: `AddSubscriber` refuses a second registration of a subscriber already registered, naming the type. **Behavioural change**
+- event: `AddSubscriber` validates every subscribed event before registering any listener. **Behavioural change**
+- event: `AddSubscriber` refuses a subscriber that declares no subscribed events, and an event name mapped to an empty list. **Behavioural change**
+- event: `MarkListenerRequired` and `MarkListenerMaySkipRequiredListeners` refuse a registration the dispatcher does not hold, naming the event and the listener id. **Behavioural change**
+- event: `EventDispatcherAdapter` refuses to mark a required listener over a wrapped dispatcher that cannot mark one, naming the wrapped type. **Behavioural change**
+- event: `contract.RegisteredListener` reports the required-listener marks a listener carries, and `debug:events --verbose` renders them in a `required` column. **Breaking**
+- event: `NewEventDispatcherAdapter` takes the dispatcher alone. **Breaking**
+- event: an `*exception.ExitError` raised by a listener travels to whoever owns the process boundary instead of being folded into a listener error. **Behavioural change**
+- cli: `output.MergeFlags` refuses a duplicated flag name at the line that declares it. **Behavioural change**
+- cli: `TableBlockBuilder.AddRow` refuses a row whose cell count disagrees with the block's declared columns, naming the block and both counts. **Behavioural change**
+- cli: the standard integer flags — `--verbosity`, `--limit`, `--offset`, `--table-width` — refuse a negative value at parsing, naming the flag, the way `--format` and `--order` have always refused an unsupported one. **Behavioural change**
+- cli: the table format prints the warnings under `--quiet` too, and renders the envelope error whole — message, code, details, cause. **Behavioural change**
+- cli: a failure reported through the rendered envelope reaches the application log. **Behavioural change**
+- cli: a table printing failure fails the command. **Behavioural change**
+- http/bag: the request bags keep the single and the repeated key apart by type, and `Request.Input` delivers the query and form values it silently lost. **Behavioural change**
+- http: a form that does not parse is refused the way a body that does not read is. **Behavioural change**
+- config: the template scanner finds the real `")%"` closer and refuses what silently survived as text. **Behavioural change**
+- config: a braced `${...}` reference in a `.env` value whose name breaks the key grammar is refused instead of surviving literally — `${DB-PASS}` rode into the dsn as text with no signal, while nobody types `${...}` into a password by accident; the bare-dollar grammar that keeps `pa$sword` and `$1.50` data is untouched, and the refusal names the enclosing key, never the content. **Behavioural change**
+- config: the `.env` trailing comment is cut once, by godotenv's own countback. **Behavioural change**
+- config: the `.env` preprocessor walks bytes, not runes. **Behavioural change**
+- config: `MarkSecret` after the boot resolution travels to every parameter that reads the marked key, and follows the marking to a fixpoint — a reader of a freshly marked name is scanned in turn, so a whole derivation chain is covered however late the mark arrives, the way the early marking always did — the late call redacted the key while the dsn assembled from it printed in full in `debug:parameters`, and the end-of-boot retry reported that unapplied markings had landed when their propagation had nothing left to travel through. **Behavioural change**
+- config: `IntWithDefault` answers the default only for an absent (or typed-nil) parameter; one that exists but does not parse panics — `1O0` silently became the default and the operator believed the configured value was live. **Behavioural change**
+- config: a runtime parameter name is judged trimmed: the whitespace-only name passed the empty guard and registered a phantom, the padded name registered a parameter no exact-match lookup could ever reach; both are refused at the registration line, the whitespace-only one as the empty name it is. **Behavioural change**
+- bag: `ParameterBag.All` copies as deep as the bag's own writers go — a `[]string` or `map[string]string` handed back live aliased the stored value, and a caller mutating the copy wrote into the bag behind its lock. **Behavioural change**
+- cache: `NewManager` builds a manager that does not own its backend — Close leaves it open. **Behavioural change**
+- cache: a closed `InMemoryBackend` refuses every operation with `cache backend is closed` instead of silently serving a map whose cleanup goroutine is gone — an entry written after Close was never reclaimed by anything and grew the map for the rest of the process, while Close had already reported the backend gone; Close itself stays idempotent. **Behavioural change**
+- cache: the in-memory backend refuses the degenerate inputs it silently absorbed. **Behavioural change**
+- cache: a payload the serializer cannot decode is a miss for `Remember`, not a terminal failure. **Behavioural change**
+- cache: `Manager.Many` no longer discards the whole answer over one corrupt entry, and the error finally names its culprits. **Behavioural change**
+- cache: the zero-value `RememberOption` reads as the constructor defaults. **Behavioural change**
+- cache: `Remember` coalesces concurrent callers only for pointer-kind `Cache` implementations, whose address tells instances apart. **Behavioural change**
+- validation: a parameterized rule named without parameters fails closed instead of silently validating with the registered singleton. **Behavioural change**
+- validation: the regex constraint refuses an empty pattern. **Behavioural change**
+- validation: a numeric rule parameter is an integer in its entirety or it is refused. **Behavioural change**
+- validation: the string-form constraints — `regex`, `email`, `alpha`, `alphanumeric`, `numeric` — refuse a value that is not a string instead of silently passing it. **Behavioural change**
+- validation: `min`, `max` and `notBlank` measure strings, not Go renderings. **Behavioural change**
+- validation: a `validate` tag that parses to no rule at all is refused. **Behavioural change**
+- http: the per-field detail of a failed validation reaches the client. **Behavioural change**
+- security: a global access control declared without any firewall is enforced rather than silently discarded. **Behavioural change**
+- security: the zero value of `config.FirewallOverrideConfiguration` inherits the global access control the way its constructor does. **Behavioural change**
+- security: `RoleVoter` and `RoleHierarchyVoter` deny a token that is not authenticated even when it carries roles. **Behavioural change**
 - security: `SecurityContextFromRuntime` returns `(nil, false)` when the security context cannot be resolved instead of panicking.
 - security: the authorization denial paths never write a nil response.
 - security: a failed event dispatch on a refusal path keeps the real error as the cause rather than replacing it.
@@ -256,65 +257,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: the token-source recovery survives a nil token source.
 - security: `NewApiKeyHeaderRule` rejects a nil matcher at construction, the way the other firewall dependencies are validated, so a configuration mistake fails at boot rather than panicking in `Applies` on the request path, outside any recovery
 - security: a role hierarchy or decision manager that neither the firewall nor the global configuration declares is reported as `SourceNone` rather than `SourceFirewall`, so a debug panel no longer claims a manager that does not exist at the point the runtime answers that it is missing
-- security: `NewAccessControlRawPrefixRule` refuses `PUBLIC_ACCESS`.
+- security: `NewAccessControlRawPrefixRule` refuses `PUBLIC_ACCESS`. **Breaking**
 - example: the catalogue reading is served at `/catalog/report/` under the name `example.catalog.report`.
 - example: the welcome text on the static index says what the application is — a product nomenclature of products, categories, currencies and users — instead of calling itself a small demo, and the api token shipped in `.env` is named for the example rather than for a demonstration.
 - logging: `LogOnRecover` only logs.
 - config: `Resolve()` reports an error once the application is serving.
 - config: a positive session ttl below one second fails the boot.
-- httpclient: the client sets `MaxIdleConnsPerHost` on its transport, exposed as `TransportConfig.MaxIdleConnsPerHost` and defaulting to `MaxIdleConns` (100), following an override of it unless pinned explicitly.
-- validation: a nil pointer embed is validated as "nothing was supplied" rather than "nothing to validate", so the constraints on its promoted fields run against their zero values exactly as a value embed's already did.
-- validation: exceeding the nesting-depth cap is reported as a validation error (`nestingDepthExceeded`) only when the truncated subtree could actually carry a `validate` tag, so nesting past the cap can no longer bypass validation while free-form tag-free client json is accepted up to the cap as before.
-- http: a route pattern whose optional parameter is not its final segment is refused at registration instead of being accepted and half-served.
-- cli: in json mode a command's standard output is the rendered document and nothing else — the ansi start/finish banner that `cli.Register` wraps around every registered command is suppressed, and `--format=json` implies `--no-color`.
-- cli: a command whose envelope reports an error exits non-zero.
-- cli: `--format` and `--order` reject an unrecognised value instead of silently substituting the default.
-- http: the response path saves and advertises the session published on the request under `RequestAttributeSession` at the moment the response is written, rather than the one the kernel captured before routing.
-- cli: `--order=desc` reverses the listing in `debug:router`, `debug:events`, `debug:parameters`, `debug:middleware` and `debug:container`, applied before `--limit`/`--offset` so a descending window returns the end of the list rather than the beginning; `--order=asc` remains the default.
-- cli: the `--fields` and `--sort` flags are withdrawn.
-- rate limit: the default key extractor now keys on the client IP alone instead of `ip:path`.
+- httpclient: the client sets `MaxIdleConnsPerHost` on its transport, exposed as `TransportConfig.MaxIdleConnsPerHost` and defaulting to `MaxIdleConns` (100), following an override of it unless pinned explicitly. **Behavioural change**
+- validation: a nil pointer embed is validated as "nothing was supplied" rather than "nothing to validate", so the constraints on its promoted fields run against their zero values exactly as a value embed's already did. **Behavioural change**
+- validation: exceeding the nesting-depth cap is reported as a validation error (`nestingDepthExceeded`) only when the truncated subtree could actually carry a `validate` tag, so nesting past the cap can no longer bypass validation while free-form tag-free client json is accepted up to the cap as before. **Behavioural change**
+- http: a route pattern whose optional parameter is not its final segment is refused at registration instead of being accepted and half-served. **Behavioural change**
+- cli: in json mode a command's standard output is the rendered document and nothing else — the ansi start/finish banner that `cli.Register` wraps around every registered command is suppressed, and `--format=json` implies `--no-color`. **Behavioural change**
+- cli: a command whose envelope reports an error exits non-zero. **Behavioural change**
+- cli: `--format` and `--order` reject an unrecognised value instead of silently substituting the default. **Behavioural change**
+- http: the response path saves and advertises the session published on the request under `RequestAttributeSession` at the moment the response is written, rather than the one the kernel captured before routing. **Behavioural change**
+- cli: `--order=desc` reverses the listing in `debug:router`, `debug:events`, `debug:parameters`, `debug:middleware` and `debug:container`, applied before `--limit`/`--offset` so a descending window returns the end of the list rather than the beginning; `--order=asc` remains the default. **Behavioural change**
+- cli: the `--fields` and `--sort` flags are withdrawn. **Breaking**. **Behavioural change**
+- rate limit: the default key extractor now keys on the client IP alone instead of `ip:path`. **Behavioural change**
 - security: an access control rule whose attribute list normalizes to empty is refused at construction instead of being accepted.
 - http: `TokenBucketLimiter` is now `FixedWindowLimiter`, with the old type name and both constructors kept as deprecated aliases so existing code is unaffected.
-- http: the request attributes the kernel owns are reserved under the framework's own underscore prefix (`RequestAttributeSession` is `_session`, `RequestAttributeScheme` is `_scheme`) and are published after the route attributes, so a route attribute can no longer replace the session object or the resolved scheme.
-- container: the protected `service.` namespace holds at both lifetimes.
-- container: a closed container refuses new registrations and new overrides the way its scoped registrar always has.
-- container: an override must fit every type its name is registered under.
-- container: `Has` and `HasType` answer under the same suspension `Get` enforces.
-- container: a typed-nil provider function is refused where it is registered.
-- container: two DIFFERENT types that share one identity key refuse to coexist.
+- http: the request attributes the kernel owns are reserved under the framework's own underscore prefix (`RequestAttributeSession` is `_session`, `RequestAttributeScheme` is `_scheme`) and are published after the route attributes, so a route attribute can no longer replace the session object or the resolved scheme. **Behavioural change**
+- container: the protected `service.` namespace holds at both lifetimes. **Behavioural change**
+- container: a closed container refuses new registrations and new overrides the way its scoped registrar always has. **Behavioural change**
+- container: an override must fit every type its name is registered under. **Behavioural change**
+- container: `Has` and `HasType` answer under the same suspension `Get` enforces. **Behavioural change**
+- container: a typed-nil provider function is refused where it is registered. **Behavioural change**
+- container: two DIFFERENT types that share one identity key refuse to coexist. **Behavioural change**
 - container: `Replacing()`'s documentation says what the code does.
-- application: an http process whose `.env` artifacts contributed no keys at all refuses to boot.
-- application: a middleware factory that yields nil is refused when the pipeline is built.
-- http: a route indistinguishable from one already registered is refused where it is declared.
-- application: a teardown failure on Run's normal return exits non-zero.
-- application: `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are removed.
-- application: `RegisterConfiguration` refuses a name nothing consumes.
-- logging: `LogError` anchors the record on the error the caller handed over and reads the already-logged mark at the depth `exception.MarkLogged` writes it.
-- logging: `jsonLogger.Close` recognizes the process console by identity — the `os.Stdout` and `os.Stderr` values themselves — instead of by file name.
-- logging: `NewJsonLoggerWithLabels`, `NewLoggingConfiguration` and `LoggingConfiguration.LevelLabels` copy the label map instead of sharing it.
-- logging: the json logger weighs a record whose level is not one of the five known ones as an error instead of as debug.
-- logging: the json logger's timestamp carries nanosecond precision (`RFC3339Nano`).
-- logging: an error in a log context that also implements `json.Marshaler` is handed to the encoder instead of being flattened to its message, and `validation.ValidationErrors` now marshals as the array it is — each element through its own marshaler, with field, message, code and context.
-- logging: the request logger writes the real request id under its context key unconditionally.
-- application: a panic during `Boot` tears the container down before the exit.
-- serializer: `NewSerializerManager` refuses two mime keys that collapse into one normalized key, naming the normalized key and both spellings.
-- serializer: a member of the accept header whose `q` parameter falls outside the RFC 7231 qvalue grammar — a zero with up to three decimal digits, or a one with up to three zero decimals — is dropped whole instead of being scored by guesswork.
-- serializer: a manager deliberately configured without `application/json` answers an empty accept header — and one that matches nothing it has — with its first configured serializer in lexical mime order, instead of refusing every such request while a serializer sits configured beside the refusal.
-- example: the api presenter answers `406 Not Acceptable` when the accept header refuses every available media type, exactly as the framework result handler answers the same header on the success path.
-- event: a dispatch aborted by a failing listener scans the listeners behind it for one marked required, exactly as a stop of propagation does, and refuses the dispatch when it finds one.
-- http: the kernel publishes the response `writeResponse` actually wrote — the function returns it, and every call site assigns it back before the terminate event fires.
-- application, http: the framework exception listener is registered only when the application installed no error handler by boot, which makes `SetErrorHandler` reachable for the first time in a framework-booted application.
-- http: every default error rendering goes through one door — the exception listener and each of the kernel's seven fallback paths call the same renderer — and the body honours the negotiation the success path honours: a client that negotiated a registered representation gets its error in it, where the error path used to answer hardcoded json below the two-way html test whatever the accept header said, measured against a success body negotiated to xml on the same header.
-- http: `WriteToHttpResponseWriter` gives a header key named by the response to the response: the writer's values for that key are replaced rather than appended to, and keys the response does not name keep what the writer carries.
-- session: `Session.Get` hands out a copy at the depth `All` copies at, for the reason `All`'s own documentation names: the live nested value, mutated in place, changed the session without passing through `Set` — `modified` stayed false, `SaveSession` skipped the write and reported success, and the mutation silently never persisted, measured with the stored role unchanged behind a save that returned nil.
-- http: `static.NewFileServer` copies the configuration at construction, struct and both lists, so the server is immutable once built.
-- application: the kernel's default listeners — the profiler under debug mode, the response normalizer, the terminate access log, and the exception listener when no error handler was installed — register at the end of `Boot`, in every process shape, instead of inside the http run.
-- debug: `debug:container` describes by default and builds only when asked.
-- debug: `debug:middleware` describes the pipeline by default and builds only under `--build`.
-- debug: the verbose listener block of `debug:events` prints the DISPATCH order — the dispatcher's own slice, held sorted at insertion — with an `order` column carrying the rank, in the table and in the verbose json alike.
-- debug: the `application` row of `debug:version` reads the process-wide declaration made through `cli/output.SetApplicationVersion` — the door that existed with zero callers — and the framework wiring no longer fills it with melody's own version: both rows printed `v1.19.0`, measured, so the one command that answers "what is deployed here" answered the framework version twice.
+- application: an http process whose `.env` artifacts contributed no keys at all refuses to boot. **Behavioural change**
+- application: a middleware factory that yields nil is refused when the pipeline is built. **Behavioural change**
+- http: a route indistinguishable from one already registered is refused where it is declared. **Behavioural change**
+- application: a teardown failure on Run's normal return exits non-zero. **Behavioural change**
+- application: `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are removed. **Breaking**
+- application: `RegisterConfiguration` refuses a name nothing consumes. **Behavioural change**
+- logging: `LogError` anchors the record on the error the caller handed over and reads the already-logged mark at the depth `exception.MarkLogged` writes it. **Behavioural change**
+- logging: `jsonLogger.Close` recognizes the process console by identity — the `os.Stdout` and `os.Stderr` values themselves — instead of by file name. **Behavioural change**
+- logging: `NewJsonLoggerWithLabels`, `NewLoggingConfiguration` and `LoggingConfiguration.LevelLabels` copy the label map instead of sharing it. **Behavioural change**
+- logging: the json logger weighs a record whose level is not one of the five known ones as an error instead of as debug. **Behavioural change**
+- logging: the json logger's timestamp carries nanosecond precision (`RFC3339Nano`). **Behavioural change**
+- logging: an error in a log context that also implements `json.Marshaler` is handed to the encoder instead of being flattened to its message, and `validation.ValidationErrors` now marshals as the array it is — each element through its own marshaler, with field, message, code and context. **Behavioural change**
+- logging: the request logger writes the real request id under its context key unconditionally. **Behavioural change**
+- application: a panic during `Boot` tears the container down before the exit. **Behavioural change**
+- serializer: `NewSerializerManager` refuses two mime keys that collapse into one normalized key, naming the normalized key and both spellings. **Behavioural change**
+- serializer: a member of the accept header whose `q` parameter falls outside the RFC 7231 qvalue grammar — a zero with up to three decimal digits, or a one with up to three zero decimals — is dropped whole instead of being scored by guesswork. **Behavioural change**
+- serializer: a manager deliberately configured without `application/json` answers an empty accept header — and one that matches nothing it has — with its first configured serializer in lexical mime order, instead of refusing every such request while a serializer sits configured beside the refusal. **Behavioural change**
+- example: the api presenter answers `406 Not Acceptable` when the accept header refuses every available media type, exactly as the framework result handler answers the same header on the success path. **Behavioural change**
+- event: a dispatch aborted by a failing listener scans the listeners behind it for one marked required, exactly as a stop of propagation does, and refuses the dispatch when it finds one. **Behavioural change**
+- http: the kernel publishes the response `writeResponse` actually wrote — the function returns it, and every call site assigns it back before the terminate event fires. **Behavioural change**
+- application, http: the framework exception listener is registered only when the application installed no error handler by boot, which makes `SetErrorHandler` reachable for the first time in a framework-booted application. **Behavioural change**
+- http: every default error rendering goes through one door — the exception listener and each of the kernel's seven fallback paths call the same renderer — and the body honours the negotiation the success path honours: a client that negotiated a registered representation gets its error in it, where the error path used to answer hardcoded json below the two-way html test whatever the accept header said, measured against a success body negotiated to xml on the same header. **Behavioural change**
+- http: `WriteToHttpResponseWriter` gives a header key named by the response to the response: the writer's values for that key are replaced rather than appended to, and keys the response does not name keep what the writer carries. **Behavioural change**
+- session: `Session.Get` hands out a copy at the depth `All` copies at, for the reason `All`'s own documentation names: the live nested value, mutated in place, changed the session without passing through `Set` — `modified` stayed false, `SaveSession` skipped the write and reported success, and the mutation silently never persisted, measured with the stored role unchanged behind a save that returned nil. **Behavioural change**
+- http: `static.NewFileServer` copies the configuration at construction, struct and both lists, so the server is immutable once built. **Behavioural change**
+- application: the kernel's default listeners — the profiler under debug mode, the response normalizer, the terminate access log, and the exception listener when no error handler was installed — register at the end of `Boot`, in every process shape, instead of inside the http run. **Behavioural change**
+- debug: `debug:container` describes by default and builds only when asked. **Behavioural change**
+- debug: `debug:middleware` describes the pipeline by default and builds only under `--build`. **Breaking**
+- debug: the verbose listener block of `debug:events` prints the DISPATCH order — the dispatcher's own slice, held sorted at insertion — with an `order` column carrying the rank, in the table and in the verbose json alike. **Behavioural change**
+- debug: the `application` row of `debug:version` reads the process-wide declaration made through `cli/output.SetApplicationVersion` — the door that existed with zero callers — and the framework wiring no longer fills it with melody's own version: both rows printed `v1.19.0`, measured, so the one command that answers "what is deployed here" answered the framework version twice. **Behavioural change**
 - debug: `debug:router` renders the two discriminators the dispatch actually uses — `priority` and `order`, the registration rank that breaks a priority tie — on every row, in the table and the json document; `--verbose` adds the requirements, defaults and attributes as compact cells, and the json items carry the three maps always.
-- debug: the trace/stack noise filter of the rendered error context is a display concern and full verbosity turns it off: `debug:container ...
+- debug: the trace/stack noise filter of the rendered error context is a display concern and full verbosity turns it off: `debug:container ... -vvv` shows the context whole, stack keys included, where the drop used to be unconditional at every verbosity.
 - config: a late `MarkSecret` covers the whole derivation chain.
 - container: a scope closes what it built in dependency order, dependents before their dependencies, falling back to creation order, latest first, for anything the graph says nothing about — the same tie-break the container's own teardown applies, since the two share one walk — and reporting a cycle the way that teardown reports one.
 
@@ -327,11 +328,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - documentation: the integration readmes list the doors their modules ship.
 - documentation: four counts in this block are corrected against the code they describe.
 - documentation: seventy-seven exported doors this major has always carried are listed at last, and the enumerations that pretend to enumerate stop leaving them out.
-- documentation: the package documents, the upgrade guide and the roadmap are corrected where they described something the code does not do.
+- documentation: the package documents, the upgrade guide and the roadmap are corrected where they described something the code does not do. `APPLICATION.md` and `UPGRADE.md` stop prescribing a shutdown hook this major has no door for, and name the mechanism that exists — deriving an upgraded connection's lifetime from the context handed to `Run`, whose cancellation is what begins the shutdown. `SECURITY.md` describes an unrepublished session rotation as the fail-safe it is (the previous entry is gone, the rotated-away object is latched cleared, the response path expires the cookie) rather than as a silent revert. `UPGRADE.md` stops announcing that `DecideAny` now refuses an empty attribute list where it granted one; it refused before the change too, and what is new is the refusal reason.
 - documentation: five source comments are corrected against the code they sit on.
 - documentation: the entries of this block that described code this major does not carry are corrected against it — the access-control refusal names `NewAccessControlRawPrefixRule`, the constructor that panics on `PUBLIC_ACCESS`, rather than `NewAccessControlRule`, which allows it; the late secret marking is described as the fixpoint walk the code performs rather than as a direct-reader pass with the closure deferred to another major; the scope close falls back to creation order rather than to a descending node key; the cli action is described as not closing the container at all; the event adapter entry describes the ordering index being removed rather than reordered; the runtime registration entry describes the publication preceding the resolution, which is the order the code takes and the order its own comment explains; the session-persistence records are described as carrying a one-way reference rather than the session id; the httpclient entry stops claiming the unsupported-body
   error names the call it came from, which the function raising it cannot know; and the time-codec entry drops the false parenthesis about every sibling memo
-- documentation: two claims of this major's documents are brought back to what the code does.
+- documentation: two claims of this major's documents are brought back to what the code does. `.documentation/UPGRADE.md` pointed [`Register`](../container/container_registrar.go) at `container/container.go`, which declares the two symbols the same sentence names and not that one, so a reader following the link found the neighbours of what they were sent to read.
 - session: the file storage's atomic save fsyncs the directory after the rename, the way the cron generator's atomic writer always has — without it a power loss after a save could resurface the previous snapshot, silently logging out the user whose session had just been written; and the construction sweeps the `<name>.*.tmp` orphans a hard kill leaves between `CreateTemp` and the rename, each of which is a complete snapshot of every live session and its tokens that nothing ever opened again.
 - the example catches up with the identities its own cache promises, on the doors a divergence was measured through: the bun user lookup compares on the binary collation (`LOWER(username) = (? COLLATE utf8mb4_bin)`), because the column's accent-insensitive default (`'café' = 'cafe'` is true under `utf8mb4_0900_ai_ci`) admitted spellings the cache keys and the invalidation listeners — which fold with `NormalizedUsername` alone — could never address, so a deleted user kept authenticating from the ttl-less cache under the collation-only spelling; `UserUpdatedEvent` carries the username the row held before the update and the listener drops both spellings, since a rename left the entry behind under the old one; caller-supplied identifiers are answered as absent by every finder when the cache-key grammar refuses them (a space, a newline, over 255 bytes) instead of surfacing the backend's refusal as a 500 on a read, and the write doors refuse the same spellings as a 400 that names the field —
   a product id with an interior space used to land in the database and then fail every later cache write, with the created row invisible to the ttl-less list forever; the invalidation listeners run every delete and join the failures instead of returning on the first, which used to skip the list entry behind it; the login door no longer concatenates the failure's internals into the client response; the password doors refuse the bcrypt 72-byte ceiling as a 400 instead of a 500, a role carrying a comma is refused before the comma-joined storage would split it into roles nobody granted on the next read, and the embedded-env build embeds the committed `.env` alone — the `.env*` glob also baked the gitignored `.env.local`, the machine-local file that holds real credentials precisely because it never enters git, into the shipped binary, where the loader's precedence let it override the committed configuration.
@@ -345,8 +346,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - documentation: the serializer document states what an untyped deserialization target receives — every JSON number as `float64`, an integer beyond 2^53 silently altered, arrays as `[]any` — where typed struct targets decode exactly; the config and bag documents state that the string grammar `Float`/`Float64` reads is Go's full `ParseFloat` (underscore spellings, hexadecimal floats, exponents), wider than the strict base-10 grammar `Int` reads, replacing the config document's claim that the three accessors read one grammar; the bag document states that `Get` hands back the stored value live — a `[]string` mutated through it writes into the bag behind its lock — with `All`/`StringSlice` as the copying doors; and the validation document states that an integer bound above 2^53 is compared in `float64` against a float-typed field, so a value within one ULP of such a bound can be misjudged against the declared number
 - cache: `NewDefaultRememberOption`'s GoDoc states the pinned-leader hazard the cache document already carried — under exactly the defaults (non-cancelable, unbounded wait) a callback that never returns pins its key's single-flight entry and every later caller for the life of the process, with `WithWaitTimeout`, `WithCancelable` and `WithContext` as the opt-out doors
 - http/static: the entity tag reads the modification time at nanosecond resolution rather than whole seconds.
-- documentation: two security-relevant surfaces gain the caveat their behaviour always had.
-- http, security: the kernel refuses a request path that folds to a different spelling, before it is routed or authorized.
+- documentation: two security-relevant surfaces gain the caveat their behaviour always had. `NewAccessControlRegexRule` states that its pattern is compiled UNANCHORED — a substring match against the canonicalized path, so `"/public"` also matches `/admin/public-notes` — which is the opposite of a route requirement melody anchors, and names the `"^/public(/|$)"` form that bounds a rule to one section; the GoDoc, the `SECURITY.md` match-priority list carry it.
+- http, security: the kernel refuses a request path that folds to a different spelling, before it is routed or authorized. **Behavioural change**
 - documentation: three claims of the http document catch up with the code.
 - documentation: the config document states the bool grammar the typed accessor reads — the string spellings, the whitespace trim, and the refusal of the empty string — which until now was written only in the cron integration's readme; and the container quick-start stops passing `WithTypeRegistration(true)`, a restatement of the default that taught the option must be passed by an example that never resolves by type
 - documentation: the application document's logging usage example compiles — `LevelLabels` maps to `LevelLabel` values built through `LevelLabelFromInt`, and the example handed it bare string literals the type cannot hold
@@ -357,11 +358,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - example: the seeded password digest is compared in constant time with `crypto/subtle.ConstantTimeCompare` rather than with `!=`.
 - example: `/health` stamps its answer with the injected clock rather than with `time.Now`.
 - example: the README's structure overview lists `assets/`, the frontend bundle source that produces `public/assets/app.js` and is tracked in git, and no longer describes `repository/` as carrying only in-memory implementations or `service/` as carrying four of its six services.
-- application: a shutdown no longer reports a clean stop it did not obtain.
+- application: a shutdown no longer reports a clean stop it did not obtain. **Behavioural change**
 - event: a dispatch builds no debug record the journal would discard.
 - config: the refusal of an empty `MELODY_ENV` names the key, the parameter and the files the emptiness already selected.
 - config: `Parameter.Bool` reads through the shared parser its sibling accessors use, so a refusal carries the cause that names the parameter, the target type and the value.
-- validation: `NewMinLength` and `NewMaxLength` refuse a negative bound, which the tag door beside them has always refused with the reason written in a comment.
+- validation: `NewMinLength` and `NewMaxLength` refuse a negative bound, which the tag door beside them has always refused with the reason written in a comment. **Behavioural change**
 - example: `/health` answers a monitoring probe in all three examples, where v1 and v2 left it to the `ROLE_USER` catch-all and v3 alone had made it public.
 - example: `/index.html` carries the same public policy as the `/` it serves.
 - example: the README of every major describes the cron wiring that exists.
@@ -390,10 +391,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - session: the in-memory storage sweeps expired sessions in chunks, releasing the lock between them, the way the cache backend's sweep already did.
 - http/middleware: the sliding-window rate limiter trims the expired marks by index instead of rebuilding the whole window on every call.
 - http/middleware: the compression middleware takes its gzip writers from a pool per compression level instead of building one per response.
-- cache: a `RememberOption` that asks for both no coalescing and no wait — `NewDefaultRememberOption().WithStampedeProtectionEnabled(false).WithWaitTimeout(0)` — is now honoured instead of collapsing to the constructor defaults.
-- security: a failing token source that returns a sub-500 `HttpException` — an expired jwt, a malformed `Authorization`, a bad signature — is recorded at warning rather than error.
-- security: a substituted `AccessDecisionManager` no longer loses the role hierarchy in silence.
-- security: `NewRoleHierarchyVoter` takes any `Voter` as its delegate, not only the built-in `*RoleVoter`.
+- cache: a `RememberOption` that asks for both no coalescing and no wait — `NewDefaultRememberOption().WithStampedeProtectionEnabled(false).WithWaitTimeout(0)` — is now honoured instead of collapsing to the constructor defaults. **Behavioural change**
+- security: a failing token source that returns a sub-500 `HttpException` — an expired jwt, a malformed `Authorization`, a bad signature — is recorded at warning rather than error. **Behavioural change**
+- security: a substituted `AccessDecisionManager` no longer loses the role hierarchy in silence. **Breaking**
+- security: `NewRoleHierarchyVoter` takes any `Voter` as its delegate, not only the built-in `*RoleVoter`. **Breaking at source**
 - application: `serializer.ServiceSerializerManager`, `validation.ServiceValidator` and `http.ServiceUrlGenerator` are registered behind the `Has` gate the logger, the cache, the session and the firewall manager already had.
 - application: `serializer.ServiceSerializer` is registered, so the two published resolvers answer.
 - cache: the in-memory backend judges a `Decrement` in the order the shared contract fixes — the closed backend first, then the key, and the magnitude of the delta last.
@@ -412,64 +413,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - serializer: a header refusing one registered type is no longer answered `406 Not Acceptable` while another registered type was never refused.
 - application documentation: `NewApplication` is documented on its real signature, `NewApplication(embeddedEnvFiles, embeddedPublicFiles)`.
 - http: the wiring panics of the request setup are answered instead of resetting the connection.
-- security: a 403 names the branch that produced it.
+- security: a 403 names the branch that produced it. **Behavioural change**
 - http: a handler failure that carries no melody error files one record, not two.
-- http: `ReadFrom` on the recording response writer records the commit only after the copy, and only when a byte actually reached the delegate — the convention `WriteHeader` and `Write` already follow in the same type, and the door `io.Copy` takes for every streamed body.
-- http: the terminate event and the access log report the status a self-committed stream actually carries: the recording writer now records the committed status code, and `writeResponse` reports it for the response the kernel substituted — the journal recorded 204 for every streamed 200 and a rendered-but-never-written 500 for a panic mid-stream, so status-distribution queries over the access log were wrong for every streaming route.
-- http: the kernel's handler-error writers — `controller handler error` and `not found handler error` — read the already-logged mark before filing, record a deliberate 4xx at warning and everything else at error, and mark what they filed, the discipline the panic recovery and the exception listener already share.
+- http: `ReadFrom` on the recording response writer records the commit only after the copy, and only when a byte actually reached the delegate — the convention `WriteHeader` and `Write` already follow in the same type, and the door `io.Copy` takes for every streamed body. **Behavioural change**
+- http: the terminate event and the access log report the status a self-committed stream actually carries: the recording writer now records the committed status code, and `writeResponse` reports it for the response the kernel substituted — the journal recorded 204 for every streamed 200 and a rendered-but-never-written 500 for a panic mid-stream, so status-distribution queries over the access log were wrong for every streaming route. **Behavioural change**
+- http: the kernel's handler-error writers — `controller handler error` and `not found handler error` — read the already-logged mark before filing, record a deliberate 4xx at warning and everything else at error, and mark what they filed, the discipline the panic recovery and the exception listener already share. **Behavioural change**
 - http: a handler that honours its context and returns the request context's own cancellation is answered in the journal as `request cancelled by client` at warning — it was recorded as `controller handler error` at error plus a second error record from the exception listener, indistinguishable from a genuine handler fault, so error-rate alerting fired on the client's own disconnects
 - http: a response-write failure the client caused — the broken-pipe family, the cancelled request context — is recorded at warning under `failed to write response; client disconnected`, and both classes of the record now carry the method and path: at error every impatient download paged the operator, in a record that could not even name the route it happened on
 - http: `WriteToHttpResponseWriter` refuses a status outside net/http's `[100, 999]` by name through its own error return — it is a public door, and the delegate's panic turned an external caller's arithmetic mistake into a connection reset where the signature promises an error
 - http: `Kernel.SetForwardedHeadersPolicy` and `NewForwardedClientIpResolver` copy the trusted proxy list instead of retaining the caller's slice.
-- http: `CompressionMiddleware` reads a nil configuration as the default one, the way the cors middleware and the route group read their absent options, and normalizes an out-of-range level or minimum on a private copy instead of writing back into the caller's object — it used to panic on the nil dereference and to silently rewrite the caller's own configuration at construction.
+- http: `CompressionMiddleware` reads a nil configuration as the default one, the way the cors middleware and the route group read their absent options, and normalizes an out-of-range level or minimum on a private copy instead of writing back into the caller's object — it used to panic on the nil dereference and to silently rewrite the caller's own configuration at construction. **Behavioural change**
 - http: `static.NewFileServer` refuses nil options by name instead of panicking on the dereference — refusal rather than a default, because the default here would be a live file server over the `public` directory, and a nil that is almost always a wiring mistake must not start serving files nobody asked served
-- http: the static file server's two ordinary-control-flow exits — the non-retrieval method and the out-of-prefix path — are recorded at debug instead of info: with the middleware registered globally they fired once per api request, exactly the per-request noise the package's own logging comment keeps out of the journal.
-- http: `NewHttpMiddlewareDefinition` copies its four constraint lists and `MiddlewareBuildReport.SetInactive` copies like every sibling accessor of the report — a registrant reusing a slice silently rewrote the ordering constraints the pipeline was registered under, and the one non-copying setter let a caller rewrite a report the diagnostics already held.
+- http: the static file server's two ordinary-control-flow exits — the non-retrieval method and the out-of-prefix path — are recorded at debug instead of info: with the middleware registered globally they fired once per api request, exactly the per-request noise the package's own logging comment keeps out of the journal. **Behavioural change**
+- http: `NewHttpMiddlewareDefinition` copies its four constraint lists and `MiddlewareBuildReport.SetInactive` copies like every sibling accessor of the report — a registrant reusing a slice silently rewrote the ordering constraints the pipeline was registered under, and the one non-copying setter let a caller rewrite a report the diagnostics already held. **Behavioural change**
 - http: the rate-limit middleware records a limiter call the caller's own cancellation ended at warning under `rate limiter call cancelled` — at error it read as a store outage against a perfectly healthy store, once per disconnect on a rate-limited route
-- httpclient: `RequestOptions.Headers` and `Query` hand out copies.
+- httpclient: `RequestOptions.Headers` and `Query` hand out copies. **Behavioural change**
 - exception: `LogContext` and the cause-chain rendering produce an error's text under a recover, the containment the container teardown's close-error rendering already applies.
 - http: `RecoverToError` normalizes a typed-nil error to the generic branch the way the exit handler's resolver normalizes it, the kernel's debug-mode message renders through the same containment, a discarded response body whose `Close` panics inside the recovery defer is contained into the error the caller already reports, and an application serializer that panics on the error payload degrades to the json fallback under the renderer's own "an error response always exists" — each of these second-order failures used to escape `ServeHttp` and reset the connection, measured
 - logging: the exit handler's resolve step runs under its own shield, honouring the claim of the comment beside the other steps — a recovered value whose `Error()` panicked unwound into `main` and the process died with the Go runtime's exit code 2: no record, no certificate, no stderr echo, no before-exit teardown, measured.
-- security: each of the three direct 401 refusals of the access-control listener files one warning naming its reason — `missing_token`, `token_not_authenticated`, or `missing_security_context`, the last a wiring fault rather than a client mistake.
+- security: each of the three direct 401 refusals of the access-control listener files one warning naming its reason — `missing_token`, `token_not_authenticated`, or `missing_security_context`, the last a wiring fault rather than a client mistake. **Behavioural change**
 - cache: `SetMultiple` validates its batch over sorted keys on the in-memory backend, so a batch carrying two malformed keys names the same culprit on every call instead of one chosen by map iteration — the rule the redis backend's batch reporting already follows
 - event: a subscriber installation on `EventDispatcherAdapter` is one critical section against its twin and its removal, the guard the concrete dispatcher's `subscriberMutex` already carries: without the outer section two concurrent `AddSubscriber` calls for one identity both passed the duplicate refusal and installed every listener twice — measured under four-way contention — and a `RemoveSubscriber` interleaved with an installation removed the half already installed while the rest kept arriving under a record the remover was just told is gone
 - event: the adapter's `RegisteredEvents` breaks equal-priority ties by the wrapped dispatcher's listener id — the tiebreak dispatch actually uses — instead of an adapter-side counter issued under a different lock.
-- http: a response status code outside net/http's `[100, 999]` answers the rendered 500 instead of an implicit empty 200.
+- http: a response status code outside net/http's `[100, 999]` answers the rendered 500 instead of an implicit empty 200. **Behavioural change**
 - http: `PrefersHtml` splits Accept members and parameters outside quoted sections through `internal.SplitOutsideQuotes`, the serializer reader's grammar — the third layer of the one-grammar rule after the joined field lines and the shared q-value reader.
 - http: the compression middleware joins every line of a repeated `Accept-Encoding` field before parsing, the way both Accept readers join theirs — reading only the first line dropped a coding the client named on the second — splits members outside quoted sections through the same shared grammar, and resolves a repeated coding to its higher q, the tie rule of every Accept reader: last-wins made `gzip;q=0.5, gzip;q=0` and its reversal answer differently for one statement
 - http: the compression peek buffer grows with the bytes actually read instead of being allocated at the full `MinSize` upfront: the threshold has no upper bound, so an oversized — or unit-confused — minimum turned every eligible response into an allocation of that size before a single byte arrived, when a response below the threshold needs no more memory than its own length
-- serializer: a full negotiation tie — equal quality and equal specificity — resolves through the json-first convention `defaultSerializer` states for the empty header.
-- cache: `Remember` answers one shape for one key — the computing call now returns the value passed through the manager's serializer round-trip (one local encode+decode, no backend involved), the exact shape every cached call answers.
+- serializer: a full negotiation tie — equal quality and equal specificity — resolves through the json-first convention `defaultSerializer` states for the empty header. **Behavioural change**
+- cache: `Remember` answers one shape for one key — the computing call now returns the value passed through the manager's serializer round-trip (one local encode+decode, no backend involved), the exact shape every cached call answers. **Behavioural change**
 - cache: the in-memory counter accepts exactly the redis integer grammar — no whitespace padding, no plus sign, no leading zeros, no minus zero — where a trimmed `ParseInt` adopted them all: the same payload incremented through this backend and errored through redis, measured live, while the refusal's own comment claimed redis parity
 - cache: a nil payload is stored as the empty payload and reads back as an empty non-nil slice through both backends, and the rule is written on the `Backend` contract: redis has no nil to store, so the in-memory backend preserving the distinction let a caller tell the implementations apart by reading back what it wrote — measured live
-- session: the response path decides a session's fate from one atomic `Snapshot` — values, modified flag and cleared flag read under a single lock acquisition, used by `Manager.SaveSession` and by `writeResponse`'s branch decision alike.
+- session: the response path decides a session's fate from one atomic `Snapshot` — values, modified flag and cleared flag read under a single lock acquisition, used by `Manager.SaveSession` and by `writeResponse`'s branch decision alike. **Breaking**
 - config: `Resolve` walks the parameters in sorted name order, so a boot with several broken templates fails on the same parameter every time — the dotenv reader's own rule, stated there for exactly this reason; the fixpoint itself was always order-independent, but the failure's identity was chosen by a random map walk
 - debug: `debug:router` orders tied rows by registration order and `debug:middleware` orders same-name inactive entries by reason, making both comparators total: under an unstable sort, routes sharing pattern and methods — distinct at dispatch by host, priority or requirements — and same-name inactive entries flipped their rows from run to run, in the commands that exist to show which of them answers
-- httpclient: header maps are canonicalized at the door and two spellings that collapse onto one header are refused by name — the serializer's convention for its mime keys.
-- cache: a `With` setter called on the exact zero-value `RememberOption` first reads the receiver as the constructor defaults, then applies its own field.
-- container: `MustGet` and `MustGetByType` panic with the failure the way `FromResolver` and `FromResolverByType` return it — a melody error travels out whole with the service name or type written into its context in place, and only a foreign error is wrapped naming it.
+- httpclient: header maps are canonicalized at the door and two spellings that collapse onto one header are refused by name — the serializer's convention for its mime keys. **Breaking**
+- cache: a `With` setter called on the exact zero-value `RememberOption` first reads the receiver as the constructor defaults, then applies its own field. **Behavioural change**
+- container: `MustGet` and `MustGetByType` panic with the failure the way `FromResolver` and `FromResolverByType` return it — a melody error travels out whole with the service name or type written into its context in place, and only a foreign error is wrapped naming it. **Behavioural change**
 - container: the wrapper a coalesced waiter receives for a failed creation inherits the already-logged mark of the failure it carries.
 - event: the wrapper the dispatcher returns for a failing listener inherits the already-logged mark of the listener's error, the reading the panic half has always applied to a marked panic value; the kernel comment that promises the mark is visible "on anything wrapping a marked error" is now true on the error path too
 - event: a listener that fails while also stopping propagation with a required listener behind it has its failure travel as the cause of the stop's refusal, through the new `NewRequiredListenerSkippedErrorWithStoppedListenerFailure`.
-- http: `UserRateLimit` and `UserRateLimitWithResolver` refuse a nil user-id callback at construction with a named panic, the way the middleware constructor refuses its missing limiter.
+- http: `UserRateLimit` and `UserRateLimitWithResolver` refuse a nil user-id callback at construction with a named panic, the way the middleware constructor refuses its missing limiter. **Breaking**
 - http: `PrefersHtml` reads the Accept header under the serializer's rules — every line of a repeated field joined before parsing, and a member whose q parameter falls outside the RFC 7231 qvalue grammar dropped whole.
 - http: `acceptsGzip` drops an Accept-Encoding entry whose q parameter falls outside the qvalue grammar instead of scoring it with a bare float parse, under which `q=Inf` switched the compression on and `q=NaN` switched it off
-- http: the static file server honours an explicit cache max age of zero as `Cache-Control: public, max-age=0` — always revalidate, with the ETag and Last-Modified machinery intact — because the configuration door validates zero as a distinct choice; only a negative value reads as unset and takes the 3600 default.
-- http: `cors.NewService` reads a nil method or header list as the one default `DefaultService` grants — Authorization included — and keeps an empty list as the expressed preference, the reading the origins field always had.
-- session: `NewManager` and its siblings refuse a positive ttl shorter than one second, the refusal the configuration door has always given for `MELODY_HTTP_SESSION_TTL`: below one second the value is not a short session but a broken one — the storage purges every lapsed entry on the write that stores the new one, so `SaveSession` reported success and persisted nothing.
+- http: the static file server honours an explicit cache max age of zero as `Cache-Control: public, max-age=0` — always revalidate, with the ETag and Last-Modified machinery intact — because the configuration door validates zero as a distinct choice; only a negative value reads as unset and takes the 3600 default. **Breaking**
+- http: `cors.NewService` reads a nil method or header list as the one default `DefaultService` grants — Authorization included — and keeps an empty list as the expressed preference, the reading the origins field always had. **Breaking**
+- session: `NewManager` and its siblings refuse a positive ttl shorter than one second, the refusal the configuration door has always given for `MELODY_HTTP_SESSION_TTL`: below one second the value is not a short session but a broken one — the storage purges every lapsed entry on the write that stores the new one, so `SaveSession` reported success and persisted nothing. **Breaking**
 - bag: the zero-value `ParameterBag` accepts its first write — `Set` and `AppendString` allocate the nil map the way `exception.Error.SetContextValue` always has — instead of half-working: the reads answered the zero value while the first write died on a raw nil-map assignment
 - config: the comment at the session-ttl default registration states the default that exists — zero, no expiry, with the boot warning as the compensation — instead of asserting the bounded lifetime the constant it registers contradicts
 - event: a subscriber installation and removal are each one critical section against their twins.
-- cache: the refusal order joins the shared backend contract — the closed answer wins over the key judgment, and a batch write judges the ttl before its keys, the redis backend's order.
+- cache: the refusal order joins the shared backend contract — the closed answer wins over the key judgment, and a batch write judges the ttl before its keys, the redis backend's order. **Behavioural change**
 - http: a rate-limit handler that produces neither response nor error still refuses the request through the middleware door, answered 429 exactly as the listener door answers it.
 - http: `RateLimitMiddleware(nil)` is refused with the named panic its listener twin gives for the same wiring mistake, instead of an invalid-memory-address panic at boot
 - http: `pipeline.Builder.Describe` mirrors `Build`'s nil-factory refusal, so `debug:middleware` no longer reports as healthy a pipeline the serving boot refuses; the description's promise — the same refusals, no factory invoked — now covers all three of them
-- httpclient: the streaming path judges an invalid explicit response-body cap before anything is dialled, the rule the buffered path always held.
+- httpclient: the streaming path judges an invalid explicit response-body cap before anything is dialled, the rule the buffered path always held. **Behavioural change**
 - container: `FromResolverByType` dresses its failure the way `FromResolver` does — a melody error travels out whole with the service type written into its context, a foreign error is wrapped naming the type — instead of returning the raw error with nothing to say which resolution failed
-- http: `RouteGroup.HandleWithOptions` reads nil options as the default options — an unnamed route answering every method, still carrying the group's prefix, requirements and defaults — the answer the router's own door always gave for the same input and the reading the Symfony model it mirrors gives to absence.
-- container: a scope override is answered by the type-keyed resolutions of every type its name is registered under, exactly as the container-level override propagates.
+- http: `RouteGroup.HandleWithOptions` reads nil options as the default options — an unnamed route answering every method, still carrying the group's prefix, requirements and defaults — the answer the router's own door always gave for the same input and the reading the Symfony model it mirrors gives to absence. **Behavioural change**
+- container: a scope override is answered by the type-keyed resolutions of every type its name is registered under, exactly as the container-level override propagates. **Behavioural change**
 - container: the override assignability guard judges the value the way the readers will, on both the container and the scope: raw assignability for an interface registration, whose stored value is asserted against the interface at resolution, and canonical identity for a value-typed registration — a string service is registered under `*string` and its own provider's builds sit raw under that key, so a raw string override occupies exactly the slot a built value occupies.
-- container: a lazy handle follows the scope of the resolver it was built over instead of memoizing forever.
+- container: a lazy handle follows the scope of the resolver it was built over instead of memoizing forever. **Behavioural change**
 - application, http: a duplicate route joins the aggregated boot collision report instead of panicking one duplicate per boot attempt.
 - application: a fatal failure of the configured logger fails the boot, at the step that owns it.
 - application: a relative `MELODY_LOG_PATH` is anchored to the project directory — the rule `ensureRuntimeDirectories` already applies to the logs and cache directories, now through the one shared helper — and the file's parent directory is created before the open.
@@ -483,8 +484,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - application: the kernel is read through the interface at the two doors that ask whether there is anything to tear down.
 - application: the logger provider reads the module configuration before it opens the log file.
 - application: the module, module-provider and cli-command registration doors refuse a typed nil.
-- http: `Request.Input` answers the first value of a repeated key, as `FormValue` beside it and `url.Values.Get` already did.
-- http: the static file server refuses a spelling that `path.Clean` folds into the mount root, which is the refusal the branch resolving every other path already carried.
+- http: `Request.Input` answers the first value of a repeated key, as `FormValue` beside it and `url.Values.Get` already did. **Behavioural change**
+- http: the static file server refuses a spelling that `path.Clean` folds into the mount root, which is the refusal the branch resolving every other path already carried. **Behavioural change**
 - security: an access-control rule matches every spelling of the path it names.
 - security: a typed-nil token reads as the absence it means at the three doors where a token crosses from application code into the framework — the authenticator, the token resolver and the firewall's token source — and at `SecurityContext.IsGranted`, whose constructor already read the firewall beside it that way.
 - http: a typed-nil response reads as no response at all.
@@ -524,20 +525,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - httpclient: the errors of a failed exchange say which request failed, on the paths that know it.
 - exception: the error utilities tolerate the typed nil they exist to describe.
 - exception: the mutable error state is locked, because the single-threaded-per-request premise does not survive the sharing the framework itself introduces.
-- exception: `MarkLogged` marks at the depth `logging.LogError` reads.
+- exception: `MarkLogged` marks at the depth `logging.LogError` reads. **Behavioural change**
 - exception: `LogContext` anchors the cause walk on the top error's own wrap link instead of the nearest `*Error` a deep search found.
 - exception: the zero values the constructors cannot reach are safe to touch.
 - exception: `IsHttpException` answers whether `AsHttpException` finds a usable exception, so the pair cannot disagree on a typed nil: `Is` answered true while `As` answered nil, and a caller that trusted `Is` and then dereferenced panicked on the disagreement.
-- exception: `NewExitError` refuses an exit code outside `[1, 255]`.
-- exception: `NewHttpException` and `NewHttpExceptionWithCause` refuse a status code outside `[100, 599]`.
-- exception: `ValidationFailed` puts its detail under the `errors` context key — the one the kernel exception listener copies into the json payload — instead of `validationErrors`, a key nothing on the response path reads, so the detail the caller attached reached no one.
+- exception: `NewExitError` refuses an exit code outside `[1, 255]`. **Behavioural change**
+- exception: `NewHttpException` and `NewHttpExceptionWithCause` refuse a status code outside `[100, 599]`. **Behavioural change**
+- exception: `ValidationFailed` puts its detail under the `errors` context key — the one the kernel exception listener copies into the json payload — instead of `validationErrors`, a key nothing on the response path reads, so the detail the caller attached reached no one. **Behavioural change**
 - debug: the error-context walk descends into a defined map or slice type whose underlying shape it already handles, so the framework's own `exceptioncontract.Context` nested inside a context no longer rides past all three guards at once.
 - debug: `debug:container` reports why a build failed, not only that it did.
 - debug: the error context of a failing service is read through the `ContextProvider` contract rather than the concrete `*exception.Error`, so an `HttpException` — or any userland error carrying a context — in the resolution chain contributes its context to the report instead of nothing
 - debug: the table-cell truncation stays out of the json document.
 - debug: the `debug:container` list summary puts the shown count before the ok/error split, so the split reads as scoped to the window it was computed over: only the windowed services are resolved, and an unqualified `8 ok | 2 error` beside a larger total implied the rest were neither instead of unprobed
 - debug: `debug:events` counts distinct subscribers across the dispatcher in its summary.
-- debug: `debug:events --format=json --verbose` carries the listener detail — priority, source, owner and the required and may-skip marks that say whether the fail-closed dispatch guarantee is armed.
+- debug: `debug:events --format=json --verbose` carries the listener detail — priority, source, owner and the required and may-skip marks that say whether the fail-closed dispatch guarantee is armed. **Behavioural change**
 - debug: `NewMiddlewareCommand` refuses a nil provider at construction and the zero-value command returns a named refusal through the report — every value the provider returns was guarded while the provider itself was not, so a wiring mistake surfaced as a bare nil-function call far from where it was made
 - debug: a secret parameter whose value is nil renders as `(empty)` instead of the mask.
 - event: the reason a listener failed reaches the log.
@@ -591,15 +592,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - validation: `ValidationError.ToExceptionError` hands the exception a copy of the context.
 - validation: a refused rule parameter names its reason.
 - http: `BindJson` keeps the real error as the cause.
-- session: a session deleted while a request was still running cannot be written back.
-- session: `Session.Clear` ends the session and the ending latches.
-- session: `NewManager` does not close the storage it was handed; `NewManagerOwningStorage` is the constructor for a caller that built both by hand and wants one `Close` to end both.
+- session: a session deleted while a request was still running cannot be written back. **Behavioural change**
+- session: `Session.Clear` ends the session and the ending latches. **Behavioural change**
+- session: `NewManager` does not close the storage it was handed; `NewManagerOwningStorage` is the constructor for a caller that built both by hand and wants one `Close` to end both. **Behavioural change**
 - http: a session write lost to a storage outage answers 500 instead of the response the handler produced.
 - session: `Manager.SaveSession` refuses a typed nil session instead of dereferencing it.
 - session: `Manager.SaveSession` holds the session id to the standard the load and delete paths hold it to.
-- session: `NewManager` refuses a negative ttl.
+- session: `NewManager` refuses a negative ttl. **Breaking**
 - session: `Session.All` returns a copy that reaches all the way down, the depth both storages already copy at.
-- session: `InMemoryStorage` refuses `Load`, `Save`, `Delete` and `Clear` after `Close`, the way `FileStorage` already did.
+- session: `InMemoryStorage` refuses `Load`, `Save`, `Delete` and `Clear` after `Close`, the way `FileStorage` already did. **Behavioural change**
 - session: the instant a session expires counts as lapsed in `InMemoryStorage`, the boundary `FileStorage` already drew with `now >= ExpiresAt`.
 - session: a load of a lapsed entry answers "no such session" even when the housekeeping flush that removes it cannot write.
 - http: the kernel tests what a session manager hands back with `IsNilInterface` rather than against `nil`.
@@ -634,14 +635,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: the static file server accepts all three HTTP date formats for `If-Modified-Since` (RFC 9110 requires accepting the obsolete RFC 850 and asctime forms, not only IMF-fixdate)
 - http: the static file server records a refused resolution on the streaming path.
 - http: a route whose only segment is a trailing optional parameter is served at the root again.
-- http: a `RouteGroup` no longer writes its name prefix and its merged requirements and defaults back into the caller's `RouteOptions`.
+- http: a `RouteGroup` no longer writes its name prefix and its merged requirements and defaults back into the caller's `RouteOptions`. **Behavioural change**
 - http: a route declared with an empty method no longer contributes an empty token to the `Allow` header of a `405` response; an empty element is not a valid method token (RFC 9110)
 - validation: a field promoted through stacked embed levels below a diamond is validated again.
-- http: equal-priority middlewares now run in the order the application registered them.
-- validation: the parsed validate tag and the constraint a parameterized rule resolves to are memoized instead of being rebuilt for every value the validator reaches.
-- debug: `debug:router`, `debug:events`, `debug:parameters` and `debug:middleware` apply `--limit` and `--offset` to the items they render instead of only reporting them in the payload.
+- http: equal-priority middlewares now run in the order the application registered them. **Behavioural change**
+- validation: the parsed validate tag and the constraint a parameterized rule resolves to are memoized instead of being rebuilt for every value the validator reaches. **Behavioural change**
+- debug: `debug:router`, `debug:events`, `debug:parameters` and `debug:middleware` apply `--limit` and `--offset` to the items they render instead of only reporting them in the payload. **Behavioural change**
 - http: the kernel loads the session inside its panic-recovery guard, so a session-storage outage answers with a logged `500` instead of escaping `ServeHttp`.
-- http: `Kernel.SetSessionCookiePolicy` no longer drops the `SameSite=Lax` default when the caller names only `Path` or `Domain`.
+- http: `Kernel.SetSessionCookiePolicy` no longer drops the `SameSite=Lax` default when the caller names only `Path` or `Domain`. **Behavioural change**
 - http: a session is no longer stored for a response that is discarded because the handler already committed its headers — the `Set-Cookie` could never reach the client, so a first-time visitor on a streamed response left one unreachable session behind per reconnect.
 - validation: the parsed-tag and constructed-constraint memos settle on a single instance under a concurrent first touch, so every goroutine validates against the same constraint.
 - cli: when a command fails and the container or scope also fails to close, the aggregated error carries the exit code itself, so the shutdown failures it reports survive to the log instead of being skipped in favour of the command's own exit error.
@@ -656,7 +657,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: a handler that panics with `net/http`'s `ErrAbortHandler` now aborts the connection silently, as that sentinel documents, instead of being converted into a 500 response plus an error log line — a reverse proxy raises it on every client that disconnects mid-stream
 - logging: the json logger takes the same lock for closing its writer that it takes for writing to it, and drops later writes instead of handing them to a closed writer.
 - serializer: accept-header negotiation gives each available media type the quality of the most specific range covering it, so an exact range wins over a wildcard whatever the header order, and a range carrying `q=0` refuses that type instead of being ignored.
-- bag: a key present with a nil value reports as unset from `String`, `StringSlice`, `StringStrict` and `StringSliceStrict`, matching what `Int`, `Bool`, `Float64` and `Duration` already reported for the same state — `Has` and the typed accessors no longer contradict each other.
+- bag: a key present with a nil value reports as unset from `String`, `StringSlice`, `StringStrict` and `StringSliceStrict`, matching what `Int`, `Bool`, `Float64` and `Duration` already reported for the same state — `Has` and the typed accessors no longer contradict each other. **Behavioural change**
 - cache: the single-flight waiter counter uses the atomic wrapper type rather than a bare 64-bit field, so its alignment no longer depends on where it happens to sit in the struct; on a 32-bit build a bare field that loses its alignment panics on every counted call
 - event: two distinct subscribers whose types carry no fields no longer collapse onto one registration, so removing either one leaves the other's listeners registered instead of silently unregistering both.
 - http: a request path that differs from a route only by leading or trailing whitespace no longer reaches that route's handler.
