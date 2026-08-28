@@ -3334,3 +3334,43 @@ func TestNewFileServer_AcceptsAnEmptyEmbeddedPublicDirectory(t *testing.T) {
         t.Fatalf("unexpected body %q", body)
     }
 }
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
+    directory := t.TempDir()
+
+    if err := osWriteFile(directory+"/index.html", []byte("hello")); nil != err {
+        t.Fatalf("write file error: %v", err)
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(ModeFilesystem, directory, "index.html", "", false, 0, false),
+            "",
+            nil,
+        ),
+    )
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    /* each door is asserted through its OWN warning: serveForStreaming below them carries the same reading
+    and refuses the request too, so a probe that only asks whether the door served cannot tell which guard
+    answered. */
+    serveLogger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+    if _, _, _, served := server.Serve(unassignedRequest, serveLogger); true == served {
+        t.Fatalf("expected Serve to skip a typed nil request")
+    }
+    if 1 != len(serveLogger.warningMessages) || "static serve skipped because request is nil" != serveLogger.warningMessages[0] {
+        t.Fatalf("expected Serve's own refusal to be the one that answered, got %v", serveLogger.warningMessages)
+    }
+
+    readerLogger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+    if _, _, _, served := server.ServeReader(unassignedRequest, readerLogger); true == served {
+        t.Fatalf("expected ServeReader to skip a typed nil request")
+    }
+    if 1 != len(readerLogger.warningMessages) || "static serve reader skipped because request is nil" != readerLogger.warningMessages[0] {
+        t.Fatalf("expected ServeReader's own refusal to be the one that answered, got %v", readerLogger.warningMessages)
+    }
+}

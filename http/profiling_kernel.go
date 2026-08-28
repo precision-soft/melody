@@ -29,7 +29,7 @@ func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispa
                 return nil
             }
 
-            if nil == responseEvent.Request() {
+            if true == internal.IsNilInterface(responseEvent.Request()) {
                 return nil
             }
 

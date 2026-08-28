@@ -172,3 +172,14 @@ func TestAcceptQuality_QuotedSemicolonStaysOneParameter(t *testing.T) {
         t.Fatalf("expected the quoted semicolon to leave the q parameter readable, got %v", quality)
     }
 }
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestPrefersHtml_ATypedNilRequestIsNotHtml(t *testing.T) {
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    if true == PrefersHtml(unassignedRequest) {
+        t.Fatalf("expected a typed nil request to not prefer html")
+    }
+}

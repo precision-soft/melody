@@ -73,3 +73,16 @@ func TestPathPrefixMatcher_ATrailingSlashPrefixClaimsTheBareSpelling(t *testing.
         }
     }
 }
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches the
+matcher as a non-nil interface and HttpRequest() below dereferences it. The untyped literal the sibling
+probe passes is the only shape a bare comparison catches. */
+func TestPathPrefixMatcher_ATypedNilRequestDoesNotMatch(t *testing.T) {
+    matcher := NewPathPrefixMatcher("/admin")
+
+    var unassignedRequest *http.Request
+
+    if true == matcher.Matches(unassignedRequest) {
+        t.Fatalf("expected matcher to not match a typed nil request")
+    }
+}

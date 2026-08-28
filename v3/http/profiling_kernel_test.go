@@ -153,3 +153,37 @@ type typedNilAttributesRequest struct {
 func (instance *typedNilAttributesRequest) Attributes() bagcontract.ParameterBag {
     return instance.attributes
 }
+
+/* The sibling of the typed nil attributes probe above, one level out: the request itself is the
+application's contract, and the request-context read below dereferences a nil pointer of a request type
+that a bare comparison carries through — in a response listener, where no recover covers it. */
+func TestKernelHttpProfilerListener_EmitsNoProfileForATypedNilRequest(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelHttpProfilerListener(dispatcher)
+
+    profileCount := 0
+    dispatcher.AddListener(
+        EventHttpRequestProfile,
+        func(_ runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            profileCount++
+
+            return nil
+        },
+        0,
+    )
+
+    var unassignedRequest *Request
+
+    responseEvent := NewKernelResponseEvent(unassignedRequest, nil)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, responseEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 0 != profileCount {
+        t.Fatalf("expected no profile for a request the listener cannot read, got %d", profileCount)
+    }
+}

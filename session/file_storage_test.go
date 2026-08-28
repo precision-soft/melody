@@ -1311,6 +1311,17 @@ func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(
         t.Fatalf("the refused write left the file empty, destroying every persisted session: %q", string(output))
     }
 
+    /* the child answers a distinct token per exit, so a run that never applied the limit cannot be read as
+    a pass: the earlier form wrote "intact" on three paths where nothing had been injected, and the parent
+    asked only whether that word appeared anywhere. */
+    if true == strings.Contains(string(output), "probe-unavailable") {
+        t.Skipf("the environment refused the file size limit this probe injects with: %q", string(output))
+    }
+
+    if true == strings.Contains(string(output), "probe-did-not-inject") {
+        t.Fatalf("the limited write succeeded, so nothing was injected and the guard was never exercised: %q", string(output))
+    }
+
     if false == strings.Contains(string(output), "intact") {
         t.Fatalf("expected the child to report the file intact, got %q", string(output))
     }
@@ -1319,8 +1330,18 @@ func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(
 func runFileStorageWriteWindowChild() {
     signal.Ignore(syscall.SIGXFSZ)
 
-    path := filepath.Join(os.TempDir(), "melody_session_write_window.json")
-    defer os.Remove(path)
+    /* a directory of its own, not a fixed name under os.TempDir: the three majors share one temp directory
+    and their suites run concurrently, so a fixed name had the children of two majors seed and remove the
+    same file and one of them report a failed seed. */
+    directory, directoryErr := os.MkdirTemp("", "melody_session_write_window")
+    if nil != directoryErr {
+        _, _ = os.Stdout.WriteString("temp-directory-failed\n")
+
+        return
+    }
+    defer os.RemoveAll(directory)
+
+    path := filepath.Join(directory, "sessions.json")
 
     seed, seedErr := NewFileStorageFromPath(path)
     if nil != seedErr {
@@ -1354,13 +1375,13 @@ func runFileStorageWriteWindowChild() {
 
     var previous syscall.Rlimit
     if nil != syscall.Getrlimit(syscall.RLIMIT_FSIZE, &previous) {
-        _, _ = os.Stdout.WriteString("intact\n")
+        _, _ = os.Stdout.WriteString("probe-unavailable-getrlimit\n")
 
         return
     }
 
     if nil != syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 0, Max: previous.Max}) {
-        _, _ = os.Stdout.WriteString("intact\n")
+        _, _ = os.Stdout.WriteString("probe-unavailable-setrlimit\n")
 
         return
     }
@@ -1370,7 +1391,7 @@ func runFileStorageWriteWindowChild() {
     _ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &previous)
 
     if nil == saveErr {
-        _, _ = os.Stdout.WriteString("intact\n")
+        _, _ = os.Stdout.WriteString("probe-did-not-inject\n")
 
         return
     }

@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
@@ -104,7 +105,7 @@ func (instance *FileServer) ServeReader(
 ) (int, nethttp.Header, io.ReadCloser, bool) {
     logger = logging.EnsureLogger(logger)
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         logger.Warning("static serve reader skipped because request is nil", nil)
 
         return 0, nil, nil, false
@@ -161,7 +162,7 @@ func (instance *FileServer) Serve(
 ) (int, nethttp.Header, []byte, bool) {
     logger = logging.EnsureLogger(logger)
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         logger.Warning("static serve skipped because request is nil", nil)
 
         return 0, nil, nil, false
@@ -478,7 +479,7 @@ func (instance *FileServer) serveForStreaming(
 ) (int, nethttp.Header, fs.File, fs.FileInfo, bool) {
     logger = logging.EnsureLogger(logger)
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return 0, nil, nil, nil, false
     }
 

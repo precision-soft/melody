@@ -6,6 +6,7 @@ import (
     "testing"
 
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/session"
     sessioncontract "github.com/precision-soft/melody/session/contract"
@@ -204,5 +205,27 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
 
     if nil != sessionManager.Session(existingId) {
         t.Fatalf("expected the rotated-away id to stay gone from storage instead of being re-created under the authenticated identity")
+    }
+}
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestRegenerateRequestSession_RefusesATypedNilRequest(t *testing.T) {
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    rotated, err := RegenerateRequestSession(unassignedRequest)
+    if nil == err {
+        t.Fatalf("expected a typed nil request to be refused")
+    }
+    if nil != rotated {
+        t.Fatalf("expected no session for a typed nil request, got %v", rotated)
+    }
+
+    /* the refusal is asserted by NAME: the session lookup below this guard carries its own reading of the
+    same typed nil and answers the missing-session refusal, so a probe that only asks whether an error came
+    back cannot tell the two apart. */
+    if "request is nil in regenerate request session" != err.Error() {
+        t.Fatalf("expected the request refusal to be the one that answered, got %q", err.Error())
     }
 }

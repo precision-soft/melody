@@ -39,7 +39,9 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            if nil == requestEvent || nil == requestEvent.Request() {
+            /* IsNilInterface on the request and not `nil ==`: a nil pointer of a request type is a non-nil
+            interface a bare check reads as a live request, and the path read below dereferences it. */
+            if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 

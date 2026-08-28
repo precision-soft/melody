@@ -45,7 +45,7 @@ func RegisterRateLimitRequestListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
-            if false == ok || nil == requestEvent || nil == requestEvent.Request() {
+            if false == ok || nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 

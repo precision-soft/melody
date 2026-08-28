@@ -42,7 +42,11 @@ func (instance *ApiKeyHeaderRule) Check(request httpcontract.Request) error {
         return nil
     }
 
-    if nil == request {
+    /* IsNilInterface and not `nil ==`: the matcher above is the application's, so a request the framework's
+    own matcher would have refused still reaches here when a custom matcher claims it — and a nil pointer of
+    a request type is a non-nil interface a bare check carries to the header read below, which dereferences
+    it. */
+    if true == internal.IsNilInterface(request) {
         return exception.Forbidden("forbidden")
     }
 

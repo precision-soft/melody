@@ -8,6 +8,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 type Service struct {
@@ -246,7 +247,7 @@ func (instance *Service) ApplyPreflightHeaders(origin string, headers nethttp.He
 }
 
 func (instance *Service) IsPreflight(request httpcontract.Request) bool {
-    if nil == request || nil == request.HttpRequest() {
+    if true == internal.IsNilInterface(request) || nil == request.HttpRequest() {
         return false
     }
 
@@ -258,7 +259,7 @@ func (instance *Service) IsPreflight(request httpcontract.Request) bool {
 }
 
 func (instance *Service) RequestOrigin(request httpcontract.Request) string {
-    if nil == request || nil == request.HttpRequest() {
+    if true == internal.IsNilInterface(request) || nil == request.HttpRequest() {
         return ""
     }
 

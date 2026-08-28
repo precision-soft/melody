@@ -1,7 +1,6 @@
 package http
 
 import (
-    "errors"
     "fmt"
     "html"
     nethttp "net/http"
@@ -11,6 +10,7 @@ import (
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     "github.com/precision-soft/melody/runtime"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/serializer"
@@ -77,8 +77,16 @@ func renderNegotiatedErrorPayload(
         return jsonErrorResponseFromPayload(statusCode, message, payload)
     }
 
+    /* every resolution failure falls back the same way, the not-acceptable refusal among them: the
+    asymmetry the door's own documentation states is that an error keeps its status rather than being
+    masked behind a 406, so naming that refusal separately here would have claimed a branch it does not
+    have — it was strictly covered by the error test beside it. The success path in result_handler is
+    where the two are told apart, and it also records the failure the error path deliberately keeps quiet.
+    The serializer test is defence in depth: this manager answers a serializer or an error, never neither,
+    and a regression that broke that is already caught by the recover around the serialize call, which
+    returns to this same fallback. */
     serializerInstance, err := serializerManager.ResolveByAcceptHeader(joinedAcceptHeader(request))
-    if true == errors.Is(err, serializer.ErrNotAcceptable) || nil != err || nil == serializerInstance {
+    if nil != err || nil == serializerInstance {
         return jsonErrorResponseFromPayload(statusCode, message, payload)
     }
 
@@ -107,7 +115,7 @@ func jsonErrorResponseFromPayload(statusCode int, message string, payload map[st
 
 /* joinedAcceptHeader reads the accept header the way the success path reads it: every line joined before parsing, because Get answers only the first line of a repeated field and the accept header is list-typed — a refusal the client sent on a second line would otherwise vanish. */
 func joinedAcceptHeader(request httpcontract.Request) string {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return ""
     }
 
@@ -120,7 +128,7 @@ func joinedAcceptHeader(request httpcontract.Request) string {
 }
 
 func requestIdFromRequest(request httpcontract.Request) string {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return ""
     }
 

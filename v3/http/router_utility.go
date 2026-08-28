@@ -430,7 +430,7 @@ func writeResponse(
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             writeLogContext := exceptioncontract.Context{}
-            if nil != request && nil != request.HttpRequest() {
+            if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
                 writeLogContext["method"] = request.HttpRequest().Method
                 writeLogContext["path"] = request.HttpRequest().URL.Path
             }
@@ -474,7 +474,7 @@ func closeResponseBodySafely(closer io.Closer) (closeErr error) {
 
 /* isClientAbortWriteError classifies a response-write failure the client caused rather than the server: the request context net/http cancels the moment the peer disconnects, and the broken-pipe and connection-reset errors a write to a gone peer answers with. Everything else stays a server-side write failure. */
 func isClientAbortWriteError(request httpcontract.Request, err error) bool {
-    if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().Context().Err() {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() && nil != request.HttpRequest().Context().Err() {
         return true
     }
 
@@ -495,7 +495,7 @@ func republishedSession(
 }
 
 func sessionFromRequestAttribute(request httpcontract.Request) sessioncontract.Session {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return nil
     }
 
@@ -518,7 +518,7 @@ func sessionFromRequestAttribute(request httpcontract.Request) sessioncontract.S
 }
 
 func requestNamesSession(request httpcontract.Request, sessionId string) bool {
-    if nil == request || "" == sessionId {
+    if true == internal.IsNilInterface(request) || "" == sessionId {
         return false
     }
 
@@ -565,7 +565,7 @@ func resolveSessionCookieSecure(
         return false
     }
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return false
     }
 
@@ -597,7 +597,7 @@ func logSessionPersistenceEvent(
         recordContext["sessionRef"] = sessionIdLogReference(sessionId)
     }
 
-    if nil != request && nil != request.HttpRequest() {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
         recordContext["method"] = request.HttpRequest().Method
         recordContext["path"] = request.HttpRequest().URL.Path
     }

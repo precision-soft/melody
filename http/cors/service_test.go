@@ -469,3 +469,26 @@ func TestService_AccessorsReportTheConfiguredPolicy(t *testing.T) {
         t.Fatalf("unexpected expose headers: %v", service.ExposeHeaders())
     }
 }
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestService_IsPreflight_ATypedNilRequestIsNotPreflight(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{"http://example.com"}})
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    if true == service.IsPreflight(unassignedRequest) {
+        t.Fatalf("expected a typed nil request to not be a preflight")
+    }
+}
+
+func TestService_RequestOrigin_ATypedNilRequestHasNoOrigin(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{"http://example.com"}})
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    if "" != service.RequestOrigin(unassignedRequest) {
+        t.Fatalf("expected no origin for a typed nil request, got %q", service.RequestOrigin(unassignedRequest))
+    }
+}

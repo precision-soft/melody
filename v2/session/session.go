@@ -11,12 +11,11 @@ import (
 )
 
 type Session struct {
-    id        string
-    mutex     sync.RWMutex
-    values    map[string]any
-    modified  bool
-    cleared   bool
-    abandoned bool
+    id       string
+    mutex    sync.RWMutex
+    values   map[string]any
+    modified bool
+    cleared  bool
 }
 
 func (instance *Session) Id() string {
@@ -54,7 +53,6 @@ func (instance *Session) Set(key string, value any) {
     instance.mutex.Lock()
     instance.values[key] = value
     instance.modified = true
-    instance.cleared = false
     instance.mutex.Unlock()
 }
 
@@ -84,7 +82,6 @@ func (instance *Session) Clear() {
     instance.values = make(map[string]any)
     instance.modified = true
     instance.cleared = true
-    instance.abandoned = true
     instance.mutex.Unlock()
 }
 
@@ -102,7 +99,7 @@ func (instance *Session) Snapshot() (map[string]any, bool, bool) {
     instance.mutex.RLock()
     values := internal.CopyAnyMap(instance.values)
     modified := instance.modified
-    cleared := instance.cleared || instance.abandoned
+    cleared := instance.cleared
     instance.mutex.RUnlock()
 
     return values, modified, cleared
@@ -118,7 +115,7 @@ func (instance *Session) IsModified() bool {
 
 func (instance *Session) IsCleared() bool {
     instance.mutex.RLock()
-    value := instance.cleared || instance.abandoned
+    value := instance.cleared
     instance.mutex.RUnlock()
 
     return value

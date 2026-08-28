@@ -73,7 +73,7 @@ func WriteToHttpResponseWriter(
         }(closer)
     }
 
-    if nil != request && nil != request.HttpRequest() && nethttp.MethodHead == request.HttpRequest().Method {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() && nethttp.MethodHead == request.HttpRequest().Method {
         return nil
     }
 

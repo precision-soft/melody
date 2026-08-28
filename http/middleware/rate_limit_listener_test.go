@@ -227,3 +227,30 @@ func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarni
         t.Fatalf("expected one warning and no error for the cancelled call, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
     }
 }
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil),
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    requestEvent := http.NewKernelRequestEvent(runtimeInstance, unassignedRequest)
+
+    _, err := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected no response for a request the listener cannot read")
+    }
+}

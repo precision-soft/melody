@@ -3,6 +3,7 @@ package security
 import (
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
 )
 
 type FirewallRegistry struct {
@@ -18,7 +19,10 @@ func NewFirewallRegistry(compiledConfiguration *CompiledConfiguration) *Firewall
 }
 
 func (instance *FirewallRegistry) Match(request httpcontract.Request) (*CompiledFirewall, bool) {
-    if nil == request {
+    /* IsNilInterface and not `nil ==`: a nil pointer of a request type is a non-nil interface a bare check
+    carries into the loop below, where the firewall's own matcher dereferences it. The guard exists so a
+    request that cannot be read selects nothing rather than crashing the firewall walk. */
+    if true == internal.IsNilInterface(request) {
         return nil, false
     }
 

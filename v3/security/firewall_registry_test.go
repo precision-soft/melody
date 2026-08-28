@@ -3,6 +3,7 @@ package security
 import (
     "testing"
 
+    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -138,5 +139,47 @@ func TestFirewallRegistry_Match_IgnoresNilFirewallOrNilMatcher(t *testing.T) {
     }
     if "good" != matchedFirewall.Name() {
         t.Fatalf("expected good firewall to win")
+    }
+}
+
+/* The registry's nil guard exists so that a request it cannot read selects no firewall. A nil pointer of
+a request type is a non-nil interface, so the bare comparison this replaces carried it into the firewall
+walk. The matcher here answers yes for everything, the shape an application matcher may take: the
+framework's own PathPrefixMatcher refuses such a request itself, so with it the registry's guard cannot be
+observed at all. */
+func TestFirewallRegistry_Match_ATypedNilRequestSelectsNoFirewall(t *testing.T) {
+    firewall := NewCompiledFirewall(
+        "a",
+        &registryTestMatcher{matches: true},
+        "always",
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+
+    configuration := NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)
+    registry := NewFirewallRegistry(configuration)
+
+    var unassignedRequest *http.Request
+
+    matchedFirewall, matched := registry.Match(unassignedRequest)
+    if true == matched {
+        t.Fatalf("expected a typed nil request to select no firewall")
+    }
+    if nil != matchedFirewall {
+        t.Fatalf("expected no firewall, got %v", matchedFirewall)
     }
 }

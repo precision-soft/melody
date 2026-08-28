@@ -5,6 +5,7 @@ import (
 
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
     "github.com/precision-soft/melody/v2/http"
+    "github.com/precision-soft/melody/v2/internal"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
@@ -36,7 +37,7 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
-            if false == ok || nil == requestEvent || nil == requestEvent.Request() {
+            if false == ok || nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 

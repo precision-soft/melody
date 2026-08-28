@@ -595,3 +595,34 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
         t.Fatalf("expected a fail-closed response when the exception dispatch produced none, got nil")
     }
 }
+
+/* A nil pointer of a request type is a non-nil interface, so the bare comparison this replaces carried it
+past the gate and into the path read below, which dereferences it — inside a kernel listener, where no
+recover covers it. The listener must leave such an event alone, not crash the request. */
+func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN"))),
+    )
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    var unassignedRequest *httpPkg.Request
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, unassignedRequest)
+
+    _, err := kernel.EventDispatcher().DispatchName(
+        runtimeInstance,
+        "kernel.request",
+        requestEvent,
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected no response for a request the listener cannot read")
+    }
+}

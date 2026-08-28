@@ -4,6 +4,7 @@ import (
     "strings"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -18,7 +19,11 @@ type PathPrefixMatcher struct {
 }
 
 func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
-    if nil == request {
+    /* IsNilInterface and not `nil ==`: Matches is public and the request is an application-implementable
+    contract, so a nil pointer of a request type arrives as a non-nil interface a bare check reads as a live
+    request — and the very next line dereferences it, taking the request down on the path that decides
+    which firewall claims it. */
+    if true == internal.IsNilInterface(request) {
         return false
     }
 

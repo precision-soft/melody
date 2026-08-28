@@ -28,7 +28,7 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
                 return nil
             }
 
-            if nil == terminateEvent.Request() || nil == terminateEvent.Request().RequestContext() {
+            if true == internal.IsNilInterface(terminateEvent.Request()) || nil == terminateEvent.Request().RequestContext() {
                 return nil
             }
 
@@ -68,7 +68,7 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
             routeName := ""
             routePattern := ""
 
-            if nil != terminateEvent.Request() {
+            if false == internal.IsNilInterface(terminateEvent.Request()) {
                 routeName = terminateEvent.Request().RouteName()
                 routePattern = terminateEvent.Request().RoutePattern()
             }

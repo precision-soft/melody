@@ -65,11 +65,11 @@ func logAuthorizationRefusalAtLevel(
     logContext := loggingcontract.Context{
         "reason": reason,
     }
-    if nil != request && nil != request.HttpRequest() {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
         logContext["method"] = request.HttpRequest().Method
         logContext["path"] = request.HttpRequest().URL.Path
     }
-    if nil != request && nil != request.RequestContext() {
+    if false == internal.IsNilInterface(request) && nil != request.RequestContext() {
         logContext["requestId"] = request.RequestContext().RequestId()
     }
 
@@ -114,7 +114,9 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            if nil == requestEvent || nil == requestEvent.Request() {
+            /* IsNilInterface on the request and not `nil ==`: a nil pointer of a request type is a non-nil
+            interface a bare check reads as a live request, and the path read below dereferences it. */
+            if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 
