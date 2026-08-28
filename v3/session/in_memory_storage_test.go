@@ -563,3 +563,62 @@ func TestInMemoryStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
         t.Fatalf("expected the session to lapse once the injected clock passed its ttl")
     }
 }
+
+/* the sweep reads the INJECTED clock, and nothing proved it: the two tests that reach cleanupExpired build the storage with NewInMemoryStorage, so they run on the wall clock either way, and the one test with a frozen clock never reaches the sweep — its ticker interval is a minute, and FrozenClock.NewTicker delegates to a real time.NewTicker, so Advance does not fire a tick. The frozen instant here is far in the WALL-CLOCK past, so a sweep reading time.Now instead drops a session the injected clock says is still live. */
+func TestInMemoryStorage_TheSweepReadsTheInjectedClockNotTheWallClock(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC))
+
+    storage := NewInMemoryStorageWithClock(time.Minute, frozenClock)
+    defer func() { _ = storage.Close() }()
+
+    if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    /* called directly rather than waited for: the ticker is real even on a frozen clock, so a wait would prove the interval and not the reading */
+    storage.cleanupExpired()
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if false == exists {
+        t.Fatalf("expected the sweep to leave a session the injected clock says is still live")
+    }
+}
+
+/* the expiry instant ITSELF is lapsed, and no fixture reached it: every other one ages a session by an hour, where the comparison answers the same whether it is > or >=. The two halves below sit one nanosecond apart around the exact instant Save wrote. */
+func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T) {
+    frozenTime := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+    frozenClock := clock.NewFrozenClock(frozenTime)
+
+    storage := NewInMemoryStorageWithClock(time.Minute, frozenClock)
+    defer func() { _ = storage.Close() }()
+
+    if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    frozenClock.TravelTo(frozenTime.Add(time.Hour).Add(-time.Nanosecond))
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if false == exists {
+        t.Fatalf("expected the session to survive the last nanosecond before its expiry")
+    }
+
+    frozenClock.TravelTo(frozenTime.Add(time.Hour))
+
+    _, exists, loadErr = storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if true == exists {
+        t.Fatalf("expected the expiry instant itself to be lapsed")
+    }
+}

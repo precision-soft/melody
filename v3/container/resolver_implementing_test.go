@@ -523,6 +523,11 @@ func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *test
             t.Fatalf("expected the container collection to leave the scoped handler out")
         }
     }
+
+    /* the loop above is satisfied by an empty collection, which is also what a collector that gathers NOTHING returns — the sibling below carries this same guard */
+    if 0 == len(handlers) {
+        t.Fatalf("expected the container collection to gather the container handlers")
+    }
 }
 
 /* A container provider collecting through the resolver it was handed must gather only container members, even while the resolution that reached it came through a scope: the dispatcher it is building is a process singleton, and a handler built for one request would be held by it for the life of the process. */

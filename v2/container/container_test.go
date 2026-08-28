@@ -520,7 +520,8 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
             t.Fatalf("expected the original melody error to travel out whole, got %#v", recoveredValue)
         }
 
-        if "" == melodyErr.Context()["type"] {
+        typeContextValue, hasTypeContextValue := melodyErr.Context()["type"].(string)
+        if false == hasTypeContextValue || "" == typeContextValue {
             t.Fatalf("expected the type written into the original failure's context, got %#v", melodyErr.Context())
         }
     }()
@@ -928,12 +929,21 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
         t.Fatalf("unexpected build error: %v", getErr)
     }
 
+    describedBuiltService := false
     for _, description := range reporter.ServiceDescriptions() {
-        if "described.container" == description.Name {
-            if false == description.IsBuilt || "string" != description.TypeName {
-                t.Fatalf("expected the built service to be described as built, got %+v", description)
-            }
+        if "described.container" != description.Name {
+            continue
         }
+
+        describedBuiltService = true
+        if false == description.IsBuilt || "string" != description.TypeName {
+            t.Fatalf("expected the built service to be described as built, got %+v", description)
+        }
+    }
+
+    /* without this the loop asserts nothing at all when the report loses the service, which is the very failure the assertion inside it exists to catch */
+    if false == describedBuiltService {
+        t.Fatalf("expected the built service to be described at all, got %+v", reporter.ServiceDescriptions())
     }
 }
 

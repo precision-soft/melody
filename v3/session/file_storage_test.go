@@ -1566,3 +1566,74 @@ func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
         t.Fatalf("expected the session to lapse once the injected clock passed its ttl")
     }
 }
+
+/* the purge reads the INJECTED clock, and nothing proved it: no fixture ever ran the purge under a clock that disagrees with the wall clock. The frozen instant here is far in the WALL-CLOCK past, so a purge reading time.Now instead drops a session the injected clock says is still live — and because the purge is the ONE place a lapsed entry is removed, that loss is silent and permanent. */
+func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC))
+
+    storagePath := filepath.Join(t.TempDir(), "sessions.json")
+
+    storage, newErr := NewFileStorageFromPathWithClock(storagePath, frozenClock)
+    if nil != newErr {
+        t.Fatalf("unexpected storage error: %v", newErr)
+    }
+    defer func() { _ = storage.Close() }()
+
+    if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    /* a second Save is what reaches the purge on every path, and it rewrites the whole snapshot */
+    if saveErr := storage.Save("session-2", map[string]any{"user": "admin"}, time.Hour); nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if false == exists {
+        t.Fatalf("expected the purge to leave a session the injected clock says is still live")
+    }
+}
+
+/* the expiry instant ITSELF is lapsed, and no fixture reached it: every other one ages a session by an hour, where the comparison answers the same whether it is > or >=. The two halves below sit one nanosecond apart around the exact instant Save wrote. */
+func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T) {
+    frozenTime := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+    frozenClock := clock.NewFrozenClock(frozenTime)
+
+    storagePath := filepath.Join(t.TempDir(), "sessions.json")
+
+    storage, newErr := NewFileStorageFromPathWithClock(storagePath, frozenClock)
+    if nil != newErr {
+        t.Fatalf("unexpected storage error: %v", newErr)
+    }
+    defer func() { _ = storage.Close() }()
+
+    if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    frozenClock.TravelTo(frozenTime.Add(time.Hour).Add(-time.Nanosecond))
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if false == exists {
+        t.Fatalf("expected the session to survive the last nanosecond before its expiry")
+    }
+
+    frozenClock.TravelTo(frozenTime.Add(time.Hour))
+
+    _, exists, loadErr = storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if true == exists {
+        t.Fatalf("expected the expiry instant itself to be lapsed")
+    }
+}

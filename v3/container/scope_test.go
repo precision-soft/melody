@@ -190,25 +190,59 @@ func TestScope_CloseReturnsErrorOnGet(t *testing.T) {
 func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
     serviceContainer := NewContainer()
 
-    scope := serviceContainer.NewScope()
-    _ = scope.Close()
+    /* the name is registered so a LIVE scope answers instead of panicking: on an empty container MustGet panics whatever the scope's state, and the recover below cannot tell the closed branch from a missing registration */
+    registerErr := serviceContainer.Register(
+        "service.test",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            return &scopeTestService{value: "live"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+    _ = scopeInstance.Close()
 
     defer func() {
-        if nil == recover() {
+        recovered := recover()
+        if nil == recovered {
             t.Fatalf("expected panic from MustGet on a closed scope")
+        }
+
+        /* the panic message is the same whatever the refusal was, so the cause is the only thing that names the guard under test */
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == errors.Is(recoveredErr, ErrScopeClosed) {
+            t.Fatalf("expected the panic to carry the closed-scope refusal, got %#v", recovered)
         }
     }()
 
-    _ = scope.MustGet("service.test")
+    _ = scopeInstance.MustGet("service.test")
 }
 
 func TestScope_HasReturnsFalseWhenClosed(t *testing.T) {
     serviceContainer := NewContainer()
 
-    scope := serviceContainer.NewScope()
-    _ = scope.Close()
+    registerErr := serviceContainer.Register(
+        "a",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            return &scopeTestService{value: "live"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
 
-    if true == scope.Has("a") {
+    scopeInstance := serviceContainer.NewScope()
+
+    /* the positive control: on an empty container the closed branch and the full lookup both answer false, so without a registered name the assertion below holds just as well with the closed branch deleted */
+    if false == scopeInstance.Has("a") {
+        t.Fatalf("expected the live scope to answer for the registered name")
+    }
+
+    _ = scopeInstance.Close()
+
+    if true == scopeInstance.Has("a") {
         t.Fatalf("expected false")
     }
 }
@@ -216,7 +250,24 @@ func TestScope_HasReturnsFalseWhenClosed(t *testing.T) {
 func TestScope_CloseIsIdempotent(t *testing.T) {
     serviceContainer := NewContainer()
 
+    closeCalls := int32(0)
+
+    registerErr := serviceContainer.RegisterScoped(
+        "app.idempotent",
+        func(resolver containercontract.Resolver) (*closeCountingScopeService, error) {
+            return &closeCountingScopeService{value: "scoped", closeCalls: &closeCalls}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
     scopeInstance := serviceContainer.NewScope()
+
+    /* the scope has to have BUILT something: on a cold scope both passes walk empty maps, so idempotence reads exactly like a Close that tears down nothing at all */
+    if _, getErr := scopeInstance.Get("app.idempotent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
 
     if err := scopeInstance.Close(); nil != err {
         t.Fatalf("unexpected first close error: %v", err)
@@ -224,6 +275,10 @@ func TestScope_CloseIsIdempotent(t *testing.T) {
 
     if err := scopeInstance.Close(); nil != err {
         t.Fatalf("unexpected second close error: %v", err)
+    }
+
+    if 1 != atomic.LoadInt32(&closeCalls) {
+        t.Fatalf("expected the built service to be closed exactly once across both passes, got %d", atomic.LoadInt32(&closeCalls))
     }
 }
 
@@ -254,8 +309,15 @@ func TestScope_OverrideAfterCloseKeepsMustPanicking(t *testing.T) {
     _ = scopeInstance.Close()
 
     defer func() {
-        if nil == recover() {
+        recovered := recover()
+        if nil == recovered {
             t.Fatalf("expected panic from MustOverrideProtectedInstance on a closed scope")
+        }
+
+        /* an unqualified recover accepts any panic at all; the message is the same whatever the refusal was, so the cause is what names the guard under test */
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == errors.Is(recoveredErr, ErrScopeClosed) {
+            t.Fatalf("expected the panic to carry the closed-scope refusal, got %#v", recovered)
         }
     }()
 
@@ -281,22 +343,56 @@ func TestScope_GetByTypeAfterCloseReturnsError(t *testing.T) {
 func TestScope_GetByTypeAfterCloseKeepsMustPanicking(t *testing.T) {
     serviceContainer := NewContainer()
 
+    registerErr := serviceContainer.Register(
+        "service.getbytype",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            return &scopeTestService{value: "live"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
     scopeInstance := serviceContainer.NewScope()
     _ = scopeInstance.Close()
 
     defer func() {
-        if nil == recover() {
+        recovered := recover()
+        if nil == recovered {
             t.Fatalf("expected panic from MustGetByType on a closed scope")
+        }
+
+        /* the panic message is the same whatever the refusal was, so the cause is the only thing that names the guard under test */
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == errors.Is(recoveredErr, ErrScopeClosed) {
+            t.Fatalf("expected the panic to carry the closed-scope refusal, got %#v", recovered)
         }
     }()
 
+    /* the type is registered so a LIVE scope answers instead of panicking: on an empty container MustGetByType panics whatever the scope's state */
     _ = scopeInstance.MustGetByType(reflect.TypeOf((*scopeTestService)(nil)))
 }
 
 func TestScope_HasTypeReturnsFalseWhenClosed(t *testing.T) {
     serviceContainer := NewContainer()
 
+    registerErr := serviceContainer.Register(
+        "service.hastype",
+        func(resolver containercontract.Resolver) (*scopeTestService, error) {
+            return &scopeTestService{value: "live"}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
     scopeInstance := serviceContainer.NewScope()
+
+    /* the positive control: with no type registered the closed branch and the full lookup both answer false, so without this the assertion below holds with the closed branch deleted */
+    if false == scopeInstance.HasType(reflect.TypeOf((*scopeTestService)(nil))) {
+        t.Fatalf("expected the live scope to answer for the registered type")
+    }
+
     _ = scopeInstance.Close()
 
     if true == scopeInstance.HasType(reflect.TypeOf((*scopeTestService)(nil))) {
@@ -364,6 +460,11 @@ func TestScope_ConcurrentGetAndClose(t *testing.T) {
     }()
 
     waitGroup.Wait()
+
+    /* the recover above swallows every panic the readers take, so without this the whole point of the fixture — that a scope closing under concurrent readers refuses rather than crashing — is unasserted and all 32 goroutines may panic with the test green */
+    if 0 != panics.Load() {
+        t.Fatalf("expected no reader to panic while the scope closed under them, got %d", panics.Load())
+    }
 }
 
 func TestScope_ConcurrentOverrideAndGet(t *testing.T) {
@@ -1746,6 +1847,91 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
 
     if "holder" != recorded[0] || "dependency" != recorded[1] {
         t.Fatalf("expected the holder to close before the override its type alias also files, got %v", recorded)
+    }
+}
+
+type aliasGroupSpanningService struct {
+    label    string
+    recorder *scopedCloseRecorder
+}
+
+func (instance *aliasGroupSpanningService) Close() error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+type aliasGroupMiddleService struct {
+    recorder *scopedCloseRecorder
+}
+
+func (instance *aliasGroupMiddleService) Close() error {
+    instance.recorder.record("middle")
+
+    return nil
+}
+
+/* an alias group is as old as its OLDEST member, and only a group that SPANS a third node can tell that from taking the newest — the two siblings above cannot, because a type filed alongside its name in one keep is stamped right after it and nothing can fall between two consecutive stamps. Here the name is filed by a plain resolution, an unrelated service is built next, and the override propagates to the registered type LAST: the name keeps its first stamp, the type takes a third, and the middle service sits inside the group. Read as old as its name the pair closes after the middle; read as new as its late type filing it closes before, tearing the installed value down ahead of a service built later than it. */
+func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &scopedCloseRecorder{}
+
+    if registerErr := serviceContainer.RegisterScoped(
+        "app.aaa.shared",
+        func(resolver containercontract.Resolver) (*aliasGroupSpanningService, error) {
+            return &aliasGroupSpanningService{label: "original", recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.RegisterScoped(
+        "app.middle",
+        func(resolver containercontract.Resolver) (*aliasGroupMiddleService, error) {
+            return &aliasGroupMiddleService{recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    /* BY NAME, which files the name node alone */
+    if _, getErr := scopeInstance.Get("app.aaa.shared"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := scopeInstance.Get("app.middle"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    /* the override propagates to the type the name is registered under, so the type node is stamped here — after the middle service, and far from the name it belongs to */
+    if overrideErr := scopeInstance.(containercontract.OverrideServiceWithOptions).OverrideInstanceWithOptions(
+        "app.aaa.shared",
+        &aliasGroupSpanningService{label: "installed", recorder: recorder},
+        ClosedWithScope(),
+    ); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    recorded := recorder.recorded()
+    if 3 != len(recorded) {
+        t.Fatalf("expected three closes, got %v", recorded)
+    }
+
+    if "middle" != recorded[0] || "installed" != recorded[1] {
+        t.Fatalf("expected the alias group to close as old as its oldest member, got %v", recorded)
+    }
+
+    /* the evicted value closes after the ordered walk, which is where the teardown puts everything it replaced */
+    if "original" != recorded[2] {
+        t.Fatalf("expected the evicted value to close last, got %v", recorded)
     }
 }
 

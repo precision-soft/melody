@@ -490,7 +490,7 @@ func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
     }
 }
 
-/* the names are chosen so the descending-name fallback would produce the opposite order, which is what makes the dependency graph the thing being tested. */
+/* the names are chosen so the node-key fallback would produce the opposite order. That fallback no longer decides: it survives only as the last tie-break between two nodes carrying the same creation stamp, and what holds this order is the creation-order tie-break — a dependency built during its dependent is the older node, so latest-first reaches the dependent first with or without the edge. This fixture therefore pins that scoped dependents close before their dependencies, not that the graph is what decides it: cutting the graph leaves it green. */
 func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -545,7 +545,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
     }
 }
 
-/* the names are chosen so the descending-name fallback would close the dependency first, which is what makes the edge recorded on the early answer the thing being tested. */
+/* the names are chosen so the node-key fallback would close the dependency first. That fallback no longer decides: it survives only as the last tie-break between two nodes carrying the same creation stamp, and the order here is held by the creation-order tie-break, which closes the later-created dependent first. So this pins that an early answer still records its edge, not that the edge outranks the tie-break: cutting the graph leaves it green. */
 func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
     serviceContainer := NewContainer()
 

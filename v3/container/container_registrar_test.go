@@ -4,6 +4,7 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func TestContainer_RegisterAndGetService(t *testing.T) {
@@ -47,17 +48,18 @@ func TestContainer_Register_ReturnsErrorOnInvalidArguments(t *testing.T) {
 func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
     serviceContainer := NewContainer()
 
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    serviceContainer.MustRegister(
-        "",
-        func(resolver containercontract.Resolver) (*testService, error) {
-            return &testService{}, nil
+    /* an unqualified recover accepts any panic at all, including one thrown by a guard three lines away; the message is what names the refusal under test */
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            serviceContainer.MustRegister(
+                "",
+                func(resolver containercontract.Resolver) (*testService, error) {
+                    return &testService{}, nil
+                },
+            )
         },
+        "service name is required to register a service",
     )
 }
 

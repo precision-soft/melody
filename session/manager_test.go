@@ -627,8 +627,14 @@ func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T
 
     concurrentView.Set("lastSeen", "now")
 
-    if nil == manager.SaveSession(concurrentView) {
+    saveErr := manager.SaveSession(concurrentView)
+    if nil == saveErr {
         t.Fatalf("expected the in-flight request to be refused the write to the rotated-away id")
+    }
+
+    /* the response path branches on the IDENTITY of the refusal, so "an error came back" is satisfied by the wrong one just as well — the sibling above already reads it this way */
+    if false == errors.Is(saveErr, ErrSessionDeleted) {
+        t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", saveErr)
     }
 
     if _, exists, _ := storage.Load(previousId); true == exists {
