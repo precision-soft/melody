@@ -7,6 +7,7 @@ import (
     "io"
     "mime"
     nethttp "net/http"
+    "net/textproto"
     neturl "net/url"
     "os"
     "path/filepath"
@@ -425,17 +426,21 @@ func RedirectExternalResponse(location string, statusCode int) *Response {
     }
 }
 
-/* isExternalRedirectLocation reads the location the way a browser will: a scheme ("https:", "mailto:", "javascript:") or a leading "//" leaves the origin, and a backslash is treated as leaving too, because several browsers fold "\" to "/" while net/url does not — the disagreement is the exploit. */
+/* isExternalRedirectLocation reads the location the way a browser will: a scheme ("https:", "mailto:", "javascript:") or a leading "//" leaves the origin, and a backslash is treated as leaving too, because several browsers fold "\" to "/" while net/url does not — the disagreement is the exploit.
+
+The reading runs on the location the header writer will emit rather than on the one the caller passed. net/textproto folds away leading and trailing spaces and tabs as it writes the field, so " //evil.example.com" reaches the browser as "//evil.example.com" while the untrimmed spelling carries neither the scheme-relative prefix nor a scheme for the checks below to find. */
 func isExternalRedirectLocation(location string) bool {
-    if true == strings.Contains(location, "\\") {
+    emittedLocation := textproto.TrimString(location)
+
+    if true == strings.Contains(emittedLocation, "\\") {
         return true
     }
 
-    if true == strings.HasPrefix(location, "//") {
+    if true == strings.HasPrefix(emittedLocation, "//") {
         return true
     }
 
-    parsedLocation, parseErr := neturl.Parse(location)
+    parsedLocation, parseErr := neturl.Parse(emittedLocation)
     if nil != parseErr {
         return true
     }

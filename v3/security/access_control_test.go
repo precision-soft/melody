@@ -6,6 +6,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v3/internal/testhelper"
+    "github.com/precision-soft/melody/v3/security/accesscontrol"
 )
 
 func TestAccessControl_Match_ReturnsFalseWhenNoRules(t *testing.T) {
@@ -40,7 +41,7 @@ func TestAccessControl_Match_LongestPrefixWins(t *testing.T) {
 
 func TestAccessControl_Match_FallbackRuleWhenPrefixEmpty(t *testing.T) {
     control := NewAccessControl(
-        NewAccessControlRawPrefixRule("", "ROLE_ANY"),
+        NewAccessControlRule("", "ROLE_ANY"),
         NewAccessControlRule("/admin", "ROLE_ADMIN"),
     )
 
@@ -195,8 +196,8 @@ func TestAccessControlMatch_RegexFirstMatchWinsInDeclarationOrder(t *testing.T) 
 
 func TestAccessControlMatch_FallbackEmptyPrefixIsUsedLast(t *testing.T) {
     accessControl := NewAccessControl(
-        NewAccessControlRule("/login", "PUBLIC_ACCESS"),
-        NewAccessControlRawPrefixRule("", "ROLE_USER"),
+        NewAccessControlRuleWithSegmentPrefix("/login", "PUBLIC_ACCESS"),
+        NewAccessControlRule("", "ROLE_USER"),
     )
 
     attributes, ok := accessControl.Match("/login")
@@ -239,7 +240,7 @@ func TestAccessControlMatch_EmptyPathIsNormalizedToSlash(t *testing.T) {
 
 func TestRules_ReturnsCopy(t *testing.T) {
     accessControl := NewAccessControl(
-        NewAccessControlRule("/login", "PUBLIC_ACCESS"),
+        NewAccessControlRuleWithSegmentPrefix("/login", "PUBLIC_ACCESS"),
         NewAccessControlRule("/products", "ROLE_EDITOR"),
     )
 
@@ -251,7 +252,7 @@ func TestRules_ReturnsCopy(t *testing.T) {
     rules[0] = NewAccessControlRule("/changed", "X")
 
     rulesAfter := accessControl.Rules()
-    if true == strings.HasPrefix(rulesAfter[0].pathPrefix, "/changed") {
+    if true == strings.HasPrefix(rulesAfter[0].PathPrefix(), "/changed") {
         t.Fatalf("expected returned rules to be a copy")
     }
 }
@@ -329,7 +330,7 @@ func TestNewAccessControlRule_PublicAccessCombinedWithOtherAttributesPanics(t *t
         }
     }()
 
-    _ = NewAccessControlRule("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
+    _ = NewAccessControlRuleWithSegmentPrefix("/admin", "PUBLIC_ACCESS", "ROLE_ADMIN")
 }
 
 func TestNewAccessControlRule_LonePublicAccessIsAllowed(t *testing.T) {
@@ -339,9 +340,9 @@ func TestNewAccessControlRule_LonePublicAccessIsAllowed(t *testing.T) {
         }
     }()
 
-    rule := NewAccessControlRule("/health", "PUBLIC_ACCESS")
-    if 1 != len(rule.attributes) {
-        t.Fatalf("expected exactly one attribute, got %v", rule.attributes)
+    rule := NewAccessControlRuleWithSegmentPrefix("/health", "PUBLIC_ACCESS")
+    if 1 != len(rule.Attributes()) {
+        t.Fatalf("expected exactly one attribute, got %v", rule.Attributes())
     }
 }
 
@@ -371,20 +372,20 @@ func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testin
     }
 
     rule := NewAccessControlRule("/admin", "", "ROLE_ADMIN", "   ")
-    if 1 != len(rule.attributes) || "ROLE_ADMIN" != rule.attributes[0] {
-        t.Fatalf("expected the blank attributes to be trimmed from a non-empty list, got %v", rule.attributes)
+    if 1 != len(rule.Attributes()) || "ROLE_ADMIN" != rule.Attributes()[0] {
+        t.Fatalf("expected the blank attributes to be trimmed from a non-empty list, got %v", rule.Attributes())
     }
 }
 
-func TestNewAccessControlRule_EmptyPrefixRefused(t *testing.T) {
+func TestNewAccessControlRuleWithSegmentPrefix_EmptyPrefixRefused(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        NewAccessControlRule("", "ROLE_ADMIN")
+        NewAccessControlRuleWithSegmentPrefix("", "ROLE_ADMIN")
     }, "access control segment prefix may not be empty")
 }
 
-func TestNewAccessControlRule_GovernsItsSegmentAndNoLongerSegmentText(t *testing.T) {
+func TestNewAccessControlRuleWithSegmentPrefix_GovernsItsSegmentAndNoLongerSegmentText(t *testing.T) {
     control := NewAccessControl(
-        NewAccessControlRule("/admin", "ROLE_ADMIN"),
+        NewAccessControlRuleWithSegmentPrefix("/admin", "ROLE_ADMIN"),
     )
 
     for _, matchingPath := range []string{"/admin", "/admin/", "/admin/panel"} {
@@ -407,12 +408,12 @@ func TestNewAccessControlRule_LonePublicAccessAllowed(t *testing.T) {
         }
     }()
 
-    rule := NewAccessControlRule("/health", "PUBLIC_ACCESS")
-    if false == rule.isSegmentPrefix {
+    rule := NewAccessControlRuleWithSegmentPrefix("/health", "PUBLIC_ACCESS")
+    if accesscontrol.MatchingSegmentPrefix != rule.Matching() {
         t.Fatalf("expected the default constructor to build a segment-prefix rule")
     }
-    if 1 != len(rule.attributes) || "PUBLIC_ACCESS" != rule.attributes[0] {
-        t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.attributes)
+    if 1 != len(rule.Attributes()) || "PUBLIC_ACCESS" != rule.Attributes()[0] {
+        t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.Attributes())
     }
 }
 
@@ -428,21 +429,21 @@ func TestNewAccessControlRule_LonePublicAccessIsAllowedOnBoundedRules(t *testing
     regexRule := NewAccessControlRegexRule("^/health", "PUBLIC_ACCESS")
 
     for _, rule := range []AccessControlRule{segmentRule, exactRule, regexRule} {
-        if 1 != len(rule.attributes) || "PUBLIC_ACCESS" != rule.attributes[0] {
-            t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.attributes)
+        if 1 != len(rule.Attributes()) || "PUBLIC_ACCESS" != rule.Attributes()[0] {
+            t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.Attributes())
         }
     }
 }
 
-func TestNewAccessControlRawPrefixRule_PublicAccessIsRefused(t *testing.T) {
+func TestNewAccessControlRule_RawReach_PublicAccessIsRefused(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        NewAccessControlRawPrefixRule("/health", "PUBLIC_ACCESS")
+        NewAccessControlRule("/health", "PUBLIC_ACCESS")
     }, "access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule")
 }
 
-func TestNewAccessControlRawPrefixRule_ReachesAcrossTheSegmentBoundary(t *testing.T) {
+func TestNewAccessControlRule_RawReach_ReachesAcrossTheSegmentBoundary(t *testing.T) {
     control := NewAccessControl(
-        NewAccessControlRawPrefixRule("/admin", "ROLE_ADMIN"),
+        NewAccessControlRule("/admin", "ROLE_ADMIN"),
     )
 
     for _, matchingPath := range []string{"/admin", "/administrator", "/admin-tools", "/admin/panel"} {
@@ -454,7 +455,7 @@ func TestNewAccessControlRawPrefixRule_ReachesAcrossTheSegmentBoundary(t *testin
 
 func TestAccessControl_MatchFoldsTheSpellingsACatchAllRouteAccepts(t *testing.T) {
     control := NewAccessControl(
-        NewAccessControlRawPrefixRule("/admin", "ROLE_ADMIN"),
+        NewAccessControlRule("/admin", "ROLE_ADMIN"),
     )
 
     for _, requestPath := range []string{

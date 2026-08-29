@@ -5,6 +5,7 @@ import (
     "encoding/json"
     "errors"
     "io"
+    nethttp "net/http"
     "net/http/httptest"
     "os"
     "path/filepath"
@@ -377,6 +378,45 @@ func TestRedirectResponse_RefusesTheLocationsThatLeaveTheApplication(t *testing.
             }()
 
             _ = RedirectResponse(location, 0)
+        }()
+    }
+}
+
+/* the guard runs before net/http writes the field, and the writer folds away leading spaces and tabs — so a padded spelling reaches the browser as the bare scheme-relative target while an untrimmed reading sees a relative path. Each case below is asserted twice: the constructor refuses it, and net/http is shown emitting the external location that makes the refusal necessary. */
+func TestRedirectResponse_RefusesALocationThePaddingWouldHideFromTheGuard(t *testing.T) {
+    for _, testCase := range []struct {
+        location string
+        emitted  string
+    }{
+        {" //evil.example.com", "//evil.example.com"},
+        {"  //evil.example.com", "//evil.example.com"},
+        {"\t//evil.example.com", "//evil.example.com"},
+        {" ///evil.example.com", "///evil.example.com"},
+        {" //evil.example.com/path?q=1", "//evil.example.com/path?q=1"},
+        {" https://evil.example.com", "https://evil.example.com"},
+        {"//evil.example.com ", "//evil.example.com"},
+    } {
+        headers := make(nethttp.Header)
+        headers.Set("Location", testCase.location)
+
+        buffer := &bytes.Buffer{}
+        if writeErr := headers.Write(buffer); nil != writeErr {
+            t.Fatalf("expected the header to write for %q, got %v", testCase.location, writeErr)
+        }
+
+        expectedField := "Location: " + testCase.emitted + "\r\n"
+        if expectedField != buffer.String() {
+            t.Fatalf("expected net/http to emit %q for %q, got %q", expectedField, testCase.location, buffer.String())
+        }
+
+        func() {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("expected the location %q to be refused, since it reaches the browser as %q", testCase.location, testCase.emitted)
+                }
+            }()
+
+            _ = RedirectResponse(testCase.location, 0)
         }()
     }
 }

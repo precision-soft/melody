@@ -53,7 +53,7 @@ func TestModule_RegisterHttpRoutesRefusesAMissingHubAtBoot(t *testing.T) {
     NewModule(ModuleConfig{Path: "/stream"}).RegisterHttpRoutes(kernel)
 }
 
-/* the options carry a VALID IdleTimeout deliberately: with the zero value, NewStreamHandler's own panic would answer for a disarmed path guard and the mutant would survive shadowed — the empty path must be the only refusal candidate (§5.25). */
+/* the options carry a VALID IdleTimeout deliberately: with the zero value, NewStreamHandler's own panic would answer for a disarmed path guard and the mutant would survive shadowed — the empty path must be the only refusal candidate. */
 func TestModule_RegisterHttpRoutesRefusesAnEmptyPathAtBoot(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 

@@ -82,12 +82,12 @@ Userland code must treat `token.IsAuthenticated()` as the canonical guard for ac
 
 ### Access control matching
 
-`AccessControl.Match(path)` selects attributes based on the following priority:
+`accesscontrol.Control.Match(path)` — reached as `security.AccessControl` too, which aliases it — selects attributes based on the following priority:
 
-1. **Exact match** (`NewAccessControlExactRule`)
-2. **Prefix match** with **longest prefix wins**: `NewAccessControlRule` is bounded to a path SEGMENT — `/admin` governs `/admin` and `/admin/panel` but not `/administrator` — and is the rule to reach for by default; `NewAccessControlRuleWithSegmentPrefix` is a deprecated alias for it. `NewAccessControlRawPrefixRule` is the cross-segment form that matches every path beginning with the prefix, kept behind its own name because a raw rule shadows a correctly bounded denial, and it refuses `PUBLIC_ACCESS` for that reason
-3. **Regex match** (`NewAccessControlRegexRule`) with **first match wins** (declaration order). The pattern is compiled **unanchored** and tested as a substring of the canonicalized path — `/public` matches `/admin/public-notes` as readily as `/public` — deliberately, mirroring the path regex of other frameworks; a rule meant to name one section must anchor itself: `^/public(/|$)`
-4. **Fallback** rule with an empty prefix (only `NewAccessControlRawPrefixRule("")` builds one; `NewAccessControlRule` refuses an empty prefix)
+1. **Exact match** (`accesscontrol.NewExactRule`)
+2. **Prefix match** with **longest prefix wins**: `accesscontrol.NewSegmentPrefixRule` is bounded to a path SEGMENT — `/admin` governs `/admin` and `/admin/panel` but not `/administrator` — while `accesscontrol.NewRawPrefixRule` reaches across the boundary and claims `/administrator` too
+3. **Regex match** (`accesscontrol.NewRegexRule`) with **first match wins** (declaration order). The pattern is compiled **unanchored** and tested as a substring of the canonicalized path — `/public` matches `/admin/public-notes` as readily as `/public` — deliberately, mirroring the path regex of other frameworks; a rule meant to name one section must anchor itself: `^/public(/|$)`
+4. **Fallback** rule with an empty prefix (only `accesscontrol.NewRawPrefixRule("")` builds one; the segment reach refuses an empty path)
 
 The matcher folds the request path (`//admin`, `/x/../admin`) to its canonical spelling before matching. The fold alone would not be sufficient — the router matches the path as sent — which is why the http kernel refuses a non-canonical request path before anything routes or authorizes it (`requestPathIsCanonical`); the matcher's own fold remains as its defence for a caller consulting `AccessControl` without that guard, and it can only make a rule match more, never open what a rule had closed. This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).
 
@@ -394,7 +394,7 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 
 ## Footguns & caveats
 
-- `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*AccessControl).Match`](../../security/access_control.go).
+- `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*Control).Match`](../../security/accesscontrol/control.go).
 - Internal-auth HMAC key ids are bound to a single app: do not share one key id (or its secret) across applications — the verifier rejects any envelope whose key id is not bound to its claimed app, and a shared secret would otherwise let one service impersonate another. Supply a shared [`NonceGuard`](../../security/contract/nonce_guard.go) behind a load balancer; the default in-process guard only prevents replay within one instance.
 - A session-backed login that does not call [`RegenerateSession`](../../session/manager.go) is vulnerable to **session fixation**: the id the victim arrived with stays valid and authenticated. Rotating is a per-application responsibility — the framework cannot do it for you, because only the login handler knows when the privilege change happens. See [Session fixation](#session-fixation).
 - `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`.
@@ -436,8 +436,12 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 
 ### Types
 
-- [`AccessControl`](../../security/access_control.go)
-- [`AccessControlRule`](../../security/access_control.go)
+- [`accesscontrol.Control`](../../security/accesscontrol/control.go) — carries `Match` and `Rules`; `security.AccessControl` is an alias for it
+- [`accesscontrol.Rule`](../../security/accesscontrol/rule.go) — carries `PathPrefix`, `Pattern`, `Attributes` and `Matching`; `security.AccessControlRule` is an alias for it
+- [`accesscontrol.Matching`](../../security/accesscontrol/matching.go) — the four reaches a rule can be declared with
+- [`accesscontrol.RuleConfig`](../../security/accesscontrol/rule.go)
+- [`AccessControl`](../../security/access_control.go) — alias for `accesscontrol.Control`
+- [`AccessControlRule`](../../security/access_control.go) — alias for `accesscontrol.Rule`
 - [`RoleHierarchy`](../../security/role_hierarchy.go)
 - Tokens: [`AnonymousToken`](../../security/anonymous_token.go), [`AuthenticatedToken`](../../security/authenticated_token.go), [`Token`](../../security/token.go)
 - Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go)
@@ -452,11 +456,15 @@ Rotate on the way out too: logout should clear the session ([`Session.Clear`](..
 ### Constructors
 
 - [`NewAccessControl(rules...)`](../../security/access_control.go)
-- [`NewAccessControlRule(pathPrefix string, attributes ...string)`](../../security/access_control.go) — segment-bounded prefix rule (the default; refuses an empty prefix, permits `PUBLIC_ACCESS`)
-- [`NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string)`](../../security/access_control.go) — cross-segment prefix rule (refuses `PUBLIC_ACCESS`)
-- [`NewAccessControlExactRule(path string, attributes ...string)`](../../security/access_control.go)
-- [`NewAccessControlRegexRule(pattern string, attributes ...string)`](../../security/access_control.go) — unanchored substring match; a rule meant to name one section anchors itself (`^/public(/|$)`)
-- [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go) — deprecated alias of `NewAccessControlRule`
+- [`accesscontrol.NewRule(path string, matching Matching, config RuleConfig)`](../../security/accesscontrol/rule.go) — the mode is named at the call site and the zero value is refused
+- [`accesscontrol.NewExactRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go)
+- [`accesscontrol.NewSegmentPrefixRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go) — the path and its descendants under a `/` boundary
+- [`accesscontrol.NewRawPrefixRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go) — every path beginning with the spelling; refuses `PUBLIC_ACCESS`
+- [`accesscontrol.NewRegexRule(pattern string, config RuleConfig)`](../../security/accesscontrol/rule.go) — unanchored substring match; a rule meant to name one section anchors itself, and `PUBLIC_ACCESS` is refused unless every branch of the pattern is anchored to the path start
+- [`NewAccessControlRule(pathPrefix string, attributes ...string)`](../../security/access_control.go) — deprecated, superseded by `accesscontrol.NewRawPrefixRule`; removed in v4
+- [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go) — deprecated, superseded by `accesscontrol.NewSegmentPrefixRule`; removed in v4
+- [`NewAccessControlExactRule(path string, attributes ...string)`](../../security/access_control.go) — deprecated, superseded by `accesscontrol.NewExactRule`; removed in v4
+- [`NewAccessControlRegexRule(pattern string, attributes ...string)`](../../security/access_control.go) — deprecated, superseded by `accesscontrol.NewRegexRule`; removed in v4
 - [`NewRoleHierarchy(hierarchy map[string][]string)`](../../security/role_hierarchy.go)
 - [`NewAnonymousToken()`](../../security/anonymous_token.go)
 - [`NewAuthenticatedToken(userIdentifier string, roles []string)`](../../security/authenticated_token.go)

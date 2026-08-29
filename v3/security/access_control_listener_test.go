@@ -119,7 +119,7 @@ func TestMatchAccessControlRule_NormalizesEmptyPathToRoot(t *testing.T) {
 
 func TestMatchAccessControlRule_FallbackRuleSelectedOnce(t *testing.T) {
     control := NewAccessControl(
-        NewAccessControlRawPrefixRule("", "ROLE_ANY"),
+        NewAccessControlRule("", "ROLE_ANY"),
         NewAccessControlRule("/admin", "ROLE_ADMIN"),
     )
 

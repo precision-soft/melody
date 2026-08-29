@@ -171,7 +171,7 @@ func TestRememberInFlightCall_WaitWithoutACallerContextParksUntilTheFlightAnswer
     }
 }
 
-/* the pre-select above the two blocking selects exists to take the coin out of a tie: with a memoized result AND a lapsed caller context both ready, a select chooses uniformly at random, so the same call answered the value or the cancellation from one run to the next. A single-shot assertion cannot prove that guard — measured, the mutant that removes it is killed four runs in five, which is luck, not proof (§5.11) — so the tie is built sixty-four times and every one of them has to answer the value. */
+/* the pre-select above the two blocking selects exists to take the coin out of a tie: with a memoized result AND a lapsed caller context both ready, a select chooses uniformly at random, so the same call answered the value or the cancellation from one run to the next. A single-shot assertion cannot prove that guard — measured, the mutant that removes it is killed four runs in five, which is luck, not proof — so the tie is built sixty-four times and every one of them has to answer the value. */
 func TestRememberInFlightCall_AMemoizedResultBeatsALapsedContextEveryTime(t *testing.T) {
     canceledContext, cancel := context.WithCancel(context.Background())
     cancel()

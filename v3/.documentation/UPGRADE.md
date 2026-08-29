@@ -8,7 +8,7 @@ It is a companion to [`CHANGELOG.md`](../CHANGELOG.md), not a replacement: the c
 
 Melody releases a behavioural break as a **MINOR**, with the entry marked `**Behavioural change**` in the changelog and listed here with its symptom and remedy. It does not open a new major for one.
 
-The same decision covers a **method added to an exported contract**, which breaks an out-of-tree implementation of that interface at compile time: it ships as a MINOR with a `**Breaking**` note. A new major would put `/v4` into the import path of every file of every consumer — the cost is paid by everyone, including the majority that implements no framework contract — to spare the one consumer that implements it the addition of a single method. That is the same cost already rejected for behavioural breaks, so it is rejected here too.
+The same decision covers a **method added to an exported contract**, which breaks an out-of-tree implementation of that interface at compile time: it ships as a MINOR with a `**Breaking**` note. A new major would put `/v4` into the import path of every file of every consumer — the cost is paid by everyone, including the majority that implements no framework contract — to spare the one consumer that implements it the addition of a single method. That is the same cost already rejected for behavioural breaks, so it is rejected here too. What a break of either kind does instead is accumulate: the API it supersedes is marked with a `/* Deprecated: ... */` doc comment and kept working, and the deprecations are removed together at the v4 cut, slated for Q4 2026. An application that adopts the replacement while still on v3 carries no change across that cut.
 
 An upgrader who needs the old behaviour of any entry below pins the previous patch release; the remedies here are the supported path forward.
 
@@ -558,14 +558,6 @@ debug.NewMiddlewareCommand(
 **Symptom.** A constructor call with a mistyped status (a `4004`, a `0`) panics where it is made instead of one response write away from it.
 
 **Remedy.** Fix the status at the call site.
-
-### Security: `NewAccessControlRule` is now segment-bounded, and the cross-segment form has its own name
-
-**What changed.** `NewAccessControlRule` built a rule that matched every path merely beginning with the prefix — `/admin` governed `/administrator` as readily as `/admin/panel`. It now builds a rule bounded to a path SEGMENT: `/admin` governs `/admin` and `/admin/panel` but not `/administrator`. The cross-segment behaviour moves to the explicit `NewAccessControlRawPrefixRule`, on which `PUBLIC_ACCESS` is refused because a raw public rule, being the longest match, shadows a correctly bounded denial. An empty prefix is now refused rather than made a catch-all fallback, and `NewAccessControlRuleWithSegmentPrefix` becomes a deprecated alias for the plain name.
-
-**Symptom.** An existing rule matches fewer requests than before — only its own segment and descendants under a `/` boundary — which can only refuse a request the old raw form would have granted, never grant one it would have refused. A rule that genuinely meant to reach across segment boundaries (a rule for `/admin` that was relied on to also govern `/admin-tools`) stops governing the sibling. A `NewAccessControlRule("")` used as a catch-all fallback now panics at construction.
-
-**Remedy.** For a rule that must reach across the segment boundary, call `NewAccessControlRawPrefixRule`. For a catch-all fallback, declare an explicit `"/"` prefix, or use `NewAccessControlRawPrefixRule("")`. Most rules want the bounded form and need no change.
 
 ### Security: a global access control without a firewall now enforces, and a zero-value override inherits it
 

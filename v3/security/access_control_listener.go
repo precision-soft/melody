@@ -319,7 +319,7 @@ func matchAccessControlRule(accessControl *AccessControl, path string, source So
         return nil, nil, false
     }
 
-    matchedIndex, matched := accessControl.matchRuleIndex(path)
+    matchedIndex, matched := accessControl.MatchRuleIndex(path)
     if false == matched {
         return nil, nil, false
     }
@@ -327,8 +327,8 @@ func matchAccessControlRule(accessControl *AccessControl, path string, source So
     matchedRuleValue := accessControl.Rules()[matchedIndex]
 
     matchedRule := NewMatchedAccessControlRule(
-        matchedRuleValue.pathPrefix,
-        matchedRuleValue.attributes,
+        matchedRuleValue.PathPrefix(),
+        matchedRuleValue.Attributes(),
         source,
         matchedIndex,
         firewallName,
