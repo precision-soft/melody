@@ -3,6 +3,7 @@ package security
 import (
     "github.com/precision-soft/melody/v2/event"
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/internal"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
@@ -130,7 +131,8 @@ func (instance *CompiledFirewall) Login(
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
-    if nil == instance.loginHandler {
+    /* IsNilInterface and not `nil ==`: the handler comes through NewCompiledFirewall, which is public and validates nothing, so a nil pointer of the application's own handler type is a non-nil interface a bare check carries past this refusal into the call below */
+    if true == internal.IsNilInterface(instance.loginHandler) {
         return nil, exception.NewError(
             "firewall login handler is nil",
             exceptioncontract.Context{
@@ -181,7 +183,8 @@ func (instance *CompiledFirewall) Logout(
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
-    if nil == instance.logoutHandler {
+    /* IsNilInterface and not `nil ==`, for the reason its login sibling names */
+    if true == internal.IsNilInterface(instance.logoutHandler) {
         return nil, exception.NewError(
             "firewall logout handler is nil",
             exceptioncontract.Context{

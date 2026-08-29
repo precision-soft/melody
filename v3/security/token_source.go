@@ -80,7 +80,8 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
         return nil, err
     }
 
-    if nil == token {
+    /* IsNilInterface and not `nil ==`: the token is the application's, so a nil pointer of its own token type is a non-nil interface a bare check hands back as a live token instead of falling through to the anonymous one */
+    if true == internal.IsNilInterface(token) {
         return NewAnonymousToken(), nil
     }
 

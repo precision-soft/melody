@@ -569,7 +569,7 @@ debug.NewMiddlewareCommand(
 
 ### Security: the role voters and `DecideAll` refuse where they used to grant
 
-**What changed.** `RoleVoter` and `RoleHierarchyVoter` granted a token that carried the role even when it answered `IsAuthenticated()` false; they now deny it, matching the access control listener, which had always checked authentication first. `AccessDecisionManager.DecideAll` over an empty attribute list now refuses instead of granting vacuously, matching `DecideAny`.
+**What changed.** `RoleVoter` and `RoleHierarchyVoter` granted a token that carried the role even when it answered `IsAuthenticated()` false; they now deny it, matching the access control listener, which had always checked authentication first. `AccessDecisionManager.DecideAll` over an empty attribute list now refuses instead of granting vacuously, matching `DecideAny`. `SecurityContext.IsGranted` asks the same question before it reads roles, which is what makes the sentence below true: until it did, the voters denied while `IsGranted` still granted, so the firewall refused the route and a handler branching on `IsGranted` rendered the privileged content behind it.
 
 **Symptom.** A handler-level `IsGranted` check on an unauthenticated token that carries roles — a "remembered" or half-logged-in token — now returns false where it used to return true. A direct `DecideAll(token, nil, subject)` caller now receives a refusal.
 
@@ -577,11 +577,11 @@ debug.NewMiddlewareCommand(
 
 ### Security: the internal-auth envelope carries its own `typ`, and the JWT validator refuses it
 
-**What changed.** The internal-auth envelope and the JSON web token were both HS256 over the same signing primitive in a byte-identical three-part shape, with nothing but secret disjointness — which nothing enforces — telling them apart. The envelope now signs under `typ: "melody-internal"`, the decoder REQUIRES that type, and the JWT validator refuses any `typ` that is not absent or `JWT` (case-insensitive).
+**What changed.** The internal-auth envelope and the JSON web token were both HS256 over the same signing primitive in a byte-identical three-part shape, with nothing but secret disjointness — which nothing enforces — telling them apart. The envelope now signs under `typ: "melody-internal"`, the decoder REQUIRES that type, and the JWT validator refuses any `typ` that is not absent or `JWT` (case-insensitive). `HmacTokenSourceConfig.AcceptUntypedEnvelopes` opens a migration window in which an envelope carrying NO `typ` is accepted; it defaults to false, and a `typ` that is present and wrong is refused whether or not it is set.
 
 **Symptom.** An envelope minted by an earlier build of the signer is rejected by an upgraded verifier ("internal-auth type is not accepted" in the journal at Info). With the default thirty-second envelope ttl, the exposure is one rolling-deploy window in a fleet where signers and verifiers upgrade at different moments. A JWT minted with an exotic `typ` (anything other than absent or `JWT`) is now refused.
 
-**Remedy.** Upgrade verifiers and signers within the envelope ttl of one another, or tolerate the one-window rejections — they fail closed to anonymous, exactly as an expired envelope does. A JWT issuer that stamps a non-standard `typ` must mint with `JWT` or drop the field.
+**Remedy.** For a fleet that cannot upgrade verifiers and signers within the envelope ttl of one another, set `AcceptUntypedEnvelopes: true` on the verifiers FIRST, roll the signers, then clear it — that ordering is what makes the upgrade continuous, and it is the only shape that avoids the rejections entirely. Without it, upgrade both sides within the ttl or tolerate the one-window rejections; they fail closed to anonymous, exactly as an expired envelope does. What the window costs while it is open is the structural half of the domain separation — a JSON web token carries no `typ`, so one presented on this header is no longer refused on its type alone; it is still refused on its signature, which must verify under the internal-auth secret for the key id it names, so the exposure is a deployment that signs JSON web tokens with the very secret it uses for internal auth. The window is removed in v4. A JWT issuer that stamps a non-standard `typ` must mint with `JWT` or drop the field.
 
 ### Security: both token stores refuse a non-positive ttl on `PutWithTtl`
 
@@ -1495,6 +1495,14 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 **Symptom.** An out-of-tree implementation of the `Session` contract stops compiling with "missing method Snapshot".
 
 **Remedy.** Implement `Snapshot` as one critical section over the same three answers the accessors give; a single-threaded implementation can simply return `instance.All(), instance.IsModified(), instance.IsCleared()`.
+
+### Session: the manager no longer closes a storage it was handed
+
+**What changed.** `session.NewManager` builds a manager that does not own its storage: `Close` leaves the storage open, because a storage handed in was built by someone else and is closed by whoever built it — on the container path both are registered services and the container closes each one itself, so the cascade closed the storage twice, which a storage wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. `NewManagerOwningStorage` keeps the cascade for the caller that builds both by hand. This is the same ownership rule the cache manager took, and it is stated here because the session manager took it too.
+
+**Symptom.** A hand-wired `NewManager` caller that relied on `manager.Close()` to close its storage finds the storage still open: a file handle is not released, and a storage that runs a goroutine keeps running it for the life of the process.
+
+**Remedy.** Build with `NewManagerOwningStorage` if the manager is meant to own the storage, or close the storage where it was built. On the container path there is nothing to do — the container already closes both.
 
 ### Session: a sub-second positive ttl is refused by the manual constructor too
 

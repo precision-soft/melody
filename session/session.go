@@ -49,9 +49,12 @@ func (instance *Session) String(key string) string {
     return stringValue
 }
 
+/* Set takes its own copy at the depth the readers copy at. Get, All and Snapshot all hand out a deep copy so a caller mutating what it received cannot change the live session behind Set's back; storing the caller's value by reference opens the same hole from the other side, and worse — the session would hold memory it does not own, so a caller still writing to the map it handed over races the copy the response path makes, and a concurrent map read and write is a fatal error no recover reaches. */
 func (instance *Session) Set(key string, value any) {
+    ownedValue := internal.CopyAnyValue(value)
+
     instance.mutex.Lock()
-    instance.values[key] = value
+    instance.values[key] = ownedValue
     instance.modified = true
     instance.mutex.Unlock()
 }

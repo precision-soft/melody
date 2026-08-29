@@ -17,6 +17,9 @@ import (
 /* ErrSessionDeleted is the cause carried by the error SaveSession returns for a session that was deleted while the request holding it was still running. It says the session ended, not that the storage failed, and the two need different answers: the response path expires the browser cookie and serves the handler's response, where a storage outage suppresses the cookie and answers 500. */
 var ErrSessionDeleted = errors.New("session was deleted")
 
+/* ErrSessionRotated is the cause carried by the refusal to save a session id that a rotation retired, and it exists because the response path cannot answer a rotation the way it answers a logout. Both refuse the write for the same reason — the retired id must not be re-created — but a logout ends the identity, where a rotation moves it to a fresh id the client is already being handed. Expiring the browser cookie is right for the first and logs the user out for the second, immediately after the login that rotated the id. A caller that wants only "the write was refused" reads ErrSessionDeleted, which this refusal also carries. */
+var ErrSessionRotated = errors.New("session was rotated away")
+
 /* TombstoneRetention is the default for how long a deleted session id is remembered so a request that loaded that session before it was deleted cannot write it back. It has to cover the longest a request can still be holding a snapshot taken before the delete — the lifetime of an in-flight request, not the lifetime of a session — and nothing in the chain bounds that lifetime: the server's socket timeouts cut the connection, not the handler goroutine, so a request that outlives the window can save the deleted session back. A deployment whose slowest legitimate request exceeds five minutes sizes the window to match, through MELODY_HTTP_SESSION_TOMBSTONE_RETENTION on the framework path or NewManagerWithTombstoneRetention when wiring the manager by hand; what the window costs is one remembered entry per deletion inside it, and the record lives in this manager, per process. */
 const TombstoneRetention = 5 * time.Minute
 
@@ -35,6 +38,8 @@ type Manager struct {
     /* the tombstone record has a lock of its own, held for a map read or a map write and never across the storage: a section that spans I/O and a section that does not have no reason to share a lock. */
     tombstoneMutex sync.Mutex
     deletedAtById  map[string]time.Time
+    /* which of the buried ids were retired by a rotation rather than ended by a delete. It rides on the same record and the same retention as the burials, and is pruned by the same walk, so a rotation cannot outlive the tombstone that refuses it. */
+    rotatedAwayIds map[string]bool
     /* the same burials in the order they happened, which is the order they lapse in, so the pruning walks only what has actually lapsed instead of the whole record */
     buriedInOrder []tombstone
 }
@@ -145,6 +150,7 @@ func newManager(
         ownsStorage:        ownsStorage,
         tombstoneRetention: tombstoneRetention,
         deletedAtById:      make(map[string]time.Time),
+        rotatedAwayIds:     make(map[string]bool),
     }
 }
 
@@ -204,7 +210,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
     rotatedId := instance.uniqueSessionId()
 
     /* the rotated-away id is buried for the same reason a deleted one is, and in the same critical section as its removal: a request that loaded the session under the previous id while this rotation ran would otherwise write it back, re-creating the very id the rotation exists to retire */
-    deleteErr := instance.DeleteSession(previousId)
+    deleteErr := instance.deleteSessionRecordingCause(previousId, true)
     if nil != deleteErr {
         return nil, deleteErr
     }
@@ -256,7 +262,19 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
     sessionMutex.Lock()
     defer sessionMutex.Unlock()
 
-    if true == instance.isTombstoned(sessionId) {
+    tombstoned, rotatedAway := instance.tombstoneStateOf(sessionId)
+    if true == tombstoned {
+        /* the refusal carries ErrSessionDeleted either way, so a caller that only asks "was the write refused" keeps the answer it had; a rotation carries ErrSessionRotated beside it, which is what lets the response path keep the browser cookie it is in the middle of replacing */
+        if true == rotatedAway {
+            return exception.NewError(
+                "session was rotated away and cannot be saved again",
+                map[string]any{
+                    "sessionRef": sessionIdLogReference(sessionId),
+                },
+                errors.Join(ErrSessionDeleted, ErrSessionRotated),
+            )
+        }
+
         return exception.NewError(
             "session was deleted and cannot be saved again",
             map[string]any{
@@ -270,6 +288,10 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
 }
 
 func (instance *Manager) DeleteSession(sessionId string) error {
+    return instance.deleteSessionRecordingCause(sessionId, false)
+}
+
+func (instance *Manager) deleteSessionRecordingCause(sessionId string, rotated bool) error {
     if false == isValidSessionId(sessionId) {
         return exception.NewError(
             "session id is invalid in delete session",
@@ -286,7 +308,11 @@ func (instance *Manager) DeleteSession(sessionId string) error {
     /* only a removal that actually happened earns a tombstone. Nothing lifts a burial before its retention window lapses, so one laid over a storage refusal refuses every later save of an id whose entry is still there: the caller is handed a transient error, its next SaveSession answers ErrSessionDeleted, and the response path reads that refusal as a deliberate logout and expires the browser cookie — a storage blip logs the user out of a session that was never removed. The burial stays inside this section and follows the removal, so a save waiting on this lock still finds the tombstone whenever the entry did go. */
     deleteErr := instance.storage.Delete(sessionId)
     if nil == deleteErr {
-        instance.buryTombstone(sessionId)
+        if true == rotated {
+            instance.buryRotationTombstone(sessionId)
+        } else {
+            instance.buryTombstone(sessionId)
+        }
     }
 
     return deleteErr
@@ -323,16 +349,37 @@ func (instance *Manager) buryTombstone(sessionId string) {
     instance.buryTombstoneAt(sessionId, instance.clock.Now())
 }
 
+/* buryRotationTombstone buries the same refusal a delete does and records why, so the save path can name the cause and the response path can tell a retired id apart from an ended one */
+func (instance *Manager) buryRotationTombstone(sessionId string) {
+    instance.buryRotationTombstoneAt(sessionId, instance.clock.Now())
+}
+
 /* buryTombstoneAt records a burial at a given instant, which is what lets the pruning be driven by the order of the burials rather than by a walk of the whole record.
 
    Pruning still rides on the burial, so nothing has to sweep the record on a timer — but it now walks only the burials that have actually lapsed. Every tombstone is held for the same window, so the burials lapse in the order they happened and the lapsed ones are a prefix of the queue: the walk stops at the first one still inside the window. Sweeping the whole map instead cost a step per remembered deletion on every login and every logout, and the record grows with the rate of logins, so the burial got slower exactly as the traffic that drives it got heavier — at a hundred thousand remembered deletions one logout cost six hundred microseconds, with the manager's lock held for all of it. */
 func (instance *Manager) buryTombstoneAt(sessionId string, deletedAt time.Time) {
+    instance.buryTombstoneRecordingCause(sessionId, deletedAt, false)
+}
+
+func (instance *Manager) buryRotationTombstoneAt(sessionId string, deletedAt time.Time) {
+    instance.buryTombstoneRecordingCause(sessionId, deletedAt, true)
+}
+
+func (instance *Manager) buryTombstoneRecordingCause(sessionId string, deletedAt time.Time, rotated bool) {
     instance.tombstoneMutex.Lock()
     defer instance.tombstoneMutex.Unlock()
 
     instance.pruneLapsedTombstonesLocked(deletedAt)
 
     instance.deletedAtById[sessionId] = deletedAt
+
+    /* an id buried again inside its window takes the cause of the burial that is current, so an id rotated away and later deleted outright stops reading as a rotation */
+    if true == rotated {
+        instance.rotatedAwayIds[sessionId] = true
+    } else {
+        delete(instance.rotatedAwayIds, sessionId)
+    }
+
     instance.buriedInOrder = append(
         instance.buriedInOrder,
         tombstone{sessionId: sessionId, deletedAt: deletedAt},
@@ -351,6 +398,7 @@ func (instance *Manager) pruneLapsedTombstonesLocked(now time.Time) {
         deletedAt, exists := instance.deletedAtById[buried.sessionId]
         if true == exists && true == deletedAt.Equal(buried.deletedAt) {
             delete(instance.deletedAtById, buried.sessionId)
+            delete(instance.rotatedAwayIds, buried.sessionId)
         }
 
         lapsedUntil = lapsedUntil + 1
@@ -361,11 +409,28 @@ func (instance *Manager) pruneLapsedTombstonesLocked(now time.Time) {
     }
 }
 
+/* tombstoneStateOf answers whether the id is buried and why in one acquisition of the record's lock: asking the two questions separately would let a burial land between them and pair "not buried" with a rotation, or a lapse pair "buried" with a cause already cleared. */
+func (instance *Manager) tombstoneStateOf(sessionId string) (bool, bool) {
+    instance.tombstoneMutex.Lock()
+    defer instance.tombstoneMutex.Unlock()
+
+    if false == instance.isTombstonedLocked(sessionId) {
+        return false, false
+    }
+
+    return true, instance.wasRotatedAwayLocked(sessionId)
+}
+
 func (instance *Manager) isTombstoned(sessionId string) bool {
     instance.tombstoneMutex.Lock()
     defer instance.tombstoneMutex.Unlock()
 
     return instance.isTombstonedLocked(sessionId)
+}
+
+/* wasRotatedAwayLocked answers why an id is buried, and is only meaningful for an id isTombstoned already reported: the record is cleared with the burial, so a lapsed rotation answers false here exactly as it answers false there. */
+func (instance *Manager) wasRotatedAwayLocked(sessionId string) bool {
+    return instance.rotatedAwayIds[sessionId]
 }
 
 func (instance *Manager) isTombstonedLocked(sessionId string) bool {

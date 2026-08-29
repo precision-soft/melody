@@ -39,6 +39,13 @@ type HmacTokenSourceConfig struct {
     /* VerifyBodyBeforeNonce selects the default order of the body and nonce checks. When false (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When true the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. A per-request override (route attribute HmacVerifyBodyBeforeNonceAttribute, or SetHmacVerifyBodyBeforeNonce) takes precedence for routes/calls that need the opposite trade-off. */
     VerifyBodyBeforeNonce bool
 
+    /* AcceptUntypedEnvelopes opens the migration window for the envelope's own typ, and exists because emitting the typ and requiring it arrived together: a verifier on this version refuses every envelope minted by a signer that has not been redeployed yet, so during a rolling upgrade each unmigrated caller fails before its signature is read and a fleet degrades to anonymous all at once. Set it on the verifiers FIRST, roll the signers, then clear it — that ordering is what makes the upgrade continuous.
+
+       What the window costs while it is open is the structural half of the domain separation: a JSON web token carries no typ, so one presented on this header is no longer refused on its type alone. It is still refused on its signature, which has to verify under the internal-auth secret for the key id it names, and the JWT validator still refuses this envelope's type — so the exposure is a deployment that signs JSON web tokens with the very secret it uses for internal auth. A typ that is present and wrong is refused whether or not this is set.
+
+       Default false, which is the strict reading. The window is removed in v4, where the typ is required unconditionally. */
+    AcceptUntypedEnvelopes bool
+
     /* Clock is the clock the envelope's time window and the nonce ttl are measured against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
     Clock clockcontract.Clock
 }
@@ -84,6 +91,7 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         leeway:                config.Leeway,
         maxFutureExpiry:       config.MaxFutureExpiry,
         verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,
+        acceptUntypedEnvelopes: config.AcceptUntypedEnvelopes,
         serviceIdentity:       config.ServiceIdentity,
         clock:                 clockInstance,
     }
@@ -103,6 +111,7 @@ type HmacTokenSource struct {
     maxFutureExpiry       time.Duration
     verifyBodyBeforeNonce bool
     serviceIdentity       string
+    acceptUntypedEnvelopes bool
     clock                 clockcontract.Clock
 }
 
@@ -119,7 +128,7 @@ func (instance *HmacTokenSource) Resolve(
         return NewAnonymousToken(), nil
     }
 
-    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, instance.secrets)
+    envelope, keyId, decodeErr := decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue, instance.secrets, instance.acceptUntypedEnvelopes)
     if nil != decodeErr {
         return instance.reject(runtimeInstance, decodeErr)
     }

@@ -447,7 +447,9 @@ func removeOrphanSessionTemporaryFiles(path string) {
     }
 }
 
-/* refuseAppendModeHandle asks the handle the only question that settles it, and asks it with a write of nothing: WriteAt refuses an appending handle before it looks at the bytes, so an empty slice answers the question and touches no file — a zero-length write on a handle that is not appending returns without reaching the descriptor at all. There is no portable way to read the open flags back otherwise, and os.File itself keeps the answer: it is the same field WriteAt consults on every save, so the door and the write agree by construction rather than by two guesses. */
+/* refuseAppendModeHandle asks the handle the only question that settles it, and asks it with a write of nothing: WriteAt refuses an appending handle before it looks at the bytes, so an empty slice answers the question and touches no file — a zero-length write on a handle that is not appending returns without reaching the descriptor at all. There is no portable way to read the open flags back otherwise, and os.File itself keeps the answer: it is the same field WriteAt consults on every save, so the door and the write agree by construction rather than by two guesses.
+
+   MEASURED GAP, deliberately not closed here: the empty slice cannot settle whether the handle can write AT ALL. A zero-length write returns before it reaches the descriptor, so a read-only handle answers nil, passes this door, loads sessions correctly and fails every Save for the life of the process. Closing it needs the descriptor's access mode, which Go does not expose portably; truncating the file to its own length was tried and refused as the answer, because it also refuses a handle whose writes work and whose truncate does not, which is a case this storage supports. */
 func refuseAppendModeHandle(fileInstance *os.File) error {
     _, err := fileInstance.WriteAt([]byte{}, 0)
     if nil == err {
@@ -477,8 +479,13 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
     /* the write goes first and the truncation cuts to the length it produced, because the reverse order held a window in which the file was empty on disk: a process killed between a truncation to zero and the write that was to follow — an OOM kill, a docker kill, a deploy with no grace period — left a zero-length file, which the next boot reads as "no sessions at all" and answers by logging every user out without a single error. This door writes through a handle it does not own, so the temp-and-rename its FromPath sibling uses is not available to it: a rename would unlink the very inode the caller still holds. What remains is a window in which a torn document can survive a kill mid-write, and that one is written on the contract instead of being made to disappear.
 
        The offset is named on the write rather than sought beforehand, because a seek is advice a handle opened for appending is free to ignore: write(2) on an O_APPEND descriptor lands at the end of the file whatever was sought, so the snapshot went AFTER the previous document and the truncation below then cut the pair to the new length — keeping the old document's first bytes and calling them the session file. WriteAt refuses such a handle by contract instead, so the write either lands at zero or fails, and the failure reaches the caller as one. */
-    _, err = fileInstance.WriteAt(buffer.Bytes(), 0)
+    writtenCount, err := fileInstance.WriteAt(buffer.Bytes(), 0)
     if nil != err {
+        /* a WriteAt that fails PART WAY has already put the head of the new document over the tail of the old one, and the file now decodes as neither. Reporting that as an ordinary failure would roll the in-memory entry back to a state the disk no longer holds — the same inversion the truncate and sync failures below are marked for — so a torn write is marked the same way: the caller keeps the state it just wrote rather than restoring one the file has stopped agreeing with. A write that failed having placed nothing is the ordinary failure it looks like. */
+        if 0 < writtenCount {
+            return persistedDespiteFlushFailure("failed to write session storage file after it was partly written", nil, err)
+        }
+
         return exception.NewError("failed to write session storage file", nil, err)
     }
 

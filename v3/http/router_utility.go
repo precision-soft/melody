@@ -359,8 +359,13 @@ func writeResponse(
                 }
             } else {
                 err := sessionManager.SaveSession(sessionInstance)
-                if true == errors.Is(err, session.ErrSessionDeleted) {
-                    /* the session ended while this request was running — another request logged it out, or rotated it away. That is not a failure of this request and it is not a storage outage: the write is refused so the deleted session cannot be re-created, the cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+                if true == errors.Is(err, session.ErrSessionRotated) {
+                    /* another request rotated this id away while this one was running — a login, typically. The write is refused for the same reason a deleted session's is, so the retired id cannot be re-created, but the cookie is LEFT ALONE: the identity did not end, it moved to a fresh id the rotating request is handing the client in its own Set-Cookie. Expiring it here would race that header and log the user out immediately after the login that rotated the session. The handler's own response is served unchanged. */
+                    sessionPersistFailed = true
+
+                    logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelWarning, "session was rotated away while the request was in flight", err, sessionInstance.Id(), request)
+                } else if true == errors.Is(err, session.ErrSessionDeleted) {
+                    /* the session ended while this request was running — another request logged it out. That is not a failure of this request and it is not a storage outage: the write is refused so the deleted session cannot be re-created, the cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
                     sessionPersistFailed = true
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelWarning, "session was deleted while the request was in flight", err, sessionInstance.Id(), request)

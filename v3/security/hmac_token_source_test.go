@@ -648,6 +648,45 @@ func TestHmacNonceGuardKey_ColonExtensionKeyIdsCannotCollide(t *testing.T) {
 }
 
 /* the pre-typ wire format: a header carrying alg and kid alone, signed correctly. The decoder must refuse it — requiring the envelope's own typ is the structural half of the domain separation from every other HS256 credential. */
+/* the same envelope the test below refuses AUTHENTICATES once the deployment opens the migration window, which is the whole point of the window: a verifier already on this version keeps accepting the peers that have not been redeployed yet, so a rolling upgrade does not take the fleet to anonymous in one step. The window is opt-in, so this is the only shape that reaches it. */
+func TestHmacTokenSource_TheMigrationWindowAuthenticatesAnEnvelopeWithoutTheInternalAuthType(t *testing.T) {
+    secret := []byte("current-shared-secret-value-0001")
+    now := time.Now()
+
+    payloadBytes, _ := json.Marshal(hmacEnvelope{
+        App:       "wms-service",
+        Method:    "GET",
+        Path:      "/internal/ping",
+        IssuedAt:  now.Unix(),
+        ExpiresAt: now.Add(30 * time.Second).Unix(),
+        Nonce:     "nonce-window-1",
+        BodyHash:  hashBody(nil),
+    })
+
+    headerBytes, _ := json.Marshal(map[string]string{"alg": "HS256", "kid": "key-current"})
+
+    part0 := base64.RawURLEncoding.EncodeToString(headerBytes)
+    part1 := base64.RawURLEncoding.EncodeToString(payloadBytes)
+    signature := signHmacSha256(part0+"."+part1, secret)
+    headerValue := part0 + "." + part1 + "." + base64.RawURLEncoding.EncodeToString(signature)
+
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:                hmacTestSecrets(),
+        Apps:                   hmacTestApps(),
+        NonceGuard:             NewMemoryNonceGuard(),
+        AcceptUntypedEnvelopes: true,
+    })
+
+    token, resolveErr := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, DefaultHmacHeaderName, headerValue))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if false == token.IsAuthenticated() {
+        t.Fatal("expected the migration window to authenticate an envelope minted before the typ was emitted")
+    }
+}
+
 func TestHmacTokenSource_RejectsAnEnvelopeWithoutTheInternalAuthType(t *testing.T) {
     secret := []byte("current-shared-secret-value-0001")
     now := time.Now()

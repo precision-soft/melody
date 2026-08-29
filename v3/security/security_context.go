@@ -99,6 +99,13 @@ func (instance *SecurityContext) IsGranted(role string) bool {
         return false
     }
 
+    /* the voters refuse a token that reports roles while answering IsAuthenticated false, and this door has to
+    answer the same: it is called straight from a handler to branch on privilege, so a token the firewall denied
+    the route would otherwise still open the content behind it */
+    if false == token.IsAuthenticated() {
+        return false
+    }
+
     compiledFirewall := instance.Firewall()
     if nil == compiledFirewall {
         return hasRole(token.Roles(), role)

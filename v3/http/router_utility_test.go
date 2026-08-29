@@ -1206,6 +1206,47 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
     }
 }
 
+/* A session ROTATED away while the request was running is refused the same write and answered differently: the identity did not end, it moved to a fresh id the rotating request is handing the client in its own Set-Cookie, so expiring the browser cookie here would race that header and log the user out immediately after the login that rotated the session. The write is still refused, the refusal is still logged, and the handler's own response is still served — only the clearing cookie is gone. */
+func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+    response := TextResponse(nethttp.StatusOK, "handler body")
+    writer := httptest.NewRecorder()
+
+    sessionManager := &stubSessionManager{
+        saveErr: exception.NewError(
+            "session was rotated away and cannot be saved again",
+            nil,
+            errors.Join(session.ErrSessionDeleted, session.ErrSessionRotated),
+        ),
+    }
+    sessionInstance := &stubSession{id: "session-123", isModified: true}
+
+    writeResponse(
+        nil,
+        melodyRequest,
+        writer,
+        response,
+        sessionManager,
+        sessionInstance,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    httpResponse := writer.Result()
+
+    if nethttp.StatusOK != httpResponse.StatusCode {
+        t.Fatalf("expected the handler's own response to be served, got %d", httpResponse.StatusCode)
+    }
+
+    if 0 != len(httpResponse.Cookies()) {
+        t.Fatalf("expected no cookie at all for a rotated-away session, got %d", len(httpResponse.Cookies()))
+    }
+}
+
 /* A storage outage on the save path answers 500 rather than the response the handler produced: the handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored — and the client cannot tell the difference. The cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
 func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)

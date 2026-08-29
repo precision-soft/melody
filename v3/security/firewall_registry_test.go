@@ -183,3 +183,26 @@ func TestFirewallRegistry_Match_ATypedNilRequestSelectsNoFirewall(t *testing.T) 
         t.Fatalf("expected no firewall, got %v", matchedFirewall)
     }
 }
+
+/* the matcher comes through NewCompiledFirewall, which is public and validates nothing, so a nil pointer of an
+application's own matcher type arrives here as a non-nil interface: `nil ==` reads it as a live matcher and the
+Matches call below dereferences it. This is the walk that decides which firewall claims a request, so the crash
+lands on EVERY request rather than on a rare path. Written before the repair, it panics with SIGSEGV. */
+func TestFirewallRegistry_Match_SkipsAFirewallCarryingATypedNilMatcher(t *testing.T) {
+    var typedNilMatcher *PathPrefixMatcher
+
+    firewall := NewCompiledFirewall(
+        "main", typedNilMatcher, "", nil, nil,
+        NewAccessControl(), nil, nil, nil, nil,
+        "", "", nil, nil,
+        SourceNone, SourceNone, SourceFirewall, SourceNone, SourceNone,
+    )
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, NewAccessControl()))
+
+    matched, found := registry.Match(newFirewallTestRequest("/anything"))
+
+    if true == found || nil != matched {
+        t.Fatalf("expected a firewall whose matcher is a typed nil to claim nothing, got %v", matched)
+    }
+}

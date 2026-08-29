@@ -1167,3 +1167,52 @@ func TestNewManagerWithClock_RefusesANilClock(t *testing.T) {
         "session manager clock is nil",
     )
 }
+
+/* the two ways an id stops being writable have to be told apart at the save path, because the response path
+answers them differently: a logout ends the identity and the browser cookie is expired, a rotation moves the
+identity to a fresh id the rotating request is handing the client, and expiring the cookie there logs the user
+out immediately after the login that rotated the session. Both refusals still carry ErrSessionDeleted, so a
+caller that only asks whether the write was refused reads the same answer it always did. */
+func TestManager_SaveSession_NamesARotationApartFromADeletion(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
+
+    rotatedAway := manager.NewSession()
+    if saveErr := manager.SaveSession(rotatedAway); nil != saveErr {
+        t.Fatalf("unexpected error: %v", saveErr)
+    }
+
+    rotatedAwayId := rotatedAway.Id()
+
+    if _, regenerateErr := manager.RegenerateSession(rotatedAway); nil != regenerateErr {
+        t.Fatalf("unexpected error: %v", regenerateErr)
+    }
+
+    rotationRefusal := manager.SaveSession(&Session{id: rotatedAwayId, values: map[string]any{}, modified: true})
+    if false == errors.Is(rotationRefusal, ErrSessionRotated) {
+        t.Fatalf("expected the refusal of a rotated-away id to carry ErrSessionRotated, got %v", rotationRefusal)
+    }
+
+    if false == errors.Is(rotationRefusal, ErrSessionDeleted) {
+        t.Fatalf("expected the refusal of a rotated-away id to carry ErrSessionDeleted beside it, got %v", rotationRefusal)
+    }
+
+    deleted := manager.NewSession()
+    if saveErr := manager.SaveSession(deleted); nil != saveErr {
+        t.Fatalf("unexpected error: %v", saveErr)
+    }
+
+    deletedId := deleted.Id()
+
+    if deleteErr := manager.DeleteSession(deletedId); nil != deleteErr {
+        t.Fatalf("unexpected error: %v", deleteErr)
+    }
+
+    deletionRefusal := manager.SaveSession(&Session{id: deletedId, values: map[string]any{}, modified: true})
+    if false == errors.Is(deletionRefusal, ErrSessionDeleted) {
+        t.Fatalf("expected the refusal of a deleted id to carry ErrSessionDeleted, got %v", deletionRefusal)
+    }
+
+    if true == errors.Is(deletionRefusal, ErrSessionRotated) {
+        t.Fatalf("expected the refusal of a deleted id NOT to read as a rotation")
+    }
+}

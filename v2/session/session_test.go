@@ -1,6 +1,7 @@
 package session
 
 import (
+    "sync"
     "testing"
     "time"
 
@@ -285,5 +286,46 @@ func TestSession_SnapshotPairsTheFlagsWithTheValues(t *testing.T) {
     }
     if 0 != len(values) {
         t.Fatalf("expected the cleared snapshot to pair the flag with the emptied values, got %#v", values)
+    }
+}
+
+/* Set has to take its own copy at the depth the readers copy at. Get, All and Snapshot all hand out a deep
+copy so that a caller mutating what it received cannot change the live session behind Set's back; Set storing
+the caller's map by reference opens the same hole from the other side, and worse — the session then holds
+memory it does not own, so a caller that keeps writing to the map it handed over races the copy the response
+path makes. A concurrent map read and write is a fatal error in Go: it kills the process, and no recover
+reaches it. This runs under -race, which is the only lane that can observe it. */
+func TestSession_SetDoesNotKeepTheCallersMapByReference(t *testing.T) {
+    sessionInstance := &Session{id: "0123456789abcdef0123456789abcdef", values: map[string]any{}}
+
+    callerOwnedMap := map[string]any{"seeded": 1}
+    sessionInstance.Set("payload", callerOwnedMap)
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(2)
+
+    go func() {
+        defer waitGroup.Done()
+        for index := 0; index < 200; index++ {
+            callerOwnedMap["written-by-the-caller"] = index
+        }
+    }()
+
+    go func() {
+        defer waitGroup.Done()
+        for index := 0; index < 200; index++ {
+            _, _, _ = sessionInstance.Snapshot()
+        }
+    }()
+
+    waitGroup.Wait()
+
+    stored, ok := sessionInstance.All()["payload"].(map[string]any)
+    if false == ok {
+        t.Fatalf("expected the stored payload to still be a map")
+    }
+
+    if _, leaked := stored["written-by-the-caller"]; true == leaked {
+        t.Fatalf("expected the session to hold its own copy, but the caller's later write reached it")
     }
 }

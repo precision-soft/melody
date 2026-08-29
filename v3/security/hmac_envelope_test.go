@@ -122,6 +122,44 @@ func TestDecodeHmacHeaderValue_RefusesAnyOtherAlgorithmOrType(t *testing.T) {
     }
 }
 
+/* the migration window admits exactly the envelopes a signer that predates the typ can mint, and nothing else: an envelope carrying NO typ verifies, while one carrying a WRONG typ is refused whether or not the window is open. Without the second half the window would let a JSON web token through on its type as well as on its absence. */
+func TestDecodeHmacHeaderValue_TheMigrationWindowAcceptsAnAbsentTypeAndStillRefusesAWrongOne(t *testing.T) {
+    secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
+
+    encode := func(headerType string) string {
+        headerBytes, _ := json.Marshal(hmacEnvelopeHeader{Algorithm: hmacEnvelopeAlgorithm, Type: headerType, KeyId: "key-current"})
+        payloadBytes, _ := json.Marshal(hmacEnvelopeProbe())
+
+        part0 := base64.RawURLEncoding.EncodeToString(headerBytes)
+        part1 := base64.RawURLEncoding.EncodeToString(payloadBytes)
+
+        return part0 + "." + part1 + "." + base64.RawURLEncoding.EncodeToString(signHmacSha256(part0+"."+part1, secret))
+    }
+
+    envelope, keyId, absentErr := decodeHmacHeaderValueAcceptingUntypedEnvelopes(encode(""), hmacEnvelopeProbeSecrets(), true)
+    if nil != absentErr {
+        t.Fatalf("expected an envelope minted before the typ to be accepted inside the window, got %v", absentErr)
+    }
+
+    if "key-current" != keyId {
+        t.Fatalf("expected the key id to be carried through, got %q", keyId)
+    }
+
+    if hmacEnvelopeProbe().Path != envelope.Path {
+        t.Fatalf("expected the payload to be carried through, got path %q", envelope.Path)
+    }
+
+    _, _, wrongErr := decodeHmacHeaderValueAcceptingUntypedEnvelopes(encode("JWT"), hmacEnvelopeProbeSecrets(), true)
+    if nil == wrongErr || false == strings.Contains(wrongErr.Error(), "internal-auth type is not accepted") {
+        t.Fatalf("expected a wrong typ to be refused even inside the window, got %v", wrongErr)
+    }
+
+    _, _, closedErr := decodeHmacHeaderValueAcceptingUntypedEnvelopes(encode(""), hmacEnvelopeProbeSecrets(), false)
+    if nil == closedErr || false == strings.Contains(closedErr.Error(), "internal-auth type is not accepted") {
+        t.Fatalf("expected an absent typ to be refused with the window closed, got %v", closedErr)
+    }
+}
+
 func TestDecodeHmacHeaderValue_RefusesASignatureOverOtherContent(t *testing.T) {
     secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
     valid, _ := encodeHmacHeaderValue("key-current", hmacEnvelopeProbe(), secret)
