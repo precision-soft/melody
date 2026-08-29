@@ -484,3 +484,247 @@ func TestLazyService_AContainerBackedHandleTurnsTerminalAfterContainerClose(t *t
         t.Fatalf("expected the container-backed handle to refuse after the container closed, not serve the dead value")
     }
 }
+
+/* the closing service reaches through the handle from inside its own Close, which is the only place the
+teardown window can be observed from: outside it the container is either open or finished. */
+type lazyTeardownReader struct {
+    lazyHandle    *LazyService[*lazyProbeItem]
+    directResolve func() (*lazyProbeItem, error)
+
+    lazyErr   error
+    directErr error
+    ran       bool
+}
+
+func (instance *lazyTeardownReader) Close() error {
+    instance.ran = true
+    _, instance.lazyErr = instance.lazyHandle.Resolve()
+    _, instance.directErr = instance.directResolve()
+
+    return nil
+}
+
+/* A service closing through a handle must be served what the resolver beside it still answers directly.
+The container raises the flag IsClosed reports at the START of its teardown and stops answering resolutions
+only at the end, deliberately, so that a service's own Close is entitled to what it depends on. A handle
+that read the earlier flag turned terminal for the whole window and dropped its memoized value on the way,
+so a worker releasing a lease from Close was refused by the handle and served by the door beside it. */
+func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+        return &lazyProbeItem{name: "dependency"}, nil
+    })
+
+    reader := &lazyTeardownReader{
+        lazyHandle: Lazy[*lazyProbeItem](serviceContainer, "app.dependency"),
+        directResolve: func() (*lazyProbeItem, error) {
+            return FromResolver[*lazyProbeItem](serviceContainer, "app.dependency")
+        },
+    }
+
+    /* memoized before anything closes, so a drop is observable as a loss rather than a miss */
+    if _, resolveErr := reader.lazyHandle.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error before the teardown: %v", resolveErr)
+    }
+
+    MustRegister[*lazyTeardownReader](serviceContainer, "app.reader", func(resolver containercontract.Resolver) (*lazyTeardownReader, error) {
+        return reader, nil
+    })
+    MustFromResolver[*lazyTeardownReader](serviceContainer, "app.reader")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == reader.ran {
+        t.Fatalf("the closing service never ran, so the teardown window was never observed")
+    }
+
+    if nil != reader.directErr {
+        t.Fatalf("the direct door is expected to answer a closing service, got %v", reader.directErr)
+    }
+
+    if nil != reader.lazyErr {
+        t.Fatalf("expected the handle to answer the closing service exactly as the direct door did, got %v", reader.lazyErr)
+    }
+}
+
+/* The same window, read through the resolver a provider was handed — the shape the LazyService godoc
+recommends when the teardown ordering matters, and therefore the shape that must not be the broken one.
+That view carries no scope, so its liveness answer comes from the container underneath it. */
+func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+        return &lazyProbeItem{name: "dependency"}, nil
+    })
+
+    reader := &lazyTeardownReader{}
+
+    MustRegister[*lazyTeardownReader](serviceContainer, "app.reader", func(resolver containercontract.Resolver) (*lazyTeardownReader, error) {
+        reader.lazyHandle = Lazy[*lazyProbeItem](resolver, "app.dependency")
+        reader.directResolve = func() (*lazyProbeItem, error) {
+            return FromResolver[*lazyProbeItem](resolver, "app.dependency")
+        }
+
+        return reader, nil
+    })
+    MustFromResolver[*lazyTeardownReader](serviceContainer, "app.reader")
+
+    if _, resolveErr := reader.lazyHandle.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error before the teardown: %v", resolveErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == reader.ran {
+        t.Fatalf("the closing service never ran, so the teardown window was never observed")
+    }
+
+    if nil != reader.directErr {
+        t.Fatalf("the direct door is expected to answer a closing service, got %v", reader.directErr)
+    }
+
+    if nil != reader.lazyErr {
+        t.Fatalf("expected the handle to answer the closing service exactly as the direct door did, got %v", reader.lazyErr)
+    }
+}
+
+/* The scope keeps the terminal reading, and this is what says so: a scope stops answering resolutions the
+moment it is marked closed, so both its doors refuse together and a handle over it must go on refusing. The
+window the container has does not exist there, and widening the container's repair onto the scope would
+serve a dead request's state. */
+func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheScopeTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegisterScoped[*lazyProbeItem](serviceContainer, "scoped.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+        return &lazyProbeItem{name: "dependency"}, nil
+    })
+
+    reader := &lazyTeardownReader{}
+
+    MustRegisterScoped[*lazyTeardownReader](serviceContainer, "scoped.reader", func(resolver containercontract.Resolver) (*lazyTeardownReader, error) {
+        return reader, nil
+    })
+
+    scopeInstance := serviceContainer.NewScope()
+
+    reader.lazyHandle = Lazy[*lazyProbeItem](scopeInstance, "scoped.dependency")
+    reader.directResolve = func() (*lazyProbeItem, error) {
+        return FromResolver[*lazyProbeItem](scopeInstance, "scoped.dependency")
+    }
+
+    if _, resolveErr := reader.lazyHandle.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error before the teardown: %v", resolveErr)
+    }
+
+    MustFromResolver[*lazyTeardownReader](scopeInstance, "scoped.reader")
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected scope close error: %v", closeErr)
+    }
+
+    if false == reader.ran {
+        t.Fatalf("the closing service never ran, so the scope teardown was never observed")
+    }
+
+    if nil == reader.directErr {
+        t.Fatalf("expected the scope door to refuse a resolution during its own teardown")
+    }
+
+    if nil == reader.lazyErr || false == strings.Contains(reader.lazyErr.Error(), "lazy service scope is closed") {
+        t.Fatalf("expected the scope-backed handle to stay terminal with the scope-is-closed refusal, got %v", reader.lazyErr)
+    }
+}
+
+/* A handle built over the resolver a SCOPED provider was handed holds that one request's state, so it has
+to turn terminal with the request — the container it layers over is still live and would answer forever.
+This is the arm the container's own teardown window must not be widened onto. */
+func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScope(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegisterScoped[*lazyProbeItem](serviceContainer, "scoped.unit", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+        return &lazyProbeItem{name: "per-request"}, nil
+    })
+
+    /* the holder carries its own type: two scoped registrations of one type collide on the canonical key */
+    capturedHandle := (*LazyService[*lazyProbeItem])(nil)
+    MustRegisterScoped[string](serviceContainer, "scoped.holder", func(resolver containercontract.Resolver) (string, error) {
+        capturedHandle = Lazy[*lazyProbeItem](resolver, "scoped.unit")
+
+        return "holder", nil
+    })
+
+    requestScope := serviceContainer.NewScope()
+    MustFromResolver[string](requestScope, "scoped.holder")
+
+    if nil == capturedHandle {
+        t.Fatalf("the scoped provider never ran, so no handle was captured")
+    }
+
+    if _, resolveErr := capturedHandle.Resolve(); nil != resolveErr {
+        t.Fatalf("expected the live scope to serve the value, got %v", resolveErr)
+    }
+
+    if closeErr := requestScope.Close(); nil != closeErr {
+        t.Fatalf("unexpected scope close error: %v", closeErr)
+    }
+
+    _, resolveErr := capturedHandle.Resolve()
+    if nil == resolveErr {
+        t.Fatalf("expected the handle to turn terminal with the request scope, not serve the dead request's value")
+    }
+
+    if false == strings.Contains(resolveErr.Error(), "lazy service scope is closed") {
+        t.Fatalf("expected the scope-is-closed refusal, got %v", resolveErr)
+    }
+}
+
+/* A service registered on the CONTAINER is one instance for the whole process, but its provider first
+runs inside whichever request happened to reach it, and the view it is handed still carries that request's
+scope — suspended, so the provider's own wiring cannot read it. The liveness question has to follow the
+same predicate: a suspended view reads the container, so a handle the singleton captured must outlive the
+request that built it. Asking only whether a scope pointer was present killed the handle with that one
+request, while the container went on answering the same name directly for the rest of the process. */
+func TestLazyService_ASingletonsCapturedHandleOutlivesTheRequestThatBuiltIt(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister[string](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (string, error) {
+        return "process-lifetime-dependency", nil
+    })
+
+    capturedHandle := (*LazyService[string])(nil)
+    MustRegister[*lazyProbeItem](serviceContainer, "app.singleton", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+        capturedHandle = Lazy[string](resolver, "app.dependency")
+
+        return &lazyProbeItem{name: "singleton"}, nil
+    })
+
+    /* the singleton is first reached through a request, which is the ordinary case */
+    firstRequest := serviceContainer.NewScope()
+    MustFromResolver[*lazyProbeItem](firstRequest, "app.singleton")
+
+    if nil == capturedHandle {
+        t.Fatalf("the singleton's provider never ran, so no handle was captured")
+    }
+
+    if _, resolveErr := capturedHandle.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error inside the first request: %v", resolveErr)
+    }
+
+    if closeErr := firstRequest.Close(); nil != closeErr {
+        t.Fatalf("unexpected scope close error: %v", closeErr)
+    }
+
+    value, resolveErr := capturedHandle.Resolve()
+    if nil != resolveErr {
+        t.Fatalf("expected the singleton's handle to outlive the request that built it, got %v", resolveErr)
+    }
+
+    if "process-lifetime-dependency" != value {
+        t.Fatalf("expected the process-lifetime value, got %q", value)
+    }
+}

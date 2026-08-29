@@ -24,7 +24,7 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
 
-This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
+Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, and none of them asks the upgrader for an action.
 
 ### Bunorm: the registry refuses new callers while a pool is still closing
 

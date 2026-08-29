@@ -122,7 +122,7 @@ func (instance *HttpMiddleware) UseFactoriesWithPriority(priority int, factories
             []string{MiddlewareGroupHttp},
             make([]string, 0),
             func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
-                /* a factory that yields nil is refused at the build instead of being dropped from the chain: the pipeline skips a nil middleware without recording it anywhere, so the operator who registered a rate limiter here would run every request without it and be told nothing. The typed-nil yield is the same absence one assertion later — it would join the chain and panic per request. */
+                /* a factory that yields nil is refused at the build instead of being dropped from the chain, and the refusal is louder than the pipeline's own reading on purpose: the builder records such a definition as inactive under "factory returned no middleware", which is honest for a framework definition that has a reason to be inactive, but an application factory has no way to express that reason and a nil from one is a wiring mistake far more often than a decision. An operator who registered a rate limiter here would otherwise run every request without it and find out only by reading a report. A middleware meant to be conditional is left unregistered at the composition root, where the condition is; declaring one inactive from this door needs a way to say so, which does not exist yet. The typed-nil yield is the same absence one assertion later — it would join the chain and panic per request. */
                 middlewareInstance := factoryInstance(kernelInstance)
                 if true == internal.IsNilInterface(middlewareInstance) {
                     return nil, exception.NewError(

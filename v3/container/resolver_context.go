@@ -94,13 +94,15 @@ func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
 
-/* Closed reports whether the scope this resolution reads has ended, so a LazyService that captured a provider's resolver — the shape the godoc recommends for teardown ordering — turns terminal with that scope instead of serving a dead request's state. A resolution with no scope is a container one and ends when the container closes. The suspension is not consulted: it hides the scope from a container provider's own wiring, not from the liveness question a handle asks after the request is over. */
+/* Closed reports whether the thing this resolution reads has stopped answering resolutions, which is the liveness question a LazyService that captured a provider's resolver asks — the shape the godoc recommends for teardown ordering — so that such a handle turns terminal with it instead of serving a dead request's state.
+
+   The question is asked of whatever scopeVisible answers for, which is the same predicate that decides where the resolution itself reads, and the two must agree. A resolution that reads the request scope ends with its request. One that reads the CONTAINER — because it has no scope, or because the scope is suspended for a provider the container owns, whose service is one instance for the whole process — ends only once the teardown has finished, since until then the container deliberately still answers a closing service what it depends on. Consulting only the scope pointer answered for whichever request happened to trigger a singleton's construction: the handle it captured went terminal when that one request ended, while the container went on answering the same name directly for the rest of the process. */
 func (instance *resolverContext) Closed() bool {
-    if nil != instance.scopeInstance {
+    if true == instance.scopeVisible() {
         return instance.scopeInstance.Closed()
     }
 
-    return instance.containerInstance.IsClosed()
+    return instance.containerInstance.resolutionsRefused()
 }
 
 /* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */

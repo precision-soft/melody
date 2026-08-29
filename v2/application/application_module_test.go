@@ -26,6 +26,13 @@ func (instance fakeModule) Description() string {
     return instance.name
 }
 
+/* a module registered as a struct VALUE whose field is an interface: comparable as a type, comparable as a
+value only when the field holds something hashable */
+type payloadCarryingModule struct {
+    fakeModule
+    payload any
+}
+
 type fakeModuleProvider struct {
     fakeModule
     children []applicationcontract.Module
@@ -549,4 +556,37 @@ func TestApplicationRegisterModuleProvider_RefusesATypedNilProvider(t *testing.T
         },
         "module provider may not be nil",
     )
+}
+
+/* A module carrying an `any` field is comparable as a TYPE — an interface field counts as comparable at
+that level whatever it ends up holding — while the value is only comparable if what the field holds is.
+Asking the type therefore admitted a module to the identity map and then panicked hashing it, with exactly
+the "hash of unhashable type" the guard was written to avoid, for any module registered as a struct value
+whose field holds a map, a slice or a func. Such a module keeps the uncomparable path: registered, named,
+never a map key. */
+func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInsteadOfPanicking(t *testing.T) {
+    instance := &Application{}
+
+    instance.RegisterModule(payloadCarryingModule{
+        fakeModule: fakeModule{name: "carrier"},
+        payload:    map[string]any{"unhashable": 1},
+    })
+
+    assertModuleNames(t, instance.modules, []string{"carrier"})
+}
+
+/* the comparable half of the same shape stays on the identity path, so the repair is a narrowing of the
+skip and not a removal of it: one instance reached twice still boots once. */
+func TestRegisterModule_AValueModuleCarryingAHashableFieldKeepsItsIdentity(t *testing.T) {
+    instance := &Application{}
+
+    moduleInstance := payloadCarryingModule{
+        fakeModule: fakeModule{name: "carrier"},
+        payload:    "hashable",
+    }
+
+    instance.RegisterModule(moduleInstance)
+    instance.RegisterModule(moduleInstance)
+
+    assertModuleNames(t, instance.modules, []string{"carrier"})
 }

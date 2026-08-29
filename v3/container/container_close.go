@@ -31,6 +31,14 @@ func (instance *container) IsClosed() bool {
     return instance.isClosed
 }
 
+/* resolutionsRefused answers the memoized handle's liveness question: not whether a teardown began, which is what IsClosed reports, but whether this container has stopped answering resolutions altogether. The two differ for the whole teardown, and container_resolver.go refuses on this second state for the same reason. */
+func (instance *container) resolutionsRefused() bool {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.teardownFinished
+}
+
 /* Close tears the container down exactly once. A concurrent or repeated call blocks until the first teardown finishes and returns the same error, so a second caller never reports a premature success while services are still being closed.
 
    That blocking makes Close re-entrant-unsafe by construction: a service whose own Close calls back into container.Close re-enters the teardown that is waiting on it and deadlocks the whole shutdown. A service that closes defensively asks IsClosed first — the flag is set before the first service Close runs, so during the teardown it already answers true and the defensive caller skips. The scope resolves the same re-entrance by reading a closed scope instead of blocking, but its second caller may also return while services are still closing; this container keeps the stronger contract for its concurrent callers and leaves re-entrance to the IsClosed protocol. */

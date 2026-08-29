@@ -129,8 +129,17 @@ func (instance *LazyService[T]) sourceIsClosedLocked() bool {
     return true
 }
 
+/* resolutionRefusingSource is answered by the resolvers this package owns, and it asks the only question a memoized handle actually has: would a resolution asked of this source right now be REFUSED? Closed() and IsClosed() answer a different one for the container. The flag they read is raised at the START of the teardown, while the resolver deliberately goes on answering until the last service Close has returned — that is what entitles a service's own Close to the things it depends on. A handle reading the earlier flag turned terminal for the whole teardown window and dropped its memoized value on the way, so a service closing through a handle was refused exactly what the same door answered directly beside it. The scope implements nothing here on purpose: it stops answering resolutions the moment it is marked closed, so its two doors already agree, and a foreign Resolver keeps the Closed()/IsClosed() reading it always had. */
+type resolutionRefusingSource interface {
+    resolutionsRefused() bool
+}
+
 /* sourceReportsClosed asks the resolver whether the scope it reads has ended, through whichever liveness method the resolver carries: a scope and a provider's resolver context answer Closed(), the container answers IsClosed() — the two spellings the check used to see only the first of, so a handle built over the container (or over a provider's resolver context, the shape the godoc recommends) never learned its scope closed and served the dead request's state forever. A resolver that carries neither method — a foreign Resolver implementation — is read as open, the same way the exit handler reads a logger that cannot answer. */
 func sourceReportsClosed(source any) bool {
+    if refusingSource, isRefusing := source.(resolutionRefusingSource); true == isRefusing {
+        return refusingSource.resolutionsRefused()
+    }
+
     if closedChecker, isChecker := source.(interface{ Closed() bool }); true == isChecker {
         return closedChecker.Closed()
     }
