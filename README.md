@@ -99,15 +99,24 @@ At a high level, a Melody application is assembled as follows:
 
 ## Versions & project status
 
-Melody ships as three parallel Go module lines:
+Melody ships as three parallel Go module lines, with a fourth in development:
 
-| Version line | Module path                                              | Status                                                               |
-|--------------|----------------------------------------------------------|----------------------------------------------------------------------|
-| **v3**       | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | **Stable, actively maintained — use this for new projects.**         |
-| v2           | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | Feature-frozen — patch-level defect and security fixes land until v4. |
-| v1           | `github.com/precision-soft/melody` (repository root)     | Feature-frozen — patch-level defect and security fixes land until v4. |
+| Version line | Module path | First released | Latest | Status | Fixes land until |
+|---|---|---|---|---|---|
+| v4 | `github.com/precision-soft/melody/v4` | **Q4 2026** (planned) | — | Planned — the deprecations v3 accumulates are removed there; no code exists yet | — |
+| **v3** | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | 2026-03-08 | **v3.13.0** | **Stable, actively maintained — use this for new projects.** New features land here until v4 | v5 is released |
+| v2 | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | 2026-02-17 | v2.13.0 | Feature-frozen | v4 is released |
+| v1 | `github.com/precision-soft/melody` (repository root) | 2026-01-17 | v1.19.0 | Feature-frozen | v4 is released |
 
-Three versions exist for historical reasons: earlier major versions introduced changes that were not backwards compatible, and each was maintained in parallel. **Going forward, all new features land on v3 only.**
+"Fixes land until" covers patch-level defect fixes and security fixes; a line that is feature-frozen
+receives no new capability. Each boundary is named individually rather than derived from a rule —
+v1 and v2 are supported until v4 ships, v3 until v5 does — because no single rule fits all three, and
+a boundary a reader has to compute is a boundary the project can get wrong. Only v4 carries a date,
+and it is a plan rather than a commitment. An application that wants the v4 vocabulary early adopts
+the replacements v3 already carries — every deprecated symbol names its successor — and then crosses
+the cut with no change to its own code.
+
+Three versions exist for historical reasons: earlier major versions introduced changes that were not backwards compatible, and each was maintained in parallel. **Until v4 ships, all new features land on v3 only; after it, they land on v4.**
 v1 and v2 are feature-frozen and receive patch-level defect and security fixes until v4 is released (see [`SECURITY.md`](./SECURITY.md) and
 [`CONTRIBUTING.md`](./CONTRIBUTING.md)). An application moving off a frozen major starts at the
 "Migrating to v3" section of its upgrade guide: [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md)

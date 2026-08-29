@@ -64,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- documentation: `README.md` carries one version table — when each line was first released, its latest tag, its status and the event that ends its fixes — and `SECURITY.md` links to it instead of repeating a second, differently shaped one. The two had already drifted: the security table named no release and no boundary, while the readme named the boundary and no release. v4 appears there as planned for Q4 2026, and v3's own boundary is written for the first time
 - example: `melody:cron:run` boots from the schedule the example already declared.
 - example: the schema is owned by a migration set of its own, in `v2/.example/migration/` — five mysql migrations, one per table, the journal among them, because this major keeps the journal on the same connection as the catalogue.
 - example: a stateless api-key firewall on `/products/api`, which is the door `APP_API_TOKEN` always promised — the key shipped in `.env`, was marked secret, and nothing read it.
