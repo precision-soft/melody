@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Melody is developed as parallel module lines. **v3 is the actively maintained version**; v1 and v2 are in maintenance mode and receive security fixes and patch-level defect fixes until v4 is released.
+Melody is developed as parallel module lines. **v3 is the actively maintained version**; v1 and v2 are in maintenance mode and receive security fixes and patch-level defect fixes through 2027-08-17 and 2027-09-08 respectively — eighteen months from the release of the major that replaced each, the rule and the dates being in the table below.
 
 **Every supported line receives security fixes**, whether it is actively maintained or feature-frozen; that is what the maintenance mode is for. Which lines those are, when each was released and which event ends its support is one table, in [`README.md`](./README.md#versions--project-status) — it is not repeated here, so the two cannot drift apart.
 

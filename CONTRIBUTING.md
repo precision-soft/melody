@@ -12,7 +12,7 @@ Melody ships as three parallel Go module lines (see the [`README.md`](./README.m
 Rules for contributions:
 
 - **New features:** v3 only. Do not add features to v1 or v2.
-- **Bug fixes:** apply to v3. **Back-port to v1 and v2 whenever the defect is observable there and the fix fits a patch release** — no new public symbols, no signature changes, nothing breaking. A fix that needs new API surface stays on v3, and a capability gap is not a defect: behavior that is merely poorer on a frozen line does not qualify. v1 and v2 receive such patch-level fixes until v4 is released.
+- **Bug fixes:** apply to v3. **Back-port to v1 and v2 whenever the defect is observable there and the fix fits a patch release** — no new public symbols, no signature changes, nothing breaking. A fix that needs new API surface stays on v3, and a capability gap is not a defect: behavior that is merely poorer on a frozen line does not qualify. v1 and v2 receive such patch-level fixes through the support dates in [`README.md`](./README.md#versions--project-status) — 2027-08-17 for v1, 2027-09-08 for v2.
 - **Breaking changes:** instead of changing a v3 API in place, mark the old form with a `/* Deprecated: ... */`
   doc comment and keep it working; breaking changes accumulate toward a future v4.
 - The three versions are **intentionally duplicated** so each binds to one framework version. Do not try to consolidate or de-duplicate them — such pull requests will not be accepted.

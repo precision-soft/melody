@@ -101,23 +101,29 @@ At a high level, a Melody application is assembled as follows:
 
 Melody ships as three parallel Go module lines, with a fourth in development:
 
-| Version line | Module path | First released | Latest | Status | Fixes land until |
+| Version line | Module path | Released | Latest | Status | Supported until |
 |---|---|---|---|---|---|
 | v4 | `github.com/precision-soft/melody/v4` | **Q4 2026** (planned) | — | Planned — the deprecations v3 accumulates are removed there; no code exists yet | — |
-| **v3** | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | 2026-03-08 | **v3.13.0** | **Stable, actively maintained — use this for new projects.** New features land here until v4 | v5 is released |
-| v2 | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | 2026-02-17 | v2.13.0 | Feature-frozen | v4 is released |
-| v1 | `github.com/precision-soft/melody` (repository root) | 2026-01-17 | v1.19.0 | Feature-frozen | v4 is released |
+| **v3** | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | 2026-03-08 | **v3.13.0** | **Stable, actively maintained — use this for new projects.** New features, security fixes and deprecations land here | set the day v4 ships, 18 months after it |
+| v2 | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | 2026-02-17 | v2.13.0 | Feature-frozen since v3 shipped | **2027-09-08** |
+| v1 | `github.com/precision-soft/melody` (repository root) | 2026-01-17 | v1.19.0 | Feature-frozen since v2 shipped | **2027-08-17** |
 
-"Fixes land until" covers patch-level defect fixes and security fixes; a line that is feature-frozen
-receives no new capability. Each boundary is named individually rather than derived from a rule —
-v1 and v2 are supported until v4 ships, v3 until v5 does — because no single rule fits all three, and
-a boundary a reader has to compute is a boundary the project can get wrong. Only v4 carries a date,
-and it is a plan rather than a commitment. An application that wants the v4 vocabulary early adopts
-the replacements v3 already carries — every deprecated symbol names its successor — and then crosses
-the cut with no change to its own code.
+**The support policy, in two sentences.** The current line receives new features, security fixes and
+deprecations. The day a new major ships, the line it replaces stops receiving features and receives
+security fixes and patch-level defect fixes for **18 more months**, counted from the successor's release
+date.
+
+Every date in the table is that one rule applied to the release dates beside it, so a reader can check it
+rather than take it: v1 was replaced by v2 on 2026-02-17 and is supported through 2027-08-17, v2 was
+replaced by v3 on 2026-03-08 and is supported through 2027-09-08. v3 carries no end date because it is the
+current line — its clock starts the day v4 ships, and Q4 2026 for v4 is a plan rather than a commitment.
+"Supported until" covers security fixes and patch-level defect fixes; a feature-frozen line receives no new
+capability whatever remains of its window. An application that wants the v4 vocabulary early adopts the
+replacements v3 already carries — every deprecated symbol names its successor — and then crosses the cut
+with no change to its own code.
 
 Three versions exist for historical reasons: earlier major versions introduced changes that were not backwards compatible, and each was maintained in parallel. **Until v4 ships, all new features land on v3 only; after it, they land on v4.**
-v1 and v2 are feature-frozen and receive patch-level defect and security fixes until v4 is released (see [`SECURITY.md`](./SECURITY.md) and
+v1 and v2 are feature-frozen and receive patch-level defect and security fixes through the dates in the table above (see [`SECURITY.md`](./SECURITY.md) and
 [`CONTRIBUTING.md`](./CONTRIBUTING.md)). An application moving off a frozen major starts at the
 "Migrating to v3" section of its upgrade guide: [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md)
 for v1, [`v2/.documentation/UPGRADE.md`](./v2/.documentation/UPGRADE.md) for v2.

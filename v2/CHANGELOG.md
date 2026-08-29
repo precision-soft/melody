@@ -4,9 +4,13 @@ All notable changes to `precision-soft/melody/v2` will be documented in this fil
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**v2 is feature-frozen.** The major is stabilized: no new feature lands here, while patch-level defect fixes and security fixes still do, until v4 is released. New development continues on [v3](../v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
+**v2 is feature-frozen.** The major is stabilized: no new feature lands here, while patch-level defect fixes and security fixes still do, through 2027-09-08. New development continues on [v3](../v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
 
 ## [Unreleased]
+
+### Changed
+
+- documentation: the version table names the date each line is supported until, and the rule those dates come from, where it named an event nobody can schedule. The current line receives new features, security fixes and deprecations; the day a new major ships, the line it replaces stops receiving features and receives security and patch-level defect fixes for eighteen more months, counted from the successor's release. v2 was replaced by v3 on 2026-03-08 and is therefore supported **through 2027-09-08**, where the previous wording promised fixes "until v4 is released" — an extension of the commitment, and one an application can plan an upgrade against. `README.md`, `SECURITY.md`, `CONTRIBUTING.md`, `.documentation/UPGRADE.md` and this changelog's banner all carry the date; the rule itself lives in one place, beside the table
 
 ### Fixed
 

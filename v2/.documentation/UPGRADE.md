@@ -14,7 +14,7 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Migrating to v3
 
-v2 is feature-frozen: the major is stabilized, no new feature lands on it, and what still arrives, until v4 is released, is patch-level defect fixes and security work. The recommended move for an application on this major is v3, where development continues.
+v2 is feature-frozen: the major is stabilized, no new feature lands on it, and what still arrives, through 2027-09-08, is patch-level defect fixes and security work. That date is eighteen months from the release of v3, the major that replaced this one. The recommended move for an application on this major is v3, where development continues.
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version: `github.com/precision-soft/melody/v2` becomes `github.com/precision-soft/melody/v3`, and each integration module trades its `/v2` suffix for `/v3` on its module path — a package inside such a module then carries the major mid-path, as in `integrations/rueidis/v3/cache`. The one rewrite that does not compile afterwards — twelve deprecated validation constants that v3 has never carried — is recorded with its replacements in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
 
