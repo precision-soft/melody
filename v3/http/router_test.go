@@ -1017,3 +1017,37 @@ func TestRouterMatch_AnEncodedSegmentIsUnescapedForTheHandler(t *testing.T) {
         t.Fatalf("expected the segment to be unescaped for the handler, got %q", params["slug"])
     }
 }
+
+/* a route the registry declined is not put in the matching tree. The index the tree receives is the position of the last STORED route, so registering it for a declined duplicate gave the pattern's entry somebody else's route — the invariant every reader of the tree relies on, and the one the priority tie-break reads the index for. */
+func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing.T) {
+    router := NewRouter()
+
+    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, nil
+    }
+
+    recordedCollisions := []string{}
+    router.routeRegistry.SetBootCollisionRecorder(func(kind string, name string) {
+        recordedCollisions = append(recordedCollisions, name)
+    })
+
+    router.Handle(nethttp.MethodGet, "/alpha", handler)
+    router.Handle(nethttp.MethodGet, "/beta", handler)
+    router.Handle(nethttp.MethodGet, "/alpha", handler)
+
+    if 1 != len(recordedCollisions) {
+        t.Fatalf("expected the duplicate to be recorded once, got %v", recordedCollisions)
+    }
+
+    registeredRoutes := router.routeRegistry.routesInternal()
+    alphaNode := router.routeTreeRoot.staticChildren["alpha"]
+    if nil == alphaNode {
+        t.Fatal("expected a tree node for the alpha segment")
+    }
+
+    for _, registeredIndex := range alphaNode.routeIndices {
+        if "/alpha" != registeredRoutes[registeredIndex].pattern {
+            t.Fatalf("expected every entry of the alpha node to name /alpha, got %q at index %d", registeredRoutes[registeredIndex].pattern, registeredIndex)
+        }
+    }
+}

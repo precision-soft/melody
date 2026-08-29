@@ -302,6 +302,9 @@ func writeResponse(
             )
         }
 
+        /* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response leaves its *os.File open for the life of the process, one descriptor per request that reached here. The save-failure branch below discards a response the same way and closes it the same way. */
+        closeDiscardedResponseBody(response, logger)
+
         response = renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, "internal server error", nil)
     }
 

@@ -565,3 +565,24 @@ func TestRequest_Input_FallsThroughToTheRouteParametersOnly(t *testing.T) {
         t.Fatalf("expected the route parameter when no other source carries the key, got %q", request.Input("id"))
     }
 }
+
+/* a query the client wrote with a legacy semicolon separator is not a form that failed to parse: ParseForm reports the query's failure through the same return value as the body's, and refusing on it answered 400 to a submission whose body was perfectly valid, with the handler's own form emptied on the way there */
+func TestNewRequest_AMalformedQueryDoesNotRefuseAValidForm(t *testing.T) {
+    formBody := strings.NewReader("field=value&csrf=token")
+    postRequest := httptest.NewRequest("POST", "/submit?a=b;c=d", formBody)
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    if nil != request.bodyReadErr {
+        t.Fatalf("expected the request to be served, got the refusal %v", request.bodyReadErr)
+    }
+
+    if "value" != request.Input("field") {
+        t.Fatalf("expected the parsed form to reach the handler, got %q", request.Input("field"))
+    }
+
+    if "token" != request.Input("csrf") {
+        t.Fatalf("expected every parsed form key to reach the handler, got %q", request.Input("csrf"))
+    }
+}

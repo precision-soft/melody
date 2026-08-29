@@ -42,9 +42,14 @@ func WriteToHttpResponseWriter(
 
     headers := response.Headers()
     if nil != headers {
-        /* a key the response names is owned by the response: the writer's values for it are replaced rather than appended to, so a header both sides set — the request id the kernel puts on the raw writer, and any header a kernel.response listener sets on the response — reaches the client once instead of twice. Keys the response does not name keep whatever the writer already carries. */
+        /* a key the response names is owned by the response: the writer's values for it are replaced rather than appended to, so a header both sides set — the request id the kernel puts on the raw writer, and any header a kernel.response listener sets on the response — reaches the client once instead of twice. Keys the response does not name keep whatever the writer already carries.
+
+           Set-Cookie is the one field the response cannot own, because its lines are not a list one side may restate: each line is a separate cookie, so "both sides set Set-Cookie" means two DIFFERENT cookies, not one header twice. A handler writes cookies on the writer its own contract hands it, and the framework writes the session cookie on the response — replacing there deleted the handler's cookie in silence, and the client simply never received it. */
         for key, values := range headers {
-            responseWriter.Header().Del(key)
+            if "Set-Cookie" != nethttp.CanonicalHeaderKey(key) {
+                responseWriter.Header().Del(key)
+            }
+
             for _, value := range values {
                 responseWriter.Header().Add(key, value)
             }
@@ -130,11 +135,12 @@ func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
     return written, writeErr
 }
 
-/* Flush is forwarded so the wrapper keeps satisfying http.Flusher, which streaming handlers rely on; a flush commits the response, so it also records that the headers were written — after the delegate returns, the convention every commit recording in this type follows. */
+/* Flush is forwarded so the wrapper keeps satisfying http.Flusher, which streaming handlers rely on; a flush commits the response, so it also records that the headers were written — after the delegate returns, the convention every commit recording in this type follows.
+
+   It is forwarded through a ResponseController rather than by asserting on the immediate delegate, because the delegate is whatever wrapped the connection before the kernel did: an operator's own net/http middleware that implements Unwrap for ResponseController compatibility but forwards no Flush of its own left this assertion failing, and every flush a streaming handler issued became a silent no-op — the frames sat in the buffer, the handler saw no error, and the client received nothing until the response ended. The controller unwraps the chain the way the standard library does, so the flush reaches the connection whatever sits between. */
 func (instance *recordingResponseWriter) Flush() {
-    flusher, isFlusher := instance.ResponseWriter.(nethttp.Flusher)
-    if true == isFlusher {
-        flusher.Flush()
+    flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
+    if nil == flushErr {
         instance.recordImplicitCommit()
     }
 }

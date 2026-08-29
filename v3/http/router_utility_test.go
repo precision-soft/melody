@@ -1944,3 +1944,39 @@ func slicesEqualForTest(left []string, right []string) bool {
 
     return true
 }
+
+type closeTrackingResponseBodyReader struct {
+    reader *strings.Reader
+    closed bool
+}
+
+func (instance *closeTrackingResponseBodyReader) Read(destination []byte) (int, error) {
+    return instance.reader.Read(destination)
+}
+
+func (instance *closeTrackingResponseBodyReader) Close() error {
+    instance.closed = true
+
+    return nil
+}
+
+/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response left its *os.File open for the life of the process, one descriptor per request whose status landed outside the range net/http accepts */
+func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T) {
+    bodyReader := &closeTrackingResponseBodyReader{reader: strings.NewReader("file bytes")}
+
+    response := NewResponse(nethttp.StatusOK, nil)
+    response.SetBodyReader(bodyReader)
+    response.SetStatusCode(1200)
+
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
+
+    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{})
+
+    if nethttp.StatusInternalServerError != written.StatusCode() {
+        t.Fatalf("expected the rendered 500, got %d", written.StatusCode())
+    }
+
+    if false == bodyReader.closed {
+        t.Fatal("expected the discarded response body to be closed")
+    }
+}

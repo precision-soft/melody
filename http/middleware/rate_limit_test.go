@@ -1358,3 +1358,27 @@ func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testi
 
     RegisterRateLimitRequestListener(nil, NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
 }
+
+/* the marks are searched with a binary search, which is entitled to an ordered slice, so the recorded instant is clamped to the last mark. A wall clock moved backwards under the process otherwise appended out of order, and an unordered slice does not merely keep an expired mark — the search can cut a LIVE one away and hand the key its budget back, on a limiter the package points at login, one-time codes and password reset. */
+func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *testing.T) {
+    startedAt := time.Now()
+    frozenClock := clock.NewFrozenClock(startedAt)
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 2, 12*time.Second)
+
+    frozenClock.TravelTo(startedAt.Add(20 * time.Second))
+    if false == limiter.Allow("key1") {
+        t.Fatal("expected the first request to be admitted")
+    }
+
+    /* the clock answers an earlier instant than one already recorded */
+    frozenClock.TravelTo(startedAt.Add(5 * time.Second))
+    if false == limiter.Allow("key1") {
+        t.Fatal("expected the second request to be admitted; the budget is two")
+    }
+
+    /* the mark at +20s is still inside the twelve second window that opens at +18s, so the budget is spent */
+    frozenClock.TravelTo(startedAt.Add(30 * time.Second))
+    if true == limiter.Allow("key1") {
+        t.Fatal("expected the refusal: the live mark must not be cut away by a search over unordered marks")
+    }
+}

@@ -288,7 +288,7 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
 
     /* the marks are appended in clock order, so the expired ones are a contiguous prefix and the window is trimmed by index rather than rebuilt: the whole slice used to be reallocated and copied on every call, admitted or refused alike, under the lock every key shares — at a limit of ten thousand that is a full scan an attacker pays on each of his own refusals while every other client waits behind it. Dropping the prefix leaves the live marks in place; append reclaims the vacated head when it grows the slice, so the compaction is amortized rather than paid per call.
 
-       The cut is the first mark still inside the window, so everything it drops is genuinely expired whatever order the marks are in: a clock that answered an earlier instant than one already recorded — a fake clock in a test, a wall clock moved under the process — can only leave an expired mark standing, which shortens the caller's own budget, never widens it. */
+       The search needs the marks to be ordered, and the recorded instant is clamped to the last mark to keep them so. A clock that answers an earlier instant than one already recorded — a fake clock in a test, a wall clock moved under the process — would otherwise append out of order, and a binary search over an unordered slice does not merely keep an expired mark, it can drop a LIVE one: marks at 20, 5 and 30 seconds with the window opening at 8 make the predicate read true, false, true, and the search answers 2, cutting the live mark at 20 away and handing the key part of its budget back. Clamping keeps the ordering the search is entitled to, and it can only hold a mark inside the window longer than the wall clock would, which shortens the caller's own budget and never widens it. */
     liveFrom := sort.Search(
         len(window.requests),
         func(index int) bool {
@@ -304,7 +304,15 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
         return false
     }
 
-    window.requests = append(window.requests, now)
+    recordedAt := now
+    if 0 < len(window.requests) {
+        lastMark := window.requests[len(window.requests)-1]
+        if true == lastMark.After(recordedAt) {
+            recordedAt = lastMark
+        }
+    }
+
+    window.requests = append(window.requests, recordedAt)
 
     return true
 }

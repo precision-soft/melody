@@ -183,3 +183,22 @@ func TestPrefersHtml_ATypedNilRequestIsNotHtml(t *testing.T) {
         t.Fatalf("expected a typed nil request to not prefer html")
     }
 }
+
+/* excess trailing zeros are precision the qvalue grammar cannot carry and the value cannot change, and clients do write them: refusing them dropped the member from the negotiation entirely, so an api client that asked for application/json;q=1.0000 was handed the html error page. A fourth digit that is not a zero still carries a weight the grammar cannot express, and its member is still dropped. */
+func TestPrefersHtml_ReadsAJsonPreferenceWrittenWithExcessTrailingZeros(t *testing.T) {
+    htmlPreferred := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "text/html;q=0.9, application/json;q=1.0000")
+    if true == PrefersHtml(htmlPreferred) {
+        t.Fatal("expected the json member to keep its weight and win the negotiation")
+    }
+
+    stillRefused := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "text/html;q=0.9, application/json;q=1.0001")
+    if false == PrefersHtml(stillRefused) {
+        t.Fatal("expected a fourth digit outside the grammar to drop its member")
+    }
+
+    /* a refusal written with excess zeros stays a refusal, which the default weight a dropped member would fall back to could not express */
+    refusedWithZeros := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "text/html;q=0.9, application/json;q=0.0000")
+    if false == PrefersHtml(refusedWithZeros) {
+        t.Fatal("expected q=0.0000 to keep refusing json")
+    }
+}

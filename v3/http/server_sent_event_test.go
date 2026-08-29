@@ -435,3 +435,28 @@ func TestServerSentEventWriter_ZeroValueRefusesInsteadOfDereferencingNothing(t *
         t.Fatalf("expected the zero value to refuse")
     }
 }
+
+/* the frames are flushed through the outermost writer so every wrapper records the commit it exists to record, and that flush has to reach the connection: with a wrapper between the kernel's recorder and the connection that carries Unwrap but no Flush, the capability probe answered yes and every flush was a silent no-op — the handler subscribed, wrote its events, and the client received nothing until the response ended */
+func TestNewServerSentEventWriter_FlushesThroughAnIntermediateWrapper(t *testing.T) {
+    connection := &flushCountingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+    writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})
+
+    eventWriter, writerErr := NewServerSentEventWriter(writer)
+    if nil != writerErr {
+        t.Fatalf("expected the stream to be accepted, got %v", writerErr)
+    }
+
+    flushesAfterHeaders := connection.flushes
+    if 1 > flushesAfterHeaders {
+        t.Fatal("expected the header commit to reach the connection")
+    }
+
+    sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"})
+    if nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    if flushesAfterHeaders >= connection.flushes {
+        t.Fatalf("expected the frame to be flushed to the connection, flushes stayed at %d", connection.flushes)
+    }
+}

@@ -1341,3 +1341,49 @@ func TestAddVaryAcceptEncoding_ReadsAnExistingTokenInAnyCase(t *testing.T) {
         t.Fatalf("expected the existing spelling to be left as it was, got: %q", headers.Get("Vary"))
     }
 }
+
+type panickingResponseBodyReader struct {
+    servedOnce bool
+}
+
+func (instance *panickingResponseBodyReader) Read(destination []byte) (int, error) {
+    if false == instance.servedOnce {
+        instance.servedOnce = true
+
+        served := len(destination)
+        if 2048 < served {
+            served = 2048
+        }
+
+        for index := 0; index < served; index++ {
+            destination[index] = 'a'
+        }
+
+        return served, nil
+    }
+
+    panic("the application's body reader panicked")
+}
+
+/* the copy runs on a goroutine this middleware starts, where neither of the kernel's recovery defers nor net/http's own per-connection recovery stands: a panic raised by the application's body reader took the whole process down, every in-flight request with it. It is contained and reported through the pipe the reader of this response already fails on. */
+func TestStreamGzipCompressInto_ContainsAPanicFromTheResponseBodyReader(t *testing.T) {
+    pipeReader, pipeWriter := io.Pipe()
+    compressionDone := make(chan struct{})
+
+    go streamGzipCompressInto(pipeWriter, &panickingResponseBodyReader{}, nethttp.NoBody, 5, compressionDone)
+
+    _, readErr := io.Copy(io.Discard, pipeReader)
+    if nil == readErr {
+        t.Fatal("expected the reader of the compressed body to see the failure")
+    }
+
+    if false == strings.Contains(readErr.Error(), "panicked while the response was being compressed") {
+        t.Fatalf("expected the contained panic to be reported through the pipe, got %v", readErr)
+    }
+
+    select {
+    case <-compressionDone:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the compression goroutine to finish")
+    }
+}

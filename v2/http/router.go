@@ -179,7 +179,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         attributes[RouteAttributeLocales] = append([]string{}, options.Locales()...)
     }
 
-    instance.routeRegistry.registerRoute(
+    routeStored := instance.routeRegistry.registerRoute(
         route{
             name:         options.Name(),
             pattern:      normalizedPattern,
@@ -195,6 +195,11 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
             attributes:   attributes,
         },
     )
+
+    /* a route the registry declined is not put in the matching tree. The index below is the position of the LAST STORED route, so registering it for a declined one gave the pattern's tree entry a route that is not its own — the invariant every reader of the tree relies on, and the one the priority tie-break reads the index for. Today only the re-validation inside matchPath keeps that from answering the wrong handler. */
+    if false == routeStored {
+        return
+    }
 
     routeIndex := len(instance.routeRegistry.routesInternal()) - 1
 
