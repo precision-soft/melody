@@ -14,6 +14,38 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
+### Application: the error handler is consulted, and the shutdown drain runs whatever failed before it
+
+**What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. An http process now makes that one decision where serving begins; a console process keeps making it at boot-end, so its dispatcher still exposes the listener set a serving process runs. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
+
+**Symptom.** An error handler wired between `Boot` and `Run` starts rendering, where it used to be accepted and never called. A shutdown whose serve or server-shutdown phase failed starts reporting the open request scopes as well, joined with the earlier cause; a run that failed for one reason alone reads exactly as it did.
+
+**Remedy.** None. An application that installed its handler before boot-end is unaffected; one that installed it later gets the behaviour its own wiring asked for. Code matching on the run error by string should read it with `errors.Is`, which traverses the join.
+
+### Http: the session-cookie cache guard keeps the rest of `Cache-Control`
+
+**What changed.** The guard that keeps a session-cookie response out of a shared cache reads every `Cache-Control` field line rather than the first, and splits the directive list outside quoted sections rather than on a bare comma.
+
+**Symptom.** A response that carried `Cache-Control` on more than one field line keeps the directives on the lines behind the first, which used to be deleted; a directive carrying a quoted field-name list keeps every name in it, where a name spelled like a directive used to be dropped out of the middle of the list.
+
+**Remedy.** None.
+
+### Container: a collection refuses a closed scope, and a live-scope registration's options are honoured or refused
+
+**What changed.** `AllImplementing` gathered through the resolver a provider was handed refuses a closed scope, the way collecting through the scope itself already did — the refusal was keyed on a method the resolution context did not implement. `RegisterScoped` on a live scope honours `WithCollectionPriority` instead of accepting and dropping it, and refuses `WithTeardownDependency` with `ErrScopedTeardownDependencyUnsupported`, the way the container's scoped door already refuses it.
+
+**Symptom.** A request-outliving goroutine collecting through a captured resolver receives `ErrScopeClosed` where it used to receive an empty set and dispatch to nobody. A scoped registration that declared a collection priority starts being ordered by it. A scoped registration that declared a teardown dependency on a live scope now fails at the registration call instead of installing nothing.
+
+**Remedy.** Handle `ErrScopeClosed` from a collection made after the request ended — it is the same refusal `Get` already answers there. Drop the `WithTeardownDependency` from a live-scope registration: a scope keeps its own teardown graph, recorded from the resolutions it actually made, so there was never anywhere for the declaration to be written.
+
+### Http: a catch-all keeps an encoded separator inside its segment
+
+**What changed.** The request path is split on the separators the client actually sent and each segment is unescaped on its own, so a parameter may carry a slash; the catch-all rebuilt its value by joining the decoded segments back on `/`, which put the separator back where a segment boundary is. Only the separator is now re-escaped when the tail is rebuilt.
+
+**Symptom.** A catch-all value may now contain `%2F` where the request spelled the separator that way — `/files/a%2Fb/c` binds `a%2Fb/c` and is finally distinguishable from `/files/a/b/c`, which still binds `a/b/c` unchanged. A requirement regex applied to a catch-all sees that spelling.
+
+**Remedy.** A handler that reassembles a storage key or a proxy target from the catch-all unescapes the value (`url.PathUnescape`) if it wants the literal slash; one whose paths never carry an encoded separator sees no change. A requirement that must admit the encoded spelling names it.
+
 Every entry below but the first is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left. The first entry is the exception and says so: nothing behaved wrongly, and what it removes is a vendor's API from melody's public surface.
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.

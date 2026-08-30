@@ -105,6 +105,11 @@ func (instance *resolverContext) Closed() bool {
     return instance.containerInstance.resolutionsRefused()
 }
 
+/* isScopeClosed lets a collection refuse through this resolver exactly as it refuses through the scope itself. AllImplementing tells a dispatcher to collect with the resolver its provider received, so without this the refusal the collection promises never fired for the one resolver its own godoc recommends, and a request-outliving goroutine collected a silently empty set from a scope that enumerates nothing once closed. The question is asked of whatever scopeVisible answers for, the same predicate Closed above uses: a resolution the container owns has no scope to be closed and follows the container lifetime, which the Gets below refuse loudly on their own. */
+func (instance *resolverContext) isScopeClosed() bool {
+    return true == instance.scopeVisible() && true == instance.scopeInstance.isScopeClosed()
+}
+
 /* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */
 func containerNameStore(
     containerInstance *container,
@@ -766,4 +771,5 @@ var (
     _ containercontract.Resolver   = (*resolverContext)(nil)
     _ containercontract.TypeLister = (*resolverContext)(nil)
     _ referenceResolutionChecker   = (*resolverContext)(nil)
+    _ closedScopeChecker           = (*resolverContext)(nil)
 )

@@ -1051,3 +1051,49 @@ func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing
         }
     }
 }
+
+/* splitRequestPath unescapes per segment precisely so an encoded separator stays inside the value the client put it in — a parameter may legitimately carry a slash. The catch-all then rebuilt its value by joining the segments back on "/", which puts the encoded separator back where a segment boundary is: a handler reassembling a storage key or a proxy target could no longer tell the two requests apart. */
+func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
+    router := NewRouter()
+
+    captured := make([]string, 0, 2)
+
+    router.HandleWithOptions(
+        "/files/*path",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            pathValue, _ := request.Param("path")
+            captured = append(captured, pathValue)
+
+            return TextResponse(200, "ok"), nil
+        },
+        NewRouteOptions(
+            "files.serve",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    for _, target := range []string{"/files/a%2Fb/c", "/files/a/b/c"} {
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, target, nil))
+        if 200 != recorder.Code {
+            t.Fatalf("expected %q to route, got %d", target, recorder.Code)
+        }
+    }
+
+    if 2 != len(captured) {
+        t.Fatalf("expected both requests to reach the handler, got %d", len(captured))
+    }
+
+    if captured[0] == captured[1] {
+        t.Fatalf("expected the encoded separator to keep the two targets apart, both bound %q", captured[0])
+    }
+}

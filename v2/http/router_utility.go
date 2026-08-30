@@ -610,8 +610,9 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
         return
     }
 
-    existing := headers.Get("Cache-Control")
-    if "" == existing {
+    /* every field line is read, not just the first: Cache-Control is a list header, a response may carry it on several lines, and Get answers with one of them while the Set below replaces them all — so reading Get alone deleted whatever the other lines directed while reporting that it had only added private. */
+    existingLines := headers.Values("Cache-Control")
+    if 0 == len(existingLines) {
         headers.Set("Cache-Control", "private")
 
         return
@@ -621,24 +622,27 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
     hasPrivate := false
     hasNoStore := false
 
-    for _, token := range strings.Split(existing, ",") {
-        trimmed := strings.TrimSpace(token)
-        if "" == trimmed {
-            continue
-        }
+    for _, existing := range existingLines {
+        /* a directive may carry a quoted field-name list — no-cache="X-One, Public, X-Two" — and a bare comma cuts through it: the fragment left holding a field name spelled like a directive was then dropped as if it were one, deleting a name out of the middle of somebody else's list. */
+        for _, token := range internal.SplitOutsideQuotes(existing, ',') {
+            trimmed := strings.TrimSpace(token)
+            if "" == trimmed {
+                continue
+            }
 
-        lower := strings.ToLower(trimmed)
-        if "public" == lower {
-            continue
-        }
-        if "private" == lower {
-            hasPrivate = true
-        }
-        if "no-store" == lower {
-            hasNoStore = true
-        }
+            lower := strings.ToLower(trimmed)
+            if "public" == lower {
+                continue
+            }
+            if "private" == lower {
+                hasPrivate = true
+            }
+            if "no-store" == lower {
+                hasNoStore = true
+            }
 
-        rebuilt = append(rebuilt, trimmed)
+            rebuilt = append(rebuilt, trimmed)
+        }
     }
 
     if false == hasPrivate && false == hasNoStore {

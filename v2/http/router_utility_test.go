@@ -1822,3 +1822,40 @@ func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T
         t.Fatal("expected the discarded response body to be closed")
     }
 }
+
+
+/* Cache-Control is a list header a response may carry on several field lines, and its directives may carry quoted field-name lists. Reading only the first line loses every directive on the ones behind it, and splitting on a bare comma cuts through the quotes — both rewrite a header the guard was only supposed to add "private" to. */
+func TestMarkResponsePrivateForSessionCookie_KeepsEveryFieldLineAndQuotedList(t *testing.T) {
+    t.Run("directives on a second field line survive", func(t *testing.T) {
+        response := NewResponse(nethttp.StatusOK, nil)
+        response.Headers().Add("Cache-Control", "public")
+        response.Headers().Add("Cache-Control", "max-age=60")
+
+        markResponsePrivateForSessionCookie(response)
+
+        got := response.Headers().Get("Cache-Control")
+        if false == strings.Contains(got, "max-age=60") {
+            t.Fatalf("expected the second field line's directive to survive, got %q", got)
+        }
+
+        if true == strings.Contains(strings.ToLower(got), "public") {
+            t.Fatalf("a session-cookie response must never stay publicly cacheable, got %q", got)
+        }
+
+        if false == strings.Contains(got, "private") {
+            t.Fatalf("expected the response to be marked private, got %q", got)
+        }
+    })
+
+    t.Run("a quoted field-name list is not cut", func(t *testing.T) {
+        response := NewResponse(nethttp.StatusOK, nil)
+        response.Headers().Set("Cache-Control", `no-cache="X-One, Public, X-Two", max-age=60`)
+
+        markResponsePrivateForSessionCookie(response)
+
+        got := response.Headers().Get("Cache-Control")
+        if false == strings.Contains(got, `no-cache="X-One, Public, X-Two"`) {
+            t.Fatalf("expected the quoted field-name list to survive whole, got %q", got)
+        }
+    })
+}

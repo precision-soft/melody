@@ -31,6 +31,7 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
         ownTypeProviders:               make(map[reflect.Type]providerAny),
         ownTypeRegistrationNamesByType: make(map[reflect.Type][]string),
         ownReplacesContainerService:    make(map[string]bool),
+        ownCollectionPriorityByName:    make(map[string]int),
 
         creatingByName:  make(map[string]*creationState),
         creatingByType:  make(map[string]*creationState),
@@ -62,6 +63,7 @@ type scope struct {
     ownTypeProviders               map[reflect.Type]providerAny
     ownTypeRegistrationNamesByType map[reflect.Type][]string
     ownReplacesContainerService    map[string]bool
+    ownCollectionPriorityByName    map[string]int
     /* creatingByName, creatingByType and dependencyGraph are guarded by the CONTAINER mutex, not by this scope's. The creation guard that reads and writes them runs with the container lock held and releases it only around the provider call, so that is the only lock they are ever touched under. Close() must therefore never nil them: it holds the scope lock alone, and emptying a map a guard is writing to would be a data race with no lock in common. They die with the scope instead. */
     creatingByName  map[string]*creationState
     creatingByType  map[string]*creationState
@@ -877,7 +879,7 @@ func (instance *scope) scopedPrioritizedReferences(interfaceType reflect.Type) [
     instance.mutex.RLock()
     for registeredType, registeredServiceNames := range instance.ownTypeRegistrationNamesByType {
         appendReferences(registeredType, registeredServiceNames, func(serviceName string) int {
-            return 0
+            return instance.ownCollectionPriorityByName[serviceName]
         })
     }
     instance.mutex.RUnlock()

@@ -83,6 +83,17 @@ func (instance *scope) registerOnScope(
 ) error {
     registerOption := applyRegisterServiceOptions(options)
 
+    /* refused here for the reason the container's scoped door states: a scope keeps its own teardown graph, recorded from the resolutions that scope actually made, so a declaration written at registration has nowhere to be written into. Accepting it would install nothing while reading as an ordering that holds. */
+    if 0 < len(registerOption.TeardownDependencyNames) {
+        return exception.NewError(
+            "a scoped registration cannot declare a teardown dependency",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            ErrScopedTeardownDependencyUnsupported,
+        )
+    }
+
     containerInstance := instance.container.Load()
     if nil == containerInstance {
         return exception.NewError(
@@ -160,6 +171,10 @@ func (instance *scope) registerOnScope(
 
     instance.ownProviders[serviceName] = provider
 
+    if 0 != registerOption.CollectionPriority {
+        instance.ownCollectionPriorityByName[serviceName] = registerOption.CollectionPriority
+    }
+
     if true == registerOption.ReplacesContainerService {
         instance.ownReplacesContainerService[serviceName] = true
     }
@@ -176,6 +191,7 @@ func (instance *scope) registerOnScope(
         if nil != registerTypeErr {
             delete(instance.ownProviders, serviceName)
             delete(instance.ownReplacesContainerService, serviceName)
+            delete(instance.ownCollectionPriorityByName, serviceName)
 
             return registerTypeErr
         }

@@ -577,3 +577,39 @@ func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScoped
         t.Fatalf("expected the container provider to collect the container handlers")
     }
 }
+
+/* the resolver a provider receives is the one the AllImplementing godoc tells a dispatcher to collect with, so it has to refuse a closed scope exactly the way collecting with the scope itself does; otherwise the request-outliving goroutine the refusal exists for is handed an empty set and dispatches to nothing */
+func TestAllImplementing_RefusesAClosedScopeThroughAProvidersResolver(t *testing.T) {
+    serviceContainer := newCollectionContainer(t)
+
+    var capturedResolver containercontract.Resolver
+
+    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
+        capturedResolver = resolver
+
+        return &handlerDispatcher{}, nil
+    })
+
+    requestScope := serviceContainer.NewScope()
+
+    if _, getErr := FromResolverByType[*handlerDispatcher](requestScope); nil != getErr {
+        t.Fatalf("expected the scoped dispatcher to resolve, got %v", getErr)
+    }
+
+    if nil == capturedResolver {
+        t.Fatalf("expected the provider to have captured its resolver")
+    }
+
+    if closeErr := requestScope.Close(); nil != closeErr {
+        t.Fatalf("expected the scope to close, got %v", closeErr)
+    }
+
+    handlers, allImplementingErr := AllImplementing[collectableHandler](capturedResolver)
+    if nil == allImplementingErr {
+        t.Fatalf("expected the collection to be refused after the scope closed, got %d handlers and no error", len(handlers))
+    }
+
+    if false == errors.Is(allImplementingErr, ErrScopeClosed) {
+        t.Fatalf("expected the refusal to carry ErrScopeClosed, got %v", allImplementingErr)
+    }
+}

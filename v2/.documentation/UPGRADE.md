@@ -22,6 +22,22 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 ## Unreleased
 
+### Application: the error handler is consulted, and the shutdown drain runs whatever failed before it
+
+**What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. An http process now makes that one decision where serving begins; a console process keeps making it at boot-end, so its dispatcher still exposes the listener set a serving process runs. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
+
+**Symptom.** An error handler wired between `Boot` and `Run` starts rendering, where it used to be accepted and never called. A shutdown whose serve or server-shutdown phase failed starts reporting the open request scopes as well, joined with the earlier cause; a run that failed for one reason alone reads exactly as it did.
+
+**Remedy.** None. An application that installed its handler before boot-end is unaffected; one that installed it later gets the behaviour its own wiring asked for. Code matching on the run error by string should read it with `errors.Is`, which traverses the join.
+
+### Http: the session-cookie cache guard keeps the rest of `Cache-Control`
+
+**What changed.** The guard that keeps a session-cookie response out of a shared cache reads every `Cache-Control` field line rather than the first, and splits the directive list outside quoted sections rather than on a bare comma.
+
+**Symptom.** A response that carried `Cache-Control` on more than one field line keeps the directives on the lines behind the first, which used to be deleted; a directive carrying a quoted field-name list keeps every name in it, where a name spelled like a directive used to be dropped out of the middle of the list.
+
+**Remedy.** None.
+
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
 
 Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, and none of them asks the upgrader for an action.

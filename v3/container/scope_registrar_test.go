@@ -572,3 +572,88 @@ func TestScopeRegisterScoped_TypeIdentityKeyCollisionRefusedOnTheLiveScope(t *te
         t.Fatalf("expected the colliding identity key to be refused at the live scoped door, as the container and plan doors already refuse it")
     }
 }
+
+type scopedEarlyHandler struct {
+}
+
+func (instance *scopedEarlyHandler) Handle() string {
+    return "early"
+}
+
+type scopedLateHandler struct {
+}
+
+func (instance *scopedLateHandler) Handle() string {
+    return "late"
+}
+
+/* the collection order WithCollectionPriority declares is honoured for a registration the container plans, so a registration made on the live scope has to be ordered by the same rule: the scope's own references are the ones a request-time dispatcher collects */
+func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    requestScope := serviceContainer.NewScope()
+    defer func() {
+        _ = requestScope.Close()
+    }()
+
+    requestScope.MustRegisterScoped(
+        "scoped.late",
+        func(resolver containercontract.Resolver) (*scopedLateHandler, error) {
+            return &scopedLateHandler{}, nil
+        },
+        WithCollectionPriority(20),
+    )
+
+    requestScope.MustRegisterScoped(
+        "scoped.early",
+        func(resolver containercontract.Resolver) (*scopedEarlyHandler, error) {
+            return &scopedEarlyHandler{}, nil
+        },
+        WithCollectionPriority(10),
+    )
+
+    handlers, allImplementingErr := AllImplementing[collectableHandler](requestScope)
+    if nil != allImplementingErr {
+        t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
+    }
+
+    collected := make([]string, 0, len(handlers))
+    for _, handler := range handlers {
+        collected = append(collected, handler.Handle())
+    }
+
+    if 2 != len(collected) {
+        t.Fatalf("expected both scoped handlers, got %v", collected)
+    }
+
+    /* the declared priority contradicts the type-and-name fallback, which would put scopedEarlyHandler first, so only an honoured priority can produce this order */
+    if "late" != collected[0] || "early" != collected[1] {
+        t.Fatalf("expected the scoped registrations ordered by descending priority, got %v", collected)
+    }
+}
+
+/* the container's scoped door refuses a teardown declaration because a scope keeps its own graph and there is nowhere to write one; the live scope's door registers into that same scope, so it has to refuse it for the same reason instead of accepting it and installing nothing */
+func TestRegisterScoped_OnTheScopeRefusesATeardownDependency(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    requestScope := serviceContainer.NewScope()
+    defer func() {
+        _ = requestScope.Close()
+    }()
+
+    registerErr := requestScope.RegisterScoped(
+        "scoped.late",
+        func(resolver containercontract.Resolver) (*scopedLateHandler, error) {
+            return &scopedLateHandler{}, nil
+        },
+        WithTeardownDependency("scoped.early"),
+    )
+
+    if nil == registerErr {
+        t.Fatalf("expected a teardown declaration on the live scope to be refused")
+    }
+
+    if false == errors.Is(registerErr, ErrScopedTeardownDependencyUnsupported) {
+        t.Fatalf("expected the refusal to carry ErrScopedTeardownDependencyUnsupported, got %v", registerErr)
+    }
+}

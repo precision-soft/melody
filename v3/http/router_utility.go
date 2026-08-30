@@ -630,8 +630,9 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
         return
     }
 
-    existing := headers.Get("Cache-Control")
-    if "" == existing {
+    /* every field line is read, not just the first: Cache-Control is a list header, a response may carry it on several lines, and Get answers with one of them while the Set below replaces them all — so reading Get alone deleted whatever the other lines directed while reporting that it had only added private. */
+    existingLines := headers.Values("Cache-Control")
+    if 0 == len(existingLines) {
         headers.Set("Cache-Control", "private")
 
         return
@@ -641,24 +642,27 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
     hasPrivate := false
     hasNoStore := false
 
-    for _, token := range strings.Split(existing, ",") {
-        trimmed := strings.TrimSpace(token)
-        if "" == trimmed {
-            continue
-        }
+    for _, existing := range existingLines {
+        /* a directive may carry a quoted field-name list — no-cache="X-One, Public, X-Two" — and a bare comma cuts through it: the fragment left holding a field name spelled like a directive was then dropped as if it were one, deleting a name out of the middle of somebody else's list. */
+        for _, token := range internal.SplitOutsideQuotes(existing, ',') {
+            trimmed := strings.TrimSpace(token)
+            if "" == trimmed {
+                continue
+            }
 
-        lower := strings.ToLower(trimmed)
-        if "public" == lower {
-            continue
-        }
-        if "private" == lower {
-            hasPrivate = true
-        }
-        if "no-store" == lower {
-            hasNoStore = true
-        }
+            lower := strings.ToLower(trimmed)
+            if "public" == lower {
+                continue
+            }
+            if "private" == lower {
+                hasPrivate = true
+            }
+            if "no-store" == lower {
+                hasNoStore = true
+            }
 
-        rebuilt = append(rebuilt, trimmed)
+            rebuilt = append(rebuilt, trimmed)
+        }
     }
 
     if false == hasPrivate && false == hasNoStore {
@@ -903,6 +907,17 @@ func matchesLocale(locales []string, params map[string]string) bool {
     return false
 }
 
+/* joinCatchAllSegments rebuilds the tail a catch-all binds while keeping an encoded separator inside the segment the client put it in. splitRequestPath unescapes each segment on its own for exactly that reason — a parameter may legitimately carry a slash — and joining the decoded segments back on "/" undid it: "/files/a%2Fb/c" and "/files/a/b/c" both bound "a/b/c", so a handler reassembling a storage key or a proxy target from the catch-all could not tell the two requests apart. Only the separator is re-escaped, so every other escape stays decoded exactly as it was and a tail carrying none is byte-identical to what it was before. */
+func joinCatchAllSegments(pathSegments []string) string {
+    escapedSegments := make([]string, 0, len(pathSegments))
+
+    for _, segment := range pathSegments {
+        escapedSegments = append(escapedSegments, strings.ReplaceAll(segment, "/", "%2F"))
+    }
+
+    return strings.Join(escapedSegments, "/")
+}
+
 func matchPath(
     routeDefinition route,
     pathSegments []string,
@@ -932,7 +947,7 @@ func matchPath(
             if true == isCatchAll {
                 rest := ""
                 if len(pathSegments) > pathIndex {
-                    rest = strings.Join(pathSegments[pathIndex:], "/")
+                    rest = joinCatchAllSegments(pathSegments[pathIndex:])
                 }
 
                 if "" != wildcardName {

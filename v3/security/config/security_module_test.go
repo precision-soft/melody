@@ -263,3 +263,54 @@ func TestFirewallOverride_WithMergeStrategyRefusesAnUnknownStrategy(t *testing.T
         _ = NewFirewallOverrideConfiguration().WithMergeStrategy("neitherOfTheThree")
     }, "unknown security access control merge strategy")
 }
+
+/* the two dependencies every firewall must carry are refused at the declaration door, where the
+   composition root can still be pointed at the line that declared them — a typed nil reads as
+   declared, so without this the firewall boots and the first request behind it dereferences a nil
+   receiver inside the resolution listener. */
+func TestBuilder_AddFirewallRefusesATypedNilMatcherAndTokenSource(t *testing.T) {
+    var typedNilMatcher securitycontract.Matcher = (*security.PathPrefixMatcher)(nil)
+    var typedNilTokenSource securitycontract.TokenSource = (*typedNilTokenSourceProbe)(nil)
+
+    t.Run("matcher", func(t *testing.T) {
+        builder := NewBuilder()
+
+        testhelper.AssertPanicsWithError(t, func() {
+            builder.AddStatelessFirewall(
+                "api",
+                typedNilMatcher,
+                nil,
+                &anonymousTokenSource{},
+                NewFirewallOverrideConfiguration(),
+            )
+        }, "security firewall matcher is nil")
+    })
+
+    t.Run("token source", func(t *testing.T) {
+        builder := NewBuilder()
+
+        testhelper.AssertPanicsWithError(t, func() {
+            builder.AddStatelessFirewall(
+                "api",
+                security.NewPathPrefixMatcher("/"),
+                nil,
+                typedNilTokenSource,
+                NewFirewallOverrideConfiguration(),
+            )
+        }, "security firewall token source is nil")
+    })
+}
+
+type typedNilTokenSourceProbe struct {
+}
+
+func (instance *typedNilTokenSourceProbe) Name() string {
+    return "typed-nil-probe"
+}
+
+func (instance *typedNilTokenSourceProbe) Resolve(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+) (securitycontract.Token, error) {
+    return nil, nil
+}

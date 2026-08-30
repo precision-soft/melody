@@ -116,7 +116,7 @@ func (instance *Application) bootHttp() {
     }
 }
 
-/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot, in every process shape: the listeners are inert in a console that never dispatches a kernel event, and a dispatcher inspected there answers with the same set the serving process runs — the introspection command used to report an empty dispatcher for a correctly wired application. The conditions are boot-final by contract: an error handler is installed by boot, and debug mode is configuration. */
+/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot, in every process shape: the listeners are inert in a console that never dispatches a kernel event, and a dispatcher inspected there answers with the same set the serving process runs — the introspection command used to report an empty dispatcher for a correctly wired application. Debug mode is configuration, so those conditions are boot-final; the exception listener's is not, and an http process makes it where serving begins instead. */
 func (instance *Application) registerKernelHttpListeners() {
     eventDispatcher := instance.kernel.EventDispatcher()
 
@@ -127,16 +127,29 @@ func (instance *Application) registerKernelHttpListeners() {
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
 
-    /* the framework exception listener answers every kernel.exception dispatch, so with it registered an error handler the application installed at boot could never run — the kernel consults the handler only when the dispatch produced no response. A handler installed by boot therefore takes the listener's place; without one the listener renders exactly as before. */
-    if false == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
-        http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
+    /* a console never reaches runHttp, so it decides here: its dispatcher has to show the set a serving process runs, which is what the introspection command reads. An http process defers the one decision that is not boot-final. */
+    if config.ModeHttp != instance.runtimeFlags.Mode() {
+        instance.registerKernelExceptionListener()
     }
+}
+
+/* registerKernelExceptionListener installs the framework's exception renderer unless the application installed an error handler of its own. The framework listener answers every kernel.exception dispatch, and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely; without a handler the listener renders exactly as before.
+
+   An http process makes this decision where serving begins, not at the end of Boot. SetErrorHandler is documented open until Kernel.ServeHttp builds the handler, so a handler installed in that window — after Application.Boot returned, before Run — was accepted by the kernel and then never consulted, the door reading as installed while rendering nothing. */
+func (instance *Application) registerKernelExceptionListener() {
+    if true == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
+        return
+    }
+
+    http.RegisterKernelExceptionListener(instance.kernel.EventDispatcher(), instance.kernel.DebugMode())
 }
 
 func (instance *Application) runHttp(
     ctx context.Context,
 ) error {
     configuration := instance.configuration
+
+    instance.registerKernelExceptionListener()
 
     httpKernel := instance.kernel.HttpKernel()
     httpKernel.Use(
@@ -218,6 +231,9 @@ func awaitHttpServerEnd(
         /* Shutdown starts the shutdown hooks on their own goroutines but never waits for them, and it reports quiescent at once when the only open connections are hijacked (websocket), so join the hooks — within the same shutdown budget — before returning, otherwise the process exits while a hook is still releasing those handlers */
         waitForHttpShutdownHooks(shutdownHooksDone, shutdownContext)
 
+        /* every phase of the wind-down runs, and each failing one contributes its cause. Returning on the first skipped the phases behind it, and the drain is the one that matters there: a hijacked connection is what makes Shutdown report a budget overrun in the first place, so the wait written for it was the wait that never ran, and the application container closed under a handler still on the wire. */
+        runErrs := make([]error, 0, 3)
+
         serveErr := <-errorChannel
         if nil != serveErr && false == errors.Is(serveErr, nethttp.ErrServerClosed) {
             logger.Error(
@@ -225,7 +241,7 @@ func awaitHttpServerEnd(
                 exception.LogContext(serveErr),
             )
 
-            return markHttpRunErrorLogged(serveErr)
+            runErrs = append(runErrs, serveErr)
         }
 
         if nil != shutdownErr {
@@ -234,15 +250,15 @@ func awaitHttpServerEnd(
                 exception.LogContext(shutdownErr),
             )
 
-            return markHttpRunErrorLogged(shutdownErr)
+            runErrs = append(runErrs, shutdownErr)
         }
 
         drainErr := awaitOpenRequestScopes(shutdownContext, httpKernel, logger)
         if nil != drainErr {
-            return markHttpRunErrorLogged(drainErr)
+            runErrs = append(runErrs, drainErr)
         }
 
-        return nil
+        return markHttpWindDownFailure(runErrs)
 
     case err := <-errorChannel:
         if nil != err && false == errors.Is(err, nethttp.ErrServerClosed) {
@@ -256,6 +272,19 @@ func awaitHttpServerEnd(
 
         return nil
     }
+}
+
+/* markHttpWindDownFailure answers the wind-down with the causes its phases reported. A lone cause travels exactly as it did when the first failing phase returned it, so nothing about a single failure's rendering moves; two or more are joined, because each one is independently actionable and picking a winner would drop the other. */
+func markHttpWindDownFailure(runErrs []error) error {
+    if 0 == len(runErrs) {
+        return nil
+    }
+
+    if 1 == len(runErrs) {
+        return markHttpRunErrorLogged(runErrs[0])
+    }
+
+    return markHttpRunErrorLogged(errors.Join(runErrs...))
 }
 
 /* markHttpRunErrorLogged hands the exit handler an error that already carries its own record. Run's failure travels to the exit handler, which logs whatever arrives unlogged, and the http failure was logged here first and then wrapped afresh — so one fall was rendered three times on the way out. */
