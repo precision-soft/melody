@@ -1,6 +1,8 @@
 package security
 
 import (
+    "fmt"
+
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -8,6 +10,8 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -311,10 +315,21 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
         KernelAccessControlListenerPriority,
     )
 
-    /* mark access control as a required kernel.request listener: if another listener stops propagation before it runs, the dispatch fails closed rather than letting the request reach the handler with access control silently skipped. A no-op on a dispatcher that does not support required listeners, so this stays optional. */
-    if registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar); true == ok {
-        registrar.MarkListenerRequired(accessControlRegistration)
+    /* mark access control as a required kernel.request listener: if another listener stops propagation before it runs, the dispatch fails closed rather than letting the request reach the handler with access control silently skipped. The capability is optional, so a dispatcher of the application's own still registers the listener — but it is what ARMS the fail-closed guarantee, and a dispatcher that does not carry it disarms the guarantee for the whole process. That is said out loud, naming the dispatcher, the way the framework's own adapter refuses the same condition rather than swallowing it: the record goes to the emergency channel because this runs at boot, before any resolution of the configured logger. */
+    registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar)
+    if false == ok {
+        logging.EmergencyLogger().Warning(
+            "the event dispatcher cannot mark the access control listener required",
+            loggingcontract.Context{
+                "dispatcherType": fmt.Sprintf("%T", eventDispatcher),
+                "consequence":    "a listener that stops propagation before access control lets the request reach its handler unchecked",
+            },
+        )
+
+        return
     }
+
+    registrar.MarkListenerRequired(accessControlRegistration)
 }
 
 func matchAccessControlRule(accessControl *AccessControl, path string, source Source, firewallName string) (*MatchedAccessControlRule, []string, bool) {

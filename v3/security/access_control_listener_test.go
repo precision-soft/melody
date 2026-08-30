@@ -2,12 +2,16 @@ package security
 
 import (
     "errors"
+    "io"
+    "os"
+    "strings"
     "testing"
 
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpPkg "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -750,4 +754,50 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
     if 0 != grantedCount {
         t.Fatalf("expected the refusal of the all-decision to stand, not the acceptance of the any-decision")
     }
+}
+
+/* TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed pins the branch that used to be silent. The required-listener mark is what makes a listener stopping propagation ahead of access control fail the dispatch closed instead of letting the request reach its handler unchecked; a dispatcher that cannot take the mark disarms that guarantee for the whole process, and the framework's own event adapter refuses the very same condition with a panic rather than swallowing it. The record goes to the emergency channel because this runs at boot, before the configured logger is resolvable. */
+func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    logging.CloseEmergencyLogger()
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+        logging.CloseEmergencyLogger()
+    }()
+
+    kernel := newTestKernel()
+    kernel.eventDispatcher = &capabilitylessDispatcher{EventDispatcher: kernel.eventDispatcher}
+
+    RegisterKernelAccessControlListener(
+        kernel,
+        NewFirewallRegistry(NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")))),
+    )
+
+    _ = writeEnd.Close()
+    os.Stderr = originalStderr
+
+    output, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    if false == strings.Contains(string(output), "cannot mark the access control listener required") {
+        t.Fatalf("expected the degradation to be reported, got %q", string(output))
+    }
+
+    if false == strings.Contains(string(output), "capabilitylessDispatcher") {
+        t.Fatalf("expected the dispatcher to be named, got %q", string(output))
+    }
+}
+
+/* capabilitylessDispatcher is a dispatcher of the application's own: it forwards every dispatch through the published contract and carries no MarkListenerRequired, which is exactly what an implementation written against the contract looks like */
+type capabilitylessDispatcher struct {
+    eventcontract.EventDispatcher
 }

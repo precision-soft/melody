@@ -160,8 +160,27 @@ func LogOnRecoverAndExitAfter(
         })
     }
 
-    /* the earlier record may have gone to a file logger, leaving a container whose logs are the standard streams with no trace of a fatal exit */
-    echoExitToStderr(err, resolvedExitCode)
+    /* the earlier record may have gone to a file logger, leaving a container whose logs are the standard streams with no trace of a fatal exit.
+
+       It runs under the same budget the steps above run under, but not through their shield: the shield narrates an abandoned step ON STDERR, and stderr is exactly the channel this step can be blocked on — a pipe to a collector that stopped reading — so the report would park the process one budget later, on the line written to say the previous line was abandoned. Nothing is said here on the abandoned path; os.Exit is what the process was owed, and it is taken. */
+    echoDone := make(chan struct{})
+
+    go func() {
+        defer close(echoDone)
+
+        /* a panic here would replace the exit code this process was owed with the runtime's own; the echo is best-effort by construction and the record above is already written */
+        defer func() {
+            _ = recover()
+        }()
+
+        echoExitToStderr(err, resolvedExitCode)
+    }()
+
+    select {
+    case <-echoDone:
+
+    case <-time.After(exitStepBudget):
+    }
 
     os.Exit(resolvedExitCode)
 }
@@ -169,36 +188,39 @@ func LogOnRecoverAndExitAfter(
 /* exitStepBudget is how long one step of the exit handler may run before it is abandoned; tests replace it to drive the timeout without real waits. Ten seconds is double the default http shutdown wait on purpose — the exit handler is the last resort, not the first — and it is a package constant rather than a tunable because this package cannot read the configuration: the logger it builds is what the configuration is loaded through. */
 var exitStepBudget = 10 * time.Second
 
-/* RunShieldedStep is the exit handler's own shield, offered to the one other caller that stands between a process and its end: the normal return of Run, whose teardown is deferred with no budget at all, so the healthy shutdown was the one without an emergency exit while the panicking one had a ten-second escape. It contains a panic inside the step, echoes it to stderr best-effort, and abandons a step that does not return within the budget, answering whether the step finished. A caller that gets false has a process holding something it cannot release and should end rather than wait.
+/* RunShieldedStep is the exit handler's own shield, offered to the one other caller that stands between a process and its end: the normal return of Run, whose teardown is deferred with no budget at all, so the healthy shutdown was the one without an emergency exit while the panicking one had a ten-second escape. It contains a panic inside the step, echoes it to stderr best-effort, and abandons a step that does not return within the budget, answering whether the step ran to its end. A caller that gets false has a process holding something it cannot release and should end rather than wait; a contained panic answers false for the same reason, because the step stopped where it raised.
 
    The step keeps running on its goroutine after abandonment, so anything it writes must not be read by a caller that was told it did not finish. */
 func RunShieldedStep(stepName string, step func()) bool {
     return runExitStepShielded(stepName, step)
 }
 
-/* runExitStepShielded contains a panic inside one step of the exit handler and echoes it to stderr best-effort, and abandons a step that does not return within the budget: the steps stand between a fatal failure and os.Exit, so a teardown blocked on a close that never returns — a drain on an unbuffered channel, a lock somebody died holding — would otherwise turn a dying process into a hung one, with the record written and the exit never taken. The step keeps running on its goroutine after abandonment; os.Exit ends it with the process. It answers whether the step finished inside its budget. */
+/* runExitStepShielded contains a panic inside one step of the exit handler and echoes it to stderr best-effort, and abandons a step that does not return within the budget: the steps stand between a fatal failure and os.Exit, so a teardown blocked on a close that never returns — a drain on an unbuffered channel, a lock somebody died holding — would otherwise turn a dying process into a hung one, with the record written and the exit never taken. The step keeps running on its goroutine after abandonment; os.Exit ends it with the process. It answers whether the step ran to its end: a step abandoned on the budget and a step whose panic was contained here both left work undone, and a caller that is told otherwise records a teardown that never happened. */
 func runExitStepShielded(stepName string, step func()) bool {
-    stepDone := make(chan struct{})
+    /* the channel carries the outcome rather than only the fact that the goroutine ended, because closing it alone reported a recovered panic as a completed step; it is buffered so the send cannot park forever once the budget has abandoned the step and nobody is left to receive */
+    stepDone := make(chan bool, 1)
 
     go func() {
-        defer close(stepDone)
+        stepCompleted := false
 
         /* the recover lives on the step's own goroutine: a recover in the waiting parent could never catch a panic raised here */
         defer func() {
             recoveredValue := recover()
-            if nil == recoveredValue {
-                return
+            if nil != recoveredValue {
+                _, _ = fmt.Fprintf(os.Stderr, "melody: panic while %s during the exit handler: %v\n", stepName, recoveredValue)
             }
 
-            _, _ = fmt.Fprintf(os.Stderr, "melody: panic while %s during the exit handler: %v\n", stepName, recoveredValue)
+            stepDone <- stepCompleted
         }()
 
         step()
+
+        stepCompleted = true
     }()
 
     select {
-    case <-stepDone:
-        return true
+    case stepCompleted := <-stepDone:
+        return stepCompleted
 
     case <-time.After(exitStepBudget):
         _, _ = fmt.Fprintf(os.Stderr, "melody: %s did not return within %s during the exit handler; abandoning it\n", stepName, exitStepBudget)
@@ -347,7 +369,11 @@ func echoExitToStderr(err error, exitCode int) {
 
     message := "-"
     if nil != err {
-        message = err.Error()
+        /* the value reaching this line came out of a recover, so its Error() can be the very dereference that made it panic-worthy; LogContext renders it under a recover, which is the same door the record above was written through */
+        rendered, isRendered := exception.LogContext(err)["error"].(string)
+        if true == isRendered && "" != rendered {
+            message = rendered
+        }
     }
 
     _, _ = fmt.Fprintf(os.Stderr, "melody: exiting with code %d after unrecovered error: %s\n", exitCode, message)

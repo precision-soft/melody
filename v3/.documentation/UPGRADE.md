@@ -103,13 +103,15 @@ A flag kind melody does not ship — a duration, a float — has no alias to rea
 
 **Remedy.** None. A deployment that was unknowingly discarding these records will see them; each one names a value constructed without a level, which is worth finding.
 
-### Logging: the json timestamp carries nanosecond precision, and its order is the write order
+### Logging: the json timestamp carries nanosecond precision in UTC, and its order is the write order
 
-**What changed.** The `time` field is `RFC3339Nano` rather than `RFC3339`, and the stamp is taken inside the write mutex together with the encoding, so the order of the stamps is the order of the writes. Taken above the lock, the stamp said when the record was FORMED, and the two orders diverged by however long the encoding took.
+**What changed.** The `time` field is RFC 3339 with the nanosecond field written to its full width and the instant rendered in UTC, rather than `RFC3339`, and the stamp is taken inside the write mutex, so the order of the stamps is the order of the writes. Taken above the lock, the stamp said when the record was FORMED, and the two orders diverged by however long the work between took.
 
-**Symptom.** The `time` field gains a fractional part. Whole-second stamps made every record of a busy second indistinguishable; the fraction parses under the RFC 3339 layouts a consumer already uses, so a parser reading `time.RFC3339` is unaffected. Concurrent writers pay for the ordering: the encoding is now serialized across them.
+**Symptom.** The `time` field gains a fractional part of exactly nine digits and always ends in `Z`. Whole-second stamps made every record of a busy second indistinguishable; the fraction parses under the RFC 3339 layouts a consumer already uses, so a parser reading `time.RFC3339` is unaffected. A record written in a process whose local zone is not UTC now carries the same instant with the UTC offset rather than the local one.
 
-**Remedy.** None for a consumer that parses RFC 3339. A test asserting a whole-second stamp by string equality compares a prefix instead.
+The full width is what makes the stamps sortable as text, which is the whole of what taking them under the lock buys: `time.RFC3339Nano` trims trailing zeros, so a record landing on a whole second rendered without a fraction at all and sorted after every fractional record of that same second. Rendering in UTC closes the same hole for a zone whose offset moves.
+
+**Remedy.** None for a consumer that parses RFC 3339. A test asserting a whole-second stamp by string equality compares a prefix instead, and one asserting a local-zone offset reads UTC.
 
 ### Logging: the json logger reports its own failed write, once, on stderr
 

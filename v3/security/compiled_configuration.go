@@ -1,6 +1,8 @@
 package security
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/v3/event"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -146,14 +148,13 @@ func (instance *CompiledFirewall) Login(
     if nil != err {
         dispatchErr := instance.dispatchLoginFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            /* keep the login error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
+            /* both failures travel as causes: the login error first, so the client still sees the reason it failed rather than a generic dispatch failure, and the dispatch error beside it rather than flattened into a context slot. Flattened it said "event listener returned error" and nothing else — the listener's name, the event and the listener's own cause all live in that error's CONTEXT, which a string slot drops at the render boundary. */
             return nil, exception.NewError(
                 "security login failure event dispatch failed",
                 exceptioncontract.Context{
-                    "firewallName":  instance.name,
-                    "dispatchError": dispatchErr.Error(),
+                    "firewallName": instance.name,
                 },
-                err,
+                errors.Join(err, dispatchErr),
             )
         }
 
@@ -198,14 +199,13 @@ func (instance *CompiledFirewall) Logout(
     if nil != err {
         dispatchErr := instance.dispatchLogoutFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            /* keep the logout error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
+            /* both failures travel as causes: the logout error first, so the client still sees the reason it failed rather than a generic dispatch failure, and the dispatch error beside it rather than flattened into a context slot. Flattened it said "event listener returned error" and nothing else — the listener's name, the event and the listener's own cause all live in that error's CONTEXT, which a string slot drops at the render boundary. */
             return nil, exception.NewError(
                 "security logout failure event dispatch failed",
                 exceptioncontract.Context{
-                    "firewallName":  instance.name,
-                    "dispatchError": dispatchErr.Error(),
+                    "firewallName": instance.name,
                 },
-                err,
+                errors.Join(err, dispatchErr),
             )
         }
 

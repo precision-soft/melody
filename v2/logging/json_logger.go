@@ -2,6 +2,7 @@ package logging
 
 import (
     "encoding/json"
+    "errors"
     "fmt"
     "io"
     "os"
@@ -14,6 +15,9 @@ import (
     "github.com/precision-soft/melody/v2/internal"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
+
+/* jsonLogTimestampLayout is RFC 3339 with the nanosecond field written to its full width. time.RFC3339Nano trims trailing zeros, which makes the field variable width and the stamps unsortable as text — the whole point of taking the stamp under the write lock. */
+const jsonLogTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 func NewJsonLogger(output io.Writer, minLevel loggingcontract.Level) loggingcontract.Logger {
     return NewJsonLoggerWithLabels(output, minLevel, loggingcontract.DefaultLevelLabels())
@@ -74,47 +78,78 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
 
     label := instance.levelLabels.LabelFor(level)
 
-    /* the normalization is the one step that stays outside the lock: it walks the caller's own context, which is the unbounded part of the work and touches nothing this logger shares. */
+    /* the normalization and the encoding of the caller's own context both stay outside the lock. Both run application code — a MarshalJSON, a String, an Error of the caller's own — which is unbounded work this logger does not own and which may itself log through this very logger: under the lock, such a value deadlocked the whole journal on its own record, and every other writer queued behind the slowest caller's encoder. */
     normalizedContext := normalizeJsonContext(context)
+    encodedContext, contextMarshalErr := json.Marshal(normalizedContext)
 
-    /* the stamp and the encoding both happen under the write lock, and the order of the stamps is therefore the order of the writes. Taken above the lock, the stamp said when the record was FORMED, and the two orders diverged by however long the encoding took: measured at eight goroutines writing records of a dozen keys, 484 of 1600 records reached the file out of stamp order, while LOGGING.md promises the ordering is reconstructible from the stamps and the comment on this very line claimed the precision was what the write mutex paid for. Nanosecond precision keeps that ordering legible once it is true — whole-second stamps made every record of a busy second indistinguishable, and the fraction still parses under the RFC 3339 layouts consumers already use.
+    renderedContext := ""
+    if nil != contextMarshalErr {
+        renderedContext = fmt.Sprintf("%+v", normalizedContext)
+    }
 
-       The cost is the encoding serialized across writers: measured at eight goroutines against a real file, 8648 ns per record became 13755. A logger writes to one destination through one lock either way, so what this buys is the one ordering guarantee the document already sold. */
+    /* the stamp is taken under the write lock, so the order of the stamps is the order of the writes: taken above the lock it said when the record was FORMED, and the two orders diverged by however long the encoding took — measured at eight goroutines writing records of a dozen keys, 484 of 1600 records reached the file out of stamp order, while LOGGING.md sells the ordering as reconstructible from the stamps.
+
+       The layout is FIXED WIDTH, and that is the half without which the rest buys nothing: RFC3339Nano trims trailing zeros, so a record landing on a whole second renders with no fraction at all and sorts after every fractional record of that same second — '.' is 0x2E and 'Z' is 0x5A. Measured on four instants one second apart, the lexical order was not the chronological one. The instant is rendered in UTC for the same reason, so a zone whose offset moves cannot reorder two stamps either.
+
+       What stays under the lock is assembly of values that are already encoded, plus the write; no application code runs here, so the lock is held for bounded work. */
     instance.writeMutex.Lock()
-    defer instance.writeMutex.Unlock()
 
     if true == instance.closed.Load() {
+        instance.writeMutex.Unlock()
+
         return
     }
 
-    timestamp := time.Now().Format(time.RFC3339Nano)
+    timestamp := time.Now().UTC().Format(jsonLogTimestampLayout)
 
-    entry := logEntry{
-        Message: message,
-        Level:   label,
-        Time:    timestamp,
-        Context: normalizedContext,
+    encoded := []byte(nil)
+    marshalErr := contextMarshalErr
+    if nil == marshalErr {
+        /* the envelope is assembled from parts that are already encoded rather than marshalled as one value: handing the encoded context back to the encoder as a json.RawMessage makes it re-validate the bytes it just produced, and it does so one level deeper than it wrote them, so a context that fits the encoder's depth bound is refused when it is wrapped. Each of the three remaining fields is encoded on its own, so the escaping is the encoder's and not this line's. */
+        encodedMessage, messageErr := json.Marshal(message)
+        encodedLabel, labelErr := json.Marshal(label)
+        encodedTimestamp, timestampErr := json.Marshal(timestamp)
+
+        marshalErr = errors.Join(messageErr, labelErr, timestampErr)
+        if nil == marshalErr {
+            encoded = append(encoded, `{"message":`...)
+            encoded = append(encoded, encodedMessage...)
+            encoded = append(encoded, `,"level":`...)
+            encoded = append(encoded, encodedLabel...)
+            encoded = append(encoded, `,"time":`...)
+            encoded = append(encoded, encodedTimestamp...)
+            encoded = append(encoded, `,"context":`...)
+            encoded = append(encoded, encodedContext...)
+            encoded = append(encoded, '}')
+        }
     }
 
-    encoded, err := json.Marshal(entry)
-    if nil != err {
-        /* the fallback keeps the context as text rather than dropping it: one unmarshalable value used to cost every other key of the record — the service name, the cause chain — exactly when the record described a failure. Every fallback value is a string, so the second marshal cannot fail. */
+    if nil != marshalErr {
+        /* the fallback keeps the context as text rather than dropping it: one unmarshalable value used to cost every other key of the record — the service name, the cause chain — exactly when the record described a failure. Every fallback value is a string, so the second marshal cannot fail. The rendering itself was done above the lock, where the caller's own String methods belong; an outer failure over already-encoded values leaves nothing of the caller to render, so it says so. */
+        renderedFallbackContext := renderedContext
+        if nil == contextMarshalErr {
+            renderedFallbackContext = "the record could not be assembled from its already-encoded parts"
+        }
+
         fallback := map[string]any{
             "message":      message,
             "level":        label,
             "time":         timestamp,
-            "marshalError": err.Error(),
-            "context":      fmt.Sprintf("%+v", normalizedContext),
+            "marshalError": marshalErr.Error(),
+            "context":      renderedFallbackContext,
         }
 
         encoded, _ = json.Marshal(fallback)
     }
 
-    if 0 == len(encoded) {
-        return
+    writeErr := error(nil)
+    if 0 < len(encoded) {
+        _, writeErr = instance.output.Write(append(encoded, '\n'))
     }
 
-    _, writeErr := instance.output.Write(append(encoded, '\n'))
+    instance.writeMutex.Unlock()
+
+    /* the echo is taken after the lock is released: it writes to stderr, and a stderr that is a pipe nobody drains blocks — under the lock that parked every goroutine that logs, and Close with them, on the one channel that exists to report that the journal has stopped working. */
     if nil != writeErr {
         instance.reportWriteFailure(writeErr)
     }

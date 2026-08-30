@@ -26,6 +26,14 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 
 Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, and none of them asks the upgrader for an action.
 
+### Logging: the json timestamp is fixed width and rendered in UTC
+
+**What changed.** The `time` field of a json record was formatted with `time.RFC3339Nano`, which trims trailing zeros from the fractional second, and with the instant in the process's own zone. It is now formatted with the nanosecond field written to its full width and the instant put in UTC first.
+
+**Symptom.** The fractional part is always exactly nine digits, and the stamp always ends in `Z` rather than carrying a local offset. The value is the same instant, and it parses under the RFC 3339 layouts a consumer already uses. What it fixes is the ordering the stamp exists for: the stamp is taken under the write mutex so that the order of the stamps is the order of the writes, but a trimmed fraction made the field variable width, so a record landing on a whole second rendered shorter and sorted, as text, after every fractional record of the same second — `.` is `0x2E` and `Z` is `0x5A`. Rendering in UTC closes the same hole for a process whose zone offset moves.
+
+**Remedy.** None for a consumer that parses the field. A test comparing the stamp to a locally-formatted instant by string equality reads UTC instead, and one that asserted a trimmed fraction compares a prefix.
+
 ### Bunorm: the registry refuses new callers while a pool is still closing
 
 **What changed.** `ManagerRegistry.Close` marked the registry closed and then held the registry lock for the whole teardown, closing every manager and every migration database inside the critical section. It now publishes the flag under the lock, takes a snapshot of the two maps, releases the lock, and closes the pools outside it.

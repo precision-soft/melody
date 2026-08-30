@@ -1375,6 +1375,34 @@ func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheValueReportsItself
     }
 }
 
+/* the mark is read at the depth MarkLogged writes it, which is what the sibling above cannot show: there the payload carries the mark itself. A listener that panics with an error WRAPPING one its producer already logged asked the same question one link down, and a shallow type test answered no — one failure, two records. */
+func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheMarkIsOneLinkDown(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            panicErr := exception.NewError("already reported by its author", nil, nil)
+            _ = exception.MarkLogged(panicErr)
+
+            panic(errors.Join(panicErr))
+        },
+        0,
+    )
+
+    logger := &testRecordingLogger{}
+    runtimeInstance := testRuntimeWithLogger(t, logger)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected the panic to travel as an error")
+    }
+
+    if 0 != len(logger.errorRecords) {
+        t.Fatalf("expected no second record, got: %v", logger.errorRecords)
+    }
+}
+
 func TestEventDispatcher_ListenerPanic_IsLoggedWhenNobodyReportedIt(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
@@ -1764,7 +1792,8 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
     }
 }
 
-func TestEventDispatcher_FailingListenerWithMaySkip_ReportsItsOwnFailure(t *testing.T) {
+/* the may-skip mark licenses the stop, not the failure: its own GoDoc scopes it to a listener that stops propagation, and the registrar contract says without exception that a failure with a required listener behind it reports the skip and carries the failure as its cause. Read on the failure branch the mark granted more than it was written for — the marked listener's response was served with access control never consulted. */
+func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequiredListener(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
     listenerFailure := errors.New("the listener's own failure")
@@ -1791,12 +1820,12 @@ func TestEventDispatcher_FailingListenerWithMaySkip_ReportsItsOwnFailure(t *test
 
     _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
 
-    if _, ok := err.(*RequiredListenerSkippedError); true == ok {
-        t.Fatalf("a failing listener marked may-skip must report its own failure, got: %v", err)
+    if _, ok := err.(*RequiredListenerSkippedError); false == ok {
+        t.Fatalf("expected the skipped required listener to be reported for a failing listener marked may-skip, got: %v", err)
     }
 
     if false == errors.Is(err, listenerFailure) {
-        t.Fatalf("expected the listener's own failure, got: %v", err)
+        t.Fatalf("expected the listener's own failure to travel as the cause, got: %v", err)
     }
 }
 
@@ -2119,3 +2148,5 @@ func stoppingGateListener(runtimeInstance runtimecontract.Runtime, eventValue ev
 
     return nil
 }
+
+

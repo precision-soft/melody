@@ -54,9 +54,19 @@ type RequiredListenerSkippedError struct {
 }
 
 func (instance *RequiredListenerSkippedError) Error() string {
+    /* the zero value is constructible outside the constructors, which always set the field; the sibling this type is shaped after answers the same way rather than dereferencing it */
+    if nil == instance.exceptionErr {
+        return "required listener skipped error carries no error value"
+    }
+
     return instance.exceptionErr.Error()
 }
 
 func (instance *RequiredListenerSkippedError) Unwrap() error {
+    /* returning the nil field through the interface would box a typed nil that passes every nil comparison downstream */
+    if nil == instance.exceptionErr {
+        return nil
+    }
+
     return instance.exceptionErr
 }

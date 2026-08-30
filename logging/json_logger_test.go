@@ -1202,3 +1202,113 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
         t.Fatalf("expected a closed logger to report nothing enabled")
     }
 }
+
+/* a context value renders through the caller's own MarshalJSON, and application code may log: under the write lock that value's record deadlocked the journal on itself, and every other writer behind it. The encoding of the caller's context is therefore done above the lock, where re-entering Log is merely a second record. */
+func TestJsonLogger_AContextValueThatLogsWhileItRendersDoesNotDeadlockTheLogger(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLogger(buffer, loggingcontract.LevelInfo)
+
+    done := make(chan struct{})
+
+    go func() {
+        defer close(done)
+
+        logger.Info("outer", loggingcontract.Context{"value": &loggingReentrantValue{logger: logger}})
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the logger deadlocked on a context value that logs while it renders")
+    }
+
+    if false == strings.Contains(buffer.String(), "from inside the marshaller") {
+        t.Fatalf("expected the re-entrant record, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(buffer.String(), "outer") {
+        t.Fatalf("expected the outer record, got %q", buffer.String())
+    }
+}
+
+/* loggingReentrantValue is the application value the test above is about: it logs from inside the rendering the logger asked it for */
+type loggingReentrantValue struct {
+    logger loggingcontract.Logger
+}
+
+func (instance *loggingReentrantValue) MarshalJSON() ([]byte, error) {
+    instance.logger.Info("from inside the marshaller", nil)
+
+    return []byte(`"rendered"`), nil
+}
+
+/* the echo of a failed write goes to stderr, and a stderr nobody drains blocks: taken under the write lock it parked every goroutine that logs, and Close with them, on the one channel whose whole purpose is to report that the journal has stopped writing. */
+func TestJsonLogger_AStalledStderrEchoDoesNotHoldTheWriteLock(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+
+    filled := make(chan struct{})
+    echoed := make(chan struct{})
+
+    /* every writer parked on the pipe is unblocked and JOINED before the process stderr is put back: leaving one of them alive would have it reading the global this line writes */
+    defer func() {
+        _ = readEnd.Close()
+
+        <-filled
+        <-echoed
+
+        os.Stderr = originalStderr
+        _ = writeEnd.Close()
+    }()
+
+    /* fill the pipe so the echo below has nowhere to go */
+    go func() {
+        defer close(filled)
+
+        _, _ = writeEnd.Write(make([]byte, 1<<20))
+    }()
+
+    time.Sleep(50 * time.Millisecond)
+
+    logger := NewJsonLogger(&refusingWriter{}, loggingcontract.LevelInfo)
+
+    go func() {
+        defer close(echoed)
+
+        logger.Info("the record whose write fails", nil)
+    }()
+
+    time.Sleep(50 * time.Millisecond)
+
+    closer, isCloser := logger.(io.Closer)
+    if false == isCloser {
+        t.Fatalf("expected the json logger to be closeable")
+    }
+
+    closed := make(chan struct{})
+    go func() {
+        defer close(closed)
+
+        _ = closer.Close()
+    }()
+
+    select {
+    case <-closed:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("Close waited on the write lock while the stderr echo was stalled")
+    }
+}
+
+/* refusingWriter is the journal destination that has stopped accepting records — a full disk, a vanished mount — which is the only condition the stderr echo exists for */
+type refusingWriter struct {
+}
+
+func (instance *refusingWriter) Write(payload []byte) (int, error) {
+    return 0, errors.New("the journal destination refuses every record")
+}
+

@@ -169,7 +169,7 @@ func (instance *Application) bootContainer() {
                     configuration.Kernel().LogLevel(),
                     instance.moduleConfigurations,
                     kernelInstance.Clock(),
-                    true,
+                    config.ModeHttp == instance.runtimeFlags.Mode(),
                 ), nil
             },
         )
@@ -286,7 +286,7 @@ func (instance *Application) bootContainer() {
 
 /* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is acquired, because it panics on a configuration registered under the supported name with a type that does not implement the interface: a file opened above that would be left with no owner at all — the container stores only what a provider returned, so nothing would ever close it, and a creation failure is not memoized, so each later resolution opens another one.
 
-   The file journal is a reopenable writer, and the container-served logger arms it on SIGHUP: rename-based rotation moves the file away under the descriptor, so without the reopen the journal keeps flowing into the renamed inode and the fresh file stays empty. The exit-path caller does not arm it — that logger exists for a process that is dying, whose descriptor is surrendered to os.Exit, and a watcher armed there would outlive nothing and own nothing. */
+   The file journal is a reopenable writer, and the serving process arms it on SIGHUP: rename-based rotation moves the file away under the descriptor, so without the reopen the journal keeps flowing into the renamed inode and the fresh file stays empty. Two callers deliberately do not arm it. The exit-path logger exists for a process that is dying, whose descriptor is surrendered to os.Exit, and a watcher armed there would outlive nothing and own nothing. A cli process does not arm it either: arming is signal.Notify, which takes SIGHUP away from its default disposition of terminating the process, so a command whose terminal hung up stopped dying and stayed alive as an orphan, having rotated a journal it was about to close anyway — the same line the environment refusal draws, where a command takes its configuration with it when it exits. */
 func newContainerLogger(
     logPath string,
     logLevel loggingcontract.Level,

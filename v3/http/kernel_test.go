@@ -627,6 +627,69 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
     }
 }
 
+/* the may-skip twin of the test above, and the case the mark was never written for: the listener does not stop, it FAILS, and it fails after producing a response. Read on the failure branch the mark suppressed the skip refusal, so the dispatch returned an ordinary listener failure, the kernel's type test did not fire, and the response the failing listener had set was served — the cached /admin page handed to an anonymous caller by the branch the neighbouring test closes for the stop. */
+func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/admin",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+
+    requiredRegistration := dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        10,
+    )
+
+    registrar, isRegistrar := any(dispatcher).(eventcontract.RequiredListenerRegistrar)
+    if false == isRegistrar {
+        t.Fatalf("expected the dispatcher to mark required listeners")
+    }
+
+    registrar.MarkListenerRequired(requiredRegistration)
+
+    cacheRegistration := dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent, ok := eventValue.Payload().(*KernelRequestEvent)
+            if false == ok {
+                return nil
+            }
+
+            requestEvent.SetResponse(TextResponse(nethttp.StatusOK, "from the cache"))
+
+            return errors.New("the cache listener's own failure")
+        },
+        50,
+    )
+
+    registrar.MarkListenerMaySkipRequiredListeners(cacheRegistration)
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/admin", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the failing listener's response to be dropped for the error page, got %d", recorder.Code)
+    }
+
+    if true == strings.Contains(recorder.Body.String(), "from the cache") {
+        t.Fatalf("expected the cached body never to reach the writer, got %q", recorder.Body.String())
+    }
+}
+
 /* the kernel.controller twin of the test above, for the same reason and with the same measurement behind it */
 func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
