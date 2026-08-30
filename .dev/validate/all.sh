@@ -16,15 +16,16 @@ SKIP_LIVE_BOOLEAN="false"
 if [[ "" = "${1-}" ]]; then
     :
 elif [[ "-h" = "${1-}" ]]; then
-    println "usage: all.sh [-h] [--all | --staged | --live | --e2e | --vulncheck] [--skip-live]"
+    println "usage: all.sh [-h] [--all | --staged | --live | --e2e | --vulncheck | --compatibility] [--skip-live]"
     println ""
-    println "  -h           show this help and exit"
-    println "  --all        validate all modules, the live integration suites and the live e2e run (default)"
-    println "  --staged     validate only modules with staged changes (the vulnerability check runs only when a go.mod or go.sum is staged)"
-    println "  --live       run only the live integration suites (mirrors the ci live job)"
-    println "  --e2e        run only the live e2e harness and stack checks (mirrors the ci e2e job)"
-    println "  --vulncheck  run only the govulncheck lane against the vulncheck baseline"
-    println "  --skip-live  leave the live suites and the e2e run out of --all, for a hand run with no backends"
+    println "  -h               show this help and exit"
+    println "  --all            validate all modules, the live integration suites and the live e2e run (default)"
+    println "  --staged         validate only modules with staged changes (the vulnerability check runs only when a go.mod or go.sum is staged, the compatibility check when any go source, go.mod or go.sum outside the example applications and the dev harness is)"
+    println "  --live           run only the live integration suites (mirrors the ci live job)"
+    println "  --e2e            run only the live e2e harness and stack checks (mirrors the ci e2e job)"
+    println "  --vulncheck      run only the govulncheck lane against the vulncheck baseline"
+    println "  --compatibility  run only the lane that builds every integration against the version its go.mod pins"
+    println "  --skip-live      leave the live suites and the e2e run out of --all, for a hand run with no backends"
     exit 0
 elif [[ "--staged" = "${1-}" ]]; then
     MODE_STRING="staged"
@@ -36,6 +37,8 @@ elif [[ "--e2e" = "${1-}" ]]; then
     MODE_STRING="e2e"
 elif [[ "--vulncheck" = "${1-}" ]]; then
     MODE_STRING="vulncheck"
+elif [[ "--compatibility" = "${1-}" ]]; then
+    MODE_STRING="compatibility"
 elif [[ "--skip-live" = "${1-}" ]]; then
     MODE_STRING="all"
     SKIP_LIVE_BOOLEAN="true"
@@ -281,6 +284,24 @@ run_vulncheck_checks() {
         "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.sh"
 }
 
+# every integration module against the framework version its own go.mod PINS, rather than against the
+# local tree. Every Go lane above builds with go.work active, and a workspace substitutes the LOCAL module
+# for the dependency a go.mod declares — so none of them has ever compiled an integration against the
+# version it publishes itself as needing, which is exactly what `go get` resolves for a consumer. Green
+# under the workspace is a DEVELOPMENT check; this is the PUBLISHING one, and they are two sections on
+# purpose. The lane splits its failures by cause rather than counting them: a module naming something the
+# pinned tag does not have is the normal state of an unreleased branch and dies when the release train
+# raises the pin, while a name that exists at the tag and changed shape is a backwards-incompatible change
+# no pin bump answers. Needs the dev container for the toolchain and the network on a cold module cache.
+run_compatibility_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/compatibility.sh" ]]; then
+        fail "the compatibility check is missing or not executable: .dev/validate/compatibility.sh. It is not optional — it is the only lane that builds a published module against the version it declares, so a skip here reports a pass for the one class of defect every other lane is structurally blind to; restore it or chmod +x it"
+    fi
+
+    run_section "melody integration modules against the version each go.mod pins (GOWORK=off)" "${TAG_VALIDATE}" "compatibility" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/compatibility.sh"
+}
+
 # the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
 # actually drives a booted application over the wire, and that is the only place a whole class of defect shows
 # up at all — a middleware ordering that only matters once a real request traverses the chain, a route the
@@ -510,6 +531,13 @@ main() {
         return 0
     fi
 
+    if [[ "compatibility" = "${MODE_STRING}" ]]; then
+        run_compatibility_checks
+
+        success "validation completed"
+        return 0
+    fi
+
     if [[ "all" = "${MODE_STRING}" ]]; then
         if [[ "true" != "${SKIP_LIVE_BOOLEAN}" ]]; then
             record_validation_start_tree_hash
@@ -542,6 +570,8 @@ main() {
         run_changelog_checks
 
         run_vulncheck_checks
+
+        run_compatibility_checks
 
         run_race_go_suites
 
@@ -624,6 +654,18 @@ main() {
         run_vulncheck_checks
     else
         info "skip vulnerability check (no staged go.mod or go.sum change)"
+    fi
+
+    # gated like the vulnerability check above, and for the same reason: it needs the container and the
+    # network. The trigger is wider, because the answer moves from three sides rather than one — an
+    # integration's source, an integration's pin, and the PUBLIC API of a major. A signature change staged
+    # only under a major is precisely the case this lane exists to catch, so gating on go.mod alone would
+    # be the guard asking a different question than the one it was built for. Example applications and the
+    # dev harness are left out: neither is a published module, and the harness already builds GOWORK=off.
+    if git diff --cached --name-only 2>/dev/null | grep -vE '(^|/)\.example/' | grep -vE '^\.dev/' | grep -qE '\.go$|(^|/)go\.(mod|sum)$'; then
+        run_compatibility_checks
+    else
+        info "skip compatibility check (no staged go source, go.mod or go.sum outside the example applications and the dev harness)"
     fi
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"

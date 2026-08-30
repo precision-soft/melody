@@ -1,0 +1,63 @@
+# The integration modules that do not build against the framework version their own go.mod pins, one line
+# per module.
+#
+#   module ~ class ~ symbols ~ reason
+#
+# Read by .dev/validate/compatibility.sh. This is not a suppression list: every line is a claim the run
+# has to satisfy. A module that fails with no line here fails the check, and a line whose module now
+# builds fails it just as loudly — the break it excuses is gone, so the line has to go. That second half
+# is what makes the release train visible: raising a pin repairs the module, and this band then demands
+# the row be deleted rather than letting it rot into a permanent excuse for a module nobody builds.
+#
+# The symbols are the exact set the run measures, not a prefix of it. A row that named a subset would
+# grow silently to cover the next symbol the branch starts using, which is what a wildcard would do spelled
+# differently — so wildcards are refused and the set is compared for equality. When a module starts using
+# one more symbol the pinned version lacks, its row is rewritten; that is the row doing its job.
+#
+# The declared pin is deliberately not a field. The run reads it from the go.mod and prints it beside the
+# module, so this file cannot carry a version that has gone stale against the module it describes.
+#
+# The class is measured, not asserted, and the run refuses a row whose class no longer matches:
+#
+#   ahead     every diagnostic is an absence — the integration names something the pinned version does not
+#             have, because the framework grew it on this branch and the pin still points at an older tag.
+#             The dependency policy pins the oldest version that compiles, so this is the normal state of
+#             an unreleased branch and the release train resolves it by raising the pin. Not a defect.
+#
+#   contract  a name that EXISTS at the pinned version changed shape, and the integration no longer
+#             satisfies it. Raising the pin does not answer it: a third party implementing the same
+#             interface stops compiling too. Every such row is a backwards-incompatible change on the
+#             framework's published surface and needs a decision before it ships.
+#
+# Fields are trimmed, so the columns may be aligned. The reason is mandatory: a line whose reason is empty
+# is a line nobody can review.
+#
+# ------------------------------------------------------------------------------------------------------
+# the one contract break
+#
+# Measured against the pinned tag rather than argued: at that tag `Transport.Close(Runtime) error` had no
+# production caller anywhere in the tree — the only two call sites were in the in-memory transport's own
+# test — while the container's ordered teardown recognises `Close() error` and nothing else, so the old
+# signature left every transport structurally unreachable at shutdown and a broker connection lived as
+# long as the process. The change is therefore a defect repair whose remedy is not backwards compatible:
+# nothing that worked breaks, because the door was dead, but a third-party Transport implementation stops
+# compiling. It is filed here so the decision is visible until the release that carries it says so too.
+
+integrations/amqp/v3 ~ contract ~ messagebus/contract.Transport.Close ~ the transport close signature dropped its Runtime parameter so the container's ordered teardown can reach it; measured at the pinned tag as having zero production callers, so nothing that worked breaks, but a third-party Transport implementation stops compiling and the release notes have to say so
+
+# ------------------------------------------------------------------------------------------------------
+# source ahead of the pinned tag
+#
+# Every row below is one class of fact: the branch added a symbol to the framework or to a sibling
+# integration, the module started using it, and the pin still names a tag that predates it. The release
+# train raises these pins, the modules build, and this band then demands every row here be deleted. A row
+# that survives a release is a module published against a version that cannot compile it.
+
+integrations/bunorm/migrate/v3 ~ ahead ~ bunorm.ManagerRegistry.CloseMigrationDatabase, bunorm.ManagerRegistry.MigrationDatabase, clicontract.Context, exception.BuildCauseChain, output.IsJsonFormat ~ the branch added the command context contract, the cause-chain builder and the json output predicate to the framework, and the two migration database accessors to the sibling bunorm registry; both pins predate all five
+integrations/bunorm/mysql/v3 ~ ahead ~ bunorm.ConnectionParameters, bunorm.ContextOpener, bunorm.MigrationContextOpener, bunorm.MigrationProvider, bunorm.RouteDiagnostics ~ the branch added the connection parameter type, the route diagnostics and the three opener contracts to the sibling bunorm integration, and this module's pin on it predates all five
+integrations/bunorm/pgsql/v3 ~ ahead ~ bunorm.ConnectionParameters, bunorm.ContextOpener, bunorm.MigrationContextOpener, bunorm.MigrationProvider, bunorm.RouteDiagnostics ~ the same five names its mysql twin needs, for the same reason and against the same sibling pin
+integrations/bunorm/v3 ~ ahead ~ clicontract.Context, logging.NewStandardErrorLogger ~ the branch added the command context contract and the standard error logger constructor to the framework, and this module's pin predates both
+integrations/cron/v3 ~ ahead ~ application.NewProcessContext, application.ServiceProcessContext, clicontract.Context, exception.PanicCause, logging.NewProcessLogger, melodycli.DispatchCommand, output.IsJsonFormat ~ the branch added the process context pair, the command context contract, the panic cause accessor, the process logger constructor, the command dispatch door and the json output predicate to the framework; the pin predates all seven
+integrations/outbox/v3 ~ ahead ~ clicontract.Context ~ the branch added the command context contract to the framework and the relay command takes it; the pin predates it
+integrations/rueidis/v3 ~ ahead ~ security/contract.Claims.IssuedAt, securitycontract.EpochRevocableTokenStore ~ the branch added the epoch revocable token store contract and the issued-at field on the claims contract; the pin predates both
+integrations/websocket/v3 ~ ahead ~ exception.PanicCause ~ the branch added the panic cause accessor to the framework and the handler's recovery path reads it; the pin predates it
