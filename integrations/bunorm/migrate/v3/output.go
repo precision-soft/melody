@@ -57,6 +57,35 @@ func (instance *commandOutput) wantsDetail() bool {
 }
 
 /* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded. */
+/* finishRun renders the command's document from the outcome the run ACTUALLY had, a panic included, and is the single door every command in this family defers to.
+
+   The document is the machine contract a deploy pipeline reads, and rendered from the named return alone it reported SUCCESS for a run that died: a panic leaves the linear path that assigns runErr, so the deferred render saw nil, skipped the error branch, and wrote a complete envelope carrying `"error":null` together with every message the run had accumulated before it fell over — indistinguishable, to anything parsing stdout, from a clean run that applied them. The framework's own cli boundary makes exactly this repair for exactly this reason, and says so in as many words, but it sits OUTSIDE this defer: by the time it recovers, the success document has already been written.
+
+   recovered is passed in rather than read here, because recover() answers only when it is called directly by the deferred function itself — a call one frame deeper answers nil and would leave this door believing every run ended well. The panic is re-raised unchanged once the document says what happened, so the exit path, the status code and the journal record are all exactly what they were. */
+func (instance *commandOutput) finishRun(commandName string, startedAt time.Time, runErr error, recovered any) error {
+    if nil == recovered {
+        return instance.finish(commandName, startedAt, runErr)
+    }
+
+    /* a run that had already failed keeps its own failure as the verdict: the panic came after it, and the reason the command failed is the one the operator needs */
+    if nil == runErr {
+        runErr = exception.NewError(
+            commandName+" panicked",
+            /* the recovered VALUE travels beside its type: an error-shaped panic reaches the cause slot below with its own context and chain intact, but a string or any other value has no cause to give, and without this it reached the document as a type name and nothing else — the operator learning that something panicked and never what */
+            map[string]any{
+                "command":        commandName,
+                "recoveredType":  fmt.Sprintf("%T", recovered),
+                "recoveredValue": fmt.Sprintf("%v", recovered),
+            },
+            exception.PanicCause(recovered),
+        )
+    }
+
+    _ = instance.finish(commandName, startedAt, runErr)
+
+    panic(recovered)
+}
+
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
         return runErr

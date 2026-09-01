@@ -172,7 +172,7 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
     }
 }
 
-func TestMysqlLock_AcquireVerifyErrorReleasesHeldLock(t *testing.T) {
+func TestMysqlLock_AcquireAfterAKilledSessionTakesTheLockAfresh(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
         t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
@@ -541,5 +541,246 @@ func TestNewLocker_ReleaseTimeoutOverridePropagatesToLock(t *testing.T) {
 
     if 2*time.Second != lock.releaseTimeout {
         t.Fatalf("expected the lock to inherit the release timeout 2s, got %s", lock.releaseTimeout)
+    }
+}
+
+/* poisonProbeSelect makes every row-returning statement on the lock's own pinned session answer no
+   rows, so the refresh probe's Scan fails while the session — and the GET_LOCK it holds — live on.
+   It is the shape of a server stall past the probe budget or a KILL QUERY: the probe cannot answer,
+   and the lock is nonetheless still held. */
+func poisonProbeSelect(t *testing.T, lock *mysqlLock) {
+    t.Helper()
+
+    if _, poisonErr := lock.connection.ExecContext(
+        context.Background(), "SET SESSION sql_select_limit = 0",
+    ); nil != poisonErr {
+        t.Fatalf("poison the pinned session: %v", poisonErr)
+    }
+}
+
+/* observeLockHolder answers the id of the session MySQL reports as holding the named lock, or zero
+   when nobody holds it, read on a pool the test has not poisoned: a probe that reports on the
+   resource it broke reports nothing. A read error fails the test rather than being folded into a
+   zero. The IDENTITY and not merely the presence is the observable, because a locker that drops the
+   lock and takes it again on a fresh session ends in the same place as one that never let go — the
+   difference between them is the window in between, and the session id is what names it. */
+func observeLockHolder(t *testing.T, database *sql.DB, name string) int64 {
+    t.Helper()
+
+    var holder sql.NullInt64
+    if scanErr := database.QueryRowContext(
+        context.Background(), "SELECT IS_USED_LOCK(?)", name,
+    ).Scan(&holder); nil != scanErr {
+        t.Fatalf("observe the lock holder: %v", scanErr)
+    }
+
+    if false == holder.Valid {
+        return 0
+    }
+
+    return holder.Int64
+}
+
+/* A refresh probe that could not be ANSWERED is not a probe that answered "lost". MySQL holds a
+   named lock for exactly as long as the session that took it, so a live session still holds its
+   lock however the probe fared; releasing on it handed the lock away while the caller — which reads
+   a failed refresh as "another instance may hold it now" — stopped the callback, putting a second
+   holder inside an exclusive section this one had never left. */
+func TestMysqlLock_RefreshOnAnUnansweredProbeKeepsHeldLock(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    holderDb, holderErr := sql.Open("mysql", dsn)
+    if nil != holderErr {
+        t.Fatalf("open holder: %v", holderErr)
+    }
+    defer holderDb.Close()
+
+    competitorDb, competitorErr := sql.Open("mysql", dsn)
+    if nil != competitorErr {
+        t.Fatalf("open competitor: %v", competitorErr)
+    }
+    defer competitorDb.Close()
+
+    name := "melody_lock_refresh_unanswered_probe"
+
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, 0).(*mysqlLock)
+    if false == isMysqlLock {
+        t.Fatalf("expected a *mysqlLock")
+    }
+
+    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New())).CreateLock(name, 0)
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+    defer func() { _ = lock.Release(newLockRuntime()) }()
+
+    holderBefore := observeLockHolder(t, competitorDb, name)
+    if 0 == holderBefore {
+        t.Fatalf("expected the lock to be held before the probe is poisoned")
+    }
+
+    poisonProbeSelect(t, lock)
+
+    if refreshErr := lock.Refresh(newLockRuntime(), 0); nil != refreshErr {
+        t.Fatalf("expected the refresh to answer held over an unanswered probe on a live session, got: %v", refreshErr)
+    }
+
+    if nil == lock.connection {
+        t.Fatalf("the pinned connection was dropped for a session that is still alive")
+    }
+
+    holderAfter := observeLockHolder(t, competitorDb, name)
+    if holderBefore != holderAfter {
+        t.Fatalf(
+            "the lock changed hands over an unanswered probe: session %d held it, session %d holds it now",
+            holderBefore, holderAfter,
+        )
+    }
+
+    contended, contendedErr := competitor.Acquire(newLockRuntime())
+    if nil != contendedErr {
+        t.Fatalf("competitor acquire: %v", contendedErr)
+    }
+    if true == contended {
+        _ = competitor.Release(newLockRuntime())
+        t.Fatalf("a second holder entered the exclusive section after one unanswered probe")
+    }
+}
+
+/* The same distinction on the re-acquire path: a verify that could not be answered must not release
+   the lock and report (false, nil), which told the caller it never held a lock it was holding. */
+func TestMysqlLock_AcquireOnAnUnansweredVerifyKeepsHeldLock(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    holderDb, holderErr := sql.Open("mysql", dsn)
+    if nil != holderErr {
+        t.Fatalf("open holder: %v", holderErr)
+    }
+    defer holderDb.Close()
+
+    competitorDb, competitorErr := sql.Open("mysql", dsn)
+    if nil != competitorErr {
+        t.Fatalf("open competitor: %v", competitorErr)
+    }
+    defer competitorDb.Close()
+
+    name := "melody_lock_acquire_unanswered_verify"
+
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, 0).(*mysqlLock)
+    if false == isMysqlLock {
+        t.Fatalf("expected a *mysqlLock")
+    }
+
+    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New())).CreateLock(name, 0)
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+    defer func() { _ = lock.Release(newLockRuntime()) }()
+
+    holderBefore := observeLockHolder(t, competitorDb, name)
+    if 0 == holderBefore {
+        t.Fatalf("expected the lock to be held before the verify is poisoned")
+    }
+
+    poisonProbeSelect(t, lock)
+
+    reacquired, reacquireErr := lock.Acquire(newLockRuntime())
+    if nil != reacquireErr {
+        t.Fatalf("re-acquire over an unanswered verify: %v", reacquireErr)
+    }
+    if false == reacquired {
+        t.Fatalf("the holder was told it does not hold a lock it is holding")
+    }
+
+    /* the session id is the observable, not the presence of a lock: a locker that released and took
+       it again on a fresh session also ends up holding it, having opened a window a competitor could
+       have walked through. Only an unchanged holder proves the lock was never let go. */
+    holderAfter := observeLockHolder(t, competitorDb, name)
+    if holderBefore != holderAfter {
+        t.Fatalf(
+            "the lock was released and retaken over an unanswered verify: session %d held it, session %d holds it now",
+            holderBefore, holderAfter,
+        )
+    }
+
+    contended, _ := competitor.Acquire(newLockRuntime())
+    if true == contended {
+        _ = competitor.Release(newLockRuntime())
+        t.Fatalf("a second holder entered the exclusive section after one unanswered verify")
+    }
+}
+
+/* The negative half, so the liveness branch above cannot pass by abstaining: a session that is
+   genuinely gone HAS lost its lock, and the refresh must say so and drop the pin. */
+func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    holderDb, holderErr := sql.Open("mysql", dsn)
+    if nil != holderErr {
+        t.Fatalf("open holder: %v", holderErr)
+    }
+    defer holderDb.Close()
+
+    observerDb, observerErr := sql.Open("mysql", dsn)
+    if nil != observerErr {
+        t.Fatalf("open observer: %v", observerErr)
+    }
+    defer observerDb.Close()
+
+    name := "melody_lock_refresh_dead_session"
+
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, 0).(*mysqlLock)
+    if false == isMysqlLock {
+        t.Fatalf("expected a *mysqlLock")
+    }
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    var ownerId sql.NullInt64
+    if ownerErr := observerDb.QueryRowContext(
+        context.Background(), "SELECT IS_USED_LOCK(?)", name,
+    ).Scan(&ownerId); nil != ownerErr {
+        t.Fatalf("read lock owner: %v", ownerErr)
+    }
+    if false == ownerId.Valid {
+        t.Fatalf("expected the lock to be held by a session")
+    }
+
+    if _, killErr := observerDb.ExecContext(
+        context.Background(), "KILL "+strconv.FormatInt(ownerId.Int64, 10),
+    ); nil != killErr {
+        t.Logf("kill returned (tolerated): %v", killErr)
+    }
+
+    /* KILL is asynchronous: the server flags the thread and the session goes only once it notices */
+    deadline := time.Now().Add(10 * time.Second)
+    var refreshErr error
+    for {
+        refreshErr = lock.Refresh(newLockRuntime(), 0)
+        if nil != refreshErr || true == time.Now().After(deadline) {
+            break
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    if nil == refreshErr {
+        t.Fatalf("expected the refresh to report the lock lost once its session was killed")
+    }
+    if nil != lock.connection {
+        t.Fatalf("the pin survived a session that is gone")
     }
 }

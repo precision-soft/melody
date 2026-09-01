@@ -47,7 +47,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
 
     startedAt := time.Now()
     defer func() {
-        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
     }()
 
     SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer(), option))

@@ -41,9 +41,9 @@
 # signature left every transport structurally unreachable at shutdown and a broker connection lived as
 # long as the process. The change is therefore a defect repair whose remedy is not backwards compatible:
 # nothing that worked breaks, because the door was dead, but a third-party Transport implementation stops
-# compiling. It is filed here so the decision is visible until the release that carries it says so too.
+# compiling. The decision has been taken: it ships on v3.14.0, and the changelog and the upgrade guide both carry it. The row stays until that release raises the pin, which is what makes it disappear.
 
-integrations/amqp/v3 ~ contract ~ messagebus/contract.Transport.Close ~ the transport close signature dropped its Runtime parameter so the container's ordered teardown can reach it; measured at the pinned tag as having zero production callers, so nothing that worked breaks, but a third-party Transport implementation stops compiling and the release notes have to say so
+integrations/amqp/v3 ~ contract ~ messagebus/contract.Transport.Close ~ the transport close signature dropped its Runtime parameter so the container's ordered teardown can reach it; measured at the pinned tag as having zero production callers, so nothing that worked breaks, but a third-party Transport implementation stops compiling; adjudicated to ship on v3.14.0 as a documented break, which v3/CHANGELOG.md and v3/.documentation/UPGRADE.md already carry
 
 # ------------------------------------------------------------------------------------------------------
 # source ahead of the pinned tag
@@ -53,7 +53,7 @@ integrations/amqp/v3 ~ contract ~ messagebus/contract.Transport.Close ~ the tran
 # train raises these pins, the modules build, and this band then demands every row here be deleted. A row
 # that survives a release is a module published against a version that cannot compile it.
 
-integrations/bunorm/migrate/v3 ~ ahead ~ bunorm.ManagerRegistry.CloseMigrationDatabase, bunorm.ManagerRegistry.MigrationDatabase, clicontract.Context, exception.BuildCauseChain, output.IsJsonFormat ~ the branch added the command context contract, the cause-chain builder and the json output predicate to the framework, and the two migration database accessors to the sibling bunorm registry; both pins predate all five
+integrations/bunorm/migrate/v3 ~ ahead ~ bunorm.ManagerRegistry.CloseMigrationDatabase, bunorm.ManagerRegistry.MigrationDatabase, clicontract.Context, exception.BuildCauseChain, exception.PanicCause, output.IsJsonFormat ~ the branch added the command context contract, the cause-chain builder, the panic cause accessor and the json output predicate to the framework, and the two migration database accessors to the sibling bunorm registry; both pins predate all six
 integrations/bunorm/mysql/v3 ~ ahead ~ bunorm.ConnectionParameters, bunorm.ContextOpener, bunorm.MigrationContextOpener, bunorm.MigrationProvider, bunorm.RouteDiagnostics ~ the branch added the connection parameter type, the route diagnostics and the three opener contracts to the sibling bunorm integration, and this module's pin on it predates all five
 integrations/bunorm/pgsql/v3 ~ ahead ~ bunorm.ConnectionParameters, bunorm.ContextOpener, bunorm.MigrationContextOpener, bunorm.MigrationProvider, bunorm.RouteDiagnostics ~ the same five names its mysql twin needs, for the same reason and against the same sibling pin
 integrations/bunorm/v3 ~ ahead ~ clicontract.Context, logging.NewStandardErrorLogger ~ the branch added the command context contract and the standard error logger constructor to the framework, and this module's pin predates both

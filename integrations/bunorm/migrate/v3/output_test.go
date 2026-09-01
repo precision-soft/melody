@@ -5,6 +5,7 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "os"
     "strings"
     "testing"
     "time"
@@ -583,5 +584,158 @@ func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
 
     if true == strings.Contains(rendered, "\r") {
         t.Fatalf("a raw carriage return reached the terminal:\n%s", rendered)
+    }
+}
+
+/* The document is the machine contract a deploy pipeline reads, and a run that DIED must not be
+   able to write a success into it. Rendered from the named return alone it could: a panic never
+   reaches the assignment, so the deferred render saw a nil error and wrote `"error":null` beside
+   every message the run had accumulated before it fell over. */
+func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    outputInstance.printSuccess("applied 2 migrations")
+
+    panicked := func() (didPanic bool) {
+        defer func() {
+            if nil != recover() {
+                didPanic = true
+            }
+        }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), nil, "the migration dereferenced a nil map")
+
+        return false
+    }()
+
+    /* the panic is re-raised unchanged, so the exit path, its status code and the journal record are all exactly what they were */
+    if false == panicked {
+        t.Fatalf("expected the panic to be re-raised once the document said what happened")
+    }
+
+    rendered := buffer.String()
+
+    if true == strings.Contains(rendered, `"error":null`) {
+        t.Fatalf("a run that died reported success to the pipeline: %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "db:migrate panicked") {
+        t.Fatalf("expected the document to name the panic, got %s", rendered)
+    }
+
+    /* a panic value that is not an error has no cause to give, so it must reach the document as
+       the value it is: without that the operator learns something panicked and never what */
+    if false == strings.Contains(rendered, "the migration dereferenced a nil map") {
+        t.Fatalf("expected the panic value to reach the document, got %s", rendered)
+    }
+}
+
+/* An error-shaped panic value belongs in the CAUSE slot, where its own context and cause chain
+   survive: kept only in a context slot it collapses to its bare message at the render boundary. */
+func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    panicValue := exception.NewError(
+        "the migration lock table is missing",
+        map[string]any{"table": "bun_migration_locks"},
+        errors.New("Error 1146: Table 'melody.bun_migration_locks' doesn't exist"),
+    )
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), nil, panicValue)
+    }()
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "the migration lock table is missing") {
+        t.Fatalf("expected the error-shaped panic to reach the document, got %s", rendered)
+    }
+
+    if true == strings.Contains(rendered, `"cause":null`) {
+        t.Fatalf("expected the error-shaped panic to travel as the cause, got %s", rendered)
+    }
+
+    /* the chain beneath it survives too, which is the whole reason the cause slot is not a context slot */
+    if false == strings.Contains(rendered, "Table 'melody.bun_migration_locks' doesn't exist") {
+        t.Fatalf("expected the cause chain beneath the panic to survive, got %s", rendered)
+    }
+}
+
+/* A run that had already failed keeps its own failure as the verdict: the panic came after it, and
+   the reason the command failed is the one the operator needs. */
+func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    runFailure := exception.NewError("the migration lock is held", nil, nil)
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), runFailure, "a later defer panicked")
+    }()
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "the migration lock is held") {
+        t.Fatalf("expected the run's own failure to stay the verdict, got %s", rendered)
+    }
+}
+
+/* The ordinary paths must be untouched: no panic renders exactly what finish rendered before. */
+func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
+    successBuffer := &bytes.Buffer{}
+    successOutput := newCommandOutput(successBuffer, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+    successOutput.printSuccess("applied 2 migrations")
+
+    if runErr := successOutput.finishRun("db:migrate", time.Now(), nil, nil); nil != runErr {
+        t.Fatalf("a clean run must answer no error, got %v", runErr)
+    }
+    if false == strings.Contains(successBuffer.String(), `"error":null`) {
+        t.Fatalf("expected the clean run to render a success document, got %s", successBuffer.String())
+    }
+
+    failureBuffer := &bytes.Buffer{}
+    failureOutput := newCommandOutput(failureBuffer, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    runFailure := exception.NewError("the migration lock is held", nil, nil)
+    if runErr := failureOutput.finishRun("db:migrate", time.Now(), runFailure, nil); nil == runErr {
+        t.Fatalf("a failed run must still answer its failure")
+    }
+    if false == strings.Contains(failureBuffer.String(), "the migration lock is held") {
+        t.Fatalf("expected the failure document, got %s", failureBuffer.String())
+    }
+}
+
+/* recover() answers only when it is called directly by the deferred function itself, so the door
+   takes the recovered value as a parameter. A command that read it one frame deeper would see nil
+   and believe every run ended well — which is the defect, spelled differently. This pins that every
+   command in the family passes recover() at its own defer rather than delegating the call. */
+func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testing.T) {
+    commandFiles := []string{
+        "command_migrate.go",
+        "command_rollback.go",
+        "command_status.go",
+        "command_init.go",
+        "command_unlock.go",
+        "command_create.go",
+    }
+
+    for _, commandFile := range commandFiles {
+        source, readErr := os.ReadFile(commandFile)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", commandFile, readErr)
+        }
+
+        if false == strings.Contains(string(source), "finishRun(instance.Name(), startedAt, runErr, recover())") {
+            t.Fatalf(
+                "%s does not defer to the shared door with its own recover(); a command that renders its document any other way can report success for a run that died",
+                commandFile,
+            )
+        }
     }
 }

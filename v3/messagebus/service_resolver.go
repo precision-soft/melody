@@ -2,11 +2,13 @@ package messagebus
 
 import (
     "errors"
+    "fmt"
     "sort"
 
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
 )
 
@@ -75,7 +77,17 @@ func (instance *TransportsCloser) Close() error {
 
     var closeErrs []error
     for _, name := range names {
-        if closeErr := instance.transports[name].Close(); nil != closeErr {
+        /* a nil entry is a wiring mistake, and it must not cost the transports that come after it. The container recovers a panicking Close and records it, so the process survives — but the panic still abandons THIS loop, and everything sorted later than the offending name would never be closed at all, its broker connection living as long as the process while the record blames one service. The amqp module already refuses a nil transport at its own registration door; this map is handed in whole by the composition root, which has no such door. */
+        if true == isNilTransport(instance.transports[name]) {
+            closeErrs = append(
+                closeErrs,
+                exception.NewError("messagebus transport is nil and was not closed", map[string]any{"transport": name}, nil),
+            )
+
+            continue
+        }
+
+        if closeErr := instance.closeOne(name); nil != closeErr {
             closeErrs = append(
                 closeErrs,
                 exception.NewError("messagebus transport close failed", map[string]any{"transport": name}, closeErr),
@@ -84,6 +96,29 @@ func (instance *TransportsCloser) Close() error {
     }
 
     return errors.Join(closeErrs...)
+}
+
+/* isNilTransport reads the map entry through the typed-nil door rather than a plain nil comparison: a composition root that builds a transport conditionally hands back a non-nil interface around a nil pointer, which passes `nil ==` and then dereferences inside Close. */
+func isNilTransport(transport messagebuscontract.Transport) bool {
+    return true == internal.IsNilInterface(transport)
+}
+
+/* closeOne contains a panicking transport Close as a returned failure, so the teardown of the transports that sort after it still happens. The container's own teardown makes the same decision one level up for the same reason — but its boundary is around the CLOSER, so a panic inside this loop is recorded once and the rest of the map is silently skipped. The recovered value travels as the cause, not as a stringified context slot, so an error-shaped panic keeps its own context and cause chain in the record. */
+func (instance *TransportsCloser) closeOne(name string) (closeErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        closeErr = exception.NewError(
+            "messagebus transport close panicked",
+            map[string]any{"transport": name, "recoveredType": fmt.Sprintf("%T", recoveredValue)},
+            exception.PanicCause(recoveredValue),
+        )
+    }()
+
+    return instance.transports[name].Close()
 }
 
 func TransportsMustFromResolver(resolver containercontract.Resolver) map[string]messagebuscontract.Transport {

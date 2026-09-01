@@ -6,6 +6,7 @@ import (
     "os"
     "path/filepath"
     "strings"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -25,6 +26,8 @@ import (
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/messagebus"
+    messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/precision-soft/melody/v3/security"
     securityconfig "github.com/precision-soft/melody/v3/security/config"
@@ -756,4 +759,105 @@ func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t
     testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.panicOnBootCollisions()
     }, "duplicate registrations detected at boot")
+}
+
+
+/* recordingCloseTransport records whether the container's teardown ever reached it. */
+type recordingCloseTransport struct {
+    closed atomic.Bool
+}
+
+func (instance *recordingCloseTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    return nil
+}
+
+func (instance *recordingCloseTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+    return nil, nil
+}
+
+func (instance *recordingCloseTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    return nil
+}
+
+func (instance *recordingCloseTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+    return nil
+}
+
+func (instance *recordingCloseTransport) Close() error {
+    instance.closed.Store(true)
+
+    return nil
+}
+
+/* the http process is the case the closer was never built for: it publishes through a routing that holds the transport value directly, so it resolves the transports map never, and before this the container closed nothing it had not been asked to build — the broker connection lived exactly as long as the process. */
+func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    transport := &recordingCloseTransport{}
+
+    messagebus.RegisterTransports(
+        applicationInstance,
+        map[string]messagebuscontract.Transport{"async": transport},
+    )
+
+    kernelInstance := applicationInstance.Boot()
+
+    if closeErr := kernelInstance.ServiceContainer().Close(); nil != closeErr {
+        t.Fatalf("unexpected container close error: %v", closeErr)
+    }
+
+    if false == transport.closed.Load() {
+        t.Fatalf("expected the boot-built closer to close the registered transport")
+    }
+}
+
+/* the consume process still gets its ordered teardown: the edge is recorded on the RESOLUTION, so a closer already built at boot is no less a dependency of the map than one the map's own provider built. */
+func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    transport := &recordingCloseTransport{}
+
+    messagebus.RegisterTransports(
+        applicationInstance,
+        map[string]messagebuscontract.Transport{"async": transport},
+    )
+
+    kernelInstance := applicationInstance.Boot()
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    resolved := messagebus.TransportsMustFromResolver(serviceContainer)
+    if transport != resolved["async"] {
+        t.Fatalf("expected the registered transport to resolve")
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected container close error: %v", closeErr)
+    }
+
+    if false == transport.closed.Load() {
+        t.Fatalf("expected the resolved transports to still be closed")
+    }
+}
+
+/* an application that registered nothing must not gain a service it never asked for, and the boot must not fail looking for one. */
+func TestBoot_NoTransportsRegisteredBuildsNoCloser(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    kernelInstance := applicationInstance.Boot()
+
+    if true == kernelInstance.ServiceContainer().Has(messagebus.ServiceTransportsCloser) {
+        t.Fatalf("expected no transports closer where no transports were registered")
+    }
 }

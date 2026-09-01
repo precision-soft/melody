@@ -25,6 +25,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/messagebus"
     "github.com/precision-soft/melody/v3/security"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
     "github.com/precision-soft/melody/v3/serializer"
@@ -458,6 +459,35 @@ func (instance *Application) registerSecurity() error {
     security.RegisterKernelAccessControlListener(kernelInstance, registry)
 
     return nil
+}
+
+/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself.
+
+   RegisterTransports resolves the closer from the map's own provider, which is enough for the consume command and for nothing else. The container closes what it BUILT, and an http process routes its messages through a routing that holds the transport VALUE directly: it asks the container for the transports map never, so the closer is never built and the broker connection lives exactly as long as the process. That is the very defect the Close() signature was changed to repair, left repaired only on the one process that was already reaching it.
+
+   Built here the closer is one of the earliest nodes in the container, and the teardown closes the later-created services first, so it is reached after everything that could still be publishing through a transport. The consume command resolving the map afterwards still records its edge, which is recorded on the resolution and not on the creation, so the ordering that path relies on is unchanged.
+
+   A failure is warned about rather than raised: the transports are an optional feature, the name is the framework's own, and an application that rewired it should not lose its boot over a teardown convenience. */
+func (instance *Application) buildMessageBusTransportsCloser() {
+    serviceContainer := instance.kernel.ServiceContainer()
+
+    if false == serviceContainer.Has(messagebus.ServiceTransportsCloser) {
+        return
+    }
+
+    _, closerErr := container.FromResolver[*messagebus.TransportsCloser](
+        serviceContainer,
+        messagebus.ServiceTransportsCloser,
+    )
+    if nil != closerErr {
+        instance.bootLogger().Warning(
+            "could not build the message bus transports closer; the registered transports will not be closed on shutdown",
+            exceptioncontract.Context{
+                "serviceName": messagebus.ServiceTransportsCloser,
+                "error":       closerErr.Error(),
+            },
+        )
+    }
 }
 
 var _ applicationcontract.ServiceRegistrar = (*Application)(nil)

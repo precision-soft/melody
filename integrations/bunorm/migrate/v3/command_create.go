@@ -37,7 +37,7 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
 
     startedAt := time.Now()
     defer func() {
-        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
     }()
 
     migrationName := ""

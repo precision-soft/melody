@@ -118,6 +118,9 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.registerKernelHttpListeners()
 
+    /* after the collisions are reported and every registration is in: an optional feature built for its teardown, not for a caller */
+    instance.buildMessageBusTransportsCloser()
+
     instance.warnUnappliedSecretMarks()
 
     instance.booted = true

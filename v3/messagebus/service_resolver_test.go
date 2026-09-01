@@ -220,3 +220,115 @@ type closeFailingTransport struct {
 func (instance *closeFailingTransport) Close() error {
     return exception.NewError("broker unreachable", nil, nil)
 }
+
+/* transportsNamedIn collects the transport each branch of a joined close failure blames: the name
+   travels in the error's CONTEXT, not in its text, so reading the joined message alone finds none. */
+func transportsNamedIn(closeErr error) map[string]bool {
+    named := map[string]bool{}
+
+    joined, isJoined := closeErr.(interface{ Unwrap() []error })
+    if false == isJoined {
+        if transport, hasTransport := exception.LogContext(closeErr)["transport"].(string); true == hasTransport {
+            named[transport] = true
+        }
+
+        return named
+    }
+
+    for _, branch := range joined.Unwrap() {
+        for transport := range transportsNamedIn(branch) {
+            named[transport] = true
+        }
+    }
+
+    return named
+}
+
+/* closePanickingTransport is the composition-root mistake that used to cost every transport sorted
+   after it: the container recovers the panic and records it, but the closer's own loop was already
+   abandoned. */
+type closePanickingTransport struct {
+    recordingCloseTransport
+}
+
+func (instance *closePanickingTransport) Close() error {
+    panic(exception.NewError("the broker connection was already torn down", map[string]any{"queue": "orders"}, nil))
+}
+
+/* typedNilTransport exists to be handed over as a nil POINTER inside a non-nil interface, the shape
+   a composition root produces when it builds a transport conditionally. */
+type typedNilTransport struct {
+    recordingCloseTransport
+}
+
+/* A nil map entry is a wiring mistake and must cost only itself. The bad names sort BEFORE the
+   healthy one on purpose: the whole point is what happens to the transports that come after. */
+func TestTransportsCloser_ANilTransportDoesNotStrandTheOthers(t *testing.T) {
+    healthy := &recordingCloseTransport{}
+
+    closer := &TransportsCloser{transports: map[string]messagebuscontract.Transport{
+        "a-untyped-nil": nil,
+        "b-typed-nil":   (*typedNilTransport)(nil),
+        "z-healthy":     healthy,
+    }}
+
+    closeErr := closer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the nil transports to be reported rather than closed in silence")
+    }
+
+    named := transportsNamedIn(closeErr)
+
+    if false == named["a-untyped-nil"] {
+        t.Fatalf("expected the report to name the untyped nil entry, got %v", named)
+    }
+
+    /* the typed nil is the half a plain `nil ==` comparison lets through, and it panics on Close */
+    if false == named["b-typed-nil"] {
+        t.Fatalf("expected the report to name the typed nil entry, got %v", named)
+    }
+
+    if false == healthy.closed.Load() {
+        t.Fatalf("expected the transport sorted after the nil entries to be closed")
+    }
+
+    /* the DIAGNOSTIC is the point of naming nil separately: containment alone would report both
+       entries as "close panicked" over a nil dereference, which tells the operator what the process
+       did instead of what the wiring got wrong */
+    if 2 != strings.Count(closeErr.Error(), "transport is nil and was not closed") {
+        t.Fatalf("expected both nil entries to be named as nil rather than as a panic, got %v", closeErr)
+    }
+}
+
+/* A transport whose Close panics must not abandon the loop either: the container's recovery sits
+   around the CLOSER, so before this containment everything sorted later went unclosed in silence
+   while one record blamed a single service. */
+func TestTransportsCloser_APanickingCloseDoesNotStrandTheOthers(t *testing.T) {
+    healthy := &recordingCloseTransport{}
+
+    closer := &TransportsCloser{transports: map[string]messagebuscontract.Transport{
+        "a-panicking": &closePanickingTransport{},
+        "z-healthy":   healthy,
+    }}
+
+    closeErr := closer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the panicking close to surface as a failure")
+    }
+
+    if false == transportsNamedIn(closeErr)["a-panicking"] {
+        t.Fatalf("expected the report to name the panicking transport, got %v", closeErr)
+    }
+
+    if false == healthy.closed.Load() {
+        t.Fatalf("expected the transport sorted after the panicking one to be closed")
+    }
+
+    /* the panic value is an error, so it belongs in the CAUSE slot rather than flattened into a
+       context string: kept only in a context it collapses to its bare message at the render
+       boundary, and its own context and cause chain reach no record at all */
+    causeChain := exception.BuildCauseChain(closeErr, 8)
+    if false == strings.Contains(strings.Join(causeChain, " | "), "the broker connection was already torn down") {
+        t.Fatalf("expected the panic value to travel as the cause, got chain %v", causeChain)
+    }
+}

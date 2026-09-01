@@ -1002,7 +1002,7 @@ node than the same amount. Both default to zero, which leaves the behaviour of t
 
 ### Compile-level: `messagebus/contract.Transport`'s `Close` lost its runtime parameter
 
-**What changed.** The contract method is `Close() error`; the former `Close(runtimeInstance runtimecontract.Runtime) error` is gone, and `RegisterTransports` now registers a `TransportsCloser` the container's ordered teardown reaches.
+**What changed.** The contract method is `Close() error`; the former `Close(runtimeInstance runtimecontract.Runtime) error` is gone, and `RegisterTransports` now registers a `TransportsCloser` the container's ordered teardown reaches — built at boot wherever the transports were registered, so a process that never resolves the transports map closes them too.
 
 **Symptom.** A userland transport fails to compile against the interface until the parameter is deleted. The old signature was structurally dead: the teardown recognizes `Close() error` and nothing else, nothing in the framework or any production wiring ever called a transport's `Close`, so every broker connection lived exactly as long as the process and every deploy tore it down abruptly.
 
