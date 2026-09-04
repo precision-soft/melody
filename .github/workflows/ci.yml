@@ -242,6 +242,28 @@ jobs:
             -   name: integration modules against the version each go.mod pins
                 run: .dev/validate/all.sh --compatibility
 
+    # the exported surface of every published module against the surface of its last tag, mirroring
+    # run_apidiff_checks in `.dev/validate/all.sh`, through the same entry point. The compatibility job
+    # above asks what a consumer compiles; this one asks what the publisher moved — a signature, a removed
+    # symbol, a constant's value, a method added to an interface a third party implements — and what it
+    # added, and gates every difference on `.dev/validate/apidiff.baseline`, where each row carries the
+    # decision the release has to make. It runs inside the dev image because apidiff lives there and the
+    # old side is fetched from the module proxy. The checkout is full rather than shallow, because the lane
+    # reads each module's last tag out of git and a depth-one checkout carries no tags at all — the lane
+    # would then skip every module as untagged and pass over nothing. Kept off pull requests for the same
+    # reason as the two jobs above, because it builds that image; `workflow_dispatch` runs it on a branch
+    # on demand.
+    apidiff:
+        if: github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            -   uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
+            -   name: exported surface of every published module against its last tag
+                run: .dev/validate/all.sh --apidiff
+
     # the live e2e harness and the stack checks: the only lane that drives booted applications over the
     # wire. Every other job compiles the harness and runs its unit tests, so a middleware whose ordering
     # only matters once a real request traverses the chain, a route the router registers but never answers,

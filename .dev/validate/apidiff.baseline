@@ -1,0 +1,449 @@
+# The differences between the exported surface of every published module and the surface of its last
+# tag, one line per object.
+#
+#   module ~ class ~ object ~ change ~ disposition ~ reason
+#
+# Read by .dev/validate/apidiff.sh. This is not a suppression list: every line is a claim the run has to
+# satisfy. A difference with no line here fails the check, and a line whose difference no longer occurs
+# fails it just as loudly — the change it files is gone, or a release moved the tag past it, so the line
+# has to go. A line whose class or change text no longer matches what the run measures fails too: the row
+# then describes a different fact than the one that occurs, and has to be rewritten. That is what keeps
+# the file the measured list rather than a remembered one.
+#
+# The class and the change are apidiff's own words, measured, never asserted:
+#
+#   incompatible  a signature changed, a symbol or package was removed, a constant's value changed, a
+#                 type lost comparability, an interface a third party may implement grew a method, or a
+#                 named type changed identity (apidiff prints `changed from T to T` when the text is the
+#                 same and the type behind it is not, such as a type that became an alias of a type in
+#                 another package). Each of these is a decision a release has to make before its tag.
+#
+#   compatible    an addition. Allowed on a minor release, not on a patch one — which is what makes a row
+#                 of this class on a frozen major a finding rather than routine.
+#
+# The disposition is the decision the row carries:
+#
+#   keep          ships on this major — backwards compatible, a security repair, or a defect repair whose
+#                 remedy cannot be compatible. Has to say why.
+#   cut           leaves this major before its next tag, and lives on the next major. Has to say why.
+#   unclassified  measured, not yet decided. The reason may be empty, because "measured, undecided" is the
+#                 whole claim, and a generic reason would be a reason nobody can review. The gate counts
+#                 these rows: that number is the work left before a tag.
+#
+# The tag each module is compared with is deliberately not a field. The run reads it from git and prints
+# it beside the module, so this file cannot carry a version that has gone stale. Every field is compared
+# for exact equality, so nothing here is a pattern: a `*` in an object is a pointer receiver in apidiff's
+# own spelling, never a wildcard. A `~` inside a field is refused, being the separator. Fields are
+# trimmed, so the columns may be aligned.
+#
+# ------------------------------------------------------------------------------------------------------
+# Seeded on 2026-09-04 from the branch fix/v3-stabilization-sweep at a8ae204: 312 rows on v3 against
+# v3.13.0 (101 incompatible, 211 compatible), 90 rows on the v3 integrations against their last tags,
+# and none on v1, v2 or their integrations, whose unreleased changes are patch-level by measurement.
+# Every row landed unclassified except the two on the message bus transport's Close, adjudicated before
+# this band existed. The rows are the work list of the step that cuts from v3 what is not backwards
+# compatible before v3.14.0; a decided row replaces `unclassified` with `keep` or `cut` and a reason.
+# ------------------------------------------------------------------------------------------------------
+
+integrations/amqp/v3 ~ incompatible ~ (*Transport).Close ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime) error to func() error ~ keep ~ the amqp transport follows the messagebus contract's Close, which dropped its Runtime parameter so the container's ordered teardown can reach it; same adjudication as the framework row, shipping on the next amqp tag as a documented break
+integrations/bunorm/migrate/v3 ~ compatible ~ SetDefaultRunnerOption ~ added ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*CreateCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*CreateCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*InitCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*InitCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*MigrateCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*MigrateCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*RollbackCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*RollbackCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*StatusCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*StatusCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*UnlockCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/bunorm/migrate/v3 ~ incompatible ~ (*UnlockCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/bunorm/mysql/v3 ~ compatible ~ ConnectionConfig ~ added ~ unclassified ~
+integrations/bunorm/mysql/v3 ~ compatible ~ NewConnectionConfig ~ added ~ unclassified ~
+integrations/bunorm/mysql/v3 ~ compatible ~ (*Provider).OpenContext ~ added ~ unclassified ~
+integrations/bunorm/mysql/v3 ~ compatible ~ (*Provider).OpenForMigration ~ added ~ unclassified ~
+integrations/bunorm/mysql/v3 ~ compatible ~ (*Provider).OpenForMigrationContext ~ added ~ unclassified ~
+integrations/bunorm/mysql/v3 ~ compatible ~ WithInsecure ~ added ~ unclassified ~
+integrations/bunorm/mysql/v3 ~ compatible ~ WithTlsConfig ~ added ~ unclassified ~
+integrations/bunorm/mysql/v3 ~ incompatible ~ (*Provider).Open ~ changed from func(github.com/precision-soft/melody/integrations/bunorm/v3.ConnectionParams, github.com/precision-soft/melody/v3/logging/contract.Logger) (*github.com/uptrace/bun.DB, error) to func(github.com/precision-soft/melody/integrations/bunorm/v3.ConnectionParameters, github.com/precision-soft/melody/v3/logging/contract.Logger) (*github.com/uptrace/bun.DB, error) ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ compatible ~ ConnectionConfig ~ added ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ compatible ~ NewConnectionConfig ~ added ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ compatible ~ (*Provider).OpenContext ~ added ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ compatible ~ (*Provider).OpenForMigration ~ added ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ compatible ~ (*Provider).OpenForMigrationContext ~ added ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ compatible ~ TimeoutConfig.ReadTimeout ~ added ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ compatible ~ TimeoutConfig.WriteTimeout ~ added ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ incompatible ~ NewTimeoutConfig ~ changed from func(time.Duration) *TimeoutConfig to func(time.Duration, time.Duration, time.Duration) *TimeoutConfig ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ incompatible ~ (*Provider).Open ~ changed from func(github.com/precision-soft/melody/integrations/bunorm/v3.ConnectionParams, github.com/precision-soft/melody/v3/logging/contract.Logger) (*github.com/uptrace/bun.DB, error) to func(github.com/precision-soft/melody/integrations/bunorm/v3.ConnectionParameters, github.com/precision-soft/melody/v3/logging/contract.Logger) (*github.com/uptrace/bun.DB, error) ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./audit.Change.MarshalJSON ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./audit.EntityOptions.CaptureDeleteBeforeImage ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./audit.NewRecorderOwningStorage ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./audit.(*Recorder).Close ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ContextOpener ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./encrypt.EncryptedColumn ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*Migrator).EnsureColumnCapacity ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*Migrator).EnsureColumnCapacityForReencrypt ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ErrProviderReturnedNilDatabase ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ (*ManagerRegistry).CloseMigrationDatabase ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ (*ManagerRegistry).MigrationDatabase ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ (*ManagerRegistry).SetLogger ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ MigrationContextOpener ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ MigrationProvider ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ NewManagerRegistryWithContext ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ResetDiagnostics ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ RouteDiagnostics ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ incompatible ~ ./audit.AsyncStorage ~ old is comparable, new is not ~ unclassified ~
+integrations/bunorm/v3 ~ incompatible ~ ./encrypt.(*EncryptDatabaseCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/bunorm/v3 ~ incompatible ~ ./encrypt.(*EncryptDatabaseCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ (*Configuration).InTimezone ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ (*Configuration).TimezoneName ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ CrontabOwnershipMarker ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ (*CrontabTemplate).OwnershipMarker ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ (*CrontabTemplate).RendersUserColumn ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ EntryConfig.Arguments ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ EntryConfig.GracefulTimeout ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ EntryConfig.Timeout ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ ErrBusyboxDivergentDaySchedule ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ ErrCommandTimeout ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ ErrK8sInvalidNamespace ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ ErrUnknownTimezone ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ (*K8sTemplate).OwnershipMarker ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ (*K8sTemplate).RendersUserColumn ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ OwnedTemplate ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ UserColumnTemplate ~ added ~ unclassified ~
+integrations/cron/v3 ~ incompatible ~ CrontabForbiddenChars ~ removed ~ unclassified ~
+integrations/cron/v3 ~ incompatible ~ ErrSharedRunnerCommandFlags ~ removed ~ unclassified ~
+integrations/cron/v3 ~ incompatible ~ ForbiddenChar ~ removed ~ unclassified ~
+integrations/cron/v3 ~ incompatible ~ (*GenerateCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/cron/v3 ~ incompatible ~ (*GenerateCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/cron/v3 ~ incompatible ~ (*RunnerCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/cron/v3 ~ incompatible ~ (*RunnerCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/cron/v3 ~ incompatible ~ ValidateNoForbiddenChars ~ removed ~ unclassified ~
+integrations/outbox/v3 ~ incompatible ~ (*RelayCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+integrations/outbox/v3 ~ incompatible ~ (*RelayCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ ./cache.WithCommandTimeout ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ Connection ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ EpochRevocableTokenStoreMustFromResolver ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ ModuleConfig.Connection ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ NewConnection ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ (*RedisTokenStore).RevocationEpoch ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ (*RedisTokenStore).RevokeBefore ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ RegisterConnectionService ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ ServiceConnection ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ WithRevocationEpochRetention ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ WithServerSentEventBackplaneCallTimeout ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ WithTokenStoreClock ~ added ~ unclassified ~
+integrations/rueidis/v3 ~ compatible ~ WithTokenStoreMaximumClockSkew ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application.(*Application).MustRegisterScoped ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application.(*Application).RegisterScoped ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application.(*Application).RegisterScopedService ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application/contract.ProcessContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application/contract.ScopedServiceModule ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application/contract.ScopedServiceRegistrar ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application.NewProcessContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application.ProcessContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application.ProcessContextFromResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application.ProcessContextMustFromResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./application.ServiceProcessContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./bag.(*ParameterBag).AppendString ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache.DeserializationError ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache.IsDeserializationError ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache.(*Manager).GetCounter ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache.(*Manager).NormalizeStoredValue ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache.NewDeserializationError ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache.NewManagerOwningBackend ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache.(*RememberOption).Context ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache.(*RememberOption).WithContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.Context ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.ErrFlagValueTypeMismatch ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.FlagDefinition ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.FlagKind ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.FlagKindBool ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.FlagKindInt ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.FlagKindString ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.FlagKindStringSlice ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/contract.StaticContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli.DispatchCommand ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli.NewRoot ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/output.ApplySortOrder ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/output.FormatJsonPretty ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/output.IsJsonFormat ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/output.ReverseItems ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli/output.WindowItems ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cli.Root ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.(*Configuration).EnvironmentKeyCount ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.(*Configuration).MarkServing ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.DefaultHttpShutdownTimeout ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.DefaultSessionTombstoneRetention ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.DefaultSessionTtl ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.HttpSessionTombstoneRetentionKey ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.HttpSessionTtlKey ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.HttpShutdownTimeoutKey ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.KernelHttpSessionTombstoneRetention ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.KernelHttpSessionTtl ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.KernelHttpShutdownTimeout ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.KernelStaticExcludedPaths ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.MinimumSessionTtl ~ added ~ unclassified ~
+v3 ~ compatible ~ ./config.StaticExcludedPathsKey ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ClosedWithScope ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.OverrideOption ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.OverrideOptions ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.OverrideServiceWithOptions ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.RegisterOptions.ReplacesContainerService ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.RegisterOptions.TeardownDependencyNames ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.ScopedRegistrar ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.ServiceDescription ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.ServiceLifetimeContainer ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.ServiceLifetimeScoped ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrContainerClosed ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrScopeClosed ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrScopedServiceIdAlreadyRegistered ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrScopedServiceTypeAlreadyRegistered ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrScopedTeardownDependencyUnsupported ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrTeardownDependencyIsSelf ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrTeardownDependencyNameIsRequired ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.MustRegisterScoped ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.MustRegisterScopedType ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.RegisterScoped ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.RegisterScopedType ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.Replacing ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.WithReplacesContainerService ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.WithTeardownDependency ~ added ~ unclassified ~
+v3 ~ compatible ~ ./debug.DeferredListener ~ added ~ unclassified ~
+v3 ~ compatible ~ ./debug.DeferredListenerProvider ~ added ~ unclassified ~
+v3 ~ compatible ~ ./debug.MiddlewareBuildProvider ~ added ~ unclassified ~
+v3 ~ compatible ~ ./debug.MiddlewareDescriptionProvider ~ added ~ unclassified ~
+v3 ~ compatible ~ ./debug.NewEventCommand ~ added ~ unclassified ~
+v3 ~ compatible ~ ./event/contract.RegisteredListener.MaySkipRequiredListeners ~ added ~ unclassified ~
+v3 ~ compatible ~ ./event/contract.RegisteredListener.Required ~ added ~ unclassified ~
+v3 ~ compatible ~ ./event/contract.SubscriberRegistration ~ added ~ unclassified ~
+v3 ~ compatible ~ ./event.NewRequiredListenerSkippedError ~ added ~ unclassified ~
+v3 ~ compatible ~ ./event.NewRequiredListenerSkippedErrorWithCause ~ added ~ unclassified ~
+v3 ~ compatible ~ ./event.NewRequiredListenerSkippedErrorWithStoppedListenerFailure ~ added ~ unclassified ~
+v3 ~ compatible ~ ./event.RequiredListenerSkippedError ~ added ~ unclassified ~
+v3 ~ compatible ~ ./exception.IsAlreadyLogged ~ added ~ unclassified ~
+v3 ~ compatible ~ ./exception.Logged ~ added ~ unclassified ~
+v3 ~ compatible ~ ./exception.PanicCause ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.BootCollisionKindHttpRoute ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.BootCollisionKindHttpRouteName ~ added ~ unclassified ~
+v3 ~ compatible ~ ./httpclient.(*HttpClient).Close ~ added ~ unclassified ~
+v3 ~ compatible ~ ./httpclient.(*HttpClient).RequestStreamWithContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./httpclient.TransportConfig.MaxIdleConnsPerHost ~ added ~ unclassified ~
+v3 ~ compatible ~ ./httpclient.TransportCount ~ added ~ unclassified ~
+v3 ~ compatible ~ ./httpclient.TransportDuration ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.ConfinedAttachmentResponse ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.ConfinedFileResponse ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/contract.MethodPolicy ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/contract.SessionCookiePolicy.Secure ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/contract.SessionCookieSecureAlways ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/contract.SessionCookieSecureFromScheme ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/contract.SessionCookieSecureNever ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/contract.SessionCookieSecurePolicy ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/cors.RegisterListeners ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/cors.RegisterRequestListener ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/cors.RequestListenerPriority ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.ErrorResponsePayloadDetail ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.ErrorResponsePayload.Status ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.FilterRouteManifestByZone ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.IsRouteZone ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*Kernel).HasErrorHandler ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*Kernel).OpenRequestScopes ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*Kernel).SetMethodPolicy ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.FixedWindowLimiter ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.(*FixedWindowLimiter).SetMaxKeys ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.IpRateLimitWithResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.NewFixedWindowLimiter ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.NewFixedWindowLimiterWithClock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware/pipeline.(*Builder).Describe ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware/pipeline.(*HttpMiddlewareDefinition).SetFunctionName ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware/pipeline.MiddlewareDescription ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.RateLimitRequestListenerPriority ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.RegisterRateLimitRequestListener ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.SimpleRateLimitWithResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.(*SlidingWindowLimiter).SetMaxKeys ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/middleware.UserRateLimitWithResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RedirectExternalResponse ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RegenerateRequestSession ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RequestAttributeScheme ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RequestContextFromResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RequestContextMustFromResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RouteManifestEntry.Host ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RouteManifestEntry.Locales ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RouteManifestEntry.Priority ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RouteManifestEntry.Schemes ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*RouteRegistry).SetBootCollisionRecorder ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RouteZones ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*ServerSentEventHub).Close ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*ServerSentEventHub).IsClosed ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*ServerSentEventHub).SetLogger ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*ServerSentEventSubscriber).Topic ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/static.DefaultAllowedDotPrefix ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/static.EtagMatchesIfNoneMatch ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/static.(*FileServerConfig).SetAllowedDotPrefixList ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http/static.(*FileServerConfig).SetExcludedPathList ~ added ~ unclassified ~
+v3 ~ compatible ~ ./lock.LeaderGateOptions.MaxConsecutiveRefreshFailures ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging/contract.LevelReporter ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.ErrRotatedDescriptorNotClosed ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.LevelEnabled ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.LogOnRecoverAndExitAfter ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.NewJsonLoggerWithClock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.NewProcessLogger ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.NewReopenableFileWriter ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.NewStandardErrorLogger ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.ReopenableFileWriter ~ added ~ unclassified ~
+v3 ~ compatible ~ ./logging.RunShieldedStep ~ added ~ unclassified ~
+v3 ~ compatible ~ ./messagebus.HandleOptions.AllowMissingHandler ~ added ~ unclassified ~
+v3 ~ compatible ~ ./messagebus.ServiceTransportsCloser ~ added ~ unclassified ~
+v3 ~ compatible ~ ./messagebus.TransportsCloser ~ added ~ unclassified ~
+v3 ~ compatible ~ ./openapi.PathItem.Description ~ added ~ unclassified ~
+v3 ~ compatible ~ package ./security/accesscontrol ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/config.FirewallOverrideConfiguration.WithAccessControl ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/config.FirewallOverrideConfiguration.WithAccessDecisionManager ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/config.FirewallOverrideConfiguration.WithInheritGlobalAccessControl ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/config.FirewallOverrideConfiguration.WithMergeStrategy ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/config.FirewallOverrideConfiguration.WithRoleHierarchy ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/contract.Claims.DeviceIdentifier ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/contract.Claims.IssuedAt ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/contract.EpochRevocableTokenStore ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/contract.RevocationEpochStore ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.HmacEnvelopeSignerConfig.Clock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.HmacTokenSourceConfig.AcceptUntypedEnvelopes ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.HmacTokenSourceConfig.Clock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.(*InMemoryTokenStore).RevocationEpoch ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.(*InMemoryTokenStore).RevokeBefore ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.(*InMemoryTokenStore).WithRevocationEpochRetention ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.JwtConfig.Clock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.JwtConfig.DeviceClaim ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.JwtConfig.RevocationEpochSkew ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.NewJwtTokenValidatorWithRevocationEpoch ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.NewMemoryNonceGuardWithClock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security/totp.OtpauthUri ~ added ~ unclassified ~
+v3 ~ compatible ~ ./security.TotpSecondFactorAuthenticatorConfig.Clock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./serializer.ErrNotAcceptable ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.ErrSessionDeleted ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.ErrSessionRotated ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.(*Manager).RegenerateSession ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.NewFileStorageFromFileWithClock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.NewFileStorageFromPathWithClock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.NewInMemoryStorageWithClock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.NewManagerOwningStorage ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.NewManagerWithClock ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.NewManagerWithTombstoneRetention ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.(*Session).Snapshot ~ added ~ unclassified ~
+v3 ~ compatible ~ ./session.TombstoneRetention ~ added ~ unclassified ~
+v3 ~ compatible ~ ./validation.ErrorNestingDepthExceeded ~ added ~ unclassified ~
+v3 ~ compatible ~ ./validation.IsRuleWiringErrorCode ~ added ~ unclassified ~
+v3 ~ compatible ~ ./validation.ValidationErrors.HasRuleWiringError ~ added ~ unclassified ~
+v3 ~ compatible ~ ./validation.ValidationErrors.MarshalJSON ~ added ~ unclassified ~
+v3 ~ compatible ~ ./validation.ValidationErrors.WithoutRuleWiringContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.Constructor.IsScoped ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.GenerateReport.BindTargetsUnchecked ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.GenerateReport.ExcludedFiles ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.GenerateReport.ScopedConstructorCount ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.GenerateReport.UnusedExcludes ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.GenerateRequest.BuildTags ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.GenerateRequest.ScopedFunctionName ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.ScanResult.ExcludedFiles ~ added ~ unclassified ~
+v3 ~ compatible ~ ./wiring.ScanResult.UnusedExcludes ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./application.HttpShutdownConfiguration ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./application.HttpTimeoutConfiguration ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/contract.BoolFlag ~ changed from github.com/urfave/cli/v3.FlagBase[bool, github.com/urfave/cli/v3.BoolConfig, github.com/urfave/cli/v3.boolValue] to BoolFlag ~ unclassified ~
+v3 ~ incompatible ~ ./cli/contract.CommandContext ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/contract.Command.Flags ~ changed from func() []Flag to func() []Flag ~ unclassified ~
+v3 ~ incompatible ~ ./cli/contract.Command.Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./cli/contract.Flag ~ changed from github.com/urfave/cli/v3.Flag to Flag ~ unclassified ~
+v3 ~ incompatible ~ ./cli/contract.IntFlag ~ changed from github.com/urfave/cli/v3.FlagBase[int, github.com/urfave/cli/v3.IntegerConfig, github.com/urfave/cli/v3.intValue[int]] to IntFlag ~ unclassified ~
+v3 ~ incompatible ~ ./cli/contract.StringFlag ~ changed from github.com/urfave/cli/v3.FlagBase[string, github.com/urfave/cli/v3.StringConfig, github.com/urfave/cli/v3.stringValue] to StringFlag ~ unclassified ~
+v3 ~ incompatible ~ ./cli/contract.StringSliceFlag ~ changed from github.com/urfave/cli/v3.FlagBase[[]string, github.com/urfave/cli/v3.StringConfig, github.com/urfave/cli/v3.StringSlice] to StringSliceFlag ~ unclassified ~
+v3 ~ incompatible ~ ./cli.NewCommandContext ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.DebugFlags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.FlagNameFields ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.FlagNameSortKey ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.Flags.Fields ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.Flags.SortKey ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.MergeFlags ~ changed from func([]github.com/precision-soft/melody/v3/cli/contract.Flag, []github.com/precision-soft/melody/v3/cli/contract.Flag) []github.com/precision-soft/melody/v3/cli/contract.Flag to func([]github.com/precision-soft/melody/v3/cli/contract.Flag, []github.com/precision-soft/melody/v3/cli/contract.Flag) []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.Option.Fields ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.Option.SortKey ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.ParseOptionFromCommand ~ changed from func(*github.com/precision-soft/melody/v3/cli/contract.CommandContext) Option to func(github.com/precision-soft/melody/v3/cli/contract.Context) Option ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.SplitFields ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./cli/output.StandardFlags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./cli.Register ~ changed from func(*github.com/precision-soft/melody/v3/cli/contract.CommandContext, github.com/precision-soft/melody/v3/cli/contract.Command, github.com/precision-soft/melody/v3/runtime/contract.Runtime) to func(*Root, github.com/precision-soft/melody/v3/cli/contract.Command, github.com/precision-soft/melody/v3/runtime/contract.Runtime) ~ unclassified ~
+v3 ~ incompatible ~ ./config/contract.HttpConfiguration.SessionTombstoneRetention ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./config/contract.HttpConfiguration.SessionTtl ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./config/contract.HttpConfiguration.ShutdownTimeout ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./config/contract.HttpConfiguration.StaticExcludedPaths ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./container/contract.RegisterOptions ~ old is comparable, new is not ~ unclassified ~
+v3 ~ incompatible ~ ./container/contract.ScopedRegistrar.MustRegisterScoped ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./container/contract.ScopedRegistrar.RegisterScoped ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./container/contract.ScopeManager.MustRegisterScoped ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./container/contract.ScopeManager.RegisterScoped ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*ContainerCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*ContainerCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*EventCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./debug.EventCommand ~ old is comparable, new is not ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*EventCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*MiddlewareCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*MiddlewareCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./debug.MiddlewareProvider ~ changed from func() []github.com/precision-soft/melody/v3/http/contract.Middleware to func() ([]github.com/precision-soft/melody/v3/http/middleware/pipeline.MiddlewareDescription, *github.com/precision-soft/melody/v3/http/middleware/pipeline.MiddlewareBuildReport, error) ~ unclassified ~
+v3 ~ incompatible ~ ./debug.NewMiddlewareCommand ~ changed from func(MiddlewareProvider) *MiddlewareCommand to func(MiddlewareDescriptionProvider, MiddlewareBuildProvider) *MiddlewareCommand ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*ParameterCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*ParameterCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*RouterCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*RouterCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*VersionCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./debug.(*VersionCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./event/contract.EventDispatcher.AddSubscriber ~ changed from func(EventSubscriber) to func(EventSubscriber) SubscriberRegistration ~ unclassified ~
+v3 ~ incompatible ~ ./event/contract.EventDispatcher.RemoveSubscriber ~ changed from func(EventSubscriber) int to func(SubscriberRegistration) int ~ unclassified ~
+v3 ~ incompatible ~ ./event.(*EventDispatcherAdapter).AddSubscriber ~ changed from func(github.com/precision-soft/melody/v3/event/contract.EventSubscriber) to func(github.com/precision-soft/melody/v3/event/contract.EventSubscriber) github.com/precision-soft/melody/v3/event/contract.SubscriberRegistration ~ unclassified ~
+v3 ~ incompatible ~ ./event.(*EventDispatcherAdapter).RemoveSubscriber ~ changed from func(github.com/precision-soft/melody/v3/event/contract.EventSubscriber) int to func(github.com/precision-soft/melody/v3/event/contract.SubscriberRegistration) int ~ unclassified ~
+v3 ~ incompatible ~ ./event.(*EventDispatcher).AddSubscriber ~ changed from func(github.com/precision-soft/melody/v3/event/contract.EventSubscriber) to func(github.com/precision-soft/melody/v3/event/contract.EventSubscriber) github.com/precision-soft/melody/v3/event/contract.SubscriberRegistration ~ unclassified ~
+v3 ~ incompatible ~ ./event.(*EventDispatcher).RemoveSubscriber ~ changed from func(github.com/precision-soft/melody/v3/event/contract.EventSubscriber) int to func(github.com/precision-soft/melody/v3/event/contract.SubscriberRegistration) int ~ unclassified ~
+v3 ~ incompatible ~ ./event.NewEventDispatcherAdapter ~ changed from func(github.com/precision-soft/melody/v3/event/contract.EventDispatcher, github.com/precision-soft/melody/v3/clock/contract.Clock) *EventDispatcherAdapter to func(github.com/precision-soft/melody/v3/event/contract.EventDispatcher) *EventDispatcherAdapter ~ unclassified ~
+v3 ~ incompatible ~ ./httpclient.TransportConfig.DialTimeout ~ changed from time.Duration to *time.Duration ~ unclassified ~
+v3 ~ incompatible ~ ./httpclient.TransportConfig.ExpectContinueTimeout ~ changed from time.Duration to *time.Duration ~ unclassified ~
+v3 ~ incompatible ~ ./httpclient.TransportConfig.IdleConnTimeout ~ changed from time.Duration to *time.Duration ~ unclassified ~
+v3 ~ incompatible ~ ./httpclient.TransportConfig.KeepAlive ~ changed from time.Duration to *time.Duration ~ unclassified ~
+v3 ~ incompatible ~ ./httpclient.TransportConfig.MaxIdleConns ~ changed from int to *int ~ unclassified ~
+v3 ~ incompatible ~ ./httpclient.TransportConfig.ResponseHeaderTimeout ~ changed from time.Duration to *time.Duration ~ unclassified ~
+v3 ~ incompatible ~ ./httpclient.TransportConfig.TlsHandshakeTimeout ~ changed from time.Duration to *time.Duration ~ unclassified ~
+v3 ~ incompatible ~ ./http/contract.Kernel.SetMethodPolicy ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./http.ErrorResponsePayload.Error ~ changed from string to ErrorResponsePayloadDetail ~ unclassified ~
+v3 ~ incompatible ~ ./http.JsonHandlerErrorResponder ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/http/contract.Request, int, string) (github.com/precision-soft/melody/v3/http/contract.Response, error) to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/http/contract.Request, int, string, error) (github.com/precision-soft/melody/v3/http/contract.Response, error) ~ unclassified ~
+v3 ~ incompatible ~ ./http.KernelOptions.MethodPolicy ~ changed from MethodPolicy to github.com/precision-soft/melody/v3/http/contract.MethodPolicy ~ unclassified ~
+v3 ~ incompatible ~ ./http.MethodPolicy ~ changed from MethodPolicy to github.com/precision-soft/melody/v3/http/contract.MethodPolicy ~ unclassified ~
+v3 ~ incompatible ~ ./http.NewErrorResponsePayload ~ changed from func(string, string) *ErrorResponsePayload to func(int, string, string) *ErrorResponsePayload ~ unclassified ~
+v3 ~ incompatible ~ ./http.NewRequirements ~ changed from func(...Requirement) map[string]string to func(...*Requirement) map[string]string ~ unclassified ~
+v3 ~ incompatible ~ ./http.RequestAttributeSession ~ value changed from "session" to "_session" ~ unclassified ~
+v3 ~ incompatible ~ ./http.(*RouteManifestCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./http.(*RouteManifestCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./http/static.FileServerConfig ~ old is comparable, new is not ~ unclassified ~
+v3 ~ incompatible ~ ./lock.(*ExclusiveCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./lock.(*ExclusiveCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./messagebus.(*ConsumeCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./messagebus.(*ConsumeCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./messagebus/contract.Transport.Close ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime) error to func() error ~ keep ~ the transport close signature dropped its Runtime parameter so the container's ordered teardown can reach it; measured at v3.13.0 as having zero production callers, so nothing that worked breaks, but a third-party Transport implementation stops compiling; adjudicated on 2026-08-30 to ship on v3.14.0 as a documented break, which v3/CHANGELOG.md and v3/.documentation/UPGRADE.md already carry
+v3 ~ incompatible ~ ./messagebus.HandleOptions.RequireHandler ~ removed ~ unclassified ~
+v3 ~ incompatible ~ ./messagebus.(*InMemoryTransport).Close ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime) error to func() error ~ unclassified ~
+v3 ~ incompatible ~ ./openapi.(*GenerateCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./openapi.(*GenerateCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./security.AccessControl ~ changed from AccessControl to github.com/precision-soft/melody/v3/security/accesscontrol.Control ~ unclassified ~
+v3 ~ incompatible ~ ./security.AccessControlRule ~ changed from AccessControlRule to github.com/precision-soft/melody/v3/security/accesscontrol.Rule ~ unclassified ~
+v3 ~ incompatible ~ ./security.(*CompiledConfiguration).GlobalAccessControl ~ changed from func() *AccessControl to func() *AccessControl ~ unclassified ~
+v3 ~ incompatible ~ ./security.(*CompiledFirewall).AccessControl ~ changed from func() *AccessControl to func() *AccessControl ~ unclassified ~
+v3 ~ incompatible ~ ./security/config.(*AccessControlBuilder).Build ~ changed from func() *github.com/precision-soft/melody/v3/security.AccessControl to func() *github.com/precision-soft/melody/v3/security.AccessControl ~ unclassified ~
+v3 ~ incompatible ~ ./security/config.(*Builder).SetGlobal ~ changed from func(*github.com/precision-soft/melody/v3/security.AccessControl, *github.com/precision-soft/melody/v3/security.RoleHierarchy, github.com/precision-soft/melody/v3/security/contract.AccessDecisionManager, github.com/precision-soft/melody/v3/security/contract.EntryPoint, github.com/precision-soft/melody/v3/security/contract.AccessDeniedHandler) *Builder to func(*github.com/precision-soft/melody/v3/security.AccessControl, *github.com/precision-soft/melody/v3/security.RoleHierarchy, github.com/precision-soft/melody/v3/security/contract.AccessDecisionManager, github.com/precision-soft/melody/v3/security/contract.EntryPoint, github.com/precision-soft/melody/v3/security/contract.AccessDeniedHandler) *Builder ~ unclassified ~
+v3 ~ incompatible ~ ./security.(*FirewallRegistry).GlobalAccessControl ~ changed from func() *AccessControl to func() *AccessControl ~ unclassified ~
+v3 ~ incompatible ~ ./security.NewAccessControl ~ changed from func(...AccessControlRule) *AccessControl to func(...AccessControlRule) *AccessControl ~ unclassified ~
+v3 ~ incompatible ~ ./security.NewAccessControlExactRule ~ changed from func(string, ...string) AccessControlRule to func(string, ...string) AccessControlRule ~ unclassified ~
+v3 ~ incompatible ~ ./security.NewAccessControlRegexRule ~ changed from func(string, ...string) AccessControlRule to func(string, ...string) AccessControlRule ~ unclassified ~
+v3 ~ incompatible ~ ./security.NewAccessControlRule ~ changed from func(string, ...string) AccessControlRule to func(string, ...string) AccessControlRule ~ unclassified ~
+v3 ~ incompatible ~ ./security.NewAccessControlRuleWithSegmentPrefix ~ changed from func(string, ...string) AccessControlRule to func(string, ...string) AccessControlRule ~ unclassified ~
+v3 ~ incompatible ~ ./security.NewCompiledConfiguration ~ changed from func([]*CompiledFirewall, *AccessControl) *CompiledConfiguration to func([]*CompiledFirewall, *AccessControl) *CompiledConfiguration ~ unclassified ~
+v3 ~ incompatible ~ ./security.NewCompiledFirewall ~ changed from func(string, github.com/precision-soft/melody/v3/security/contract.Matcher, string, []github.com/precision-soft/melody/v3/security/contract.Rule, github.com/precision-soft/melody/v3/security/contract.TokenSource, *AccessControl, github.com/precision-soft/melody/v3/security/contract.AccessDecisionManager, *RoleHierarchy, github.com/precision-soft/melody/v3/security/contract.EntryPoint, github.com/precision-soft/melody/v3/security/contract.AccessDeniedHandler, string, string, github.com/precision-soft/melody/v3/security/contract.LoginHandler, github.com/precision-soft/melody/v3/security/contract.LogoutHandler, Source, Source, Source, Source, Source) *CompiledFirewall to func(string, github.com/precision-soft/melody/v3/security/contract.Matcher, string, []github.com/precision-soft/melody/v3/security/contract.Rule, github.com/precision-soft/melody/v3/security/contract.TokenSource, *AccessControl, github.com/precision-soft/melody/v3/security/contract.AccessDecisionManager, *RoleHierarchy, github.com/precision-soft/melody/v3/security/contract.EntryPoint, github.com/precision-soft/melody/v3/security/contract.AccessDeniedHandler, string, string, github.com/precision-soft/melody/v3/security/contract.LoginHandler, github.com/precision-soft/melody/v3/security/contract.LogoutHandler, Source, Source, Source, Source, Source) *CompiledFirewall ~ unclassified ~
+v3 ~ incompatible ~ ./session/contract.Manager.RegenerateSession ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./session/contract.Session.Snapshot ~ added ~ unclassified ~
+v3 ~ incompatible ~ ./session.Manager ~ old is comparable, new is not ~ unclassified ~
+v3 ~ incompatible ~ ./wiring.(*GenerateCommand).Flags ~ changed from func() []github.com/precision-soft/melody/v3/cli/contract.Flag to func() []github.com/precision-soft/melody/v3/cli/contract.Flag ~ unclassified ~
+v3 ~ incompatible ~ ./wiring.(*GenerateCommand).Run ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, *github.com/precision-soft/melody/v3/cli/contract.CommandContext) error to func(github.com/precision-soft/melody/v3/runtime/contract.Runtime, github.com/precision-soft/melody/v3/cli/contract.Context) error ~ unclassified ~
+v3 ~ incompatible ~ ./wiring.Scan ~ changed from func(string, *PackageBinding) (*ScanResult, error) to func(string, *PackageBinding, []string) (*ScanResult, error) ~ unclassified ~
