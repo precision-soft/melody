@@ -2289,3 +2289,233 @@ func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *tes
         t.Fatalf("expected the cached channel answered with its own generation 4, got %d", generation)
     }
 }
+
+func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer func() (*amqp091.Connection, error)) (*Transport, runtimecontract.Runtime) {
+    t.Helper()
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.wedge.message")
+
+    transport := NewTransport(TransportConfig{
+        Connection:     connection,
+        Dialer:         dialer,
+        Queue:          "melody.amqp.test.wedge",
+        Registry:       registry,
+        PublishTimeout: 200 * time.Millisecond,
+    })
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "healthy"})); nil != sendErr {
+        t.Fatalf("healthy send: %v", sendErr)
+    }
+
+    return transport, runtimeInstance
+}
+
+func TestTransport_SendReturnsWithinThePublishTimeoutOnAWedgedWrite(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    gated.Wedge()
+
+    outcome := make(chan error, 1)
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+
+    sendErr := awaitOutcome(t, "send on a wedged write", outcome, 2*time.Second)
+    if nil == sendErr {
+        t.Fatalf("expected the wedged send to fail")
+    }
+
+    if false == errors.Is(sendErr, errPublishTimedOut) {
+        t.Fatalf("expected the publish-timeout sentinel, got: %v", sendErr)
+    }
+
+    if 1 != gated.BlockedWrites() {
+        t.Fatalf("expected exactly one write to have been blocked, got %d", gated.BlockedWrites())
+    }
+}
+
+func TestTransport_ATimedOutSendOnAnOwnedConnectionRedialsAndDelivers(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, nil, dialer.Dial)
+    defer transport.Close()
+
+    if 1 != dialer.Dials() {
+        t.Fatalf("expected one dial before the wedge, got %d", dialer.Dials())
+    }
+
+    dialer.Latest().Wedge()
+
+    outcome := make(chan error, 1)
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+
+    /* the send's one retry redials and delivers: the wedged write is a channel fault, not a broker verdict */
+    if sendErr := awaitOutcome(t, "send on a wedged owned connection", outcome, 5*time.Second); nil != sendErr {
+        t.Fatalf("expected the send to be retried on a fresh connection and succeed, got: %v", sendErr)
+    }
+
+    if 2 != dialer.Dials() {
+        t.Fatalf("expected the wedged connection to have been cut and redialed once, got %d dials", dialer.Dials())
+    }
+}
+
+func TestTransport_ASecondSendOnAWedgedCallerOwnedConnectionIsRefusedAtOnce(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    gated.Wedge()
+
+    outcome := make(chan error, 1)
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+
+    firstErr := awaitOutcome(t, "send on a wedged write", outcome, 2*time.Second)
+    if nil == firstErr || false == strings.Contains(firstErr.Error(), "did not return within the publish timeout on a caller-owned connection") {
+        t.Fatalf("expected the first send to report the publish timeout on a caller-owned connection, got: %v", firstErr)
+    }
+
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "while-wedged"})) }()
+
+    secondErr := awaitOutcome(t, "send while wedged", outcome, 2*time.Second)
+    if nil == secondErr || false == strings.Contains(secondErr.Error(), "an earlier write is still blocked on the caller-owned connection") {
+        t.Fatalf("expected the second send to be refused for the earlier blocked write, got: %v", secondErr)
+    }
+
+    if 1 != gated.BlockedWrites() {
+        t.Fatalf("expected the refusal to reach the socket zero times, got %d blocked writes", gated.BlockedWrites())
+    }
+}
+
+func TestTransport_CloseReturnsWhileASendWriteIsWedgedOnAnOwnedConnection(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, nil, dialer.Dial)
+
+    dialer.Latest().Wedge()
+
+    sendOutcome := make(chan error, 1)
+    go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- transport.Close() }()
+
+    awaitOutcome(t, "close while a send write is wedged", closeOutcome, 3*time.Second)
+    awaitOutcome(t, "the wedged send after close", sendOutcome, 3*time.Second)
+}
+
+func TestTransport_CloseReturnsAndNamesTheBlockedWriteOnAWedgedCallerOwnedConnection(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    gated.Wedge()
+
+    sendOutcome := make(chan error, 1)
+    go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+
+    if sendErr := awaitOutcome(t, "send on a wedged write", sendOutcome, 2*time.Second); nil == sendErr {
+        t.Fatalf("expected the wedged send to fail")
+    }
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- transport.Close() }()
+
+    closeErr := awaitOutcome(t, "close on a wedged caller-owned connection", closeOutcome, 3*time.Second)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "left a publish write blocked on a caller-owned connection") {
+        t.Fatalf("expected close to name the write it could not end, got: %v", closeErr)
+    }
+}
+
+/* the window this pins — a close crossing a send whose write went out and whose confirmation has not arrived — cannot be opened from outside, since the order in which the broker answers the confirmation and the channel close is the broker's; the seam is the publish mutex the send holds across both. */
+func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
+    instance := &Transport{
+        queue:          "orders",
+        closeSignal:    make(chan struct{}),
+        reconnect:      resolveReconnectConfig(nil, nil),
+        publishTimeout: 2 * time.Second,
+    }
+
+    instance.publishMutex.Lock()
+
+    closed := make(chan error, 1)
+    go func() { closed <- instance.Close() }()
+
+    refuseOutcome(t, "close while a publish holds the mutex", closed, 200*time.Millisecond)
+
+    instance.publishMutex.Unlock()
+
+    awaitOutcome(t, "close after the publish released the mutex", closed, 2*time.Second)
+}
+
+func TestClose_GivesUpOnThePublishHalfAfterThePublishTimeout(t *testing.T) {
+    instance := &Transport{
+        queue:          "orders",
+        closeSignal:    make(chan struct{}),
+        reconnect:      resolveReconnectConfig(nil, nil),
+        publishTimeout: 100 * time.Millisecond,
+    }
+
+    instance.publishMutex.Lock()
+    defer instance.publishMutex.Unlock()
+
+    closed := make(chan error, 1)
+    go func() { closed <- instance.Close() }()
+
+    awaitOutcome(t, "close past the publish timeout", closed, 2*time.Second)
+}
+
+func TestDecode_ReadsAByteArrayMessageTypeHeader(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.message")
+
+    instance := &Transport{
+        queue:      "orders",
+        registry:   registry,
+        serializer: melodyserializer.NewJsonSerializer(),
+    }
+
+    body, marshalErr := json.Marshal(testMessage{Id: 7, Name: "bytes"})
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    envelopeInstance, decodeErr := instance.decode(amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: []byte("amqp.test.message")},
+        Body:        body,
+        DeliveryTag: 1,
+    }, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    message, ok := envelopeInstance.Message().(testMessage)
+    if false == ok || 7 != message.Id {
+        t.Fatalf("expected the byte-array typed delivery to decode into the registered message, got %#v", envelopeInstance.Message())
+    }
+
+    _, untypedErr := instance.decode(amqp091.Delivery{
+        Headers: amqp091.Table{headerMessageType: int32(7)},
+        Body:    body,
+    }, 1)
+    if nil == untypedErr || false == strings.Contains(untypedErr.Error(), "missing the message type header") {
+        t.Fatalf("expected a header of another type to read as absent, got: %v", untypedErr)
+    }
+}
+
+/* the socket wedges with nothing in flight, so no send is there to cut it: Close's own deadline is the only bound */
+func TestTransport_CloseReturnsWhenTheSocketWedgedWhileIdle(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+    transport, _ := newWedgeTestTransport(t, nil, dialer.Dial)
+
+    dialer.Latest().Wedge()
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- transport.Close() }()
+
+    awaitOutcome(t, "close on a socket that wedged while idle", closeOutcome, 3*time.Second)
+}

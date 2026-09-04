@@ -3,6 +3,7 @@ package amqp
 import (
     "context"
     "errors"
+    "fmt"
     "math"
     "reflect"
     "strconv"
@@ -26,6 +27,9 @@ const (
 
     defaultPublishReturnBuffer = 16
 
+    /* defaultPublishTimeout bounds the WRITE of one publish, the stretch the amqp client runs with the caller's context discarded; the confirmation wait after it observes the context as it always did. Sized like closeJoinTimeout, to a full amqp handshake, because a broker under a resource alarm legitimately holds publishers for seconds and a bound that fired inside that would fail sends the broker was about to accept. */
+    defaultPublishTimeout = 30 * time.Second
+
     /* maxPrefetch caps the configured prefetch at the AMQP 0-9-1 prefetch-count wire limit. The field is encoded as uint16 by channel.Qos, so a larger value wraps on the wire — 65536 becomes 0, which RabbitMQ interprets as UNLIMITED prefetch, the exact opposite of the configured flow-control cap. */
     maxPrefetch = 65535
 )
@@ -39,6 +43,9 @@ const (
 
 /* errReconnectInProgress is a PLAIN sentinel, matched with errors.Is, and every return wraps it in a FRESH melody error: a package-level *exception.Error carries the already-logged mark and a mutable context map on the instance itself, so one shared singleton, once logged anywhere, would silence every later occurrence process-wide — on every transport — and cross-instance context writes would race on it. */
 var errReconnectInProgress = errors.New("amqp reconnect already in progress")
+
+/* errPublishTimedOut is matched with errors.Is when a publish write did not return inside the publish timeout; plain and wrapped fresh at the return site, for the reason above. */
+var errPublishTimedOut = errors.New("amqp publish did not return within the publish timeout")
 
 func NewTransport(config TransportConfig) *Transport {
     return newTransport(config, nil)
@@ -93,6 +100,7 @@ func newTransport(config TransportConfig, general *ReconnectConfig) *Transport {
         publishReturnBuffer: publishReturnBuffer,
         reconnect:           reconnect,
         delayBuckets:        delayBuckets,
+        publishTimeout:      config.PublishTimeout,
         closeSignal:         make(chan struct{}),
     }
 }
@@ -111,6 +119,8 @@ type TransportConfig struct {
     PublishReturnBuffer int
     /* DelayBuckets are the queue-level-ttl delay tiers for delayed redelivery (ascending, positive, at most maxDelayBuckets; zero value uses defaultDelayBuckets). A delayed message is parked in the largest bucket not exceeding its requested delay, so every message in a bucket queue shares one ttl and RabbitMQ's head-of-queue-only expiry cannot stall short delays behind long ones; the actual delay quantizes down to the bucket. Delays below the smallest bucket keep the legacy per-message-ttl queue, where head-of-line waiting is bounded by that smallest bucket. */
     DelayBuckets []time.Duration
+    /* PublishTimeout bounds the WRITE of one Send. The amqp client discards the context it is handed for the write, so a broker that stops reading its socket — a resource alarm, a half-dead peer — would otherwise hold the send, every later send and the transport's close for good; the confirmation wait that follows the write observes the caller's context as before. A write that outlives the timeout fails as a channel fault: on a connection the transport dialed itself the connection is cut and the one retry redials, on a caller-owned connection sends are refused until that write returns. A non-positive value takes the default. */
+    PublishTimeout time.Duration
 }
 
 type Transport struct {
@@ -127,6 +137,7 @@ type Transport struct {
     publishReturnBuffer int
     reconnect           ReconnectConfig
     delayBuckets        []time.Duration
+    publishTimeout      time.Duration
 
     mutex             sync.Mutex
     publishChannel    *amqp091.Channel
@@ -136,6 +147,8 @@ type Transport struct {
     closing           bool
     reconnecting      bool
     ownsConnection    bool
+    /* wedged is set while a publish write that outlived the publish timeout is still blocked on a connection this transport does not own and so cannot cut: every send until it returns is refused at once, instead of parking one more goroutine behind it per send */
+    wedged bool
     closeSignal       chan struct{}
     closeOnce         sync.Once
 
@@ -235,9 +248,12 @@ func (instance *Transport) Nack(
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
 }
 
-/* closeJoinTimeout bounds how long Close waits for the consume goroutine. The loop observes closeSignal at every blocking point, so a healthy join costs microseconds; the one stretch it cannot observe it is inside the caller-supplied dialer, and connect rechecks closing the moment that dial returns — so the wait is one dial attempt, not an open-ended one. The window is sized to a full amqp handshake so the join completes for every dialer that carries a timeout; a dialer with none would otherwise hang teardown for good, which is why the wait is bounded at all rather than open. */
+/* closeJoinTimeout bounds the three stretches of Close that cannot observe the close signal: the consume goroutine's join, the publish half's join, and the close of an owned connection. The consume loop observes closeSignal at every blocking point, so a healthy join costs microseconds; the one stretch it cannot observe it is inside the caller-supplied dialer, and connect rechecks closing the moment that dial returns — so the wait is one dial attempt, not an open-ended one. The publish half holds its mutex across a socket write the amqp client cannot interrupt, and the connection close is an RPC over that same socket; both end at once on a healthy broker and never on one that stopped reading. The window is sized to a full amqp handshake so every join completes for a dialer that carries a timeout and for a broker that answers; a dialer with none, or a broker that does not, would otherwise hang teardown for good, which is why the waits are bounded at all rather than open. */
 const closeJoinTimeout = 30 * time.Second
 
+/* Close is bounded on every stretch, in this order: the consume goroutine is joined, the publish half is joined so a send whose write went out finishes its confirmation instead of having the channel shut under it — which resolved the pending confirmation as a nack and reported a message the broker may well have accepted as refused by the broker — then an owned connection is cut with a deadline, at once when the publish join failed, since the write is then known to be wedged, and one publish timeout ahead otherwise, so a clean close handshake gets its round trip while a socket that wedged with nothing in flight — which the join cannot see — still ends inside the same budget; the channels are closed only where that cannot block. The publish join waits one publish timeout too, not the join timeout: a write still in flight has at most its own timeout left before the send abandons it, and after that the mutex is released when the write returns or never. No amqp call runs under instance.mutex.
+
+   The signature promises an error and the old body could never produce one: every underlying close was discarded and teardown reporting read success whatever happened. A channel or connection already torn down by the broker answers amqp091.ErrClosed, which is the state Close exists to reach — not a failure. */
 func (instance *Transport) Close() error {
     instance.mutex.Lock()
     instance.closing = true
@@ -248,26 +264,47 @@ func (instance *Transport) Close() error {
 
     instance.awaitConsumeLoop()
 
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
+    publishJoined := lockWithin(&instance.publishMutex, instance.resolvedPublishTimeout())
+    if true == publishJoined {
+        defer instance.publishMutex.Unlock()
+    }
 
-    /* the signature promises an error and the old body could never produce one: every underlying close was discarded and teardown reporting read success whatever happened. A channel or connection already torn down by the broker answers amqp091.ErrClosed, which is the state Close exists to reach — not a failure. */
+    instance.mutex.Lock()
+    consumeChannel := instance.consumeChannel
+    publishChannel := instance.publishChannel
+    ownsConnection := instance.ownsConnection
+    connection := instance.connection
+    instance.consumeChannel = nil
+    instance.publishChannel = nil
+    instance.publishReturns = nil
+    if true == ownsConnection {
+        instance.connection = nil
+    }
+    instance.mutex.Unlock()
+
     var closeErrs []error
 
-    if nil != instance.consumeChannel {
-        closeErrs = append(closeErrs, ignoringAlreadyClosed(instance.consumeChannel.Close()))
-        instance.consumeChannel = nil
+    if true == ownsConnection && nil != connection {
+        deadline := time.Now()
+        if true == publishJoined {
+            deadline = deadline.Add(instance.resolvedPublishTimeout())
+        }
+
+        closeErrs = append(closeErrs, ignoringAlreadyClosed(connection.CloseDeadline(deadline)))
     }
 
-    if nil != instance.publishChannel {
-        closeErrs = append(closeErrs, ignoringAlreadyClosed(instance.publishChannel.Close()))
-        instance.publishChannel = nil
-        instance.publishReturns = nil
-    }
-
-    if true == instance.ownsConnection && nil != instance.connection {
-        closeErrs = append(closeErrs, ignoringAlreadyClosed(instance.connection.Close()))
-        instance.connection = nil
+    switch {
+    case false == ownsConnection && false == publishJoined:
+        /* a caller-owned connection with a wedged write cannot be cut from here, and a channel close over it would join the write in blocking; the channels die with the connection, by the owner's hand */
+        closeErrs = append(closeErrs, exception.NewError(
+            "amqp transport close left a publish write blocked on a caller-owned connection; the channels were not closed and end with that connection",
+            map[string]any{"queue": instance.queue},
+            nil,
+        ))
+    case false == ownsConnection:
+        closeErrs = append(closeErrs, closeChannelsWithin(closeJoinTimeout, consumeChannel, publishChannel)...)
+    default:
+        closeErrs = append(closeErrs, closeChannels(consumeChannel, publishChannel)...)
     }
 
     return errors.Join(closeErrs...)
@@ -279,6 +316,72 @@ func ignoringAlreadyClosed(closeErr error) error {
     }
 
     return closeErr
+}
+
+/* lockWithin takes the mutex unless the wait outlives the bound, and reports which. A publish holds its mutex across a socket write the amqp client cannot interrupt, so a teardown that joined the publish half unbounded would hang exactly on the write it exists to end; a join that fails is the measurement that the write is wedged. On failure the goroutine is left to take and release the mutex whenever the write returns, so the mutex is never left held by nobody. */
+func lockWithin(mutex *sync.Mutex, bound time.Duration) bool {
+    locked := make(chan struct{})
+    abandoned := make(chan struct{})
+
+    go func() {
+        mutex.Lock()
+
+        select {
+        case locked <- struct{}{}:
+        case <-abandoned:
+            mutex.Unlock()
+        }
+    }()
+
+    timer := time.NewTimer(bound)
+    defer timer.Stop()
+
+    select {
+    case <-locked:
+        return true
+    case <-timer.C:
+        close(abandoned)
+
+        return false
+    }
+}
+
+/* closeChannels closes the channels that are still open; a channel the broker or the connection already tore down answers ErrClosed, which is the state a close exists to reach. */
+func closeChannels(channels ...*amqp091.Channel) []error {
+    var closeErrs []error
+
+    for _, channel := range channels {
+        if nil == channel {
+            continue
+        }
+
+        closeErrs = append(closeErrs, ignoringAlreadyClosed(channel.Close()))
+    }
+
+    return closeErrs
+}
+
+/* closeChannelsWithin is closeChannels bounded: a channel close is an RPC over the connection's socket and observes no context, so on a connection the caller owns — the one teardown cannot cut — a broker that stops reading mid-close would otherwise hold teardown for as long as the socket does. Past the bound the closes are left to end when the socket does, and the bound is reported. */
+func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []error {
+    outcome := make(chan []error, 1)
+
+    go func() {
+        outcome <- closeChannels(channels...)
+    }()
+
+    timer := time.NewTimer(bound)
+    defer timer.Stop()
+
+    select {
+    case closeErrs := <-outcome:
+        return closeErrs
+    case <-timer.C:
+        return []error{exception.NewError(
+            "amqp channel close did not return within the bound on a caller-owned connection; the channels end with that connection",
+            map[string]any{"bound": bound.String()},
+            nil,
+        )}
+    }
 }
 
 /* the consume goroutine's own helpers (isClosing, resetConsumeChannel, ensureConsumeChannel on the reopen path) take instance.mutex, so the join must run with that mutex released or Close deadlocks against the goroutine it is waiting for. */
@@ -514,7 +617,9 @@ func (instance *Transport) publishRecoverable(
     return true == retryRetryable && true == instance.publishRetryable(), retryErr
 }
 
-/* the channel runs in publisher-confirm mode and the publish is serialized with its confirmation wait: a message is reported sent only after the broker acked it and no basic.return arrived, so republish-then-ack cannot drop a message the broker silently discarded (reject-publish policy, deleted queue). */
+/* the channel runs in publisher-confirm mode and the publish is serialized with its confirmation wait: a message is reported sent only after the broker acked it and no basic.return arrived, so republish-then-ack cannot drop a message the broker silently discarded (reject-publish policy, deleted queue).
+
+   The write runs on its own goroutine and is waited for under the publish timeout, because the amqp client discards the context it is handed for it and holds the channel and connection send locks across the blocking socket write — and its own shutdown takes the channel lock before it closes the socket, so a peer that stops reading leaves the write, every later write, every close and the client's heartbeat teardown blocked behind one another with nothing to break the ring but a deadline on the socket. The publish mutex is taken INSIDE the goroutine, so a caller that gave up on a wedged write is not itself parked on the mutex that write still holds; the confirmation wait stays on the caller's context, as it always did. */
 func (instance *Transport) publishOnce(
     ctx context.Context,
     exchange string,
@@ -526,41 +631,143 @@ func (instance *Transport) publishOnce(
         return nil, true, channelErr
     }
 
-    instance.publishMutex.Lock()
-    defer instance.publishMutex.Unlock()
-
-    _, _ = drainPublishReturn(returns)
-
-    confirmation, publishErr := channel.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, true, false, publishing)
-    if nil != publishErr {
-        return channel, true, exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, publishErr)
+    type publishOutcome struct {
+        retryable bool
+        err       error
     }
 
-    acked, waitErr := confirmation.WaitContext(ctx)
-    if nil != waitErr {
-        return channel, true, exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, waitErr)
+    written := make(chan struct{})
+    outcome := make(chan publishOutcome, 1)
+
+    go func() {
+        instance.publishMutex.Lock()
+        defer instance.publishMutex.Unlock()
+
+        _, _ = drainPublishReturn(returns)
+
+        confirmation, publishErr := channel.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, true, false, publishing)
+        close(written)
+        if nil != publishErr {
+            outcome <- publishOutcome{retryable: true, err: exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, publishErr)}
+
+            return
+        }
+
+        acked, waitErr := confirmation.WaitContext(ctx)
+        if nil != waitErr {
+            outcome <- publishOutcome{retryable: true, err: exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, waitErr)}
+
+            return
+        }
+
+        /* an unroutable return and a nack are the broker's verdict on the message, not a channel fault: they must never be retried, or the retry would silently re-drop the message on a fresh channel */
+        if returned, wasReturned := drainPublishReturn(returns); true == wasReturned {
+            outcome <- publishOutcome{retryable: false, err: exception.NewError(
+                "amqp publish was returned as unroutable",
+                map[string]any{
+                    "queue":      instance.queue,
+                    "exchange":   exchange,
+                    "routingKey": routingKey,
+                    "replyCode":  returned.ReplyCode,
+                    "replyText":  returned.ReplyText,
+                },
+                nil,
+            )}
+
+            return
+        }
+
+        if false == acked {
+            outcome <- publishOutcome{retryable: false, err: exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": instance.queue}, nil)}
+
+            return
+        }
+
+        outcome <- publishOutcome{}
+    }()
+
+    timer := time.NewTimer(instance.resolvedPublishTimeout())
+    defer timer.Stop()
+
+    select {
+    case <-written:
+        result := <-outcome
+
+        return channel, result.retryable, result.err
+    case <-timer.C:
+        retryable, abandonErr := instance.abandonWedgedPublish(exchange, routingKey, written)
+
+        return channel, retryable, abandonErr
+    }
+}
+
+/* abandonWedgedPublish is the timed-out branch of publishOnce. On a connection this transport dialed itself the socket is cut with a deadline already passed, which is the one door the amqp client leaves open once its send locks are held: the blocked write returns, the client's shutdown completes, and the one retry redials through connect — the fault is retryable, exactly like any other channel fault. On a caller-owned connection nothing here may cut the socket, so the transport marks itself wedged until the write returns — by the owner's hand, or never — and refuses every send in between at once rather than parking one goroutine per send behind the held mutex; that fault is not retryable, since the retry would meet the same refusal. */
+func (instance *Transport) abandonWedgedPublish(exchange string, routingKey string, written <-chan struct{}) (bool, error) {
+    instance.mutex.Lock()
+    closing := instance.closing
+    ownsConnection := instance.ownsConnection
+    connection := instance.connection
+    if false == closing && false == ownsConnection {
+        instance.wedged = true
+    }
+    instance.mutex.Unlock()
+
+    errorContext := map[string]any{
+        "queue":          instance.queue,
+        "exchange":       exchange,
+        "routingKey":     routingKey,
+        "publishTimeout": instance.resolvedPublishTimeout().String(),
     }
 
-    /* an unroutable return and a nack are the broker's verdict on the message, not a channel fault: they must never be retried, or the retry would silently re-drop the message on a fresh channel */
-    if returned, wasReturned := drainPublishReturn(returns); true == wasReturned {
-        return channel, false, exception.NewError(
-            "amqp publish was returned as unroutable",
-            map[string]any{
-                "queue":      instance.queue,
-                "exchange":   exchange,
-                "routingKey": routingKey,
-                "replyCode":  returned.ReplyCode,
-                "replyText":  returned.ReplyText,
-            },
-            nil,
+    /* a write still blocked while Close runs is Close's to end — it cuts an owned connection itself and cannot cut another's — so nothing is marked here and nothing is retried */
+    if true == closing {
+        return false, exception.NewError(
+            "amqp publish did not return within the publish timeout while the transport was closing",
+            errorContext,
+            errPublishTimedOut,
         )
     }
 
-    if false == acked {
-        return channel, false, exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": instance.queue}, nil)
+    if true == ownsConnection && nil != connection {
+        _ = connection.CloseDeadline(time.Now())
+
+        /* the write returns as soon as the deadline lands on the socket; the wait is bounded all the same, because a Dial-injected conn that ignores deadlines is not this transport's to reason about */
+        timer := time.NewTimer(closeJoinTimeout)
+        defer timer.Stop()
+
+        select {
+        case <-written:
+        case <-timer.C:
+        }
+
+        return true, exception.NewError(
+            "amqp publish did not return within the publish timeout; the owned connection was closed and is redialed on retry",
+            errorContext,
+            errPublishTimedOut,
+        )
     }
 
-    return channel, false, nil
+    go func() {
+        <-written
+
+        instance.mutex.Lock()
+        instance.wedged = false
+        instance.mutex.Unlock()
+    }()
+
+    return false, exception.NewError(
+        "amqp publish did not return within the publish timeout on a caller-owned connection; sends are refused until that write returns",
+        errorContext,
+        errPublishTimedOut,
+    )
+}
+
+func (instance *Transport) resolvedPublishTimeout() time.Duration {
+    if 0 >= instance.publishTimeout {
+        return defaultPublishTimeout
+    }
+
+    return instance.publishTimeout
 }
 
 /* closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. A nil failed channel (the caller never obtained one, e.g. ensurePublishChannel itself failed) identifies no specific channel, so it is a no-op rather than closing whatever channel is currently cached — a stale/closed cached channel is re-detected by ensurePublishChannel's IsClosed guard on the next publish. */
@@ -1095,10 +1302,26 @@ func (instance *Transport) forwardDeliveries(
     }
 }
 
+/* messageTypeHeader reads the type header in both spellings an AMQP field table can carry a string in: a long string, which this transport writes, and a byte array, which a foreign producer — a library that encodes strings as the table's 'x' type, a management-ui republish — writes and the client decodes as []byte; read through an exact string assertion, such a delivery was dead-lettered as untyped in silence. Any other form is absent. */
+func messageTypeHeader(headers amqp091.Table) string {
+    switch value := headers[headerMessageType].(type) {
+    case string:
+        return value
+    case []byte:
+        return string(value)
+    default:
+        return ""
+    }
+}
+
 func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) (messagebuscontract.Envelope, error) {
-    typeName, _ := delivery.Headers[headerMessageType].(string)
+    typeName := messageTypeHeader(delivery.Headers)
     if "" == typeName {
-        return nil, exception.NewError("amqp delivery is missing the message type header", map[string]any{"queue": instance.queue}, nil)
+        return nil, exception.NewError(
+            "amqp delivery is missing the message type header",
+            map[string]any{"queue": instance.queue, "headerType": fmt.Sprintf("%T", delivery.Headers[headerMessageType])},
+            nil,
+        )
     }
 
     target, exists := instance.registry.New(typeName)
@@ -1219,12 +1442,21 @@ func clampHeaderFloat(value float64) int {
 func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp091.Return, error) {
     instance.mutex.Lock()
     closing := instance.closing
+    wedged := instance.wedged
     existing := instance.publishChannel
     existingReturns := instance.publishReturns
     instance.mutex.Unlock()
 
     if true == closing {
         return nil, nil, exception.NewError("amqp transport is closing", nil, nil)
+    }
+
+    if true == wedged {
+        return nil, nil, exception.NewError(
+            "amqp publish is refused: an earlier write is still blocked on the caller-owned connection",
+            map[string]any{"queue": instance.queue},
+            errPublishTimedOut,
+        )
     }
 
     if nil != existing && false == existing.IsClosed() {
