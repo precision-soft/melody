@@ -10,6 +10,7 @@ import (
     "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
     "go.opentelemetry.io/otel/sdk/resource"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
+    "google.golang.org/grpc"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -94,6 +95,9 @@ func newExporter(ctx context.Context, config Config) (*otlptrace.Exporter, error
         if 0 < len(config.Headers) {
             options = append(options, otlptracegrpc.WithHeaders(config.Headers))
         }
+
+        /* the channel is dialled with the service config lookup disabled: grpc's dns resolver otherwise asks for a TXT record (_grpc_config.<host>) beside the address records of every new channel, and melody publishes no service config that way, so the lookup is cost alone. The channel opens lazily, on the first export; on a resolver that answers the address at once and the TXT record never — docker's embedded dns for a container name is one — that first export waits the resolver's whole timeout with the channel still connecting, and a shutdown flush that is the one to open it spends the entire close budget on a record it does not need, reporting a collector it could have reached as unreachable. */
+        options = append(options, otlptracegrpc.WithDialOption(grpc.WithDisableServiceConfig()))
 
         return otlptracegrpc.New(ctx, options...)
 
