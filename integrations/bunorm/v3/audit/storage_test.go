@@ -3,6 +3,7 @@ package audit
 import (
     "context"
     "encoding/json"
+    "errors"
     "os"
     "path/filepath"
     "strings"
@@ -104,4 +105,21 @@ func TestWithDatabase_RefusesANilHandle(t *testing.T) {
     var handle *bun.DB
 
     WithDatabase(context.Background(), handle)
+}
+
+func TestFileStorage_RefusesAContextAlreadyDone(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "audit.jsonl")
+    storage := NewFileStorage(path)
+
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    saveErr := storage.Save(ctx, "melody_audit", Entry{Entity: "widget", EntityId: "1", Operation: OperationInsert})
+    if false == errors.Is(saveErr, context.Canceled) {
+        t.Fatalf("expected the cancelled context reported, got: %v", saveErr)
+    }
+
+    if _, statErr := os.Stat(path); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected no file written on a cancelled context, stat: %v", statErr)
+    }
 }

@@ -107,9 +107,14 @@ type fileRecord struct {
     Entry Entry  `json:"entry"`
 }
 
+/* Save appends the entries as json lines and syncs the file once per batch. A context already cancelled is refused before the file is opened, the reading the database storage gets from its driver: an AsyncStorage that cancels its worker after the drain grace relies on the delegate to give the remaining entries back as dead-letters, and this one used to write every one of them regardless. An open or write already parked in the kernel — a fifo with no reader, a hung network mount — is not interrupted by this; nothing in the process can do that. */
 func (instance *FileStorage) Save(ctx context.Context, table string, entries ...Entry) error {
     if 0 == len(entries) {
         return nil
+    }
+
+    if contextErr := ctx.Err(); nil != contextErr {
+        return exception.NewError("could not append to the audit file, the context is done", map[string]any{"path": instance.path}, contextErr)
     }
 
     instance.mutex.Lock()

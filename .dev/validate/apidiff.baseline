@@ -82,6 +82,8 @@ integrations/bunorm/v3 ~ compatible ~ ./audit.Change.MarshalJSON ~ added ~ uncla
 integrations/bunorm/v3 ~ compatible ~ ./audit.EntityOptions.CaptureDeleteBeforeImage ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ ./audit.NewRecorderOwningStorage ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ ./audit.(*Recorder).Close ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./audit.ErrAsyncStorageClosed ~ added ~ keep ~ the sentinel AsyncStorage.Save wraps for an entry refused after Close, so a caller can tell a lost audit record from a delegate failure; a defect repair, and v3.14.0 is the last minor that ships features
+integrations/bunorm/v3 ~ compatible ~ ./audit.ErrAsyncStorageQueueFull ~ added ~ keep ~ the sentinel AsyncStorage.Save wraps for an entry refused on a full buffer, the same reason as the sibling row
 integrations/bunorm/v3 ~ compatible ~ ContextOpener ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ ./encrypt.EncryptedColumn ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*Migrator).EnsureColumnCapacity ~ added ~ unclassified ~
