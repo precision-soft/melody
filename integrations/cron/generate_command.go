@@ -248,6 +248,7 @@ func (instance *GenerateCommand) resolveRunOptions(
         }
         logsDir = absoluteLogsDir
 
+        /* the logs directory is created while the options are still being resolved, before anything is rendered or written, and deliberately so: it is where the generated lines redirect every job's output, and under system cron a shell whose redirection cannot create its file aborts the whole command, so the directory has to exist by the time the manifest runs whatever became of this generation. Creating it is idempotent and leaves nothing a failed run would need to undo, which is why a run that fails later still leaves it behind. */
         if mkdirErr := os.MkdirAll(logsDir, 0o755); nil != mkdirErr {
             return nil, exception.NewError(
                 "cron: could not create the logs directory",
@@ -258,7 +259,8 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.logsDir = logsDir
 
-    options.binary = resolveDefault(commandContext, configuration, flagNameBinary, ParameterBinary)
+    /* the binary is a path like its three siblings, and its parameter is anchored the way theirs are: a relative melody.cron.binary meant "under the project" and was baked into the manifest relative to wherever the generator happened to run from, while a relative --binary keeps the shell's own convention */
+    options.binary = resolveDefaultPath(commandContext, configuration, flagNameBinary, ParameterBinary)
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
     heartbeatPath := resolveDefaultPath(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
@@ -647,6 +649,7 @@ func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned 
     }
 }
 
+/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
     if nil != createErr {
@@ -831,6 +834,7 @@ func resolveEntryDestination(entryDestination string, defaultDestination string,
     return joined, nil
 }
 
+/* isWithinDir answers on the cleaned NAMES, deliberately: the guard exists for a DestinationFile whose spelling walks out of dir(--out) with "..", the mistake a configuration can make on paper. A symbolic link inside the directory that points elsewhere is not that mistake — it is the operator's layout, placed there on purpose, and following it here would refuse a destination the operator arranged exactly as an absolute path is allowed to. */
 func isWithinDir(candidate string, parent string) bool {
     if candidate == parent {
         return true

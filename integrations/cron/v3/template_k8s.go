@@ -238,7 +238,7 @@ func buildCronJobManifest(entry Entry, image string, namespace string, restartPo
     return name, builder.String(), nil
 }
 
-/* a Command override replaces the image entrypoint (k8s "command"); otherwise the command name plus its arguments are passed as "args" so the image entrypoint (the application binary) runs them in CLI mode. Both arrays refuse EMPTY tokens, not just an all-empty override: in the exec form every element is one argv entry, so an empty entrypoint token or an empty argument reaches the pod verbatim and fails there — a CrashLoopBackOff diagnosed in the cluster for a mistake generation could name. The crontab dialects join tokens with spaces, where an empty token merely vanishes; here it is load-bearing. */
+/* a Command override replaces the image entrypoint (k8s "command"); otherwise the command name plus its arguments are passed as "args" so the image entrypoint (the application binary) runs them in CLI mode. Both arrays refuse EMPTY tokens, not just an all-empty override: in the exec form every element is one argv entry, so an empty entrypoint token or an empty argument reaches the pod verbatim and fails there — a CrashLoopBackOff diagnosed in the cluster for a mistake generation could name. The crontab dialects quote an empty token as '' and hand the process an empty argument, which the application's own flag parsing then answers; here there is no shell and no parsing between the manifest and the pod, so the mistake is refused where it can still be named. */
 func k8sInvocation(entry Entry) (string, []string, error) {
     if 0 < len(entry.Command) {
         if tokenErr := refuseEmptyTokens(entry.Name, "Command", entry.Command); nil != tokenErr {

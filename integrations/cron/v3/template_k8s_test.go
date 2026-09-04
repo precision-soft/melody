@@ -394,7 +394,7 @@ func TestK8sRenderRefusesANamespaceThatIsNotAnRfc1123Label(t *testing.T) {
     }
 }
 
-/* in the exec form every element is one argv entry, so an empty token reaches the pod verbatim and fails there as a CrashLoopBackOff — the crontab dialects join with spaces, where an empty token merely vanishes */
+/* in the exec form every element is one argv entry, so an empty token reaches the pod verbatim and fails there as a CrashLoopBackOff — the crontab dialects quote it as '' and hand the process an empty argument its own flag parsing answers */
 func TestK8sRenderRefusesEmptyInvocationTokens(t *testing.T) {
     withEmptyCommandToken := k8sSampleEntry("product:list")
     withEmptyCommandToken.Command = []string{"", "run"}

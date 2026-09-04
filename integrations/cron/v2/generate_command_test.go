@@ -3303,3 +3303,70 @@ func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) 
         t.Fatalf("expected the custom marker to prove its own files, got carries=%v err=%v", carries, checkErr)
     }
 }
+
+/* the binary is the fourth path-shaped value the generator resolves, and its parameter follows the rule of the other three: relative from the configuration means under the project, relative from the flag means where the shell is. */
+func TestRunAnchorsARelativeBinaryParameterAtTheProjectDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:            "deploy",
+            ParameterBinary:          filepath.Join("bin", "app"),
+            ParameterDestinationFile: filepath.Join(projectDirectory, "var", "cron", "crontab"),
+            ParameterLogsDir:         filepath.Join(projectDirectory, "var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(t, commands, nil, configuration)
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    body, _ := os.ReadFile(filepath.Join(projectDirectory, "var", "cron", "crontab"))
+    if false == strings.Contains(string(body), filepath.Join(projectDirectory, "bin", "app")+" backup:run") {
+        t.Fatalf("expected the relative binary parameter anchored at the project directory, got:\n%s", string(body))
+    }
+}
+
+func TestRunKeepsARelativeBinaryFlagRelativeToTheWorkingDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:            "deploy",
+            ParameterBinary:          "/opt/melody/app",
+            ParameterDestinationFile: filepath.Join(projectDirectory, "var", "cron", "crontab"),
+            ParameterLogsDir:         filepath.Join(projectDirectory, "var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(t, commands, []string{"--binary", filepath.Join("bin", "app")}, configuration)
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    body, _ := os.ReadFile(filepath.Join(projectDirectory, "var", "cron", "crontab"))
+    if false == strings.Contains(string(body), filepath.Join(workingDirectory, "bin", "app")+" backup:run") {
+        t.Fatalf("expected the relative binary flag resolved against the working directory, got:\n%s", string(body))
+    }
+
+    if true == strings.Contains(string(body), filepath.Join(projectDirectory, "bin", "app")) {
+        t.Fatalf("a flag path must not be anchored at the project directory, got:\n%s", string(body))
+    }
+}
