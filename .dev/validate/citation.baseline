@@ -65,6 +65,7 @@ v1 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answer
 v2 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
 v1 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
 v2 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+v3 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
 
 v3 ~ symbol ~ amqp.DialConfig          ~ github.com/rabbitmq/amqp091-go DialConfig, named because its parse error quotes the DSN the connection redacts
 v3 ~ symbol ~ websocket.Accept         ~ github.com/coder/websocket Accept, named where the hijack takes the connection out of the server's timeouts

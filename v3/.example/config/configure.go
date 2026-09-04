@@ -112,6 +112,10 @@ func Configure(app *melodyapplication.Application) {
         app.RegisterModule(melodyrueidiscache.NewModule(melodyrueidiscache.ModuleConfig{
             Client: moduleInstance.redisClient,
             Prefix: redisCacheKeyPrefix,
+            /* the backend's context-less doors run unbounded without this; a store that stops answering would hold a request-path read for good */
+            BackendOptions: []melodyrueidiscache.BackendOption{
+                melodyrueidiscache.WithCommandTimeout(time.Second),
+            },
         }))
     }
 }

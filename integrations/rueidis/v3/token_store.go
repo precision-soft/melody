@@ -22,6 +22,9 @@ const (
 
 const defaultRevocationEpochRetentionMilliseconds = int64(7 * 24 * 60 * 60 * 1000)
 
+/* defaultTokenStoreCallTimeout is the budget of one round trip, the one the server-sent event backplane in this package gives a publish. A token store round trip is one Lua script or one cursor step, so a healthy store answers in a few milliseconds; the budget only has to sit under the client's own connection timeout, which is what bounded a write before this option existed. */
+const defaultTokenStoreCallTimeout = time.Second
+
 const (
     revocationUserField = "user"
 
@@ -192,6 +195,7 @@ func NewTokenStore(client rueidis.Client, options ...TokenStoreOption) *RedisTok
         scanCount:                  defaultTokenStoreScanCount,
         clock:                      melodyclock.NewSystemClock(),
         epochRetentionMilliseconds: defaultRevocationEpochRetentionMilliseconds,
+        callTimeout:                defaultTokenStoreCallTimeout,
     }
 
     for _, option := range options {
@@ -235,6 +239,7 @@ func WithTokenStoreScanCount(scanCount int) TokenStoreOption {
     }
 }
 
+/* WithTokenStoreContext supplies the context the contract's context-less doors derive theirs from. Its cancellation and deadline are dropped DELIBERATELY: the store lives as long as the application, and a boot context whose deadline had passed would otherwise fail every Put and Delete for the rest of the process. What is kept are its values. The lifetime of one round trip is the call timeout's, never this context's. */
 func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
     return func(store *RedisTokenStore) {
         if nil == ctx {
@@ -242,6 +247,17 @@ func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
         }
 
         store.ctx = context.WithoutCancel(ctx)
+    }
+}
+
+/* WithTokenStoreCallTimeout bounds one round trip of every door: the contract's context-less half (Put, PutWithTtl, Delete, DeleteByUser, PurgeExpired, RevokeBefore) and the runtime half (Lookup, RevocationEpoch), where it caps the request context so a request carrying no deadline — melody's http kernel attaches none — still fails fast, while a request that already carries a tighter deadline keeps it. Without a bound a store that accepts connections but stops answering holds a write for the client's own connection timeout (five seconds at the provider's default) and a read for good: the client retries a read-only command — the SSCAN behind DeleteByUser, the SCAN behind PurgeExpired, the HMGET behind RevocationEpoch — on a fresh connection for as long as the context allows, and a context without deadline allows forever. The bound is per round trip, not per operation, so a walk over a large user's index gets one budget per batch. A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that fails every call; the cache subpackage deliberately reads its command timeout the other way and says so on its own option. */
+func WithTokenStoreCallTimeout(timeout time.Duration) TokenStoreOption {
+    return func(store *RedisTokenStore) {
+        if 0 >= timeout {
+            timeout = defaultTokenStoreCallTimeout
+        }
+
+        store.callTimeout = timeout
     }
 }
 
@@ -297,6 +313,17 @@ type RedisTokenStore struct {
     clock                      clockcontract.Clock
     epochRetentionMilliseconds int64
     maximumClockSkew           time.Duration
+    callTimeout                time.Duration
+}
+
+/* callContext bounds one round trip of a door that carries no caller context. */
+func (instance *RedisTokenStore) callContext() (context.Context, context.CancelFunc) {
+    return context.WithTimeout(instance.ctx, instance.callTimeout)
+}
+
+/* runtimeCallContext caps the request context with the call timeout: context.WithTimeout keeps whichever deadline is earlier, so a request that already carries a tighter deadline still wins, while a request whose context has no deadline — as melody's http kernel leaves it — is bounded here rather than retried against an unresponsive store for as long as the client's retry policy allows. */
+func (instance *RedisTokenStore) runtimeCallContext(runtimeInstance runtimecontract.Runtime) (context.Context, context.CancelFunc) {
+    return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
 
 func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract.Claims) {
@@ -317,8 +344,11 @@ func (instance *RedisTokenStore) PutWithTtl(tokenString string, claims securityc
 }
 
 func (instance *RedisTokenStore) Delete(tokenString string) {
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
     result := tokenDeleteScript.Exec(
-        instance.ctx,
+        callContext,
         instance.client,
         []string{instance.tokenKey(tokenString)},
         []string{instance.userKeyPrefix()},
@@ -336,10 +366,12 @@ func (instance *RedisTokenStore) DeleteByUser(userIdentifier string) int {
     cursor := uint64(0)
 
     for {
+        scanContext, scanCancel := instance.callContext()
         scan, scanErr := instance.client.Do(
-            instance.ctx,
+            scanContext,
             instance.client.B().Sscan().Key(indexKey).Cursor(cursor).Count(int64(instance.scanCount)).Build(),
         ).AsScanEntry()
+        scanCancel()
         if nil != scanErr {
             exception.Panic(exception.NewError("redis token store delete by user scan failed", map[string]any{"user": userIdentifier}, scanErr))
         }
@@ -367,7 +399,10 @@ func (instance *RedisTokenStore) deleteTokenBatch(indexKey string, userIdentifie
     keys = append(keys, indexKey)
     keys = append(keys, members...)
 
-    result := tokenDeleteByUserScript.Exec(instance.ctx, instance.client, keys, []string{userIdentifier})
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
+    result := tokenDeleteByUserScript.Exec(callContext, instance.client, keys, []string{userIdentifier})
 
     removed, resultErr := result.AsInt64()
     if nil != resultErr {
@@ -389,10 +424,12 @@ func (instance *RedisTokenStore) PurgeExpired() int {
     cursor := uint64(0)
 
     for {
+        scanContext, scanCancel := instance.callContext()
         scan, scanErr := instance.client.Do(
-            instance.ctx,
+            scanContext,
             instance.client.B().Scan().Cursor(cursor).Match(escapeRedisGlobMeta(instance.userKeyPrefix())+"*").Count(int64(instance.scanCount)).Build(),
         ).AsScanEntry()
+        scanCancel()
         if nil != scanErr {
             exception.Panic(exception.NewError("redis token store purge scan failed", nil, scanErr))
         }
@@ -415,10 +452,12 @@ func (instance *RedisTokenStore) purgeUserIndex(indexKey string) int {
     cursor := uint64(0)
 
     for {
+        scanContext, scanCancel := instance.callContext()
         scan, scanErr := instance.client.Do(
-            instance.ctx,
+            scanContext,
             instance.client.B().Sscan().Key(indexKey).Cursor(cursor).Count(int64(instance.scanCount)).Build(),
         ).AsScanEntry()
+        scanCancel()
         if nil != scanErr {
             exception.Panic(exception.NewError("redis token store purge member scan failed", map[string]any{"set": indexKey}, scanErr))
         }
@@ -446,7 +485,10 @@ func (instance *RedisTokenStore) pruneTokenBatch(indexKey string, members []stri
     keys = append(keys, indexKey)
     keys = append(keys, members...)
 
-    result := tokenPurgeUserScript.Exec(instance.ctx, instance.client, keys, nil)
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
+    result := tokenPurgeUserScript.Exec(callContext, instance.client, keys, nil)
 
     pruned, resultErr := result.AsInt64()
     if nil != resultErr {
@@ -460,8 +502,11 @@ func (instance *RedisTokenStore) Lookup(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, bool, error) {
+    callContext, cancel := instance.runtimeCallContext(runtimeInstance)
+    defer cancel()
+
     values, lookupErr := tokenLookupScript.Exec(
-        runtimeInstance.Context(),
+        callContext,
         instance.client,
         []string{instance.tokenKey(tokenString)},
         []string{instance.epochKeyPrefix(), revocationUserField, revocationDeviceFieldPrefix},
@@ -510,8 +555,11 @@ func (instance *RedisTokenStore) RevokeBefore(userIdentifier string, deviceIdent
         ))
     }
 
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
     result := tokenRevokeEpochScript.Exec(
-        instance.ctx,
+        callContext,
         instance.client,
         []string{instance.epochKey(userIdentifier), instance.userKey(userIdentifier)},
         []string{
@@ -535,8 +583,11 @@ func (instance *RedisTokenStore) RevocationEpoch(
         fields = append(fields, revocationDeviceFieldPrefix+deviceIdentifier)
     }
 
+    callContext, cancel := instance.runtimeCallContext(runtimeInstance)
+    defer cancel()
+
     values, readErr := instance.client.Do(
-        runtimeInstance.Context(),
+        callContext,
         instance.client.B().Hmget().Key(instance.epochKey(userIdentifier)).Field(fields...).Build(),
     ).ToArray()
 
@@ -652,8 +703,11 @@ func (instance *RedisTokenStore) put(tokenString string, claims securitycontract
         indexPttl = strconv.FormatInt(tokenMilliseconds+tokenIndexExpiryGraceMilliseconds, 10)
     }
 
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
     result := tokenPutScript.Exec(
-        instance.ctx,
+        callContext,
         instance.client,
         []string{instance.tokenKey(tokenString)},
         []string{string(payload), pttl, instance.userKeyPrefix(), claims.UserIdentifier, indexPttl},

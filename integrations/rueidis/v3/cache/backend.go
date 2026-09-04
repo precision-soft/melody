@@ -22,6 +22,7 @@ const (
 
 type BackendOption func(*Backend)
 
+/* WithMaxKeyLength moves the bound a key is refused against. It is measured on the key the CALLER hands in, before the prefix is put in front of it: the prefix is the operator's, chosen once per application, and a bound that counted it would refuse different keys under different prefixes. A non-positive value keeps the default. */
 func WithMaxKeyLength(maxKeyLength int) BackendOption {
     return func(instance *Backend) {
         instance.maxKeyLength = maxKeyLength
