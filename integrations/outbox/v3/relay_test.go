@@ -24,8 +24,9 @@ import (
 )
 
 type logRecord struct {
-    level   loggingcontract.Level
-    message string
+    level      loggingcontract.Level
+    message    string
+    logContext loggingcontract.Context
 }
 
 type recordingLogger struct {
@@ -37,7 +38,21 @@ func (instance *recordingLogger) Log(level loggingcontract.Level, message string
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    instance.records = append(instance.records, logRecord{level: level, message: message})
+    instance.records = append(instance.records, logRecord{level: level, message: message, logContext: logContext})
+}
+
+func (instance *recordingLogger) errorRecords() []logRecord {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    records := make([]logRecord, 0, len(instance.records))
+    for _, record := range instance.records {
+        if loggingcontract.LevelError == record.level {
+            records = append(records, record)
+        }
+    }
+
+    return records
 }
 
 func (instance *recordingLogger) Debug(message string, logContext loggingcontract.Context) {
@@ -480,8 +495,8 @@ func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
     }
 }
 
-/* a batch that outlives the lock ttl refreshes the lease as it works; when the refresh fails (lease lost), the run stops early rather than draining alongside the new holder. */
-func TestRelay_RefreshesLeaseAndAbortsWhenLost(t *testing.T) {
+/* a batch that outlives the lock ttl refreshes the lease as it works; when the refresh fails (lease lost), the claimed rows are still this run's — fenced by their claim token, invisible to the new holder — so the batch is drained to its end, the refresh is not tried again, and the failure is reported after the batch. The earlier form returned at the failed refresh and left every unreached row claimed for the whole visibility timeout. */
+func TestRelay_ALostLeaseDrainsTheClaimedBatchThenReportsTheFailure(t *testing.T) {
     refreshFailure := errors.New("lease lost")
 
     lock := &fakeLock{acquire: true, refreshErr: refreshFailure}
@@ -497,22 +512,60 @@ func TestRelay_RefreshesLeaseAndAbortsWhenLost(t *testing.T) {
         Transport:  transport,
         Codec:      &stringCodec{},
         Locker:     &fakeLocker{lock: lock},
+        LockName:   "melody:outbox:test",
         LockTtl:    2 * time.Nanosecond,
     })
 
     published, runErr := relay.RunOnce(relayTestRuntime())
 
-    if refreshFailure != runErr {
-        t.Fatalf("expected the refresh failure to abort the run, got %v", runErr)
+    if false == errors.Is(runErr, refreshFailure) {
+        t.Fatalf("expected the refresh failure to be reported after the batch, got %v", runErr)
     }
-    if 0 == lock.refreshCalls {
-        t.Fatal("expected the lease to be refreshed during the batch")
+    if 3 != published || 3 != len(transport.sent) {
+        t.Fatalf("expected the whole claimed batch drained under its claim tokens, published %d, sent %d", published, len(transport.sent))
     }
-    if 3 <= published {
-        t.Fatalf("expected the run to stop before draining the whole batch, published %d", published)
+    if 3 != len(repository.calls) {
+        t.Fatalf("expected every claimed row resolved, got %v", repository.calls)
     }
-    if published != len(transport.sent) {
-        t.Fatalf("published count %d should match transport sends %d", published, len(transport.sent))
+    if 1 != lock.refreshCalls {
+        t.Fatalf("expected the refresh not to be tried again after it failed, got %d calls", lock.refreshCalls)
+    }
+    if "melody:outbox:test" != exception.LogContext(runErr)["lock"] {
+        t.Fatalf("expected the reported failure to name the lock, got %v", exception.LogContext(runErr))
+    }
+}
+
+/* a repository failure that ends the batch after the lease was already lost is the failure reported — the store is what failed and the command's loop classifies it — with the refresh failure carried in its context rather than dropped. */
+func TestRelay_ARepositoryFailureAfterALostLeaseCarriesTheRefreshFailure(t *testing.T) {
+    refreshFailure := errors.New("lease lost")
+
+    lock := &fakeLock{acquire: true, refreshErr: refreshFailure}
+    repository := &markSentFailingRepository{fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{},
+        Codec:      &stringCodec{},
+        Locker:     &fakeLocker{lock: lock},
+        LockTtl:    2 * time.Nanosecond,
+    })
+
+    published, runErr := relay.RunOnce(relayTestRuntime())
+
+    if nil == runErr || true == errors.Is(runErr, refreshFailure) {
+        t.Fatalf("expected the repository failure to be the cause, got %v", runErr)
+    }
+    if false == strings.Contains(runErr.Error(), "lease refresh had already failed") {
+        t.Fatalf("expected the outcome to say the lease had been lost, got %v", runErr)
+    }
+    if "lease lost" != exception.LogContext(runErr)["refreshError"] {
+        t.Fatalf("expected the refresh failure in the context, got %v", exception.LogContext(runErr))
+    }
+    if 1 != published {
+        t.Fatalf("expected the run to end at the failing resolution, published %d", published)
     }
 }
 
@@ -771,5 +824,154 @@ func TestRelay_LeaseRefreshCadenceIsAnchoredAtAcquisitionNotAfterTheClaim(t *tes
     /* the claim consumed 70ms of a 100ms lease whose refresh interval is 50ms: anchored at acquisition the first row must refresh; anchored after the claim the whole run would end with zero refreshes and the lease 20ms from lapsing */
     if 0 == lock.refreshCalls {
         t.Fatal("expected the slow claim to count against the refresh cadence, so the first row refreshes the lease")
+    }
+}
+
+/* panickingCodec raises the given value from Decode on the one payload it is told to, the way an application codec does on a payload shape it never expected, and decodes every other payload as a string. */
+type panickingCodec struct {
+    payload string
+    value   any
+}
+
+func (instance *panickingCodec) Encode(message any) (string, []byte, error) {
+    return "string", []byte(message.(string)), nil
+}
+
+func (instance *panickingCodec) Decode(_ string, payload []byte) (any, error) {
+    if instance.payload == string(payload) {
+        panic(instance.value)
+    }
+
+    return string(payload), nil
+}
+
+/* panickingTransport raises the given value from Send. */
+type panickingTransport struct {
+    fakeTransport
+    value any
+}
+
+func (instance *panickingTransport) Send(_ runtimecontract.Runtime, _ messagebuscontract.Envelope) error {
+    panic(instance.value)
+}
+
+func relayTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    container.MustRegister[loggingcontract.Logger](
+        serviceContainer,
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+}
+
+/* runOnceContained runs RunOnce under the test's own recover, so a panic that escapes the relay fails the assertion instead of the test binary. */
+func runOnceContained(t *testing.T, relay *Relay, runtimeInstance runtimecontract.Runtime) (published int, runErr error) {
+    t.Helper()
+
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            t.Fatalf("expected the panic to be contained by the relay, it reached the caller: %v", recovered)
+        }
+    }()
+
+    return relay.RunOnce(runtimeInstance)
+}
+
+/* a codec that panics on one row used to kill the relay process at that row on every claim; the panic is charged to the row as a decode failure — dead-lettered, with the panic in last_error — and the batch goes on. */
+func TestRelay_APanickingDecodeIsDeadLetteredAndTheBatchContinues(t *testing.T) {
+    logger := &recordingLogger{}
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 2},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}
+    transport := &fakeTransport{}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  transport,
+        Codec:      &panickingCodec{payload: "a", value: errors.New("decode boom")},
+    })
+
+    published, runErr := runOnceContained(t, relay, relayTestRuntimeWithLogger(logger))
+    if nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 2 != len(repository.calls) || "dead" != repository.calls[0].kind || 1 != repository.calls[0].id || 2 != repository.calls[0].attempts {
+        t.Fatalf("expected the panicking row dead-lettered with its attempts kept, got %v", repository.calls)
+    }
+    if false == strings.HasPrefix(repository.calls[0].lastError, "panic: decode: decode boom") {
+        t.Fatalf("expected last_error to carry the panic, got %q", repository.calls[0].lastError)
+    }
+    if "sent" != repository.calls[1].kind || 2 != repository.calls[1].id || 1 != published {
+        t.Fatalf("expected the batch to go on to the next row, got %v (published %d)", repository.calls, published)
+    }
+
+    records := logger.errorRecords()
+    if 1 != len(records) || "outbox delivery panicked" != records[0].message {
+        t.Fatalf("expected the contained panic logged once, got %v", records)
+    }
+    if "decode" != records[0].logContext["phase"] || int64(1) != records[0].logContext["id"] {
+        t.Fatalf("expected the record to name the phase and the row, got %v", records[0].logContext)
+    }
+}
+
+/* a transport that panics on send is charged as one send failure: the row takes the retry path with the panic in last_error, and is not dead-lettered on the spot, since the relay cannot tell a transient transport fault from poison. */
+func TestRelay_APanickingSendIsChargedAsADeliveryFailure(t *testing.T) {
+    logger := &recordingLogger{}
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &panickingTransport{value: errors.New("send boom")},
+        Codec:      &stringCodec{},
+    })
+
+    published, runErr := runOnceContained(t, relay, relayTestRuntimeWithLogger(logger))
+    if nil != runErr || 0 != published {
+        t.Fatalf("expected a clean run with nothing published, got %d, %v", published, runErr)
+    }
+
+    if 2 != len(repository.calls) {
+        t.Fatalf("expected both rows resolved, got %v", repository.calls)
+    }
+    for index, call := range repository.calls {
+        if "reschedule" != call.kind || 1 != call.attempts || false == strings.HasPrefix(call.lastError, "panic: send boom") {
+            t.Fatalf("expected row %d rescheduled with one attempt and the panic in last_error, got %+v", index+1, call)
+        }
+    }
+
+    records := logger.errorRecords()
+    if 2 != len(records) || "send" != records[0].logContext["phase"] {
+        t.Fatalf("expected one record per contained panic naming the send phase, got %v", records)
+    }
+}
+
+/* a panic value that is not an error still reaches last_error, as a value. */
+func TestRelay_ANonErrorPanicValueIsRecordedInLastError(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{},
+        Codec:      &panickingCodec{payload: "a", value: "boom"},
+    })
+
+    if _, runErr := runOnceContained(t, relay, relayTestRuntimeWithLogger(&recordingLogger{})); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 1 != len(repository.calls) || "dead" != repository.calls[0].kind {
+        t.Fatalf("expected the row dead-lettered, got %v", repository.calls)
+    }
+    if false == strings.Contains(repository.calls[0].lastError, "boom") {
+        t.Fatalf("expected the panic value in last_error, got %q", repository.calls[0].lastError)
     }
 }
