@@ -1,8 +1,11 @@
 package output
 
 import (
+    "bytes"
     "encoding/json"
     "io"
+
+    "github.com/precision-soft/melody/v2/internal"
 )
 
 type JsonPrinter struct {
@@ -14,7 +17,8 @@ func (instance *JsonPrinter) Print(
     envelope Envelope,
     option Option,
 ) error {
-    encoder := json.NewEncoder(writer)
+    document := &bytes.Buffer{}
+    encoder := json.NewEncoder(document)
 
     if FormatJsonPretty == option.Format {
         encoder.SetIndent("", "  ")
@@ -23,6 +27,12 @@ func (instance *JsonPrinter) Print(
     encodeErr := encoder.Encode(envelope)
     if nil != encodeErr {
         return encodeErr
+    }
+
+    /* the encoder escapes the C0 block and the two Unicode line separators and leaves the C1 block raw, so a document carrying U+009B repainted the terminal it was printed to; the document is rewritten whole before it reaches the writer — the escape decodes to the same rune, so a consumer reads the value the command gave — and written once, so a write failure is still the writer's and still reported */
+    _, writeErr := writer.Write(internal.EscapeJsonC1Block(document.Bytes()))
+    if nil != writeErr {
+        return writeErr
     }
 
     return nil

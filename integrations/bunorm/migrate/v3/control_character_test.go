@@ -3,6 +3,7 @@ package migrate
 import (
     "strings"
     "testing"
+    "unicode/utf8"
 )
 
 /* text of server origin reaches an operator's terminal through this helper — an error message off the wire, a reported version string, a failed statement — so a control character it carries must arrive as its visible spelling rather than as an instruction the terminal obeys. A carriage return alone repaints the line the previous record wrote; a newline forges a whole record in a captured log. */
@@ -193,5 +194,73 @@ func TestEscapeControlCharactersKeepsOnlyTheNewlineAmongTheRecordBoundaries(t *t
 
     if false == strings.Contains(escaped, "\n") {
         t.Fatal("the multi-line form must keep the real line break it exists for")
+    }
+}
+
+/* the server can answer the single-byte C1 introducer raw, and a walk over runes read that byte as U+FFFD, outside every range the guard checks, so the raw spelling went to the terminal as sent while the encoded one was escaped. Every byte that starts no valid sequence is spelled \xNN, and what comes out is valid UTF-8. */
+func TestEscapeControlCharactersEscapesARawByteThatIsNotValidUtf8(t *testing.T) {
+    for _, currentCase := range []struct {
+        name     string
+        value    string
+        expected string
+    }{
+        {"CSI as a raw byte", "user\x9b31mX", `user\x9b31mX`},
+        {"NEL as a raw byte", "line one\x85line two", `line one\x85line two`},
+        {"a raw byte outside the C1 block", "x\xffy", `x\xffy`},
+        {"a truncated multi-byte sequence", "caf\xc3", `caf\xc3`},
+    } {
+        escaped := escapeControlCharacters(currentCase.value, false)
+
+        if currentCase.expected != escaped {
+            t.Fatalf("%s: expected %q, got %q", currentCase.name, currentCase.expected, escaped)
+        }
+
+        if false == utf8.ValidString(escaped) {
+            t.Fatalf("%s: expected valid UTF-8 out of the escaping, got %q", currentCase.name, escaped)
+        }
+    }
+}
+
+/* once another control character forced the rewrite, the raw byte was written out as U+FFFD: the same answer was kept as sent when the byte stood alone and corrupted when a newline stood beside it, and what the server sent was destroyed instead of shown. Neither form may carry the replacement rune. */
+func TestEscapeControlCharactersDoesNotReplaceARawByteWhenAnotherCharacterForcesTheRewrite(t *testing.T) {
+    escaped := escapeControlCharacters("a\x9bb\n", false)
+
+    if `a\x9bb\n` != escaped {
+        t.Fatalf("expected the raw byte spelled beside the newline, got %q", escaped)
+    }
+
+    if true == strings.ContainsRune(escaped, utf8.RuneError) {
+        t.Fatalf("the raw byte was replaced by U+FFFD: %q", escaped)
+    }
+}
+
+/* a genuine U+FFFD is three valid bytes and ordinary text: the invalid-byte rule reads the decoder's width, so a replacement rune the server sent as itself passes through as itself, beside a raw byte or alone. */
+func TestEscapeControlCharactersLeavesAGenuineReplacementRuneUntouched(t *testing.T) {
+    if "a\xef\xbf\xbdb" != escapeControlCharacters("a\xef\xbf\xbdb", false) {
+        t.Fatalf("expected a genuine U+FFFD to pass through unchanged, got %q", escapeControlCharacters("a\xef\xbf\xbdb", false))
+    }
+
+    if "a\xef\xbf\xbdb"+`\x9b` != escapeControlCharacters("a\xef\xbf\xbdb\x9b", false) {
+        t.Fatalf("expected the genuine U+FFFD kept and the raw byte spelled, got %q", escapeControlCharacters("a\xef\xbf\xbdb\x9b", false))
+    }
+}
+
+/* the early return answers a value it finds nothing to escape in with the value itself, so it has to see an invalid byte the way the loop does: a raw byte and nothing else is the shape that tells the two apart */
+func TestContainsControlCharacterSeesARawByte(t *testing.T) {
+    if false == containsControlCharacter("\x9b", false) {
+        t.Fatal("a raw byte must be reported as a control character, or the early return hands it back as sent")
+    }
+
+    if `\x9b` != escapeControlCharacters("\x9b", false) {
+        t.Fatalf("the early return handed back the raw byte: %q", escapeControlCharacters("\x9b", false))
+    }
+}
+
+/* the multi-line form keeps the real line break the query rendering exists for and nothing else, a raw byte beside it included */
+func TestEscapeControlCharactersKeepsTheNewlineBesideARawByte(t *testing.T) {
+    escaped := escapeControlCharacters("a\x9bb\nc", true)
+
+    if `a\x9bb`+"\nc" != escaped {
+        t.Fatalf("expected the raw byte spelled and the line break kept, got %q", escaped)
     }
 }

@@ -156,7 +156,7 @@ func (instance *migrationPrinter) printFailed(prefix string, queryName string, e
 }
 
 func (instance *migrationPrinter) printEmpty(direction string, migrationName string) {
-    message := fmt.Sprintf("[migration:%s] %s: WARNING no queries to execute; the migration is marked applied without running anything", direction, migrationName)
+    message := fmt.Sprintf("[migration:%s] %s: WARNING no queries to execute; the migration is marked applied without running anything", direction, escapeControlCharacters(migrationName, false))
 
     if instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)
@@ -167,7 +167,7 @@ func (instance *migrationPrinter) printEmpty(direction string, migrationName str
 }
 
 func (instance *migrationPrinter) printSuccess(direction string, migrationName string, total int) {
-    message := fmt.Sprintf("[migration:%s] %s: all %d queries executed successfully", direction, migrationName, total)
+    message := fmt.Sprintf("[migration:%s] %s: all %d queries executed successfully", direction, escapeControlCharacters(migrationName, false), total)
 
     if instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)

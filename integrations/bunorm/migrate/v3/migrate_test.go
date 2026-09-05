@@ -296,3 +296,24 @@ func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *
         t.Fatalf("a raw control byte reached the terminal:\n%s", rendered)
     }
 }
+
+/* the empty and the success lines of a run carry the migration name, which the runner did not write, and they were the two lines of the printer that let it through as sent while the executing, completed and failed lines escaped it; the name is escaped on all five, in both colour modes */
+func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        buffer := &bytes.Buffer{}
+        printer := &migrationPrinter{writer: buffer, noColor: noColor}
+
+        printer.printEmpty("up", "2024\r0101_forged")
+        printer.printSuccess("up", "2024\r0101_forged", 1)
+
+        rendered := buffer.String()
+
+        if 2 != strings.Count(rendered, `2024\r0101_forged`) {
+            t.Fatalf("noColor=%v: expected the escaped name on both lines, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: a raw carriage return survived: %q", noColor, rendered)
+        }
+    }
+}

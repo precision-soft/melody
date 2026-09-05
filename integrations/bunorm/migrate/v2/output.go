@@ -177,6 +177,7 @@ func (instance *commandOutput) printTextSuccess(message string) {
     instance.printSuccess(message)
 }
 
+/* every text door of the output escapes what it did not write itself before the terminal sees it — the applied line names the manager, the files block names the paths bun answered, the warning carries the close error off the wire — while the json branch hands the value to the document, whose printer escapes the C1 block itself. The warning was the one door that let its message through as sent, and its one caller with foreign text is the close failure of the migration connection. */
 func (instance *commandOutput) printSuccess(message string) {
     if true == instance.isJson() {
         instance.messages = append(instance.messages, message)
@@ -184,10 +185,12 @@ func (instance *commandOutput) printSuccess(message string) {
         return
     }
 
+    escapedMessage := escapeControlCharacters(message, false)
+
     if false == instance.option.NoColor {
-        _, _ = fmt.Fprintf(instance.writer, "%s%s%s\n", cli.AnsiGreen, message, cli.AnsiReset)
+        _, _ = fmt.Fprintf(instance.writer, "%s%s%s\n", cli.AnsiGreen, escapedMessage, cli.AnsiReset)
     } else {
-        _, _ = fmt.Fprintln(instance.writer, message)
+        _, _ = fmt.Fprintln(instance.writer, escapedMessage)
     }
 }
 
@@ -198,10 +201,12 @@ func (instance *commandOutput) printWarning(message string) {
         return
     }
 
+    escapedMessage := escapeControlCharacters(message, false)
+
     if false == instance.option.NoColor {
-        _, _ = fmt.Fprintf(instance.writer, "%s%sWARNING: %s%s\n", cli.AnsiYellow, cli.AnsiBold, message, cli.AnsiReset)
+        _, _ = fmt.Fprintf(instance.writer, "%s%sWARNING: %s%s\n", cli.AnsiYellow, cli.AnsiBold, escapedMessage, cli.AnsiReset)
     } else {
-        _, _ = fmt.Fprintf(instance.writer, "WARNING: %s\n", message)
+        _, _ = fmt.Fprintf(instance.writer, "WARNING: %s\n", escapedMessage)
     }
 }
 
@@ -217,7 +222,7 @@ func (instance *commandOutput) printError(err error) {
         return
     }
 
-    /* the message came off the wire, so its control characters are escaped before the terminal sees them; the json branch above needs none of this, the encoder escapes on its own */
+    /* the message came off the wire, so its control characters are escaped before the terminal sees them; the json branch above hands it to the document, whose printer escapes the C1 block the encoder leaves raw and writes a byte that is not valid UTF-8 as U+FFFD, the encoder's documented answer */
     escapedMessage := escapeControlCharacters(err.Error(), false)
 
     if false == instance.option.NoColor {
@@ -305,7 +310,7 @@ func (instance *commandOutput) printFilesBlock(files []string) {
 
     _, _ = fmt.Fprintln(instance.writer, "FILES")
     for _, file := range files {
-        _, _ = fmt.Fprintf(instance.writer, "  %s\n", file)
+        _, _ = fmt.Fprintf(instance.writer, "  %s\n", escapeControlCharacters(file, false))
     }
 }
 

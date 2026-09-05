@@ -123,7 +123,7 @@ other C0 one, DEL and the C1 block as `\xNN`, and the Unicode line and paragraph
 in every string the commands did not write themselves — the error text off the wire, the failed statement,
 the query names, the identity block the server answers and the migration names — and it does so before the
 table cells are measured, so the alignment counts the escaped spelling. The failed statement alone keeps its
-real line breaks. The json rendering needs none of this: its encoder escapes on its own.
+real line breaks. A byte that is not valid UTF-8 is rendered as `\xNN` of that byte, so a raw C1 introducer off the wire is shown rather than passed through or replaced by U+FFFD. The json rendering is the framework printer's, which spells the C1 block the encoder leaves raw as `\u00NN` escapes; a byte that is not valid UTF-8 reaches the document as U+FFFD, the encoder's documented answer.
 
 The verbose `DATABASE` block is answered for MySQL and for PostgreSQL. Over a unix socket — the connection a
 local migration is most likely to take — PostgreSQL reports no server address, so the host reads

@@ -907,3 +907,50 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
         t.Fatalf("expected the escaped command name spelling, got %q", written)
     }
 }
+
+/* the finish banner colours the verdict red on failure, and it built the coloured verdict before the escaping that keeps client-derived text from repainting the line — so every failed run with colour on, the default, printed the banner's own escape sequence as the literal text \x1b[31m around [failed], while --no-color, which never coloured the verdict, printed it right. The verdict is coloured after the escaping: its sequence reaches the terminal raw, and a control character in the data around it — here the command's own name — is still spelled visibly. */
+func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing.T) {
+    command := &testCommand{
+        nameValue:        "bo\rom",
+        descriptionValue: "boom command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            return errors.New("boom")
+        },
+    }
+
+    written, runErr := runRegisteredCommandWithRuntime(newTestRuntime(), command, nil)
+    if nil == runErr {
+        t.Fatal("expected the command's failure to be returned")
+    }
+
+    if false == strings.Contains(written, "[finished] \x1b[31m[failed]\x1b[97m [") {
+        t.Fatalf("expected the verdict coloured with a raw escape sequence, got %q", written)
+    }
+
+    if true == strings.Contains(written, `\x1b[31m`) {
+        t.Fatalf("the banner escaped its own colour sequence: %q", written)
+    }
+
+    if false == strings.Contains(written, `[bo\rom] [finished]`) || true == strings.Contains(written, "[bo\rom]") {
+        t.Fatalf("expected the command name escaped on the finish line, got %q", written)
+    }
+}
+
+/* the no-color banner never coloured the verdict and always printed it right; the split keeps that line byte for byte */
+func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
+    command := &testCommand{
+        nameValue:        "boom",
+        descriptionValue: "boom command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            return errors.New("boom")
+        },
+    }
+
+    written, _ := runRegisteredCommandWithRuntime(newTestRuntime(), command, []string{"--no-color"})
+
+    if false == strings.Contains(written, "[boom] [finished] [failed] [") || true == strings.Contains(written, "\x1b[") {
+        t.Fatalf("expected the plain failed verdict and no escape sequence, got %q", written)
+    }
+}

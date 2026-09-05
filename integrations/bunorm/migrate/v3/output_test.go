@@ -739,3 +739,47 @@ func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testi
         }
     }
 }
+
+/* the warning is the one text door whose caller carries text off the wire — the close failure of the migration connection — and it let the message through as sent, so a carriage return in it repainted the line and an escape sequence in it was obeyed; every text door escapes what it did not write itself, in both colour modes, and the sequence the DATA carried is what must not survive, the colour's own being the door's to write */
+func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printWarning("closed\rby the wire\x1b[2J")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `WARNING: closed\rby the wire\x1b[2J`) {
+            t.Fatalf("noColor=%v: expected the escaped spelling, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") || true == strings.Contains(rendered, "\x1b[2J") {
+            t.Fatalf("noColor=%v: a control character of the data survived: %q", noColor, rendered)
+        }
+    }
+}
+
+/* the applied line names the manager the operator configured and the success lines are composed from names the commands did not write; they escape the same way, so a rule that holds for one door holds for the type */
+func TestCommandOutput_PrintSuccessEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printSuccess("applied to ma\rnager")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `applied to ma\rnager`) || true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: expected the escaped spelling and no raw carriage return, got %q", noColor, rendered)
+        }
+    }
+}
+
+/* the files block names the paths bun answered for the migration it created, built from a name the operator typed */
+func TestCommandOutput_PrintFilesBlockEscapesControlCharacters(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.printFilesBlock([]string{"migrations/20240101_a\rb.go"})
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, `  migrations/20240101_a\rb.go`) || true == strings.Contains(rendered, "\r") {
+        t.Fatalf("expected the escaped path and no raw carriage return, got %q", rendered)
+    }
+}

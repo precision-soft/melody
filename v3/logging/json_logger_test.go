@@ -1405,3 +1405,37 @@ func (instance *refusingWriter) Write(payload []byte) (int, error) {
     return 0, errors.New("the journal destination refuses every record")
 }
 
+
+/* the encoder leaves the C1 block raw in every field it writes, so a message carrying U+009B repainted the terminal the file was tailed on and a NEL in a context value ended the record for a reader splitting on Unicode line boundaries; the record spells the block as json escapes in the message and in the context alike, and decodes to the values it was given */
+func TestJsonLogger_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Info("hi\xc2\x9bthere", map[string]any{"k": "v\xc2\x85w"})
+
+    line := buffer.Bytes()
+
+    for _, continuation := range []byte{0x85, 0x9b} {
+        if true == bytes.Contains(line, []byte{0xc2, continuation}) {
+            t.Fatalf("a raw C1 rune c2 %02x survived in %q", continuation, line)
+        }
+
+        spelling := "\\" + "u00" + fmt.Sprintf("%02x", continuation)
+        if false == bytes.Contains(line, []byte(spelling)) {
+            t.Fatalf("expected the spelling %s in %q", spelling, line)
+        }
+    }
+
+    var payload map[string]any
+    if decodeErr := json.Unmarshal(line, &payload); nil != decodeErr {
+        t.Fatalf("invalid json: %v for %q", decodeErr, line)
+    }
+
+    if "hi\xc2\x9bthere" != payload["message"] {
+        t.Fatalf("expected the message decoded to the value given, got %#v", payload["message"])
+    }
+
+    context, isMap := payload["context"].(map[string]any)
+    if false == isMap || "v\xc2\x85w" != context["k"] {
+        t.Fatalf("expected the context decoded to the value given, got %#v", payload["context"])
+    }
+}

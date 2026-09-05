@@ -144,6 +144,35 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     )
                 }
 
+                /* printGreenVerdictLine is the finish form of printGreenStatusLine: the text on either side of the verdict is escaped as data, and the verdict is coloured AFTER that. Coloured before, the banner's own escape sequence went through the escaping together with the data, and every failed run with colour on — the default — printed \x1b[31m as literal text around [failed], while the no-color run, which never coloured the verdict, printed it right. A sanitiser handed an already formatted line cannot tell the author's bytes from the client's, so the presentation is added last. */
+                printGreenVerdictLine := func(writer io.Writer, textBeforeVerdict string, verdict string, failed bool, textAfterVerdict string) {
+                    escapedBefore := internal.EscapeControlCharacters(textBeforeVerdict)
+                    escapedAfter := internal.EscapeControlCharacters(textAfterVerdict)
+
+                    if true == noColor {
+                        _, _ = fmt.Fprintf(writer, "%s%s%s\n", escapedBefore, verdict, escapedAfter)
+
+                        return
+                    }
+
+                    colouredVerdict := verdict
+                    if true == failed {
+                        colouredVerdict = AnsiRed + verdict + AnsiWhite
+                    }
+
+                    _, _ = fmt.Fprintf(
+                        writer,
+                        "%s%s\r%s%s%s%s%s\n",
+                        AnsiBackgroundGreen,
+                        AnsiEraseLine,
+                        AnsiWhite,
+                        escapedBefore,
+                        colouredVerdict,
+                        escapedAfter,
+                        AnsiReset,
+                    )
+                }
+
                 printRedStatusLine := func(writer io.Writer, text string) {
                     text = internal.EscapeControlCharacters(text)
 
@@ -195,25 +224,18 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
 
                     printGreenFullLine(writer)
 
-                    statusText := "[success]"
-                    if nil != commandErr {
-                        statusText = "[failed]"
-                        if false == noColor {
-                            statusText = fmt.Sprintf("%s[failed]%s", AnsiRed, AnsiWhite)
-                        }
+                    verdict := "[success]"
+                    failed := nil != commandErr
+                    if true == failed {
+                        verdict = "[failed]"
                     }
 
-                    printGreenStatusLine(
+                    printGreenVerdictLine(
                         writer,
-                        fmt.Sprintf(
-                            "%s [%s] [finished] %s [%s] [duration=%s] %s",
-                            logFiller,
-                            normalizedCommandName,
-                            statusText,
-                            finishedAt.Format(time.DateTime),
-                            durationSecondsString,
-                            logFiller,
-                        ),
+                        fmt.Sprintf("%s [%s] [finished] ", logFiller, normalizedCommandName),
+                        verdict,
+                        failed,
+                        fmt.Sprintf(" [%s] [duration=%s] %s", finishedAt.Format(time.DateTime), durationSecondsString, logFiller),
                     )
 
                     printGreenFullLine(writer)

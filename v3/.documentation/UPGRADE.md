@@ -167,7 +167,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Symptom.** A message or a context value containing a line break, a carriage return or an escape sequence renders escaped rather than being obeyed. Text of unknown origin — a header, a form field, a url — regularly reaches these lines.
 
-**Remedy.** None. What the escaping replaces is a record that could be ended early by its own payload, with a fully-formed fake record started after it at whatever level the payload named; the json sibling has always had the same guarantee from its encoder.
+**Remedy.** None. What the escaping replaces is a record that could be ended early by its own payload, with a fully-formed fake record started after it at whatever level the payload named; the json sibling has the same guarantee from its encoder for the C0 block and the two Unicode line separators, and spells the C1 block, which the encoder leaves raw, as `\u00NN` escapes itself.
 
 ### Config and bag: the float string grammar is decimal
 
@@ -715,7 +715,7 @@ debug.NewMiddlewareCommand(
 
 ### Bunorm migrate: the plain text escapes control characters, and the commands stop pre-printing their failure
 
-**What changed.** Every string the commands did not write themselves — the error text off the wire, the failed statement, the query names, the identity block the server answers and the migration names — is escaped visibly (the named C0 characters as `\n`, `\r`, `\t`, every other C0 one, DEL and the C1 block as `\xNN`, and the Unicode line and paragraph separators as `\uNNNN`) before the terminal sees it, and before the table cells are measured, so the alignment counts the escaped spelling. The failed statement alone keeps its real line breaks. Separately, the commands no longer pre-print the failure they return: the cli runner's `[error]` line and the log record already report it. The json rendering is untouched — its encoder escapes on its own.
+**What changed.** Every string the commands did not write themselves — the error text off the wire, the failed statement, the query names, the identity block the server answers and the migration names — is escaped visibly (the named C0 characters as `\n`, `\r`, `\t`, every other C0 one, DEL and the C1 block as `\xNN`, and the Unicode line and paragraph separators as `\uNNNN`) before the terminal sees it, and before the table cells are measured, so the alignment counts the escaped spelling. The failed statement alone keeps its real line breaks. Separately, the commands no longer pre-print the failure they return: the cli runner's `[error]` line and the log record already report it. The json rendering is the framework printer's, which spells the C1 block the encoder leaves raw as `\u00NN` escapes and decodes to the same values.
 
 **Symptom.** A test asserting an exact rendered line that contained a raw control byte sees its escaped spelling. A console that showed the same failure three times shows it twice.
 

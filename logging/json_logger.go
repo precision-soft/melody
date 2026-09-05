@@ -144,7 +144,8 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
 
     writeErr := error(nil)
     if 0 < len(encoded) {
-        _, writeErr = instance.output.Write(append(encoded, '\n'))
+        /* the encoder leaves the C1 block raw in every field it wrote, so the record is spelled once more before the write: the escape decodes to the same rune, and a reader that splits on Unicode line boundaries or a terminal the file is tailed on sees no control sequence in the bytes */
+        _, writeErr = instance.output.Write(append(internal.EscapeJsonC1Block(encoded), '\n'))
     }
 
     instance.writeMutex.Unlock()
