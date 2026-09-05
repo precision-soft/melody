@@ -96,3 +96,16 @@ func TestEncryptedDeterministicStringFor_UnmarshalJSONDecodesAPlaintextString(t 
 
 /* the generic instantiation cannot be asserted in the source file — see the sibling assertion on EncryptedStringFor */
 var _ json.Unmarshaler = (*EncryptedDeterministicStringFor[crmCipherRef])(nil)
+
+func TestEncryptedDeterministicStringFor_FormatRedactsNumericVerbs(t *testing.T) {
+    secret := "top-secret-plaintext"
+    for _, verb := range []string{"%d", "%o", "%b", "%c", "%U"} {
+        rendered := fmt.Sprintf(verb, EncryptedDeterministicStringFor[crmCipherRef](secret))
+        if true == strings.Contains(rendered, secret) {
+            t.Fatalf("verb %s leaked the plaintext through the badverb form: %s", verb, rendered)
+        }
+        if redactedPlaceholder != rendered {
+            t.Fatalf("verb %s expected the redacted placeholder, got %q", verb, rendered)
+        }
+    }
+}

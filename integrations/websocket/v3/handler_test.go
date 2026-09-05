@@ -1028,3 +1028,33 @@ func TestStreamHandler_ANegativeReadLimitDisablesTheDefaultCap(t *testing.T) {
         t.Fatal("expected the oversized frame to reach OnMessage with the read limit disabled")
     }
 }
+
+func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+    hub.Shutdown()
+
+    handler := NewStreamHandler(hub, Options{
+        IdleTimeout:   time.Second,
+        TopicResolver: func(request httpcontract.Request) string { return "demo" },
+    })
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
+    recorder := httptest.NewRecorder()
+
+    _, handlerErr := handler(runtimeInstance, recorder, request)
+
+    if nil == handlerErr {
+        t.Fatal("expected a connection against a shut-down hub to be refused, not upgraded to an instantly-closed stream")
+    }
+
+    if nethttp.StatusSwitchingProtocols == recorder.Code {
+        t.Fatal("expected the refusal to land before the upgrade, not after a 101")
+    }
+
+    if 0 != hub.SubscriberCount("demo") {
+        t.Fatalf("expected no subscription on a shut-down hub, got %d", hub.SubscriberCount("demo"))
+    }
+}

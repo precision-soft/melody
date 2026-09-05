@@ -270,3 +270,16 @@ func TestEncryptedString_UnmarshalJSONRefusesANonStringValue(t *testing.T) {
         t.Fatalf("expected the refusal to name the shape, got: %v", unmarshalErr)
     }
 }
+
+func TestEncryptedString_FormatRedactsNumericVerbs(t *testing.T) {
+    secret := "top-secret-plaintext"
+    for _, verb := range []string{"%d", "%o", "%b", "%c", "%U"} {
+        rendered := fmt.Sprintf(verb, EncryptedString(secret))
+        if true == strings.Contains(rendered, secret) {
+            t.Fatalf("verb %s leaked the plaintext through the badverb form: %s", verb, rendered)
+        }
+        if redactedPlaceholder != rendered {
+            t.Fatalf("verb %s expected the redacted placeholder, got %q", verb, rendered)
+        }
+    }
+}

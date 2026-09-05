@@ -3,6 +3,7 @@ package awss3
 import (
     "context"
     "encoding/xml"
+    "fmt"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -143,5 +144,32 @@ func TestEnsureBucketStillRefusesANameOwnedElsewhere(t *testing.T) {
 
     if ensureErr := EnsureBucket(context.Background(), client, "foreign-bucket", ""); nil == ensureErr {
         t.Fatal("expected a conflict on a bucket the re-check cannot see to stay an error")
+    }
+}
+
+func TestConfig_RedactsCredentialsOnEveryFmtVerb(t *testing.T) {
+    config := Config{
+        Endpoint:  "s3.example:9000",
+        AccessKey: "AKIA-public-part",
+        SecretKey: "wJalrXUtn-the-secret",
+        Region:    "us-east-1",
+    }
+
+    for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d"} {
+        rendered := fmt.Sprintf(verb, config)
+        if true == strings.Contains(rendered, "AKIA-public-part") {
+            t.Fatalf("verb %s leaked the access key: %s", verb, rendered)
+        }
+        if true == strings.Contains(rendered, "wJalrXUtn-the-secret") {
+            t.Fatalf("verb %s leaked the secret key: %s", verb, rendered)
+        }
+        if false == strings.Contains(rendered, "s3.example:9000") {
+            t.Fatalf("verb %s dropped the safe Endpoint field: %s", verb, rendered)
+        }
+    }
+
+    pointerRendered := fmt.Sprintf("%v", &config)
+    if true == strings.Contains(pointerRendered, "wJalrXUtn-the-secret") {
+        t.Fatalf("a *Config leaked the secret key: %s", pointerRendered)
     }
 }

@@ -59,7 +59,7 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
                         statusCode = response.StatusCode()
                     }
                     if nil != handlerErr {
-                        statusCode = nethttp.StatusInternalServerError
+                        statusCode = statusCodeForError(handlerErr)
                     }
                 }
 
@@ -81,6 +81,16 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
             return handlerResponse, nextErr
         }
     }, nil
+}
+
+/* statusCodeForError maps a handler error to the status the client will actually receive, the same mapping the kernel's exception listener makes: a deliberate sub-500 an HttpException carries is graphed at its own status rather than folded into the 5xx series, so a route whose normal contract is 404 does not read as 100% server errors on the per-route instruments. Anything that is not a sub-500 http exception is a server error. */
+func statusCodeForError(handlerErr error) int {
+    httpException := exception.AsHttpException(handlerErr)
+    if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+        return httpException.StatusCode()
+    }
+
+    return nethttp.StatusInternalServerError
 }
 
 /* isNilResponse answers true for a nil interface AND for a typed-nil concrete response: `nil != response` alone lets a handler's `var resp *SomeResponse; return resp, nil` through, and the middleware's own StatusCode() dereference then panics — a panic charged to the observability layer while the defect sits in the handler. */

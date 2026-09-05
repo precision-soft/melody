@@ -58,6 +58,15 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
 
 func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        /* a hub that has already shut down serves no stream: Subscribe on it hands back a subscriber whose channel is closed, and the event loop below would read that as an ordinary end of stream, so a connection accepted here upgraded to a 101 and then closed instantly with only a generic "read loop ended" debug line — indistinguishable, to a client and to the journal, from a peer that simply went away. Refuse before the upgrade instead, the way an empty resolved topic is refused, so a client connecting during the shutdown drain gets a plain error rather than a stream that was never going to carry anything. */
+        if true == hub.IsClosed() {
+            return nil, exception.NewError(
+                "websocket stream handler hub is shut down: refusing the connection rather than upgrading it to an instantly-closed stream",
+                map[string]any{"path": request.HttpRequest().URL.Path},
+                nil,
+            )
+        }
+
         /* the topic is resolved BEFORE the upgrade so a resolver that comes up empty refuses the request outright. An empty topic is only ever an extraction that failed — the nil-resolver default is the distinct "default" — and subscribing such connections anyway would pool every mis-resolved client from every tenant on one shared "" topic, reported to each of them as an established stream. */
         topic := "default"
         if nil != options.TopicResolver {
@@ -87,6 +96,13 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
 
         subscriber := hub.Subscribe(topic, subscribeBuffer(options))
         defer hub.Unsubscribe(subscriber)
+
+        /* the hub can shut down between the check above and this Subscribe; it then hands back a subscriber whose channel is already closed, which the event loop reads as an ordinary end of stream. Name it at debug so a stream that never delivered because the hub was stopping is not silent in the journal, then return — the deferred CloseNow tears the just-accepted socket down, and no read or ping goroutine has started yet. */
+        if true == hub.IsClosed() {
+            logDebug(runtimeInstance, "websocket hub shut down during connect, closing the stream", nil)
+
+            return nil, nil
+        }
 
         connectionContext, cancel := context.WithCancel(request.HttpRequest().Context())
         defer cancel()

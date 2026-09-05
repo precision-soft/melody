@@ -11,6 +11,7 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -193,7 +194,8 @@ func (instance *GenerateCommand) Run(
         )
     }
 
-    writeErr := writeGeneratedFileAtomically(outputPath, source)
+    /* the framework's own atomic writer, which this package can import directly: it lands the source through a temp file, a sync, a rename and a directory sync, so a write that dies partway leaves the previous file intact rather than a truncated Go source the compiler and the committed-file diff read as the generator's output */
+    writeErr := internal.WriteFileAtomically(outputPath, []byte(source), "generated wiring file")
     if nil != writeErr {
         return writeErr
     }
@@ -203,90 +205,6 @@ func (instance *GenerateCommand) Run(
     return nil
 }
 
-/* writeGeneratedFileAtomically lands the generated source through a temp file and a rename, so a write that dies partway — a full disk, a killed process — leaves the previous file intact instead of a truncated Go source the compiler and the committed-file diff then read as the generator's output. */
-func writeGeneratedFileAtomically(outputPath string, content string) error {
-    directoryPath := filepath.Dir(outputPath)
-
-    makeDirectoryErr := os.MkdirAll(directoryPath, 0o755)
-    if nil != makeDirectoryErr {
-        return exception.NewError(
-            "could not create the output directory of the generated file",
-            map[string]any{
-                "out": outputPath,
-            },
-            makeDirectoryErr,
-        )
-    }
-
-    tempFile, tempErr := os.CreateTemp(directoryPath, filepath.Base(outputPath)+".*.tmp")
-    if nil != tempErr {
-        return exception.NewError(
-            "could not create the temp file of the generated file",
-            map[string]any{
-                "out": outputPath,
-            },
-            tempErr,
-        )
-    }
-
-    tempPath := tempFile.Name()
-
-    _, writeErr := tempFile.WriteString(content)
-    if nil != writeErr {
-        _ = tempFile.Close()
-        _ = os.Remove(tempPath)
-
-        return exception.NewError(
-            "could not write the generated file",
-            map[string]any{
-                "out": outputPath,
-            },
-            writeErr,
-        )
-    }
-
-    closeErr := tempFile.Close()
-    if nil != closeErr {
-        _ = os.Remove(tempPath)
-
-        return exception.NewError(
-            "could not close the temp file of the generated file",
-            map[string]any{
-                "out": outputPath,
-            },
-            closeErr,
-        )
-    }
-
-    /* the temp file is born 0600; the artifact keeps the mode a direct write would have given it */
-    chmodErr := os.Chmod(tempPath, 0o644)
-    if nil != chmodErr {
-        _ = os.Remove(tempPath)
-
-        return exception.NewError(
-            "could not set the mode of the generated file",
-            map[string]any{
-                "out": outputPath,
-            },
-            chmodErr,
-        )
-    }
-
-    renameErr := os.Rename(tempPath, outputPath)
-    if nil != renameErr {
-        _ = os.Remove(tempPath)
-
-        return exception.NewError(
-            "could not replace the output file with the generated file",
-            map[string]any{
-                "out": outputPath,
-            },
-            renameErr,
-        )
-    }
-
-    return nil
-}
 
 /* writeReport prints what the generation covered and, more importantly, what it did not: a skipped constructor and an unmatched bind are both silent losses of coverage unless they are named. */
 func (instance *GenerateCommand) writeReport(

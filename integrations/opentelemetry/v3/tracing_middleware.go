@@ -61,6 +61,9 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
                 if 500 <= response.StatusCode() {
                     span.SetStatus(codes.Error, nethttp.StatusText(response.StatusCode()))
                 }
+            } else if nil != handlerErr {
+                /* no response to read the status from, so record the client-facing status the kernel will derive from this error — otherwise a span for a handled 404 carries codes.Error and no status_code at all, and a dashboard that filters spans by http.response.status_code loses every errored request */
+                span.SetAttributes(attribute.Int("http.response.status_code", statusCodeForError(handlerErr)))
             }
 
             if nil != handlerErr {

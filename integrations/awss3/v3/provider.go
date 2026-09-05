@@ -2,6 +2,7 @@ package awss3
 
 import (
     "context"
+    "fmt"
 
     "github.com/minio/minio-go/v7"
     "github.com/minio/minio-go/v7/pkg/credentials"
@@ -45,6 +46,22 @@ type Config struct {
     SecretKey string
     Secure    bool
     Region    string
+}
+
+/* String and Format keep AccessKey and SecretKey out of every rendering fmt can reach. Both are EXPORTED fields, so a plain %v walks them and prints the object-storage credentials in the clear. Format is what makes this complete: fmt consults a Formatter before Stringer and GoStringer and for every verb, so Format answers %#v and the numeric verbs (%d, %o, …) that would otherwise reflection-walk the struct, and it delegates to String for the one rendering. A separate GoString would be dead — Format shadows it. The receivers are values so that both a Config and a pointer to it redact, and each secret is reduced to whether it was set. This mirrors the redaction the encrypt key provider carries for the same reason. */
+func (instance Config) String() string {
+    return fmt.Sprintf(
+        "awss3.Config{Endpoint:%q, Region:%q, Secure:%v, AccessKey:[redacted set=%v], SecretKey:[redacted set=%v]}",
+        instance.Endpoint,
+        instance.Region,
+        instance.Secure,
+        "" != instance.AccessKey,
+        "" != instance.SecretKey,
+    )
+}
+
+func (instance Config) Format(state fmt.State, verb rune) {
+    _, _ = state.Write([]byte(instance.String()))
 }
 
 func EnsureBucket(ctx context.Context, client *minio.Client, bucket string, region string) error {

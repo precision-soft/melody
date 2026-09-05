@@ -109,3 +109,28 @@ func TestWriteFileAtomically_ReplacesAPreviousArtifact(t *testing.T) {
         t.Fatalf("unexpected content: %q", string(written))
     }
 }
+
+func TestWriteFileAtomically_KeepsADeliberate0600DestinationMode(t *testing.T) {
+    directory := t.TempDir()
+    targetPath := filepath.Join(directory, "secret.json")
+
+    if writeErr := os.WriteFile(targetPath, []byte(`{"old":true}`), 0o600); nil != writeErr {
+        t.Fatalf("seed: %v", writeErr)
+    }
+    if chmodErr := os.Chmod(targetPath, 0o600); nil != chmodErr {
+        t.Fatalf("chmod seed: %v", chmodErr)
+    }
+
+    if writeErr := WriteFileAtomically(targetPath, []byte(`{"new":true}`), "secret document"); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    info, statErr := os.Stat(targetPath)
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+
+    if 0o600 != info.Mode().Perm() {
+        t.Fatalf("expected the deliberate 0600 destination mode to be kept, not widened, got %v", info.Mode().Perm())
+    }
+}

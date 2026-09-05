@@ -2,7 +2,9 @@ package otlp
 
 import (
     "context"
+    "fmt"
     "math"
+    "strings"
     "testing"
 
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -79,5 +81,32 @@ func TestNewTracerProvider_RefusesANaNSampleRatio(t *testing.T) {
 
     if nil == providerErr {
         t.Fatal("expected a NaN sample ratio - the shape of a failed parse - to be refused instead of inverting to AlwaysSample")
+    }
+}
+
+func TestConfig_RedactsHeadersOnEveryFmtVerb(t *testing.T) {
+    config := Config{
+        Endpoint: "otel-collector:4317",
+        Protocol: ProtocolGrpc,
+        Headers:  map[string]string{"authorization": "Bearer super-secret-token"},
+    }
+
+    for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d"} {
+        rendered := fmt.Sprintf(verb, config)
+        if true == strings.Contains(rendered, "super-secret-token") {
+            t.Fatalf("verb %s leaked the header credential: %s", verb, rendered)
+        }
+        if false == strings.Contains(rendered, "otel-collector:4317") {
+            t.Fatalf("verb %s dropped the safe Endpoint field: %s", verb, rendered)
+        }
+        if false == strings.Contains(rendered, "redacted") {
+            t.Fatalf("verb %s did not mark the headers redacted: %s", verb, rendered)
+        }
+    }
+
+    /* a pointer to the config redacts too, since the value receiver is promoted */
+    pointerRendered := fmt.Sprintf("%v", &config)
+    if true == strings.Contains(pointerRendered, "super-secret-token") {
+        t.Fatalf("a *Config leaked the header credential: %s", pointerRendered)
     }
 }

@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "fmt"
     "bytes"
     "context"
     "database/sql"
@@ -166,5 +167,18 @@ func TestEncryptedDeterministicString_UnmarshalJSONDecodesAPlaintextString(t *te
 
     if "hello" != string(decoded) {
         t.Fatalf("expected the plaintext to decode, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedDeterministicString_FormatRedactsNumericVerbs(t *testing.T) {
+    secret := "top-secret-plaintext"
+    for _, verb := range []string{"%d", "%o", "%b", "%c", "%U"} {
+        rendered := fmt.Sprintf(verb, EncryptedDeterministicString(secret))
+        if true == strings.Contains(rendered, secret) {
+            t.Fatalf("verb %s leaked the plaintext through the badverb form: %s", verb, rendered)
+        }
+        if redactedPlaceholder != rendered {
+            t.Fatalf("verb %s expected the redacted placeholder, got %q", verb, rendered)
+        }
     }
 }

@@ -29,6 +29,11 @@ func (instance EncryptedString) GoString() string {
     return redactedPlaceholder
 }
 
+/* Format redacts under the numeric verbs (%d %o %b %c %U) that fmt routes through neither Stringer nor GoStringer — it consults those only for %v %s %q %x %X and %#v — so a numeric verb would otherwise print the underlying string through the badverb form (`%!d(encrypt.EncryptedString=<plaintext>)`), carrying the secret. Every verb is answered with the same redacted rendering, the way the encrypt key provider closes the same gap. */
+func (instance EncryptedString) Format(state fmt.State, verb rune) {
+    _, _ = state.Write([]byte(redactedPlaceholder))
+}
+
 func (instance EncryptedString) LogValue() slog.Value {
     return slog.StringValue(redactedPlaceholder)
 }

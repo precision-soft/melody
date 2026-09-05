@@ -130,3 +130,66 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
 
     t.Fatalf("expected the dropped delayed requeue to be logged through the runtime's logger")
 }
+
+func TestInMemoryTransport_CloseClosesTheReceiveChannelSoAConsumerSeesEndOfStream(t *testing.T) {
+    transport := NewInMemoryTransport(4)
+
+    queue, receiveErr := transport.Receive(newTestRuntime())
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    if closeErr := transport.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    select {
+    case _, open := <-queue:
+        if true == open {
+            t.Fatalf("expected the Receive channel to be closed after Close, got a live delivery")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected Close to close the Receive channel so a consumer ranging it ends; it stayed open")
+    }
+}
+
+func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *testing.T) {
+    transport := NewInMemoryTransport(0)
+    runtimeInstance := newTestRuntime()
+
+    var senders sync.WaitGroup
+    for sender := 0; sender < 8; sender++ {
+        senders.Add(1)
+        go func() {
+            defer senders.Done()
+            for iteration := 0; iteration < 200; iteration++ {
+                /* a panic here — a send onto a closed queue — fails the test rather than crashing the binary */
+                _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: iteration}))
+            }
+        }()
+    }
+
+    /* a reader drains so unbuffered sends can make progress until Close lands */
+    stopReader := make(chan struct{})
+    queue, _ := transport.Receive(runtimeInstance)
+    go func() {
+        for {
+            select {
+            case <-stopReader:
+                return
+            case _, open := <-queue:
+                if false == open {
+                    return
+                }
+            }
+        }
+    }()
+
+    time.Sleep(2 * time.Millisecond)
+    if closeErr := transport.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    senders.Wait()
+    close(stopReader)
+}

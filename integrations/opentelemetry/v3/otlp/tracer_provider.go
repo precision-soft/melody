@@ -2,6 +2,7 @@ package otlp
 
 import (
     "context"
+    "fmt"
     "time"
 
     "go.opentelemetry.io/otel/attribute"
@@ -33,6 +34,25 @@ type Config struct {
     Headers        map[string]string
     Insecure       bool
     BatchTimeout   time.Duration
+}
+
+/* String and Format keep Headers out of every rendering fmt can reach. Headers is an EXPORTED field, so a plain %v walks it and prints the collector auth token an app puts there in the clear. Format is what makes this complete: fmt consults a Formatter before Stringer and GoStringer and for every verb, so Format answers %#v and the numeric verbs (%d, %o, …) that would otherwise reflection-walk the struct, and it delegates to String for the one rendering. A separate GoString would be dead — Format shadows it. The receivers are values so that both a Config and a pointer to it redact, and Headers is reduced to its count — enough to see whether any were set without naming one. This mirrors the redaction the encrypt key provider carries for the same reason. */
+func (instance Config) String() string {
+    return fmt.Sprintf(
+        "otlp.Config{Endpoint:%q, Protocol:%q, ServiceName:%q, ServiceVersion:%q, SampleRatio:%v, Insecure:%v, BatchTimeout:%v, Headers:[redacted %d]}",
+        instance.Endpoint,
+        instance.Protocol,
+        instance.ServiceName,
+        instance.ServiceVersion,
+        instance.SampleRatio,
+        instance.Insecure,
+        instance.BatchTimeout,
+        len(instance.Headers),
+    )
+}
+
+func (instance Config) Format(state fmt.State, verb rune) {
+    _, _ = state.Write([]byte(instance.String()))
 }
 
 /* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter. The caller owns the returned provider's lifecycle — Shutdown must run on application exit to flush pending spans; the plug-and- play Module in this package does that for you by registering it as a container-managed service. */

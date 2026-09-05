@@ -10,6 +10,7 @@ import (
 
     "github.com/prometheus/client_golang/prometheus"
 
+    "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -204,4 +205,45 @@ func gatheredStatusLabels(t *testing.T, registry *prometheus.Registry) map[strin
     }
 
     return statuses
+}
+
+func TestMetricsMiddleware_RecordsTheClientStatusOfAnHttpExceptionError(t *testing.T) {
+    meter, registry, meterErr := NewPrometheusMeter("melody-http-exception-test")
+    if nil != meterErr {
+        t.Fatalf("meter: %v", meterErr)
+    }
+
+    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    if nil != middlewareErr {
+        t.Fatalf("middleware: %v", middlewareErr)
+    }
+
+    request, runtimeInstance := testRequestAndRuntime()
+    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, exception.NewHttpException(nethttp.StatusNotFound, "not found")
+    })
+
+    if _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil == handlerErr {
+        t.Fatalf("expected the handler error to propagate")
+    }
+
+    labels := gatheredStatusLabels(t, registry)
+    if false == labels["404"] {
+        t.Fatalf("expected a handled 404 to be recorded at its client-facing status, not folded into 5xx, got %v", labels)
+    }
+    if true == labels["500"] {
+        t.Fatalf("expected the deliberate 404 not to be recorded as a server error, got %v", labels)
+    }
+}
+
+func TestStatusCodeForError_MapsSubFiveHundredHttpExceptionsAndDefaultsToFiveHundred(t *testing.T) {
+    if 404 != statusCodeForError(exception.NewHttpException(nethttp.StatusNotFound, "not found")) {
+        t.Fatalf("expected a 404 http exception to map to 404")
+    }
+    if nethttp.StatusInternalServerError != statusCodeForError(exception.NewHttpException(nethttp.StatusBadGateway, "upstream")) {
+        t.Fatalf("expected a 5xx http exception to stay a server error")
+    }
+    if nethttp.StatusInternalServerError != statusCodeForError(errors.New("plain")) {
+        t.Fatalf("expected a non-http error to be a server error")
+    }
 }

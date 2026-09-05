@@ -24,9 +24,13 @@ func NewInMemoryTransport(bufferSize int) *InMemoryTransport {
 }
 
 type InMemoryTransport struct {
-    queue       chan messagebuscontract.Envelope
-    done        chan struct{}
-    closeOnce   sync.Once
+    queue     chan messagebuscontract.Envelope
+    done      chan struct{}
+    closeOnce sync.Once
+
+    /* sendMutex lets Close close the delivery queue without racing a send onto it. Every path that sends on queue holds it as a READER for the whole two-step send — the closed-check and the send itself — and Close holds it as the WRITER around close(queue), after it has already closed done. So a send is never inside its critical section when the queue closes, and a send that starts after Close finishes sees done closed on the first step and returns before it can touch the queue. Without closing the queue, a consumer ranging over Receive() never sees the end of stream Close is supposed to signal. */
+    sendMutex sync.RWMutex
+
     loggerMutex sync.RWMutex
     logger      loggingcontract.Logger
 }
@@ -46,6 +50,10 @@ func (instance *InMemoryTransport) Send(
     if _, received := LastStampOfType[ReceivedStamp](envelopeInstance); false == received {
         envelopeInstance = envelopeInstance.WithStamp(ReceivedStamp{TransportName: "in_memory"})
     }
+
+    /* held for the whole two-step send so Close cannot close the queue between the closed-check and the send below; a send that starts after Close has run sees done closed on the first step and returns before touching the queue */
+    instance.sendMutex.RLock()
+    defer instance.sendMutex.RUnlock()
 
     select {
     case <-instance.done:
@@ -71,7 +79,12 @@ func (instance *InMemoryTransport) Receive(
 
 func (instance *InMemoryTransport) Close() error {
     instance.closeOnce.Do(func() {
+        /* done first, outside the write lock, so any send parked on the queue is unblocked through its own done case and can release its read lock; then the write lock waits for every in-flight send to leave its critical section before the queue is closed, so no send is ever picked onto a closed channel. Closing the queue is what lets a consumer ranging over Receive() see the end of stream. */
         close(instance.done)
+
+        instance.sendMutex.Lock()
+        close(instance.queue)
+        instance.sendMutex.Unlock()
     })
 
     return nil
@@ -104,6 +117,10 @@ func (instance *InMemoryTransport) Nack(
 }
 
 func (instance *InMemoryTransport) requeue(envelopeInstance messagebuscontract.Envelope) error {
+    /* held across both selects for the same reason Send holds it: Close must not close the queue between the closed-check and the send */
+    instance.sendMutex.RLock()
+    defer instance.sendMutex.RUnlock()
+
     /* the closed check runs on its own first: inside one select a ready queue slot and a closed transport are picked at RANDOM, so a requeue strictly after Close would intermittently still land — Send refuses deterministically through the same two-step form */
     select {
     case <-instance.done:
