@@ -495,7 +495,7 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     base := &baseCommand{options: options}
 
     documentBuffer := &bytes.Buffer{}
-    resolveOutput := newCommandOutput(documentBuffer, output.Option{Format: output.FormatJson})
+    resolveOutput := newCommandOutput(documentBuffer, nil, output.Option{Format: output.FormatJson})
 
     command := &probeCommand{
         nameValue:  "migrate",

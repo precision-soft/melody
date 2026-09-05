@@ -1140,3 +1140,38 @@ func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
         t.Fatalf("expected a zero attempt to read as the first, got %s", provider.computeBackoffDelay(0))
     }
 }
+
+/* pgdriver.WithDatabase and pgdriver.WithUser panic on an empty string, so a parameter left unset by the configuration reached the caller as a panic out of the open rather than as the refusal every other open failure is; the refusal names the field, before the driver sees it */
+func TestProviderOpen_RefusesAnEmptyDatabaseOrUserInsteadOfPanicking(t *testing.T) {
+    provider := NewProvider(
+        WithInsecure(true),
+        WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
+            t.Fatal("the connector was built for a refused parameter set")
+
+            return nil
+        }),
+    )
+
+    testCases := []struct {
+        name     string
+        params   bunorm.ConnectionParameters
+        expected string
+    }{
+        {name: "empty database", params: newTestParams("db.internal", "5432", "", "melody_user", "melody_password"), expected: "the database name is empty"},
+        {name: "empty user", params: newTestParams("db.internal", "5432", "melody", "", "melody_password"), expected: "the user is empty"},
+    }
+
+    for _, testCase := range testCases {
+        t.Run(testCase.name, func(t *testing.T) {
+            database, openErr := provider.Open(testCase.params, nil)
+            if nil != database {
+                _ = database.Close()
+                t.Fatal("expected no database handle for a refused parameter set")
+            }
+
+            if nil == openErr || false == strings.Contains(openErr.Error(), testCase.expected) {
+                t.Fatalf("expected the refusal to name the field (%q), got %v", testCase.expected, openErr)
+            }
+        })
+    }
+}

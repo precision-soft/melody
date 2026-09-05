@@ -317,3 +317,63 @@ func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *te
         }
     }
 }
+
+/* the option a command puts on the context is the one a run prints under, ahead of the process-wide fallback: the fallback is one value for the whole process, and a run reading it printed under whichever command had installed it last */
+func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var fallback bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &fallback, NoColor: true})
+
+    var carried bytes.Buffer
+    ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &carried, NoColor: true})
+
+    if runErr := RunQueries(ctx, nil, "up", "20240101000000_probe", nil); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if false == strings.Contains(carried.String(), "20240101000000_probe") {
+        t.Fatalf("expected the run to print on the writer the context carries, got %q", carried.String())
+    }
+
+    if "" != fallback.String() {
+        t.Fatalf("expected nothing on the process-wide fallback, got %q", fallback.String())
+    }
+}
+
+/* a command puts its posture back on the way out, and only when its own value is still the live one: the value installed for the run does not survive the run, and a command that finished while a later one still runs leaves that one's value where it is */
+func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var host bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    var first bytes.Buffer
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+
+    if &first != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the swap to install the command's value for the length of its run")
+    }
+
+    var second bytes.Buffer
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the first command's restore to leave the later command's value in place")
+    }
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if firstInstalled != processRunnerOption.Load() {
+        t.Fatal("expected the second command's restore to put back what it found, the first command's value")
+    }
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}

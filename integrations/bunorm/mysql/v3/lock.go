@@ -65,6 +65,7 @@ func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.
     }
 }
 
+/* mysqlLock carries both spellings of its name: the one the caller gave, which every error context names, and the folded form the server was actually asked for, which the contexts name beside it — a name past the server's limit is folded to a hash-suffixed form, and a diagnostic that showed only the caller's spelling sent the operator to look for a lock the server had never heard of. */
 type mysqlLock struct {
     database       *bun.DB
     name           string
@@ -111,7 +112,7 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
 
     connection, connectionErr := instance.database.DB.Conn(runtimeInstance.Context())
     if nil != connectionErr {
-        return false, exception.NewError("mysql lock connection failed", map[string]any{"name": instance.name}, connectionErr)
+        return false, exception.NewError("mysql lock connection failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, connectionErr)
     }
 
     var acquired sql.NullInt64
@@ -119,7 +120,7 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     if nil != queryErr {
         releaseOrphanedLock(connection, instance.lockName, instance.releaseTimeout)
         connection.Close()
-        return false, exception.NewError("mysql lock acquire failed", map[string]any{"name": instance.name}, queryErr)
+        return false, exception.NewError("mysql lock acquire failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, queryErr)
     }
 
     if false == acquired.Valid || 1 != acquired.Int64 {
@@ -149,11 +150,11 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     instance.connection = nil
 
     if nil != execErr {
-        return exception.NewError("mysql lock release failed", map[string]any{"name": instance.name}, execErr)
+        return exception.NewError("mysql lock release failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, execErr)
     }
 
     if nil != closeErr {
-        return exception.NewError("mysql lock connection close failed", map[string]any{"name": instance.name}, closeErr)
+        return exception.NewError("mysql lock connection close failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, closeErr)
     }
 
     return nil

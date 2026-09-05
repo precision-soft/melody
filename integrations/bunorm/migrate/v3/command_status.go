@@ -36,7 +36,7 @@ func (instance *StatusCommand) Flags() []clicontract.Flag {
 
 func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer(), option)
+    outputInstance := newCommandOutput(commandContext.Writer(), commandContext.Arguments(), option)
 
     startedAt := time.Now()
     defer func() {

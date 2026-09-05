@@ -21,7 +21,7 @@ func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
     option := output.DefaultOption()
     option.NoColor = noColor
 
-    return newCommandOutput(buffer, option), buffer
+    return newCommandOutput(buffer, nil, option), buffer
 }
 
 func TestCommandOutput_PrintSuccess(t *testing.T) {
@@ -306,7 +306,7 @@ func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) 
         option.Format = testCase.format
         option.Verbose = testCase.verbose
 
-        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, option).wantsDetail() {
+        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, nil, option).wantsDetail() {
             t.Fatalf("format %s verbose %v: expected %v", testCase.format, testCase.verbose, testCase.expectedOutcome)
         }
     }
@@ -318,7 +318,7 @@ func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *t
     jsonOption.Format = output.FormatJson
 
     jsonBuffer := &bytes.Buffer{}
-    jsonInstance := newCommandOutput(jsonBuffer, jsonOption)
+    jsonInstance := newCommandOutput(jsonBuffer, nil, jsonOption)
     jsonInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
 
     if _, keyedOnTheKey := jsonInstance.migrations["applied"]; false == keyedOnTheKey {
@@ -348,7 +348,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     jsonOption.Format = output.FormatJson
 
     buffer := &bytes.Buffer{}
-    instance := newCommandOutput(buffer, jsonOption)
+    instance := newCommandOutput(buffer, nil, jsonOption)
     instance.printDatabaseBlock(&databaseIdentity{Hostname: "localhost", Port: 5432, CurrentUser: "app"})
 
     if finishErr := instance.finish("db:status", time.Now(), nil); nil != finishErr {
@@ -376,7 +376,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     /* a named database still arrives as its name, or the guard above would pass for a field that never carries anything */
     named := "orders"
     namedBuffer := &bytes.Buffer{}
-    namedInstance := newCommandOutput(namedBuffer, jsonOption)
+    namedInstance := newCommandOutput(namedBuffer, nil, jsonOption)
     namedInstance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &named})
 
     if finishErr := namedInstance.finish("db:status", time.Now(), nil); nil != finishErr {
@@ -400,7 +400,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
 /* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing and the whole cause chain while stdout answered a single sentence beside `"details":null, "cause":null`. */
 func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
     runErr := exception.NewError(
         "database connection failed",
@@ -459,7 +459,7 @@ func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
 /* an error carrying no context still answers an object, and one carrying no cause answers a null there: a field whose json type changes with the outcome cannot be consumed, while a cause that genuinely does not exist is honestly absent */
 func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
     if finishErr := outputInstance.finish("db:migrate", time.Now(), errors.New("bare failure")); nil == finishErr {
         t.Fatal("expected the command's own failure to stay the verdict")
@@ -493,7 +493,7 @@ func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T
 /* a typed-nil *exception.Error under a fmt wrap satisfies errors.As and passes a plain nil comparison, and Context() on the nil receiver takes a read lock on a nil pointer. The chain below is the shape bun's migrator produces: it wraps the application's migration-function error with %w after a plain nil test that a typed nil passes, and fmt records the operand before formatting it, so the wrap exists and carries the typed nil while its own text reads "<nil>". The panic would unwind the command's finish defer and the cli runner would re-panic it, so the json document — and with it the real failure — would never be written. */
 func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
     runErr := fmt.Errorf("20240101000000_create_users: up: %w", (*exception.Error)(nil))
 

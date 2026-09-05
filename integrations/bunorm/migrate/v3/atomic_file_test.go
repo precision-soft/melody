@@ -1,9 +1,11 @@
 package migrate
 
 import (
+    "errors"
     "os"
     "path/filepath"
     "strings"
+    "syscall"
     "testing"
 )
 
@@ -127,5 +129,81 @@ func TestSyncDirectory_RefusesAPathThatIsNotThere(t *testing.T) {
 
     if false == strings.Contains(syncErr.Error(), "fsync") {
         t.Fatalf("the refusal does not name what failed: %v", syncErr)
+    }
+}
+
+/* the rewrite keeps the mode the destination carries, which is bun's request filtered through the process umask: under umask 077 bun leaves 0600, and a rewrite that stamped 0644 unconditionally widened what the operator's umask had narrowed */
+func TestFinishFileAtomically_KeepsTheModeTheDestinationCarries(t *testing.T) {
+    previous := syscall.Umask(0o077)
+    t.Cleanup(func() { syscall.Umask(previous) })
+
+    directory := t.TempDir()
+    destination := filepath.Join(directory, "20260905120000_create_users.go")
+
+    if writeErr := os.WriteFile(destination, []byte("seed"), 0o644); nil != writeErr {
+        t.Fatalf("could not seed the destination: %v", writeErr)
+    }
+
+    before, statErr := os.Stat(destination)
+    if nil != statErr {
+        t.Fatal(statErr)
+    }
+
+    if os.FileMode(0o600) != before.Mode().Perm() {
+        t.Fatalf("control: the umask did not narrow the seed, mode = %v", before.Mode().Perm())
+    }
+
+    if finishErr := finishFileAtomically(destination, []byte("package migrations\n")); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    after, statErr := os.Stat(destination)
+    if nil != statErr {
+        t.Fatal(statErr)
+    }
+
+    if os.FileMode(0o600) != after.Mode().Perm() {
+        t.Fatalf("destination mode = %v, want the 0600 the umask left", after.Mode().Perm())
+    }
+}
+
+/* a destination that is not there yet has no mode to keep, and bun's own 0644 is what it gets */
+func TestFinishFileAtomically_FallsBackToBunsModeWhenTheDestinationIsNotThere(t *testing.T) {
+    directory := t.TempDir()
+    destination := filepath.Join(directory, "20260905120000_create_users.go")
+
+    if finishErr := finishFileAtomically(destination, []byte("package migrations\n")); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    info, statErr := os.Stat(destination)
+    if nil != statErr {
+        t.Fatal(statErr)
+    }
+
+    if migrationFileMode != info.Mode().Perm() {
+        t.Fatalf("destination mode = %v, want %v", info.Mode().Perm(), migrationFileMode)
+    }
+}
+
+/* the one failure that leaves the destination whole is marked as such, so the command can tell it from a rename that never landed */
+func TestFinishFileAtomically_MarksADirectorySyncFailureAfterTheRename(t *testing.T) {
+    previous := syncDirectoryAfterRename
+    t.Cleanup(func() { syncDirectoryAfterRename = previous })
+    syncDirectoryAfterRename = func(path string) error {
+        return errors.New("fsync refused")
+    }
+
+    directory := t.TempDir()
+    destination := filepath.Join(directory, "20260905120000_create_users.go")
+
+    finishErr := finishFileAtomically(destination, []byte("package migrations\n"))
+    if false == errors.Is(finishErr, errDirectorySyncAfterRename) {
+        t.Fatalf("expected the directory sync marker, got %v", finishErr)
+    }
+
+    content, readErr := os.ReadFile(destination)
+    if nil != readErr || "package migrations\n" != string(content) {
+        t.Fatalf("expected the whole file in place beside the marked failure, got %q, %v", content, readErr)
     }
 }

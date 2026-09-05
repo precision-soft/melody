@@ -330,6 +330,15 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     /* the routing lives here because open is the one funnel every door shares — Open, OpenContext, the retry loop and the migration door all pass through it. Routed only on the retry path, the default retry-less open left bun's declaration mistakes on standard error. RouteDiagnostics is once per process, so repeated attempts cost nothing. */
     bunorm.RouteDiagnostics(logger)
 
+    /* an empty database or user is refused here, by name, before the driver sees it: pgdriver.WithDatabase and pgdriver.WithUser PANIC on an empty string, so a connection parameter left unset by the configuration reached the caller as a panic out of the open, not as the refusal every other open failure is. An empty host is left to the driver — it does not panic, the address "<empty>:port" simply fails to dial — and an empty password is a legitimate value. */
+    if "" == params.Database {
+        return nil, exception.NewError("pgsql database open refused: the database name is empty", params.SafeContext(), nil)
+    }
+
+    if "" == params.User {
+        return nil, exception.NewError("pgsql database open refused: the user is empty", params.SafeContext(), nil)
+    }
+
     connectionConfig := NewConnectionConfig(params.Host, params.Port, params.Database, params.User, params.Password)
 
     poolConfig := instance.resolvedPoolConfig()

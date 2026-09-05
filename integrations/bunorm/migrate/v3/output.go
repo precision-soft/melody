@@ -15,8 +15,9 @@ import (
 )
 
 type commandOutput struct {
-    writer io.Writer
-    option output.Option
+    writer    io.Writer
+    arguments []string
+    option    output.Option
 
     /* the json accumulation: under --format=json every print records instead of writing, and finish renders the one machine-readable document the cli runner's silenced banner promises — the flag was accepted and validated long before this package honoured it */
     messages   []string
@@ -27,10 +28,12 @@ type commandOutput struct {
     files      []string
 }
 
-func newCommandOutput(writer io.Writer, option output.Option) *commandOutput {
+/* newCommandOutput takes the command's positional arguments beside its writer and flags: the machine document declares an arguments field, and built without them it answered an empty list for every command, db:create included, whose one argument names the migration the document reports on. */
+func newCommandOutput(writer io.Writer, arguments []string, option output.Option) *commandOutput {
     return &commandOutput{
-        writer: writer,
-        option: option,
+        writer:    writer,
+        arguments: append([]string{}, arguments...),
+        option:    option,
     }
 }
 
@@ -91,7 +94,7 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         return runErr
     }
 
-    meta := output.NewMeta(command, nil, instance.option, startedAt, time.Since(startedAt), output.Version{})
+    meta := output.NewMeta(command, instance.arguments, instance.option, startedAt, time.Since(startedAt), output.Version{})
     envelope := output.NewEnvelope(meta)
 
     data := map[string]any{}

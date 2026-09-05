@@ -325,7 +325,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
         )
     }
 
-    /* the routing lives here because open is the one funnel every door shares — Open, OpenContext, the retry loop and the migration door all pass through it. Routed only on the retry path, the default retry-less open left bun's declaration mistakes on standard error. RouteDiagnostics is once per process, so repeated attempts cost nothing. */
+    /* the routing lives here because open is the one funnel every door shares — Open, OpenContext, the retry loop and the migration door all pass through it. Routed only on the retry path, the default retry-less open left bun's declaration mistakes on standard error. RouteDiagnostics installs nothing when the logger is the one already routed, so repeated attempts cost nothing. */
     bunorm.RouteDiagnostics(logger)
 
     connectionConfig := NewConnectionConfig(params.Host, params.Port, params.Database, params.User, params.Password)

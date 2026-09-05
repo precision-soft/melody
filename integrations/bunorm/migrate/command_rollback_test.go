@@ -1,8 +1,10 @@
 package migrate
 
 import (
+    "bytes"
     "context"
     "errors"
+    "io"
     "strings"
     "testing"
 
@@ -192,5 +194,62 @@ func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
 
     if 0 != downCalls {
         t.Fatalf("rollback ran despite the lock failure (%d times)", downCalls)
+    }
+}
+
+/* the rollback command hands its posture to the migrations the same way the migrate command does: through the context, with the process-wide fallback installed only for the length of the run */
+func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var elsewhere bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &elsewhere, NoColor: true})
+
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    var seenDuringTheRun io.Writer
+    carriedByTheContext := false
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{
+        Name:    "20240101000000",
+        Comment: "create_users",
+        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return nil
+        },
+        Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            seenDuringTheRun = resolveDefaultRunnerOption().Writer
+            _, carriedByTheContext = runnerOptionFromContext(ctx)
+
+            return RunQueries(ctx, database, "down", "20240101000000", []Query{{Name: "drop-users", SQL: "DROP TABLE users"}})
+        },
+    })
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewRollbackCommand(migrations, DefaultOptions()), "--no-color")
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if false == strings.Contains(rendered, "[migration:down] 20240101000000 [1/1] executing: drop-users") {
+        t.Fatalf("the per-query line did not reach the command's writer through the context: %q", rendered)
+    }
+
+    if "" != elsewhere.String() {
+        t.Fatalf("the per-query line reached the process-wide fallback instead: %q", elsewhere.String())
+    }
+
+    /* the context is the channel, not the fallback: with the fallback installed for the run, a migration handed the plain runtime context would still print on the command's writer, so what separates the two is the option the context carries */
+    if false == carriedByTheContext {
+        t.Fatal("the migration was not handed the context carrying the command's posture")
+    }
+
+    if &elsewhere == seenDuringTheRun {
+        t.Fatal("expected the command to install its own posture as the fallback for the length of the run")
+    }
+
+    if &elsewhere != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the command to put the fallback back on the way out, got %v", resolveDefaultRunnerOption().Writer)
     }
 }

@@ -138,3 +138,33 @@ func TestNewReadWriteSplitter_RefusesAnEmptyReplicaName(t *testing.T) {
 
     NewReadWriteSplitter(registry, "primary", "replica-a", "")
 }
+
+type noDatabaseSplitProvider struct{}
+
+func (instance *noDatabaseSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, nil
+}
+
+/* a provider answering neither a database nor an error is the wiring mistake the registry refuses by name; folded into the fallback it routed every read of that replica to the primary forever, with no signal that the replica was dead */
+func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "replica", Provider: &noDatabaseSplitProvider{}},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+    t.Cleanup(func() { _ = registry.Close() })
+
+    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+
+    database, readerErr := splitter.Reader()
+    if false == errors.Is(readerErr, ErrProviderReturnedNilDatabase) {
+        t.Fatalf("expected ErrProviderReturnedNilDatabase, got database=%v err=%v", database, readerErr)
+    }
+
+    if nil != database {
+        t.Fatal("expected no database beside the refusal")
+    }
+}

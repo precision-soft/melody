@@ -3,6 +3,7 @@ package mysql
 import (
     "context"
     "database/sql"
+    "errors"
     "os"
     "strconv"
     "strings"
@@ -12,6 +13,7 @@ import (
 
     _ "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/uptrace/bun"
@@ -782,5 +784,38 @@ func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
     }
     if nil != lock.connection {
         t.Fatalf("the pin survived a session that is gone")
+    }
+}
+
+/* every lock failure names both spellings: the caller's name and the folded form the server was actually asked for — a name past the limit is folded to a hash-suffixed form, and a diagnostic that showed only the caller's spelling sent the operator to look for a lock the server had never heard of */
+func TestMysqlLock_FailuresNameTheFoldedLockNameBesideTheName(t *testing.T) {
+    sqldb, openErr := sql.Open("mysql", "melody:melody@tcp(127.0.0.1:1)/melody")
+    if nil != openErr {
+        t.Fatal(openErr)
+    }
+    database := bun.NewDB(sqldb, mysqldialect.New())
+    if closeErr := database.Close(); nil != closeErr {
+        t.Fatal(closeErr)
+    }
+
+    name := strings.Repeat("melody:lock:", 8)
+    lock := NewLocker(database).CreateLock(name, 0)
+
+    _, acquireErr := lock.Acquire(newLockRuntime())
+    if nil == acquireErr {
+        t.Fatal("expected the acquire on a closed database to fail")
+    }
+
+    var typed *exception.Error
+    if false == errors.As(acquireErr, &typed) {
+        t.Fatalf("expected an exception.Error, got %T", acquireErr)
+    }
+
+    if name != typed.Context()["name"] || boundedLockName(name) != typed.Context()["lockName"] {
+        t.Fatalf("expected the context to carry the name and its folded form, got %v", typed.Context())
+    }
+
+    if name == boundedLockName(name) {
+        t.Fatal("control: the probe name must be long enough to be folded")
     }
 }

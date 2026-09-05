@@ -114,3 +114,70 @@ func TestRouteDiagnostics_ATypedNilLoggerLeavesTheDestinationWhereItWas(t *testi
         t.Fatal("a typed nil logger replaced the destination that was already installed")
     }
 }
+
+/* the providers route on every open; a routing on the logger already installed must install nothing, or every open allocated a fresh writer for the same journal and replaced the live one for no change */
+func TestRouteDiagnostics_ARoutingOnTheSameLoggerInstallsNothing(t *testing.T) {
+    logger := &capturingDiagnosticLogger{}
+    t.Cleanup(ResetDiagnostics)
+
+    RouteDiagnostics(logger)
+    installed := bunDiagnosticsTarget.Load()
+    if nil == installed {
+        t.Fatal("the first routing installed nothing")
+    }
+
+    RouteDiagnostics(logger)
+    RouteDiagnostics(logger)
+
+    if installed != bunDiagnosticsTarget.Load() {
+        t.Fatal("a routing on the same logger replaced the live destination")
+    }
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 1 != len(logger.captured()) {
+        t.Fatalf("expected exactly one record on the routed logger, got %d", len(logger.captured()))
+    }
+}
+
+/* the once installs the forwarder, not a destination, so a routing after a hand-back reaches the journal again through the same forwarder: the once never needs resetting */
+func TestRouteDiagnostics_RoutesAgainAfterAHandBack(t *testing.T) {
+    logger := &capturingDiagnosticLogger{}
+    t.Cleanup(ResetDiagnostics)
+
+    RouteDiagnostics(logger)
+    ResetDiagnostics()
+    RouteDiagnostics(logger)
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 1 != len(logger.captured()) {
+        t.Fatalf("expected the record to reach the logger routed after the hand-back, got %d", len(logger.captured()))
+    }
+}
+
+/* the hand-back a teardown asks for is scoped to its own logger: when another logger holds the channel, nothing happens */
+func TestResetDiagnosticsRoutedTo_LeavesAnotherLoggersChannelAlone(t *testing.T) {
+    first := &capturingDiagnosticLogger{}
+    second := &capturingDiagnosticLogger{}
+    t.Cleanup(ResetDiagnostics)
+
+    RouteDiagnostics(first)
+    RouteDiagnostics(second)
+
+    resetDiagnosticsRoutedTo(first)
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 1 != len(second.captured()) {
+        t.Fatalf("the hand-back for the first logger took the channel away from the second: %d records", len(second.captured()))
+    }
+
+    resetDiagnosticsRoutedTo(second)
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 1 != len(second.captured()) {
+        t.Fatalf("the hand-back for the live logger did not take the channel back: %d records", len(second.captured()))
+    }
+}

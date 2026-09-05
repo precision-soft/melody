@@ -7,8 +7,11 @@ import (
     "path/filepath"
 )
 
-/* migrationFileMode is the permission the finished migration file carries. It is bun's own 0644 for the file it wrote, kept so the rewrite below replaces the content and nothing else. */
+/* migrationFileMode is the permission the finished file falls back to when the destination cannot be read: bun's own 0644, the mode it asks for. The mode the destination ACTUALLY carries is what the rewrite keeps — bun's request goes through the process umask, so under umask 077 the file it wrote is 0600, and a rewrite that stamped 0644 unconditionally widened what the operator's umask had narrowed. */
 const migrationFileMode = os.FileMode(0o644)
+
+/* errDirectorySyncAfterRename marks the one failure of finishFileAtomically that leaves the destination whole: the rename succeeded, the file is in place with its full content, and only the fsync of the directory entry — the guarantee that the name survives a crash — could not be given. A caller that reported it as the command's verdict sent the operator to run the command again, which creates a SECOND migration under a new timestamp beside a perfectly good first one. */
+var errDirectorySyncAfterRename = errors.New("the directory entry could not be fsynced after the rename")
 
 /* finishFileAtomically replaces a file with the same content, written the way a file that must survive a crash has to be written: into a temporary neighbour, fsynced, renamed over the destination, and the destination's DIRECTORY fsynced so the rename itself is durable.
 
@@ -47,8 +50,8 @@ func finishFileAtomically(destination string, content []byte) error {
         return fmt.Errorf("could not close the temporary file %s: %w", tmpPath, closeErr)
     }
 
-    /* CreateTemp makes the file 0600; the destination carries the mode bun gave it, so the rewrite is invisible to anything reading the directory */
-    if chmodErr := os.Chmod(tmpPath, migrationFileMode); nil != chmodErr {
+    /* CreateTemp makes the file 0600; the destination carries the mode bun's write produced under the process umask, and that is the mode the rewrite keeps, so it is invisible to anything reading the directory. The constant is the fallback for a destination that cannot be read, not the rule. */
+    if chmodErr := os.Chmod(tmpPath, destinationFileMode(destination)); nil != chmodErr {
         return fmt.Errorf("could not chmod the temporary file %s: %w", tmpPath, chmodErr)
     }
 
@@ -58,8 +61,25 @@ func finishFileAtomically(destination string, content []byte) error {
 
     renamed = true
 
-    return syncDirectory(directory)
+    if syncErr := syncDirectoryAfterRename(directory); nil != syncErr {
+        return fmt.Errorf("%w: %w", errDirectorySyncAfterRename, syncErr)
+    }
+
+    return nil
 }
+
+/* destinationFileMode reads the permission the destination carries, and falls back to bun's own 0644 when it cannot be read. */
+func destinationFileMode(destination string) os.FileMode {
+    info, statErr := os.Stat(destination)
+    if nil != statErr {
+        return migrationFileMode
+    }
+
+    return info.Mode().Perm()
+}
+
+/* syncDirectoryAfterRename is the directory fsync the rename is followed by, held in a variable so a test can make exactly that step fail: a directory that refuses an fsync cannot be built on the filesystem the tests run on, and the failure it stands for is what the create command has to classify. */
+var syncDirectoryAfterRename = syncDirectory
 
 /* syncDirectory makes the rename itself durable: without it the file's content survives a crash and the directory entry naming it need not. */
 func syncDirectory(path string) error {

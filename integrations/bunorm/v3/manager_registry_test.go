@@ -2426,3 +2426,43 @@ func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
         t.Fatalf("the closed registry still holds bun's channel: %v", applicationLogger.captured())
     }
 }
+
+/* two registries in one process, each routed to its own logger: the first to close hands back only what is its own, and the second keeps its channel through that teardown — closing the first used to reset the channel for the whole process, and the second's diagnostics went to standard error until its next open */
+func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *testing.T) {
+    firstLogger := &capturingDiagnosticLogger{}
+    secondLogger := &capturingDiagnosticLogger{}
+    t.Cleanup(ResetDiagnostics)
+
+    first, firstErr := NewManagerRegistry(&fakeLogger{}, ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true})
+    if nil != firstErr {
+        t.Fatalf("registry error: %v", firstErr)
+    }
+
+    second, secondErr := NewManagerRegistry(&fakeLogger{}, ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true})
+    if nil != secondErr {
+        t.Fatalf("registry error: %v", secondErr)
+    }
+    t.Cleanup(func() { _ = second.Close() })
+
+    if setErr := first.SetLogger(firstLogger); nil != setErr {
+        t.Fatalf("unexpected error: %v", setErr)
+    }
+
+    if setErr := second.SetLogger(secondLogger); nil != setErr {
+        t.Fatalf("unexpected error: %v", setErr)
+    }
+
+    if closeErr := first.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 1 != len(secondLogger.captured()) {
+        t.Fatalf("the first registry's close took the channel away from the second: %d records on its logger", len(secondLogger.captured()))
+    }
+
+    if 0 != len(firstLogger.captured()) {
+        t.Fatalf("the closed registry's logger still receives: %v", firstLogger.captured())
+    }
+}

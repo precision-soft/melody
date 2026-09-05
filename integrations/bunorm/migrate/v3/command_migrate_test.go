@@ -1,9 +1,11 @@
 package migrate
 
 import (
+    "bytes"
     "context"
     "encoding/json"
     "errors"
+    "io"
     "strings"
     "testing"
 
@@ -528,5 +530,59 @@ func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *tes
     var document map[string]any
     if unmarshalErr := json.Unmarshal([]byte(rendered), &document); nil != unmarshalErr {
         t.Fatalf("the output is not one json document: %v; got %q", unmarshalErr, rendered)
+    }
+}
+
+/* the command's writer reaches the migrations through the context the migrator hands them, not through the process-wide fallback: with the fallback pointing elsewhere, the only way the per-query line lands on the command's writer is the context */
+func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var elsewhere bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &elsewhere, NoColor: true})
+
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook()
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    var seenDuringTheRun io.Writer
+    carriedByTheContext := false
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{
+        Name:    "20240101000000",
+        Comment: "create_users",
+        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            seenDuringTheRun = resolveDefaultRunnerOption().Writer
+            _, carriedByTheContext = runnerOptionFromContext(ctx)
+
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}})
+        },
+    })
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color")
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if false == strings.Contains(rendered, "[migration:up] 20240101000000 [1/1] executing: create-users") {
+        t.Fatalf("the per-query line did not reach the command's writer through the context: %q", rendered)
+    }
+
+    if "" != elsewhere.String() {
+        t.Fatalf("the per-query line reached the process-wide fallback instead: %q", elsewhere.String())
+    }
+
+    /* the context is the channel, not the fallback: with the fallback installed for the run, a migration handed the plain runtime context would still print on the command's writer, so what separates the two is the option the context carries */
+    if false == carriedByTheContext {
+        t.Fatal("the migration was not handed the context carrying the command's posture")
+    }
+
+    if &elsewhere == seenDuringTheRun {
+        t.Fatal("expected the command to install its own posture as the fallback for the length of the run")
+    }
+
+    if &elsewhere != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the command to put the fallback back on the way out, got %v", resolveDefaultRunnerOption().Writer)
     }
 }

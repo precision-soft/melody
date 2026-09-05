@@ -43,14 +43,17 @@ func (instance *MigrateCommand) Flags() []clicontract.Flag {
 
 func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer(), option)
+    outputInstance := newCommandOutput(commandContext.Writer(), commandContext.Arguments(), option)
 
     startedAt := time.Now()
     defer func() {
         runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
     }()
 
-    SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer(), option))
+    runnerOption := runnerOptionForCommand(commandContext.Writer(), option)
+    ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
+    /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it was handed, and put back on the way out */
+    defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))
 
     db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
     if nil != dbErr {
@@ -64,7 +67,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
     }
 
     /* take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
-    if lockErr := migrator.Lock(runtimeInstance.Context()); nil != lockErr {
+    if lockErr := migrator.Lock(ctx); nil != lockErr {
         /* the refusal names the resource and the remedy, the way the unknown-manager refusal three lines away already does. On its own bun's error states that a lock exists and nothing else: not which database it belongs to, and not that this command set ships db:unlock to clear a lock a crashed process left behind — the whole distance between knowing what happened and knowing what to do. The bun error stays the cause, so errors.Is still reaches it. */
         return exception.NewError(
             "migrate: the migration lock is held; another migration is running, or a crashed one left it behind",
@@ -78,14 +81,14 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
     }
     /* the unlock failure becomes the command's verdict only when the migration itself succeeded: a failed migration keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(runtimeInstance.Context(), migrator, outputInstance)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance)
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }
     }()
 
     if true == outputInstance.wantsDetail() {
-        identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
+        identity, identityErr := fetchDatabaseIdentity(ctx, db)
         if nil != identityErr {
             return identityErr
         }
@@ -95,7 +98,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
         }
     }
 
-    group, migrateErr := migrator.Migrate(runtimeInstance.Context())
+    group, migrateErr := migrator.Migrate(ctx)
     if nil != migrateErr {
         /* a group that fails part way through has already applied — and recorded as applied — everything before the one that broke, and bun returns those beside the failure. Thrown away here, the operator was told which migration failed and nothing about which had landed, so the choice between re-running (safe) and rolling back (which would take the landed ones with it) could not be made without inspecting the database by hand. The cron generator reports its own writes beside its failure for the same reason. */
         printAppliedGroup(outputInstance, managerName, group)

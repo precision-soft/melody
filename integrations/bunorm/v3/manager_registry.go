@@ -119,16 +119,6 @@ func isNilInterface(value any) bool {
     }
 }
 
-/* panicCause reads a recovered panic value as the cause of the error the recovery boundary fabricates in its place. It mirrors exception.PanicCause rather than calling it, because this module's go.mod pins a framework version that predates that door. A typed nil answers no cause: its Error() would dereference a nil receiver at the first render of the very record the boundary exists to hand on. */
-func panicCause(recovered any) error {
-    recoveredErr, isRecoveredError := recovered.(error)
-    if false == isRecoveredError || true == isNilInterface(recoveredErr) {
-        return nil
-    }
-
-    return recoveredErr
-}
-
 /* MigrationDatabase answers the connection the migration commands should run on: a dedicated one with the driver deadlines lifted when the provider implements MigrationProvider — reported through the second return — and the ordinary pooled connection otherwise. A request pool carries read and write deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back; the dedicated connection exists so a long migration finishes instead. An empty name selects the default definition. The dedicated database is opened once per name and cached under it; the migration commands end it through CloseMigrationDatabase on their way out, and the registry's own Close stays the net underneath for whatever did not. */
 func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, error) {
     if "" == name {
@@ -401,7 +391,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         pendingOpen.openError = exception.NewError(
             fmt.Sprintf("bunorm manager %s %s %s", stage, outcome, detail),
             refusalContext,
-            panicCause(recovered),
+            exception.PanicCause(recovered),
         )
         close(pendingOpen.done)
 
@@ -615,8 +605,8 @@ func (instance *ManagerRegistry) Close() error {
         <-migrationOpenDone
     }
 
-    /* bun's diagnostic channel is handed back LAST, while the logger this registry reports through is still alive: the container closes the registry before the logging service, because the registry resolves it. Everything above — a pool close that provokes a bun warning, an open finishing against the closed flag — still reaches the journal; what comes after belongs on standard error. */
-    ResetDiagnostics()
+    /* bun's diagnostic channel is handed back LAST, while the logger this registry reports through is still alive: the container closes the registry before the logging service, because the registry resolves it. Everything above — a pool close that provokes a bun warning, an open finishing against the closed flag — still reaches the journal; what comes after belongs on standard error. It is handed back only when it is this registry's: a second registry in the same process, routed to its own logger, keeps its channel through this teardown. */
+    resetDiagnosticsRoutedTo(instance.currentLogger())
 
     /* teardown diagnostics must name every pool that failed to close, not the first alone: the caller gets one error, so the other failures would otherwise leave no trace anywhere */
     if 1 < len(failedNames) {

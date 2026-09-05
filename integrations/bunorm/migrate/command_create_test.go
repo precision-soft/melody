@@ -1,6 +1,7 @@
 package migrate
 
 import (
+    "encoding/json"
     "os"
     "path/filepath"
     "regexp"
@@ -81,5 +82,30 @@ func TestCreateCommand_MissingNameFails(t *testing.T) {
     /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it */
     if true == strings.Contains(rendered, "ERROR:") {
         t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
+    }
+}
+
+/* the machine document names the argument the command ran on: built without the arguments it answered an empty list for every command, db:create included, whose one argument is the migration the document reports on */
+func TestCreateCommand_TheMachineDocumentCarriesTheArguments(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+    migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(t.TempDir()))
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--format=json", "create_users")
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    var document struct {
+        Meta struct {
+            Arguments []string `json:"arguments"`
+        } `json:"meta"`
+    }
+    if decodeErr := json.Unmarshal([]byte(rendered), &document); nil != decodeErr {
+        t.Fatalf("the output is not one json document: %v; got %q", decodeErr, rendered)
+    }
+
+    if 1 != len(document.Meta.Arguments) || "create_users" != document.Meta.Arguments[0] {
+        t.Fatalf("meta.arguments = %v, want [create_users]", document.Meta.Arguments)
     }
 }
