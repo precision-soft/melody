@@ -1008,7 +1008,6 @@ func TestRedisTokenStore_NegativeEpochRetentionIsRefusedNotIgnored(t *testing.T)
 }
 
 /* the bounded doors are probed over a store whose replies stop arriving; each call runs under a timer far below the client's own five-second ceiling, so a mutant that hands a round trip the unbounded context fails on the timer instead of on the ceiling, and a mutant that removes the bound on a read-only command — which the client retries for as long as the context allows — fails on the timer instead of never */
-const tokenStoreBoundProbeBudget = 2 * time.Second
 
 func newWedgedTokenStore(t *testing.T, options ...TokenStoreOption) (*RedisTokenStore, *gate) {
     t.Helper()
@@ -1030,7 +1029,7 @@ func newWedgedTokenStore(t *testing.T, options ...TokenStoreOption) (*RedisToken
 func TestRedisTokenStore_PutIsBoundedByTheCallTimeout(t *testing.T) {
     store, _ := newWedgedTokenStore(t)
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.Put("token", securitycontract.Claims{UserIdentifier: "wedge"})
 
         return nil
@@ -1040,7 +1039,7 @@ func TestRedisTokenStore_PutIsBoundedByTheCallTimeout(t *testing.T) {
 func TestRedisTokenStore_DeleteIsBoundedByTheCallTimeout(t *testing.T) {
     store, _ := newWedgedTokenStore(t)
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.Delete("token")
 
         return nil
@@ -1050,7 +1049,7 @@ func TestRedisTokenStore_DeleteIsBoundedByTheCallTimeout(t *testing.T) {
 func TestRedisTokenStore_DeleteByUserScanIsBoundedByTheCallTimeout(t *testing.T) {
     store, _ := newWedgedTokenStore(t)
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.DeleteByUser("wedge")
 
         return nil
@@ -1060,7 +1059,7 @@ func TestRedisTokenStore_DeleteByUserScanIsBoundedByTheCallTimeout(t *testing.T)
 func TestRedisTokenStore_PurgeExpiredScanIsBoundedByTheCallTimeout(t *testing.T) {
     store, _ := newWedgedTokenStore(t)
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.PurgeExpired()
 
         return nil
@@ -1070,7 +1069,7 @@ func TestRedisTokenStore_PurgeExpiredScanIsBoundedByTheCallTimeout(t *testing.T)
 func TestRedisTokenStore_RevokeBeforeIsBoundedByTheCallTimeout(t *testing.T) {
     store, _ := newWedgedTokenStore(t)
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.RevokeBefore("wedge", "", time.Now())
 
         return nil
@@ -1080,7 +1079,7 @@ func TestRedisTokenStore_RevokeBeforeIsBoundedByTheCallTimeout(t *testing.T) {
 func TestRedisTokenStore_LookupCapsARuntimeWithoutDeadlineAtTheCallTimeout(t *testing.T) {
     store, _ := newWedgedTokenStore(t)
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         _, _, lookupErr := store.Lookup(newTokenStoreRuntime(), "token")
 
         return lookupErr
@@ -1090,7 +1089,7 @@ func TestRedisTokenStore_LookupCapsARuntimeWithoutDeadlineAtTheCallTimeout(t *te
 func TestRedisTokenStore_RevocationEpochCapsARuntimeWithoutDeadlineAtTheCallTimeout(t *testing.T) {
     store, _ := newWedgedTokenStore(t)
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         _, epochErr := store.RevocationEpoch(newTokenStoreRuntime(), "wedge", "")
 
         return epochErr
@@ -1108,7 +1107,7 @@ func TestRedisTokenStore_LookupKeepsATighterRequestDeadline(t *testing.T) {
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 
     started := time.Now()
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         _, _, lookupErr := store.Lookup(runtimeInstance, "token")
 
         return lookupErr
@@ -1193,7 +1192,7 @@ func TestRedisTokenStore_DeleteByUserBatchIsBoundedByTheCallTimeout(t *testing.T
 
     storeGate.WedgeIntegerReplies()
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.DeleteByUser("batch")
 
         return nil
@@ -1209,7 +1208,7 @@ func TestRedisTokenStore_PurgeExpiredBatchIsBoundedByTheCallTimeout(t *testing.T
 
     storeGate.WedgeIntegerReplies()
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.PurgeExpired()
 
         return nil
@@ -1225,7 +1224,7 @@ func TestRedisTokenStore_PurgeExpiredMemberScanIsBoundedByTheCallTimeout(t *test
 
     storeGate.WedgeArrayRepliesAfter(1)
 
-    requireDeadlineExceeded(t, awaitOutcome(t, tokenStoreBoundProbeBudget, func() error {
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.PurgeExpired()
 
         return nil

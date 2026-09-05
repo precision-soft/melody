@@ -2,6 +2,7 @@ package rueidis
 
 import (
     "testing"
+    "time"
 
     "github.com/redis/rueidis"
 
@@ -76,6 +77,14 @@ func (instance *containerRegistrar) RegisterService(serviceName string, provider
     instance.target.MustRegister(serviceName, provider, options...)
 }
 
+func (instance *containerRegistrar) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    return instance.target.Register(serviceName, provider, options...)
+}
+
+func (instance *containerRegistrar) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
+    instance.target.MustRegister(serviceName, provider, options...)
+}
+
 /* E6-15: the raw client's Close returns nothing, so registered alone it could never join the container's teardown and the connection lived exactly as long as the process; through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */
 func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolved(t *testing.T) {
     client := &closeSpyClient{}
@@ -114,5 +123,34 @@ func TestRegisterConnectionService_TeardownLeavesAnUnresolvedConnectionOpen(t *t
 
     if true == client.closed {
         t.Fatalf("expected an unresolved connection to stay the composition root's to close")
+    }
+}
+
+func TestRegisterLockerServiceWithOptions_HandsTheOptionsToTheLocker(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    registrar := &containerRegistrar{target: serviceContainer}
+
+    RegisterLockerServiceWithOptions(registrar, fakeClient{}, WithLockerCallTimeout(750*time.Millisecond))
+
+    locker, ok := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
+    if false == ok {
+        t.Fatalf("expected the registered locker to be this package's, got %T", melodylock.LockerMustFromContainer(serviceContainer))
+    }
+
+    if 750*time.Millisecond != locker.callTimeout {
+        t.Fatalf("expected the options to reach the registered locker, got call timeout %v", locker.callTimeout)
+    }
+}
+
+/* PIN of the door's contract, not a guard: the option-less registration builds the locker at its defaults, the bounded one */
+func TestRegisterLockerService_KeepsTheDefaultCallTimeout(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    registrar := &containerRegistrar{target: serviceContainer}
+
+    RegisterLockerService(registrar, fakeClient{})
+
+    locker := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
+    if defaultLockerCallTimeout != locker.callTimeout {
+        t.Fatalf("expected the option-less registration to keep the default call timeout, got %v", locker.callTimeout)
     }
 }

@@ -212,6 +212,9 @@ func dialGated(t *testing.T) (redisclient.Client, *gate) {
     return client, shared
 }
 
+/* boundProbeBudget is the timer every bounded-call probe runs under: far below the client's five-second connection timeout, so a mutant that hands a round trip the unbounded context fails on the timer whichever class the command is in — a write the ceiling would end in five seconds, a read the client retries for good. */
+const boundProbeBudget = 2 * time.Second
+
 /* awaitOutcome runs a call that is expected to return on its own within the budget and fails the test by name when it does not, so a mutant that removes a bound fails here instead of hanging the suite for the client's ceiling times the number of tests. A panic inside the call is handed back as its value. */
 func awaitOutcome(t *testing.T, budget time.Duration, call func() error) error {
     t.Helper()
@@ -244,7 +247,7 @@ func awaitOutcome(t *testing.T, budget time.Duration, call func() error) error {
     }
 }
 
-/* requireDeadlineExceeded asserts that a refusal carries the call timeout's own deadline in its chain, which is what separates a bounded call from one the client's ceiling or retry policy ended. */
+/* requireDeadlineExceeded asserts that a refusal carries a deadline in its chain. Measured, that separates a bounded call from one the client's retry policy ended — which never returns — but NOT from one the client's own connection timeout ended: the ceiling refuses through context.DeadlineExceeded as well, five seconds in. What separates the bound from the ceiling is the budget every probe runs under, two seconds, below the ceiling. */
 func requireDeadlineExceeded(t *testing.T, err error) {
     t.Helper()
 

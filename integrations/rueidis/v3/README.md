@@ -28,7 +28,7 @@ if err != nil {
 Optional configuration:
 
 * [`ClientConfig`](./client_config.go) — client name, DB selection, TLS, client-side cache toggle, ping-on-start.
-* [`TimeoutConfig`](./timeout_config.go) — **boot only**. `ConnectTimeout` and `CommandTimeout` bound the provider's own ping round trips; neither is passed into `rueidis.ClientOption`, so ordinary commands are not bounded by them. The network deadline a running application answers to is `ClientConfig.ConnWriteTimeout`, which the client also applies as the deadline of a command whose context carries none — and which does not end a READ: the client retries a read-only command on a fresh connection for as long as the context allows, so the budget that ends one is the per-call timeout of the service issuing it (`WithRateLimiterCallTimeout`, `WithTokenStoreCallTimeout`, `WithServerSentEventBackplaneCallTimeout`, `cache.WithCommandTimeout`).
+* [`TimeoutConfig`](./timeout_config.go) — **boot only**. `ConnectTimeout` and `CommandTimeout` bound the provider's own ping round trips; neither is passed into `rueidis.ClientOption`, so ordinary commands are not bounded by them. The network deadline a running application answers to is `ClientConfig.ConnWriteTimeout`, which the client also applies as the deadline of a command whose context carries none — and which does not end a READ: the client retries a read-only command on a fresh connection for as long as the context allows, so the budget that ends one is the per-call timeout of the service issuing it (`WithRateLimiterCallTimeout`, `WithTokenStoreCallTimeout`, `WithLockerCallTimeout`, `WithNonceGuardCallTimeout`, `WithServerSentEventBackplaneCallTimeout`, `cache.WithCommandTimeout`).
 * [`RetryConfig`](./retry_config.go) — the initial-connection retry (see below).
 
 **A configuration is taken whole or not at all.** An absent one is replaced by [`DefaultClientConfig`](./client_config.go) or [`DefaultTimeoutConfig`](./timeout_config.go) entirely; a supplied one is used as it stands, with no field-by-field fill-in. So a partial literal is not "the defaults plus my change": every field left at its zero value is what the provider gets, which turns `PingOnStart` off and turns `DisableCache` off, switching client-side caching on where the shipped default keeps it off — a subsystem with its own memory budget and RESP3 requirements. The blast radius is bounded, measured: the library normalizes a zero dial timeout to its own five seconds, and a dead address still refuses eagerly at client creation even with the ping off. Start from the two constructors above and change what you mean to change.
@@ -80,6 +80,10 @@ Because each field is defaulted on its own, a partially filled `RetryConfig` can
 
 [`NewLocker(client)`](./lock.go) returns a `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock` backed by a Redis key with a TTL. `Acquire` is a non-blocking try (returns `(false, nil)` when another holder owns the key), `Release` deletes the key only if still owned, and `Refresh` extends the TTL, returning a "lock is no longer held" error if the lease was lost.
 
+Every door is one Lua round trip on the caller's runtime context, capped at the locker's call timeout; the framework's `RunExclusive` and `LeaderGate` renew and release under deadlines of their own, and a tighter one always wins. [`NewLockerWithOptions(client, options...)`](./lock.go) takes the options; `NewLocker(client)` builds the same locker at the defaults.
+
+* [`WithLockerCallTimeout(timeout)`](./lock.go) — bounds one round trip of `Acquire`, `Release` and `Refresh`, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds each call for the client's own connection timeout — five seconds at the provider's default — which is what a readiness handler taking the lock on the request path, or a leader gate campaigning on the caller's context, then waits on every attempt; melody's http kernel attaches no deadline to a request.
+
 ## Token store
 
 [`NewTokenStore(client, options...)`](./token_store.go) returns a `*RedisTokenStore` implementing the security `RevocableTokenStore`:
@@ -106,7 +110,10 @@ Options:
 
 ## Nonce guard
 
-[`NewNonceGuard(client)`](./nonce_guard.go) returns a `*NonceGuard` implementing the security `NonceGuard` contract — the shared replay guard for multi-instance HMAC deployments. `Remember(runtime, nonce, ttl)` records the nonce with a millisecond expiry in a single atomic round-trip (`SET NX PX` via a Lua script) and reports whether it was already seen, so there is no check-then-set race between instances. Because the recorded nonces live in Redis, a nonce replayed against **any** application instance is detected — something the in-process `security.MemoryNonceGuard` cannot do. [`NewNonceGuardWithPrefix(client, keyPrefix)`](./nonce_guard.go) overrides the default `melody:nonce` key prefix.
+[`NewNonceGuard(client)`](./nonce_guard.go) returns a `*NonceGuard` implementing the security `NonceGuard` contract — the shared replay guard for multi-instance HMAC deployments. `Remember(runtime, nonce, ttl)` records the nonce with a millisecond expiry in a single atomic round-trip (`SET NX PX` via a Lua script) and reports whether it was already seen, so there is no check-then-set race between instances. Because the recorded nonces live in Redis, a nonce replayed against **any** application instance is detected — something the in-process `security.MemoryNonceGuard` cannot do. [`NewNonceGuardWithPrefix(client, keyPrefix)`](./nonce_guard.go) overrides the default `melody:nonce` key prefix, and [`NewNonceGuardWithOptions(client, options...)`](./nonce_guard.go) takes the options below; the two older doors build the same guard.
+
+* [`WithNonceGuardKeyPrefix(keyPrefix)`](./nonce_guard.go) — the key prefix as an option; an empty value keeps the default.
+* [`WithNonceGuardCallTimeout(timeout)`](./nonce_guard.go) — bounds one round trip of `Remember`, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds the record for the client's own connection timeout, and holds the read-only existence check of a non-positive ttl for good, since the client retries a read-only command for as long as a context without deadline allows — and every authenticator that consults the guard runs on the request path, where melody's http kernel attaches none. A request that already carries a tighter deadline keeps it.
 
 ```go
 nonceGuard := rueidis.NewNonceGuard(client)
@@ -186,12 +193,13 @@ Each capability has a one-call registration helper that binds it to a canonical 
 ```go
 rueidis.RegisterClientService(registrar, client)               /* rueidis.ServiceClient, "service.rueidis.client" */
 rueidis.RegisterLockerService(registrar, client)               /* core lock.ServiceLocker */
+rueidis.RegisterLockerServiceWithOptions(registrar, client, rueidis.WithLockerCallTimeout(500*time.Millisecond))
 rueidis.RegisterTokenStoreService(registrar, client)           /* rueidis.ServiceTokenStore, "service.rueidis.token_store" */
 rueidiscache.RegisterBackendService(registrar, client, "app:") /* core cache.ServiceCacheBackend */
 rueidiscache.RegisterBackendServiceWithOptions(registrar, client, "app:", rueidiscache.WithCommandTimeout(time.Second))
 ```
 
-`RegisterClientService`, `RegisterLockerService`, and `RegisterTokenStoreService` live in [`service_resolver.go`](./service_resolver.go); `RegisterBackendService` and [`RegisterBackendServiceWithOptions`](./cache/service_resolver.go) live in [`cache/service_resolver.go`](./cache/service_resolver.go). The option-less door registers the backend unbounded, the subpackage's documented default; the one with options is how a composition root bounds the request-path reads, and the [`cache.ModuleConfig.BackendOptions`](./cache/module.go) field hands the same options through the module.
+`RegisterClientService`, `RegisterLockerService`, [`RegisterLockerServiceWithOptions`](./service_resolver.go) — the door through which a composition root hands `WithLockerCallTimeout` to the registered locker, which the option-less door builds at its defaults — and `RegisterTokenStoreService` live in [`service_resolver.go`](./service_resolver.go); `RegisterBackendService` and [`RegisterBackendServiceWithOptions`](./cache/service_resolver.go) live in [`cache/service_resolver.go`](./cache/service_resolver.go). The option-less door registers the backend unbounded, the subpackage's documented default; the one with options is how a composition root bounds the request-path reads, and the [`cache.ModuleConfig.BackendOptions`](./cache/module.go) field hands the same options through the module, as [`ModuleConfig.LockerOptions`](./module.go) does for the locker.
 
 Or bundle them as self-registering application modules — `RegisterModule` registers the client service and, opt-in, the locker and revocable token store (and the cache backend), instead of calling each helper by hand:
 

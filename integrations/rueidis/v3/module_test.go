@@ -2,9 +2,11 @@ package rueidis
 
 import (
     "testing"
+    "time"
 
     "github.com/redis/rueidis"
 
+    "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     melodylock "github.com/precision-soft/melody/v3/lock"
 )
@@ -111,5 +113,21 @@ func TestModule_RegisterServicesDerivesTheClientFromTheConnection(t *testing.T) 
 
     if false == containsName(registrar.names, ServiceClient) {
         t.Fatalf("expected the client service derived from the connection, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesForwardsTheLockerOptions(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    registrar := &containerRegistrar{target: serviceContainer}
+
+    NewModule(ModuleConfig{
+        Client:        fakeClient{},
+        AsLocker:      true,
+        LockerOptions: []LockerOption{WithLockerCallTimeout(750 * time.Millisecond)},
+    }).RegisterServices(registrar)
+
+    locker := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
+    if 750*time.Millisecond != locker.callTimeout {
+        t.Fatalf("expected the module to hand its locker options to the registered locker, got %v", locker.callTimeout)
     }
 }

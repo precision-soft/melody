@@ -58,12 +58,17 @@ func ClientMustFromContainer(serviceContainer containercontract.Container) rueid
 }
 
 func RegisterLockerService(registrar ServiceRegistrar, client rueidis.Client) {
+    RegisterLockerServiceWithOptions(registrar, client)
+}
+
+/* RegisterLockerServiceWithOptions is RegisterLockerService with the options the locker is built with — WithLockerCallTimeout above all; the option-less door registers the locker at its defaults, and ModuleConfig.LockerOptions hands the same options through the module. */
+func RegisterLockerServiceWithOptions(registrar ServiceRegistrar, client rueidis.Client, options ...LockerOption) {
     registrar.RegisterService(
         melodylock.ServiceLocker,
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
             resolveConnectionEdge(resolver)
 
-            return NewLocker(client), nil
+            return NewLockerWithOptions(client, options...), nil
         },
     )
 }
