@@ -1,6 +1,7 @@
 package container
 
 import (
+    "errors"
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -46,9 +47,7 @@ func TestContainer_RegisterType_Interface_AndResolveByType(t *testing.T) {
     }
 }
 
-/* @info same-String() types from different packages */
-
-/* @info both same-string types can now be type-registered under their auto-derived names: the name is import-path-qualified, so "contract.Bus" from two packages no longer collides at registration */
+/* both same-string types can now be type-registered under their auto-derived names: the name is import-path-qualified, so "contract.Bus" from two packages no longer collides at registration */
 func TestRegisterType_SameStringTypesFromDifferentPackagesGetDistinctNames(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -74,3 +73,48 @@ func TestRegisterType_SameStringTypesFromDifferentPackagesGetDistinctNames(t *te
         t.Fatalf("expected each auto-named registration to keep its own value, got %q and %q", alphaBus.Region, betaBus.Region)
     }
 }
+
+/* TestContainer_Register_RefusesAnEmptyTeardownDependencyName pins the refusal an empty name gets: it cannot be an edge, and dropping it silently would report a teardown order that was never installed. */
+func TestContainer_Register_RefusesAnEmptyTeardownDependencyName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*registerProbeService, error) {
+            return &registerProbeService{}, nil
+        },
+        WithTeardownDependency(""),
+    )
+
+    if false == errors.Is(registerErr, ErrTeardownDependencyNameIsRequired) {
+        t.Fatalf("expected ErrTeardownDependencyNameIsRequired, got %v", registerErr)
+    }
+
+    /* the refusal leaves nothing behind: the registration is not half-installed */
+    if true == serviceContainer.Has("service.dependent") {
+        t.Fatalf("expected the refused registration to leave no provider behind")
+    }
+}
+
+/* TestContainer_Register_RefusesATeardownDependencyOnItself pins the refusal a self-declaration gets. The teardown walk ignores a self-edge, so the declaration would be inert; it is refused where it is written rather than dropped where it is read. */
+func TestContainer_Register_RefusesATeardownDependencyOnItself(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*registerProbeService, error) {
+            return &registerProbeService{}, nil
+        },
+        WithTeardownDependency("service.dependent"),
+    )
+
+    if false == errors.Is(registerErr, ErrTeardownDependencyIsSelf) {
+        t.Fatalf("expected ErrTeardownDependencyIsSelf, got %v", registerErr)
+    }
+
+    if true == serviceContainer.Has("service.dependent") {
+        t.Fatalf("expected the refused registration to leave no provider behind")
+    }
+}
+
+type registerProbeService struct{}

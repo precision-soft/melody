@@ -611,6 +611,11 @@ func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
     firstErr := <-firstDone
     secondErr := <-secondDone
 
+    /* the equality below says nothing while both results are nil — two callers who each got a plain success share it by accident. The blocking service fails its Close so the shared result is a value there is only one of */
+    if nil == firstErr {
+        t.Fatalf("expected the teardown failure to be reported to the first caller, got nil")
+    }
+
     if firstErr != secondErr {
         t.Fatalf("expected both callers to share the teardown result, got %v and %v", firstErr, secondErr)
     }
@@ -621,11 +626,13 @@ type blockingCloser struct {
     observed chan struct{}
 }
 
+var errBlockingCloserFailed = errors.New("the blocking closer failed")
+
 func (instance *blockingCloser) Close() error {
     instance.observed <- struct{}{}
     <-instance.release
 
-    return nil
+    return errBlockingCloserFailed
 }
 
 type panickingCloseService struct{}
@@ -1036,6 +1043,86 @@ func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
     }
 }
 
+type replacedFailingProbe struct {
+    failure error
+}
+
+func (instance *replacedFailingProbe) Close() error {
+    return instance.failure
+}
+
+type secondReplacedFailingProbe struct {
+    failure error
+}
+
+func (instance *secondReplacedFailingProbe) Close() error {
+    return instance.failure
+}
+
+/* two replaced built instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so a shared constant key let the second failure overwrite the first's record, naming one failure where two happened */
+func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerFirstErr := serviceContainer.Register(
+        "app.replaced.failing.first",
+        func(resolver containercontract.Resolver) (*replacedFailingProbe, error) {
+            return &replacedFailingProbe{failure: errors.New("refusing to close app.replaced.failing.first")}, nil
+        },
+    )
+    if nil != registerFirstErr {
+        t.Fatalf("unexpected register error: %v", registerFirstErr)
+    }
+
+    registerSecondErr := serviceContainer.Register(
+        "app.replaced.failing.second",
+        func(resolver containercontract.Resolver) (*secondReplacedFailingProbe, error) {
+            return &secondReplacedFailingProbe{failure: errors.New("refusing to close app.replaced.failing.second")}, nil
+        },
+    )
+    if nil != registerSecondErr {
+        t.Fatalf("unexpected register error: %v", registerSecondErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.replaced.failing.first"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.replaced.failing.second"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.first", &replacedFailingProbe{}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.second", &secondReplacedFailingProbe{}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the two failing replaced closes to be reported")
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected a failures map in the close error context, got %+v", typedError.Context())
+    }
+
+    if "refusing to close app.replaced.failing.first" != failures["container.replacedInstance[0]"] {
+        t.Fatalf("expected the first replaced failure under its own key, got %+v", failures)
+    }
+
+    if "refusing to close app.replaced.failing.second" != failures["container.replacedInstance[1]"] {
+        t.Fatalf("expected the second replaced failure under its own key, got %+v", failures)
+    }
+}
+
 /* an override evicting an EARLIER override closes nothing: an installed override belongs to whoever installed it, and only what the container itself built enters the graveyard. */
 func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
     serviceContainer := NewContainer()
@@ -1077,10 +1164,9 @@ func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    for _, label := range closeSequence {
-        if "first-override" == label {
-            t.Fatalf("expected the evicted override to stay its installer's, got %v", closeSequence)
-        }
+    /* MEASURED, not assumed: the surviving override IS closed with the container, and only the EVICTED one is left to its installer. A loop that merely refuses the evicted label passes over an empty slice too, so it cannot tell this apart from a teardown that closed nothing at all */
+    if 1 != len(closeSequence) || "second-override" != closeSequence[0] {
+        t.Fatalf("expected only the surviving override to be closed, got %v", closeSequence)
     }
 }
 
@@ -1177,7 +1263,7 @@ func (instance *lazyHoldingService) Close() error {
     return nil
 }
 
-/* a service that keeps its resolver and reaches through it after its provider returned depends on what it then resolves exactly as hard as one that resolved it during construction. The edge used to be read from the live resolution stack, which is empty by then, so no edge was recorded at all and the teardown fell back to closing the two in descending name order — here that closes the dependency FIRST, and the holder's own Close then runs over a service that has already ended. The names are chosen so the fallback and the correct order disagree: without the edge, "service.a" sorts after "app.holder" and goes first. */
+/* a service that keeps its resolver and reaches through it after its provider returned depends on what it then resolves exactly as hard as one that resolved it during construction. The edge used to be read from the live resolution stack, which is empty by then, so no edge was recorded at all — here that closes the dependency FIRST, and the holder's own Close then runs over a service that has already ended. Without the edge the creation-order tie-break decides, and it disagrees with the graph: the dependency is built AFTER the holder that reaches for it, so latest-first closes it before its holder. */
 func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptResolver(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1256,15 +1342,7 @@ func (instance *panickingCloseWithTextService) Close() error {
     panic("the drain buffer was nil")
 }
 
-/*
-TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack pins what an
-operator learns from the one boundary that contains a teardown panic: nothing
-above it sees the panic and nothing below it survives, so whatever the recorded
-failure drops is gone. An error-shaped panic value kept only as its stringified
-message collapsed to one line at the render boundary, taking the context map
-and the cause chain of the very error the Close raised with it, and the frames
-that ran existed only inside the recover.
-*/
+/* TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack pins what an operator learns from the one boundary that contains a teardown panic: nothing above it sees the panic and nothing below it survives, so whatever the recorded failure drops is gone. An error-shaped panic value kept only as its stringified message collapsed to one line at the render boundary, taking the context map and the cause chain of the very error the Close raised with it, and the frames that ran existed only inside the recover. */
 func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T) {
     panicCause := exception.NewError(
         "the socket was already gone",
@@ -1316,15 +1394,7 @@ func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(
     }
 }
 
-/*
-TestContainer_Close_ClosesTheEarliestCreatedServiceLast pins the tie-break the
-dependency graph leaves open. It used to be the node key descending — a string
-comparison nobody wrote — so a service resolved first at boot and used silently
-by everything afterwards, the logger being the case that matters, was closed in
-the middle of the teardown by nothing but its name. Whether a worker still had
-somewhere to report its drain came down to whether it sorted above or below its
-dependency: renaming app.worker to zz.worker was the whole difference.
-*/
+/* TestContainer_Close_ClosesTheEarliestCreatedServiceLast pins the tie-break the dependency graph leaves open. It used to be the node key descending — a string comparison nobody wrote — so a service resolved first at boot and used silently by everything afterwards, the logger being the case that matters, was closed in the middle of the teardown by nothing but its name. Whether a worker still had somewhere to report its drain came down to whether it sorted above or below its dependency: renaming app.worker to zz.worker was the whole difference. */
 func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
     for _, dependentName := range []string{"service.aaa.worker", "service.zzz.worker"} {
         serviceContainer := NewContainer()
@@ -1377,8 +1447,8 @@ func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
     }
 }
 
-/* a declared edge still decides: the tie-break only settles what the graph says nothing about, so a dependency created LATER than its dependent is still closed after it */
-func TestContainer_Close_ADeclaredEdgeBeatsTheCreationOrder(t *testing.T) {
+/* a declared edge is honoured: the provider resolves its dependency during construction, so the edge is recorded and the dependency closes last. The creation-order tie-break answers the same here — a dependency built DURING its dependent finishes its own filing FIRST and is therefore the older node, which latest-first closes last anyway — so this pins that the edge is read, not that it outranks the tie-break. The fixture where the two disagree is the kept-handle one below, whose dependency is built after the holder that reaches for it. */
+func TestContainer_Close_ADeclaredEdgeIsHonoured(t *testing.T) {
     serviceContainer := NewContainer()
 
     var mutex sync.Mutex
@@ -1410,7 +1480,7 @@ func TestContainer_Close_ADeclaredEdgeBeatsTheCreationOrder(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    /* the dependent is resolved first, so its dependency is created AFTER it: the edge must still put the dependency last */
+    /* the dependent is resolved first, but its dependency is built INSIDE that provider and finishes its own filing before it returns, so the dependency is the OLDER node: the edge and the creation-order tie-break agree here */
     if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -1436,15 +1506,7 @@ func (instance *closeTimeResolvingService) Close() error {
     return nil
 }
 
-/*
-TestContainer_Close_AServiceStillResolvesDuringTheTeardown pins the first of the
-two closing states against the second. Refusing every resolution from the moment
-Close begins would take away the very thing closing the logger last exists to
-give: a worker reporting its drain resolves what it reports through, from inside
-its own Close. What is refused is a resolution made after the LAST close
-returned, which used to answer the instance found in the map — already closed —
-with a nil error.
-*/
+/* TestContainer_Close_AServiceStillResolvesDuringTheTeardown pins the first of the two closing states against the second. Refusing every resolution from the moment Close begins would take away the very thing closing the logger last exists to give: a worker reporting its drain resolves what it reports through, from inside its own Close. What is refused is a resolution made after the LAST close returned, which used to answer the instance found in the map — already closed — with a nil error. */
 func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1496,15 +1558,7 @@ func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     }
 }
 
-/*
-TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state.
-A resolution performed once the teardown is over was answered out of the maps —
-which the teardown has just emptied of meaning — so a caller holding a resolver
-received a handle to a service every Close in the process had already run on,
-with a nil error saying it was fine. The fast path is asked separately because a
-memoized instance never reaches the creation guard that refuses a closed
-container.
-*/
+/* TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state. A resolution performed once the teardown is over was answered out of the maps — which the teardown has just emptied of meaning — so a caller holding a resolver received a handle to a service every Close in the process had already run on, with a nil error saying it was fine. The fast path is asked separately because a memoized instance never reaches the creation guard that refuses a closed container. */
 func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1585,5 +1639,223 @@ func TestScope_Get_RefusesAfterTheContainerTeardownFinished(t *testing.T) {
 
     if false == strings.Contains(lateErr.Error(), "container is closed") {
         t.Fatalf("expected the closed-container refusal, got %v", lateErr)
+    }
+}
+
+type labelledLazyHolder struct {
+    label    string
+    recorder *closeOrderRecorder
+    handle   *LazyService[*closeOrderServiceA]
+}
+
+func (instance *labelledLazyHolder) Close() error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+/* the in-degree is what makes a shared dependency wait for the LAST of its dependents, and only a fixture where releasing it on the first one changes the answer can tell that apart from the creation-order tie-break. Both holders keep a handle and reach through it after their providers returned, so the shared service is stamped after both of them: released on the first decrement it is the newest node with nothing left pointing at it, and it closes BETWEEN the two holders — the teardown running over a service the second holder is still about to use. The sibling diamond above cannot see this, because there the shared dependency is built during its dependents and is the oldest node either way. */
+func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.shared",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    /* both holders carry the same Go type, so neither files a type node: the stamps below are the name nodes alone */
+    if registerErr := serviceContainer.Register(
+        "app.holder.first",
+        func(resolver containercontract.Resolver) (*labelledLazyHolder, error) {
+            return &labelledLazyHolder{
+                label:    "first",
+                recorder: recorder,
+                handle:   Lazy[*closeOrderServiceA](resolver, "service.shared"),
+            }, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.holder.second",
+        func(resolver containercontract.Resolver) (*labelledLazyHolder, error) {
+            return &labelledLazyHolder{
+                label:    "second",
+                recorder: recorder,
+                handle:   Lazy[*closeOrderServiceA](resolver, "service.shared"),
+            }, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    firstHolder, firstErr := FromResolver[*labelledLazyHolder](serviceContainer, "app.holder.first")
+    if nil != firstErr {
+        t.Fatalf("unexpected get error: %v", firstErr)
+    }
+
+    secondHolder, secondErr := FromResolver[*labelledLazyHolder](serviceContainer, "app.holder.second")
+    if nil != secondErr {
+        t.Fatalf("unexpected get error: %v", secondErr)
+    }
+
+    /* the shared service is built here, after BOTH holders, and each reach records an edge onto it */
+    if nil == firstHolder.handle.Get() {
+        t.Fatalf("expected the first handle to resolve the shared service")
+    }
+
+    if nil == secondHolder.handle.Get() {
+        t.Fatalf("expected the second handle to resolve the shared service")
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 3 != len(closeSequence) {
+        t.Fatalf("expected 3 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "second" != closeSequence[0] || "first" != closeSequence[1] || "a" != closeSequence[2] {
+        t.Fatalf("expected the shared service to wait for both holders, got %v", closeSequence)
+    }
+}
+
+/* an alias group is as old as its OLDEST member, and only a group that SPANS a third node can tell that from taking the newest. Two registered names answer the same pointer — the ordinary shape of an override installed over a service somebody already holds — and an unrelated service is built between the two filings, so the group runs from the first name to the second with the middle node inside it. Read as old as its first filing the pair closes after the middle; read as new as its second it closes before, tearing a service down ahead of one built later than it. No edge exists anywhere here, which is what keeps this pinned to the collapse and not to the graph. */
+func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    shared := &closeOrderServiceA{recorder: recorder}
+
+    if registerErr := serviceContainer.Register(
+        "app.aaa.first",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return shared, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.middle",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.zzz.second",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.aaa.first"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.middle"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    /* the same pointer under a second name, filed after the middle service: this is the far end of the group */
+    if overrideErr := serviceContainer.OverrideInstance("app.zzz.second", shared); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "b" != closeSequence[0] || "a" != closeSequence[1] {
+        t.Fatalf("expected the alias group to close as old as its oldest member, got %v", closeSequence)
+    }
+}
+
+/* the nodes a cycle leaves behind are still closed, and the order they are closed in is the same latest-first the rest of the teardown uses — the sibling above asserts only that the cycle is NAMED, so the comparator that sorts the remainder can be reversed with the suite green. The two are stamped apart and the edges are installed by hand, which is the only way to build a cycle the container refuses to create on its own. */
+func TestContainer_Close_TheCycleRemainderClosesLatestFirst(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.cycle.early",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.cycle.late",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.cycle.early"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.cycle.late"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    serviceContainer.registerDependencyLocked("service:app.cycle.early", "service:app.cycle.late")
+    serviceContainer.registerDependencyLocked("service:app.cycle.late", "service:app.cycle.early")
+    serviceContainer.mutex.Unlock()
+
+    if closeErr := serviceContainer.Close(); nil == closeErr {
+        t.Fatalf("expected the dependency cycle to be reported")
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "b" != closeSequence[0] || "a" != closeSequence[1] {
+        t.Fatalf("expected the cycle remainder to close latest first, got %v", closeSequence)
     }
 }

@@ -8,6 +8,14 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
+/* containerNameNodeKeyPrefix is the one spelling of a container name node's key. It is a constant rather than a literal at each site because the teardown reads the graph by key: a declared edge written under one spelling and a created node recorded under another would never meet, and the ordering would be silently absent rather than wrong — the failure no test of the ordering itself can see. */
+const containerNameNodeKeyPrefix = "service:"
+
+/* containerNameNodeKey is the key a container service is known by in the resolution stack, the creation order and the teardown graph. */
+func containerNameNodeKey(serviceName string) string {
+    return containerNameNodeKeyPrefix + serviceName
+}
+
 /* the scoped node keys carry their own prefix so the two levels never share one. The resolution stack detects a cycle by node key, and a scoped service that resolves the container service it replaces must be reported as repeating the scoped node rather than the container one; the container's teardown walks its own dependency graph by the same keys and must never find a node standing for a value it does not hold. */
 func scopedNameNodeKey(serviceName string) string {
     return "scope:service:" + serviceName
@@ -42,7 +50,7 @@ func scopedProviderCreateFunc(provider providerAny) createWithGuardCreateFunc {
 
 /* scopedServiceByName builds — or hands back — a service this scope owns. Everything about it is the scope's: the provider comes from the scope, the creation guard that serialises concurrent resolutions is the scope's own map, and so is the map the finished value lands in. Two scopes resolving the same name therefore never meet — they contend on nothing, wait on nothing of each other's, and each ends up with the instance that belongs to its own request — while two goroutines of the SAME request still share one instance, because they share one guard.
 
-It runs under the container mutex like every other creation: that is the lock the guard holds and releases around the provider call, and container-then-scope is the only order the two locks are ever taken in. The scope is deliberately left visible for the duration, because a scoped service is the request and may read both levels. */
+   It runs under the container mutex like every other creation: that is the lock the guard holds and releases around the provider call, and container-then-scope is the only order the two locks are ever taken in. The scope is deliberately left visible for the duration, because a scoped service is the request and may read both levels. */
 func (instance *resolverContext) scopedServiceByName(
     scopeInstance *scope,
     serviceName string,
@@ -53,6 +61,7 @@ func (instance *resolverContext) scopedServiceByName(
         guardedCreation{
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedNameNodeKey(serviceName),
+            ownerNodeKey: scopedNameNodeKey(serviceName),
             getCreatingState: func() (*creationState, bool) {
                 state, exists := scopeInstance.creatingByName[serviceName]
 
@@ -74,7 +83,7 @@ func (instance *resolverContext) scopedServiceByName(
             },
             create: scopedProviderCreateFunc(provider),
             store: instanceStore{
-                keep: func(value any) error {
+                keep: func(value any) (any, bool, error) {
                     return scopeInstance.storeCreatedInstance(serviceName, canonicalType, value)
                 },
             },
@@ -95,6 +104,7 @@ func (instance *resolverContext) scopedServiceByType(
         guardedCreation{
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedTypeNodeKey(typeKey),
+            ownerNodeKey: scopedTypeNodeKey(typeKey),
             getCreatingState: func() (*creationState, bool) {
                 state, exists := scopeInstance.creatingByType[typeKey]
 
@@ -116,7 +126,7 @@ func (instance *resolverContext) scopedServiceByType(
             },
             create: scopedProviderCreateFunc(provider),
             store: instanceStore{
-                keep: func(value any) error {
+                keep: func(value any) (any, bool, error) {
                     return scopeInstance.storeCreatedInstance("", canonicalType, value)
                 },
             },

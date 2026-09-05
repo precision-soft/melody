@@ -4,6 +4,7 @@ import (
     "fmt"
     "strings"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -28,11 +29,7 @@ func (instance *ProductListCommand) Description() string {
     return "prints products in a table"
 }
 
-/* Flags declares --limit with a non-zero default: an unset flag reads back the declared value both under
-the cli entry point and under melody:cron:run, whose dispatcher hands every scheduled command its declared
-flags — the printed "product list: limit=…" line makes the honored default observable on a scheduled tick.
-A non-positive value prints every product, the same convention the framework's own melody:outbox:relay
---limit follows. */
+/* Flags declares --limit with a non-zero default: an unset flag reads back the declared value both under the cli entry point and under melody:cron:run, whose dispatcher hands every scheduled command its declared flags — the printed "product list: limit=…" line makes the honored default observable on a scheduled tick. A non-positive value prints every product, the same convention the framework's own melody:outbox:relay --limit follows. */
 func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
         &melodyclicontract.IntFlag{
@@ -43,7 +40,7 @@ func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     limit := int(commandContext.Int(productListFlagLimit))
     fmt.Printf("product list: limit=%d\n", limit)
 
@@ -113,16 +110,17 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
     return nil
 }
 
+/* the widths are measured in RUNES, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the whole table — the frozen majors' examples left this class behind when they moved onto the framework's table builder */
 func printTable(headers []string, rows [][]string) {
     widths := make([]int, len(headers))
     for i, header := range headers {
-        widths[i] = len(header)
+        widths[i] = utf8.RuneCountInString(header)
     }
 
     for _, row := range rows {
         for i, col := range row {
-            if len(col) > widths[i] {
-                widths[i] = len(col)
+            if utf8.RuneCountInString(col) > widths[i] {
+                widths[i] = utf8.RuneCountInString(col)
             }
         }
     }
@@ -138,7 +136,7 @@ func printTable(headers []string, rows [][]string) {
 func printRow(columns []string, widths []int) {
     parts := make([]string, 0, len(columns))
     for i, column := range columns {
-        padding := widths[i] - len(column)
+        padding := widths[i] - utf8.RuneCountInString(column)
         parts = append(parts, column+strings.Repeat(" ", padding))
     }
 

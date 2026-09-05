@@ -99,13 +99,14 @@ cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 
 BASELINE_PATH_STRING=".dev/validate/changelog.baseline"
 
-# the majors this run gates. v3 is measured and printed like the rest and is not gated, for the reason the
-# citation and documentation bands give for their own lists: it is the line still under development and its
-# documents are the next stage's work.
+# the majors this run gates. All three are gated: v3's changelogs were brought to the same bar during the
+# stabilization sweep, so a finding there is as actionable as one on the published majors. The cross-major
+# dimension stays a v1/v2 affair by construction — it is the proof of their mirroring.
 GATED_SCOPE_STRING_LIST=(
     "v1"
     "v2"
     "v1+v2"
+    "v3"
 )
 
 # the sections this tree writes, adopted from the release auditor's list rather than written afresh.

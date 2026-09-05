@@ -39,9 +39,7 @@ func newLiveExampleClient(baseUrl string) *liveExampleClient {
         baseUrl: strings.TrimRight(baseUrl, "/"),
         client: &http.Client{
             Timeout: 15 * time.Second,
-            /* a redirect is an assertion in its own right here — the TRANSLATION section proves the token
-               firewall answers 401 json instead of the global entry point's 302 — so the status has to reach the
-               caller unfollowed */
+            /* a redirect is an assertion in its own right here — the TRANSLATION section proves the token firewall answers 401 json instead of the global entry point's 302 — so the status has to reach the caller unfollowed */
             CheckRedirect: func(request *http.Request, previous []*http.Request) error {
                 return http.ErrUseLastResponse
             },
@@ -49,9 +47,7 @@ func newLiveExampleClient(baseUrl string) *liveExampleClient {
     }
 }
 
-/* liveExampleRequest describes one call. The header map is what this client adds over exampleClient.call; a
-contentType of "" leaves the header unset, which matters for the GET probes (a Content-Type on a body-less GET
-would change the request the framework sees). */
+/* liveExampleRequest describes one call. The header map is what this client adds over exampleClient.call; a contentType of "" leaves the header unset, which matters for the GET probes (a Content-Type on a body-less GET would change the request the framework sees). */
 type liveExampleRequest struct {
     method      string
     path        string
@@ -72,8 +68,7 @@ func (instance liveExampleResponse) bodyText() string {
     return string(instance.body)
 }
 
-/* call issues one request and reads the whole response. The path is appended to the base url as a raw string so
-an encoded segment reaches the application still encoded. */
+/* call issues one request and reads the whole response. The path is appended to the base url as a raw string so an encoded segment reaches the application still encoded. */
 func (instance *liveExampleClient) call(label string, callRequest liveExampleRequest) liveExampleResponse {
     var reader io.Reader
     if 0 < len(callRequest.body) {
@@ -118,11 +113,7 @@ func (instance *liveExampleClient) get(label string, path string) liveExampleRes
     return instance.call(label, liveExampleRequest{method: "GET", path: path})
 }
 
-/* openStream starts a request and hands back the still-open response so the caller can read the body as it
-arrives. It is used by the server-sent-event section and by nothing else: the client here carries no overall
-Timeout, because a streaming response never completes and a Client.Timeout would cut the stream mid-check and be
-read as the application closing it. The caller MUST close the returned body — an abandoned stream leaves a
-subscriber and a goroutine inside the long-lived supervised application. */
+/* openStream starts a request and hands back the still-open response so the caller can read the body as it arrives. It is used by the server-sent-event section and by nothing else: the client here carries no overall Timeout, because a streaming response never completes and a Client.Timeout would cut the stream mid-check and be read as the application closing it. The caller MUST close the returned body — an abandoned stream leaves a subscriber and a goroutine inside the long-lived supervised application. */
 func (instance *liveExampleClient) openStream(label string, path string, headerList map[string]string) *http.Response {
     request, requestErr := http.NewRequest("GET", instance.baseUrl+path, nil)
     if nil != requestErr {
@@ -135,8 +126,7 @@ func (instance *liveExampleClient) openStream(label string, path string, headerL
 
     streamingClient := &http.Client{
         Transport: &http.Transport{
-            /* the headers still have to arrive promptly: without this a stream whose handler never wrote its
-               preamble would hang the section instead of failing it */
+            /* the headers still have to arrive promptly: without this a stream whose handler never wrote its preamble would hang the section instead of failing it */
             ResponseHeaderTimeout: 10 * time.Second,
             DisableCompression:    true,
         },
@@ -150,9 +140,7 @@ func (instance *liveExampleClient) openStream(label string, path string, headerL
     return response
 }
 
-/* liveExampleEnvelope is the shape the example's presenter wraps every api payload in
-(presenter/error_presenter.go): success, payload, errors. Decoding it is what separates "the route answered 200"
-from "the route answered its payload" — an html error page or a proxy notice returning 200 fails the decode. */
+/* liveExampleEnvelope is the shape the example's presenter wraps every api payload in (presenter/error_presenter.go): success, payload, errors. Decoding it is what separates "the route answered 200" from "the route answered its payload" — an html error page or a proxy notice returning 200 fails the decode. */
 type liveExampleEnvelope struct {
     Success bool            `json:"success"`
     Payload json.RawMessage `json:"payload"`
@@ -176,8 +164,7 @@ func decodeLiveExampleEnvelope(label string, response liveExampleResponse) liveE
     return envelope
 }
 
-/* decodeLiveExamplePayload decodes the envelope and then its payload into target, refusing an envelope that
-reports failure — a section that decoded a payload out of {"success":false} would be asserting on zero values. */
+/* decodeLiveExamplePayload decodes the envelope and then its payload into target, refusing an envelope that reports failure — a section that decoded a payload out of {"success":false} would be asserting on zero values. */
 func decodeLiveExamplePayload(label string, response liveExampleResponse, target any) {
     envelope := decodeLiveExampleEnvelope(label, response)
 
@@ -196,8 +183,7 @@ func decodeLiveExamplePayload(label string, response liveExampleResponse, target
     }
 }
 
-/* requireLiveExampleStatus is the one-line guard every section opens with, and it names the label so a run whose
-supervised application is stale reports WHICH section could not be exercised rather than a bare status mismatch. */
+/* requireLiveExampleStatus is the one-line guard every section opens with, and it names the label so a run whose supervised application is stale reports WHICH section could not be exercised rather than a bare status mismatch. */
 func requireLiveExampleStatus(label string, what string, response liveExampleResponse, expected int) {
     if expected != response.statusCode {
         fail(
@@ -211,9 +197,7 @@ func requireLiveExampleStatus(label string, what string, response liveExampleRes
     }
 }
 
-/* liveExampleUnique builds a per-run suffix for every identifier a section writes into shared infrastructure.
-Reusing a fixed one makes a section pass on a row an EARLIER run created, which is the same vacuous-pass class the
-outbox and object-storage sections guard against with their own per-run namespaces. */
+/* liveExampleUnique builds a per-run suffix for every identifier a section writes into shared infrastructure. Reusing a fixed one makes a section pass on a row an EARLIER run created, which is the same vacuous-pass class the outbox and object-storage sections guard against with their own per-run namespaces. */
 func liveExampleUnique(prefix string) string {
     return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }

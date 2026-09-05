@@ -554,3 +554,46 @@ func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
         t.Fatalf("expected the no-op logger to report nothing enabled")
     }
 }
+
+/* an errors.Join answers nothing at all to errors.Unwrap, so a record assembled from the single wrap link carried no cause, no chain, and the context of only whichever branch errors.As reached first — exactly where the failure had gathered what several replicas, several destinations or several rules had to say. */
+func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)
+
+    firstCause := exception.NewError("the first branch", map[string]any{"branch": "first"}, nil)
+    secondCause := exception.NewError("the second branch", map[string]any{"branch": "second"}, nil)
+
+    LogError(logger, errors.Join(firstCause, secondCause))
+
+    record := buffer.String()
+
+    for _, expected := range []string{"causeChain", "causeContextChain", "the second branch", `"branch":"second"`} {
+        if false == strings.Contains(record, expected) {
+            t.Fatalf("expected the record to carry %s, got %s", expected, record)
+        }
+    }
+}
+
+/* LogError is reached from inside the recovery handlers, where the error is whatever a panic carried: an Error() that dereferences the very nil field that made it panic-worthy would take down the one record written to explain the failure. */
+func TestLogError_AnErrorWhoseMessagePanicsStillProducesARecord(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)
+
+    LogError(logger, &panickingMessageError{})
+
+    if 0 == buffer.Len() {
+        t.Fatalf("expected a record for an error whose message panics")
+    }
+
+    if false == strings.Contains(buffer.String(), "panicked") {
+        t.Fatalf("expected the record to say the message panicked, got %s", buffer.String())
+    }
+}
+
+/* panickingMessageError is the shape the recovery handlers meet: an error whose own Error() raises */
+type panickingMessageError struct {
+}
+
+func (instance *panickingMessageError) Error() string {
+    panic("the error message dereferences a nil field")
+}

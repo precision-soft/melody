@@ -61,7 +61,7 @@ type resolverContext struct {
 
 /* childOwnedBy is the view of this resolution handed to the provider of one node: the same container, the same scope, the same resolution id and the same live stack, so cycle detection and the wait graph are unchanged, with the owning node written on it. A provider that keeps it and resolves through it after it has returned is then still recorded as depending on what it resolves.
 
-The suspension rides on the view rather than being set on the shared context and restored afterwards: the caller's own resolution continues above this frame and must keep seeing the scope, and a restore that runs at the wrong moment — after a panic unwound past it, say — would leave the wrong answer behind for everything further up. */
+   The suspension rides on the view rather than being set on the shared context and restored afterwards: the caller's own resolution continues above this frame and must keep seeing the scope, and a restore that runs at the wrong moment — after a panic unwound past it, say — would leave the wrong answer behind for everything further up. */
 func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended bool) *resolverContext {
     return &resolverContext{
         containerInstance: instance.containerInstance,
@@ -86,6 +86,17 @@ func (instance *resolverContext) parentNodeKey() string {
 /* scopeVisible reports whether this resolution may read the request scope. */
 func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
+}
+
+/* Closed reports whether the thing this resolution reads has stopped answering resolutions, which is the liveness question a LazyService that captured a provider's resolver asks — the shape the godoc recommends for teardown ordering — so that such a handle turns terminal with it instead of serving a dead request's state.
+
+   The question is asked of whatever scopeVisible answers for, which is the same predicate that decides where the resolution itself reads, and the two must agree. A resolution that reads the request scope ends with its request. One that reads the CONTAINER — because it has no scope, or because the scope is suspended for a provider the container owns, whose service is one instance for the whole process — ends only once the teardown has finished, since until then the container deliberately still answers a closing service what it depends on. Consulting only the scope pointer answered for whichever request happened to trigger a singleton's construction: the handle it captured went terminal when that one request ended, while the container went on answering the same name directly for the rest of the process. */
+func (instance *resolverContext) Closed() bool {
+    if true == instance.scopeVisible() {
+        return instance.scopeInstance.Closed()
+    }
+
+    return instance.containerInstance.resolutionsRefused()
 }
 
 /* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */

@@ -4,6 +4,7 @@ import (
     "container/heap"
     "fmt"
     "reflect"
+    "runtime/debug"
     "sort"
     "strings"
 
@@ -12,7 +13,35 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* Close tears the container down exactly once. A concurrent or repeated call blocks until the first teardown finishes and returns the same error, so a second caller never reports a premature success while services are still being closed. */
+/* recordCreationOrderLocked stamps a teardown node with the moment it came into being, the first time it does. The container mutex is held by every caller: the stamp is written on the same line the instance maps are written, so a node cannot exist without one. A node stamped twice would claim to have been created when it was merely re-filed — an override installed over a built instance is a new value under an old node, and it keeps the position the value it replaced held, because everything built after that node still depends on the NAME. */
+func (instance *container) recordCreationOrderLocked(nodeKey string) {
+    if _, stamped := instance.creationOrderByNodeKey[nodeKey]; true == stamped {
+        return
+    }
+
+    instance.creationOrderCounter = instance.creationOrderCounter + 1
+    instance.creationOrderByNodeKey[nodeKey] = instance.creationOrderCounter
+}
+
+/* IsClosed reports whether a Close already began tearing the container down. Because a repeated Close returns the first teardown's memoized error, a caller that closes defensively cannot tell a failure it just caused from one somebody else already discovered and reported; asking before closing is what keeps one failure from being presented as two incidents. */
+func (instance *container) IsClosed() bool {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.isClosed
+}
+
+/* resolutionsRefused answers the memoized handle's liveness question: not whether a teardown began, which is what IsClosed reports, but whether this container has stopped answering resolutions altogether. The two differ for the whole teardown, and container_resolver.go refuses on this second state for the same reason. */
+func (instance *container) resolutionsRefused() bool {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.teardownFinished
+}
+
+/* Close tears the container down exactly once. A concurrent or repeated call blocks until the first teardown finishes and returns the same error, so a second caller never reports a premature success while services are still being closed.
+
+   That blocking makes Close re-entrant-unsafe by construction: a service whose own Close calls back into container.Close re-enters the teardown that is waiting on it and deadlocks the whole shutdown. A service that closes defensively asks IsClosed first — the flag is set before the first service Close runs, so during the teardown it already answers true and the defensive caller skips. The scope resolves the same re-entrance by reading a closed scope instead of blocking, but its second caller may also return while services are still closing; this container keeps the stronger contract for its concurrent callers and leaves re-entrance to the IsClosed protocol. */
 func (instance *container) Close() error {
     instance.closeOnce.Do(func() {
         instance.closeErr = instance.closeInternal()
@@ -33,7 +62,7 @@ func (instance *container) closeInternal() error {
 
     instance.mutex.Lock()
 
-    /* @important mark closed while still holding the lock so the resolver's creation guard refuses new creations for the whole teardown; the sync.Once in Close serializes repeated callers. */
+    /* mark closed while still holding the lock so the resolver's creation guard refuses new creations for the whole teardown; the sync.Once in Close serializes repeated callers. */
     instance.isClosed = true
 
     typeStringToType := make(map[string]reflect.Type, len(instance.typeInstances))
@@ -45,7 +74,7 @@ func (instance *container) closeInternal() error {
     )
 
     for serviceName := range instance.instances {
-        createdNodeKeys = append(createdNodeKeys, "service:"+serviceName)
+        createdNodeKeys = append(createdNodeKeys, containerNameNodeKey(serviceName))
     }
 
     for targetType := range instance.typeInstances {
@@ -62,8 +91,8 @@ func (instance *container) closeInternal() error {
     )
 
     resolveNodeValue := func(nodeKey string) (any, bool) {
-        if true == strings.HasPrefix(nodeKey, "service:") {
-            serviceName := strings.TrimPrefix(nodeKey, "service:")
+        if true == strings.HasPrefix(nodeKey, containerNameNodeKeyPrefix) {
+            serviceName := strings.TrimPrefix(nodeKey, containerNameNodeKeyPrefix)
             instanceValue, exists := instance.instances[serviceName]
             return instanceValue, exists
         }
@@ -82,7 +111,7 @@ func (instance *container) closeInternal() error {
         return nil, false
     }
 
-    /* @important the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order. The "type:<T>" node is collapsed onto its backing "service:<name>" structurally (via typeRegistrationNamesByType), which is correct even for a value-type service whose dynamic contents are not hashable; pointer/value identity then groups any remaining same-instance aliases */
+    /* the same instance can be created under several node keys (a named service that also registers its type lives under both "service:<name>" and "type:<T>"); collapse those aliases onto one representative so a dependency edge recorded against any alias constrains the close order of the shared instance and it is closed exactly once in dependent-before-dependency order. The "type:<T>" node is collapsed onto its backing "service:<name>" structurally (via typeRegistrationNamesByType), which is correct even for a value-type service whose dynamic contents are not hashable; pointer/value identity then groups any remaining same-instance aliases */
     valueOfNodeKey := make(map[string]any, len(createdNodeKeys))
     representativeOf := make(map[string]string, len(createdNodeKeys))
     pointerRepresentative := make(map[pointerIdentity]string, len(createdNodeKeys))
@@ -106,7 +135,7 @@ func (instance *container) closeInternal() error {
         return false
     }
 
-    /* @important every zero-size allocation shares one address, so the address plus the type still cannot tell two distinct services of such a type apart; a genuine alias is one whose value came through the resolver from the other service, which is exactly the case the dependency graph records, so an unrelated node keeps its own representative and is closed on its own */
+    /* every zero-size allocation shares one address, so the address plus the type still cannot tell two distinct services of such a type apart; a genuine alias is one whose value came through the resolver from the other service, which is exactly the case the dependency graph records, so an unrelated node keeps its own representative and is closed on its own */
     zeroSizeAliasRepresentative := func(nodeKey string, pointerKey pointerIdentity) (string, bool) {
         for _, memberNodeKey := range pointerGroupMembers[pointerKey] {
             if true == nodesAreRelated(nodeKey, memberNodeKey) {
@@ -175,7 +204,7 @@ func (instance *container) closeInternal() error {
         }
 
         for _, serviceName := range instance.typeRegistrationNamesByType[targetType] {
-            if existingRepresentative, hasRepresentative := representativeOf["service:"+serviceName]; true == hasRepresentative {
+            if existingRepresentative, hasRepresentative := representativeOf[containerNameNodeKey(serviceName)]; true == hasRepresentative {
                 return existingRepresentative, true
             }
         }
@@ -184,7 +213,7 @@ func (instance *container) closeInternal() error {
     }
 
     for _, nodeKey := range createdNodeKeys {
-        if false == strings.HasPrefix(nodeKey, "service:") {
+        if false == strings.HasPrefix(nodeKey, containerNameNodeKeyPrefix) {
             continue
         }
 
@@ -218,9 +247,7 @@ func (instance *container) closeInternal() error {
         assignRepresentative(nodeKey, value)
     }
 
-    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the
-       teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering
-       runs over it */
+    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it */
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
@@ -245,11 +272,26 @@ func (instance *container) closeInternal() error {
         }
     }
 
-    closeOrder, remaining := teardownCloseOrder(canonicalNodeKeys, canonicalEdges)
+    /* an alias group is as old as its OLDEST member: the same instance filed under a name and under a type came into being once, and the stamp of the later filing would claim it was built after services that were in fact built from it */
+    canonicalCreationOrder := make(map[string]int, len(canonicalNodeKeys))
+
+    for nodeKey, canonicalKey := range representativeOf {
+        nodeOrder, stamped := instance.creationOrderByNodeKey[nodeKey]
+        if false == stamped {
+            continue
+        }
+
+        existingOrder, hasExisting := canonicalCreationOrder[canonicalKey]
+        if false == hasExisting || nodeOrder < existingOrder {
+            canonicalCreationOrder[canonicalKey] = nodeOrder
+        }
+    }
+
+    closeOrder, remaining := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
 
     dependencyCycleDetected := 0 < len(remaining)
 
-    candidates := make([]closeCandidate, 0, len(closeOrder))
+    candidates := make([]closeCandidate, 0, len(closeOrder)+len(instance.replacedBuiltInstances))
 
     for _, nodeKey := range closeOrder {
         value, exists := valueOfNodeKey[nodeKey]
@@ -262,6 +304,18 @@ func (instance *container) closeInternal() error {
             closeCandidate{
                 nodeKey: nodeKey,
                 value:   value,
+            },
+        )
+    }
+
+    /* the container-built instances an override evicted from the maps close after the ordered walk: they carry no edges anymore, and the identity marks below keep an instance a provider handed to several names from closing twice. */
+    for replacedIndex, replacedValue := range instance.replacedBuiltInstances {
+        candidates = append(
+            candidates,
+            closeCandidate{
+                /* keyed by position: the replaced instances carry no node key, and one shared constant key let a second replaced close that failed overwrite the first's record in the failure map, naming one failure where two happened */
+                nodeKey: fmt.Sprintf("container.replacedInstance[%d]", replacedIndex),
+                value:   replacedValue,
             },
         )
     }
@@ -325,7 +379,8 @@ func (instance *container) closeInternal() error {
                 nil,
             )
         } else {
-            failures["container.dependencyCycle"] = "dependency cycle detected"
+            /* the node list survives alongside the failures: with it dropped, the one close that both failed and cycled reported WHICH services failed but not which ones cycled, and the operator got half the diagnosis */
+            failures["container.dependencyCycle"] = "dependency cycle detected: " + strings.Join(remaining, ", ")
         }
     }
 
@@ -339,10 +394,17 @@ func (instance *container) closeInternal() error {
         )
     }
 
+    /* the second closing state is taken only now, after the last Close returned: from here a resolution is refused rather than answered out of the maps, which is what the whole teardown just emptied of meaning */
+    instance.mutex.Lock()
+    instance.teardownFinished = true
+    instance.mutex.Unlock()
+
     return resultErr
 }
 
-/* @important contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned. */
+/* contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned.
+
+   What the failure carries is the whole of what the operator will ever learn about it: this is a containment boundary, so nothing above it sees the panic and nothing below it survives. An error-shaped panic value therefore travels as the CAUSE rather than only as its own stringified message — kept only in a context slot it collapses to one line at the render boundary, so the context map and the cause chain of the very error the Close raised reached no record at all — and the stack is captured here, inside the recover, because it is the only place the frames that ran still exist. The recovery boundaries of the event dispatcher and of the http kernel make the same two decisions for the same reason. */
 func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -355,15 +417,16 @@ func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
             exceptioncontract.Context{
                 "recoveredType":  fmt.Sprintf("%T", recoveredValue),
                 "recoveredValue": fmt.Sprintf("%v", recoveredValue),
+                "panicStack":     string(debug.Stack()),
             },
-            nil,
+            exception.PanicCause(recoveredValue),
         )
     }()
 
     return closeable.Close()
 }
 
-/* @important a user error whose Error() panics must not abort the teardown loop, so the recorded failure text is produced under a recover. */
+/* a user error whose Error() panics must not abort the teardown loop, so the recorded failure text is produced under a recover. */
 func errorText(err error) (text string) {
     defer func() {
         recoveredValue := recover()
@@ -378,7 +441,8 @@ func errorText(err error) (text string) {
 }
 
 type nodeKeyHeap struct {
-    items []string
+    items           []string
+    creationOrderOf map[string]int
 }
 
 func (instance *nodeKeyHeap) Len() int {
@@ -386,7 +450,21 @@ func (instance *nodeKeyHeap) Len() int {
 }
 
 func (instance *nodeKeyHeap) Less(leftIndex int, rightIndex int) bool {
-    return instance.items[leftIndex] > instance.items[rightIndex]
+    return closesBefore(instance.creationOrderOf, instance.items[leftIndex], instance.items[rightIndex])
+}
+
+/* closesBefore answers which of two services with no edge between them is torn down first: the one created LATER. Creation order is the only order in this container that carries a causal claim — a service built during the construction of another was needed by it, whether or not the edge was declared, and a logger resolved at boot is beneath everything resolved afterwards. The comparison this replaced was on the node key descending, which is a string comparison nobody wrote and which decided, by nothing but spelling, that a worker named app.worker lost its shutdown records while the same worker renamed zz.worker kept them.
+
+   A node with no recorded creation is ordered as if created first, which closes it last: the only nodes without one are those the maps gained outside a creation, and there the key keeps deciding, exactly as before. */
+func closesBefore(creationOrderOf map[string]int, leftNodeKey string, rightNodeKey string) bool {
+    leftOrder := creationOrderOf[leftNodeKey]
+    rightOrder := creationOrderOf[rightNodeKey]
+
+    if leftOrder != rightOrder {
+        return leftOrder > rightOrder
+    }
+
+    return leftNodeKey > rightNodeKey
 }
 
 func (instance *nodeKeyHeap) Swap(leftIndex int, rightIndex int) {
@@ -461,22 +539,20 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
     return pointerIdentity{}, false
 }
 
-/* teardownCloseOrder puts a set of created services into the order they have to be closed in: a dependent
-before everything it depends on, so nothing is torn down while something still using it is alive. Ties are
-broken by the node key descending, which is the order both teardowns used before either had a graph, so
-adding an edge never reshuffles the services around it.
+/* teardownCloseOrder puts a set of created services into the order they have to be closed in: a dependent before everything it depends on, so nothing is torn down while something still using it is alive. Ties are broken by creation order, latest first — see closesBefore for why that and not the node key.
 
-The edges are expected in the same key space as the nodes; an edge naming a node that was not created is
-dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately
-and appended last, so the caller can both close it and report it.
+   The edges are expected in the same key space as the nodes; an edge naming a node that was not created is dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately and appended last, so the caller can both close it and report it.
 
-The container and the request scope share this walk because they answer the same question about different
-sets: the container asks it of everything it built for the process, the scope of everything it built for one
-request. Two implementations of it would be two chances to order a teardown differently. */
+   The container and the request scope share this walk because they answer the same question about different sets: the container asks it of everything it built for the process, the scope of everything it built for one request. Two implementations of it would be two chances to order a teardown differently. */
 func teardownCloseOrder(
     nodeKeys []string,
     edges map[string]map[string]struct{},
+    creationOrderOf map[string]int,
 ) ([]string, []string) {
+    if nil == creationOrderOf {
+        creationOrderOf = map[string]int{}
+    }
+
     adjacency := make(map[string]map[string]struct{}, len(nodeKeys))
     inDegree := make(map[string]int, len(nodeKeys))
 
@@ -521,7 +597,8 @@ func teardownCloseOrder(
     }
 
     availableHeap := &nodeKeyHeap{
-        items: available,
+        items:           available,
+        creationOrderOf: creationOrderOf,
     }
     heap.Init(availableHeap)
 
@@ -558,7 +635,7 @@ func teardownCloseOrder(
     sort.Slice(
         cycleNodeKeys,
         func(leftIndex int, rightIndex int) bool {
-            return cycleNodeKeys[leftIndex] > cycleNodeKeys[rightIndex]
+            return closesBefore(creationOrderOf, cycleNodeKeys[leftIndex], cycleNodeKeys[rightIndex])
         },
     )
 

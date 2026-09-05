@@ -255,3 +255,21 @@ func TestBagTypedReaders_AnAbsentNameIsUnsetRatherThanTheZeroValue(t *testing.T)
         t.Fatalf("expected Int to report an absent name unset, got value=%v exists=%v err=%v", intValue, intExists, intErr)
     }
 }
+
+func TestBagString_NonStringScalarReportsAbsentAndFallsBackToDefault(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("port", 9000)
+
+    _, exists := String(parameterBag, "port")
+    if true == exists {
+        t.Fatalf("expected a non-string scalar to report absent, not present-but-empty")
+    }
+
+    if "8080" != StringOrDefault(parameterBag, "port", "8080") {
+        t.Fatalf("expected StringOrDefault to substitute the default for a non-string value")
+    }
+
+    if true == HasNonEmptyString(parameterBag, "port") {
+        t.Fatalf("expected HasNonEmptyString to report false for a non-string value")
+    }
+}

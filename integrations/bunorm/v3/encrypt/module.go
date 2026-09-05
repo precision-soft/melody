@@ -14,7 +14,7 @@ type ModuleConfig struct {
     Database *bun.DB
     Cipher   Cipher
 
-    /* DatabaseFactory resolves the database for the unsuffixed command. It receives the kernel's service container and runs at the first command run — after Boot has registered the framework core services — never at RegisterCliCommands time; a successful resolution is memoized and reused by later runs. Setting it together with Database is ambiguous and panics at registration. A database opened inside the factory is not closed by the container — prefer resolving container-owned services. */
+    /* DatabaseFactory resolves the database for the unsuffixed command. It receives the kernel's service container and runs at the first command run — after Boot has registered the framework core services — never at RegisterCliCommands time; a successful resolution is memoized and reused by later runs. Setting it together with Database is ambiguous and panics at registration. A database opened inside the factory is not closed by the container — prefer resolving container-owned services. Because the database does not exist at registration, its checks move with it: a factory-resolved database with a non-MySQL dialect panics at the first command run, which is the earliest moment the dialect can be seen at all. */
     DatabaseFactory func(resolver containercontract.Resolver) (*bun.DB, error)
 
     /* Contexts adds one bulk command per key compartment — melody:encrypt:database:<name> — for a multi-context binary; it composes with the legacy fields above, which keep the unsuffixed command. */
@@ -149,6 +149,17 @@ func (instance *Module) buildCommand(
     }
 
     resolver := kernelInstance.ServiceContainer()
+    if nil == resolver {
+        exception.Panic(
+            exception.NewError(
+                "encrypt module kernel answered no service container",
+                map[string]any{
+                    "context": contextName,
+                },
+                nil,
+            ),
+        )
+    }
 
     databaseResolver := func() (*bun.DB, error) {
         resolved, resolveErr := factory(resolver)

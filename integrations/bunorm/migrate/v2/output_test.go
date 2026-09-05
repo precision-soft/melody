@@ -4,6 +4,7 @@ import (
     "bytes"
     "encoding/json"
     "errors"
+    "fmt"
     "strings"
     "testing"
     "time"
@@ -20,7 +21,7 @@ func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
     option := output.DefaultOption()
     option.NoColor = noColor
 
-    return newCommandOutput(buffer, option), buffer
+    return newCommandOutput(buffer, nil, option), buffer
 }
 
 func TestCommandOutput_PrintSuccess(t *testing.T) {
@@ -305,7 +306,7 @@ func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) 
         option.Format = testCase.format
         option.Verbose = testCase.verbose
 
-        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, option).wantsDetail() {
+        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, nil, option).wantsDetail() {
             t.Fatalf("format %s verbose %v: expected %v", testCase.format, testCase.verbose, testCase.expectedOutcome)
         }
     }
@@ -317,7 +318,7 @@ func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *t
     jsonOption.Format = output.FormatJson
 
     jsonBuffer := &bytes.Buffer{}
-    jsonInstance := newCommandOutput(jsonBuffer, jsonOption)
+    jsonInstance := newCommandOutput(jsonBuffer, nil, jsonOption)
     jsonInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
 
     if _, keyedOnTheKey := jsonInstance.migrations["applied"]; false == keyedOnTheKey {
@@ -347,7 +348,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     jsonOption.Format = output.FormatJson
 
     buffer := &bytes.Buffer{}
-    instance := newCommandOutput(buffer, jsonOption)
+    instance := newCommandOutput(buffer, nil, jsonOption)
     instance.printDatabaseBlock(&databaseIdentity{Hostname: "localhost", Port: 5432, CurrentUser: "app"})
 
     if finishErr := instance.finish("db:status", time.Now(), nil); nil != finishErr {
@@ -375,7 +376,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     /* a named database still arrives as its name, or the guard above would pass for a field that never carries anything */
     named := "orders"
     namedBuffer := &bytes.Buffer{}
-    namedInstance := newCommandOutput(namedBuffer, jsonOption)
+    namedInstance := newCommandOutput(namedBuffer, nil, jsonOption)
     namedInstance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &named})
 
     if finishErr := namedInstance.finish("db:status", time.Now(), nil); nil != finishErr {
@@ -396,18 +397,10 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     }
 }
 
-/*
-TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields
-the json envelope always declared and always answered null. The machine
-document is the contract a pipeline reads, and it was the one rendering that
-threw away what the error already carried: at the same instant, over the same
-value, the journal filed the connection, the pool sizing and the whole cause
-chain while stdout answered a single sentence beside `"details":null,
-"cause":null`.
-*/
+/* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing and the whole cause chain while stdout answered a single sentence beside `"details":null, "cause":null`. */
 func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
     runErr := exception.NewError(
         "database connection failed",
@@ -466,7 +459,7 @@ func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
 /* an error carrying no context still answers an object, and one carrying no cause answers a null there: a field whose json type changes with the outcome cannot be consumed, while a cause that genuinely does not exist is honestly absent */
 func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
     if finishErr := outputInstance.finish("db:migrate", time.Now(), errors.New("bare failure")); nil == finishErr {
         t.Fatal("expected the command's own failure to stay the verdict")
@@ -494,6 +487,52 @@ func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T
 
     if nil != document.Error.Cause {
         t.Fatalf("expected no cause for a failure that has none, got %#v", document.Error.Cause)
+    }
+}
+
+/* a typed-nil *exception.Error under a fmt wrap satisfies errors.As and passes a plain nil comparison, and Context() on the nil receiver takes a read lock on a nil pointer. The chain below is the shape bun's migrator produces: it wraps the application's migration-function error with %w after a plain nil test that a typed nil passes, and fmt records the operand before formatting it, so the wrap exists and carries the typed nil while its own text reads "<nil>". The panic would unwind the command's finish defer and the cli runner would re-panic it, so the json document — and with it the real failure — would never be written. */
+func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+
+    runErr := fmt.Errorf("20240101000000_create_users: up: %w", (*exception.Error)(nil))
+
+    var provider exceptioncontract.ContextProvider
+    if false == errors.As(runErr, &provider) {
+        t.Fatal("expected the typed-nil link to satisfy errors.As, otherwise this guard is aimed at nothing")
+    }
+    if nil == provider {
+        t.Fatal("expected the typed nil to pass a plain nil comparison, otherwise this guard is aimed at nothing")
+    }
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Message, "20240101000000_create_users") {
+        t.Fatalf("expected the wrap's own sentence in the message, got %q", document.Error.Message)
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the typed-nil link to contribute no details, got %#v", document.Error.Details)
     }
 }
 
@@ -544,5 +583,49 @@ func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
 
     if true == strings.Contains(rendered, "\r") {
         t.Fatalf("a raw carriage return reached the terminal:\n%s", rendered)
+    }
+}
+
+/* the warning is the one text door whose caller carries text off the wire — the close failure of the migration connection — and it let the message through as sent, so a carriage return in it repainted the line and an escape sequence in it was obeyed; every text door escapes what it did not write itself, in both colour modes, and the sequence the DATA carried is what must not survive, the colour's own being the door's to write */
+func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printWarning("closed\rby the wire\x1b[2J")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `WARNING: closed\rby the wire\x1b[2J`) {
+            t.Fatalf("noColor=%v: expected the escaped spelling, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") || true == strings.Contains(rendered, "\x1b[2J") {
+            t.Fatalf("noColor=%v: a control character of the data survived: %q", noColor, rendered)
+        }
+    }
+}
+
+/* the applied line names the manager the operator configured and the success lines are composed from names the commands did not write; they escape the same way, so a rule that holds for one door holds for the type */
+func TestCommandOutput_PrintSuccessEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printSuccess("applied to ma\rnager")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `applied to ma\rnager`) || true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: expected the escaped spelling and no raw carriage return, got %q", noColor, rendered)
+        }
+    }
+}
+
+/* the files block names the paths bun answered for the migration it created, built from a name the operator typed */
+func TestCommandOutput_PrintFilesBlockEscapesControlCharacters(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.printFilesBlock([]string{"migrations/20240101_a\rb.go"})
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, `  migrations/20240101_a\rb.go`) || true == strings.Contains(rendered, "\r") {
+        t.Fatalf("expected the escaped path and no raw carriage return, got %q", rendered)
     }
 }

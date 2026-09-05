@@ -1,10 +1,17 @@
 package encrypt
 
 import (
+    "context"
+    "database/sql"
     "encoding/json"
     "fmt"
+    "os"
     "strings"
     "testing"
+
+    _ "github.com/go-sql-driver/mysql"
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
 func TestEncryptedString_MarshalJSONRedactsPlaintext(t *testing.T) {
@@ -146,5 +153,133 @@ func TestEncryptedString_ScanStillPassesGenuinePlaintextThrough(t *testing.T) {
 
     if "not encrypted yet" != string(scanned) {
         t.Fatalf("expected the plaintext unchanged, got %q", string(scanned))
+    }
+}
+
+type secretRecord struct {
+    bun.BaseModel `bun:"table:secret_record"`
+
+    Id     int64                   `bun:"id,pk,autoincrement"`
+    Secret EncryptedString `bun:"secret,notnull,type:varchar(255)"`
+}
+
+func TestBunormEncryption_CiphertextAtRest(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm encryption integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    database := bun.NewDB(sqlDb, mysqldialect.New())
+
+    database.ExecContext(ctx, "DROP TABLE IF EXISTS secret_record")
+    if _, createErr := database.NewCreateTable().Model((*secretRecord)(nil)).Exec(ctx); nil != createErr {
+        t.Fatalf("create secret_record: %v", createErr)
+    }
+
+    UseCipher(NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()})))
+    defer UseCipher(nil)
+
+    record := &secretRecord{Secret: "classified-data"}
+    if _, insertErr := database.NewInsert().Model(record).Exec(ctx); nil != insertErr {
+        t.Fatalf("insert: %v", insertErr)
+    }
+
+    loaded := new(secretRecord)
+    if scanErr := database.NewSelect().Model(loaded).Where("id = ?", record.Id).Scan(ctx); nil != scanErr {
+        t.Fatalf("select: %v", scanErr)
+    }
+    if "classified-data" != string(loaded.Secret) {
+        t.Fatalf("expected decrypted value, got %q", loaded.Secret)
+    }
+
+    var rawSecret string
+    if rawErr := sqlDb.QueryRowContext(ctx, "SELECT secret FROM secret_record WHERE id = ?", record.Id).Scan(&rawSecret); nil != rawErr {
+        t.Fatalf("raw select: %v", rawErr)
+    }
+    if "classified-data" == rawSecret {
+        t.Fatalf("expected ciphertext at rest, got plaintext")
+    }
+    if false == strings.HasPrefix(rawSecret, "<ENC>\x00gcm1\x00") {
+        t.Fatalf("expected the encryption marker (with nul glue bytes intact) at rest, got %q", rawSecret)
+    }
+}
+
+func TestEncryptedString_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
+    payload, marshalErr := json.Marshal(EncryptedString("super-secret"))
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    decoded := EncryptedString("untouched")
+    unmarshalErr := json.Unmarshal(payload, &decoded)
+    if nil == unmarshalErr {
+        t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
+    }
+
+    if false == strings.Contains(unmarshalErr.Error(), "redacted encrypted value cannot be decoded back into an encrypted column") {
+        t.Fatalf("expected the refusal to name the placeholder, got: %v", unmarshalErr)
+    }
+
+    if "untouched" != string(decoded) {
+        t.Fatalf("expected the refused document to leave the value untouched, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedString_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
+    var decoded EncryptedString
+    if unmarshalErr := json.Unmarshal([]byte(`"hello"`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if "hello" != string(decoded) {
+        t.Fatalf("expected the plaintext to decode, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedString_UnmarshalJSONLeavesTheValueOnNull(t *testing.T) {
+    type holder struct {
+        Email EncryptedString `json:"email"`
+    }
+
+    decoded := holder{Email: "kept"}
+    if unmarshalErr := json.Unmarshal([]byte(`{"email":null}`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if "kept" != string(decoded.Email) {
+        t.Fatalf("expected a json null to leave the value untouched, got %q", string(decoded.Email))
+    }
+}
+
+func TestEncryptedString_UnmarshalJSONRefusesANonStringValue(t *testing.T) {
+    var decoded EncryptedString
+    unmarshalErr := json.Unmarshal([]byte(`42`), &decoded)
+    if nil == unmarshalErr {
+        t.Fatalf("expected a number to be refused, got %q", string(decoded))
+    }
+
+    if false == strings.Contains(unmarshalErr.Error(), "encrypted column json value is not a string") {
+        t.Fatalf("expected the refusal to name the shape, got: %v", unmarshalErr)
+    }
+}
+
+func TestEncryptedString_FormatRedactsNumericVerbs(t *testing.T) {
+    secret := "top-secret-plaintext"
+    for _, verb := range []string{"%d", "%o", "%b", "%c", "%U"} {
+        rendered := fmt.Sprintf(verb, EncryptedString(secret))
+        if true == strings.Contains(rendered, secret) {
+            t.Fatalf("verb %s leaked the plaintext through the badverb form: %s", verb, rendered)
+        }
+        if redactedPlaceholder != rendered {
+            t.Fatalf("verb %s expected the redacted placeholder, got %q", verb, rendered)
+        }
     }
 }

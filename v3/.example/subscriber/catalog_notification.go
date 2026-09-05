@@ -28,9 +28,9 @@ type catalogNotification struct {
 
 /* notifyCatalogChange tells every open page that the nomenclature has changed.
 
-It runs from the event listeners, beside the cache invalidation and the journal entry, because those three are the same thing said three ways: everything that must follow a write. A page holding a stale list is exactly the case the invalidation two lines above exists for, and this is what lets the page find out.
+   It runs from the event listeners, beside the cache invalidation and the journal entry, because those three are the same thing said three ways: everything that must follow a write. A page holding a stale list is exactly the case the invalidation two lines above exists for, and this is what lets the page find out.
 
-Broadcasting itself cannot fail — the hub drops an event nobody is listening for, and the payload is a struct of strings — so the only thing this reports is not being able to reach the hub at all, which is a wiring mistake rather than a runtime condition. It is reported rather than swallowed for exactly that reason: a resolution that quietly returned would leave the notifications never firing, with every write still answering 201 and nothing anywhere saying why the pages went silent. */
+   Broadcasting itself cannot fail — the hub drops an event nobody is listening for, and the payload is a struct of strings — so the only thing this reports is not being able to reach the hub at all, which is a wiring mistake rather than a runtime condition. It is reported rather than swallowed for exactly that reason: a resolution that quietly returned would leave the notifications never firing, with every write still answering 201 and nothing anywhere saying why the pages went silent. */
 func notifyCatalogChange(
     runtimeInstance melodyruntimecontract.Runtime,
     action string,

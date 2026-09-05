@@ -16,9 +16,11 @@ func newCronConfiguration(kernelInstance melodykernelcontract.Kernel) *melodycro
             Schedule: &melodycron.Schedule{Minute: "0", Hour: "*"},
             User:     productUser,
         }).
+        /* the entry declares its own arguments, and both halves honour them: the generator renders them into the manifest line and the in-process runner hands them to the child command */
         Schedule(melodycron.CommandName(cli.NewProductListCommand), &melodycron.EntryConfig{
-            Schedule: &melodycron.Schedule{Minute: "0", Hour: "*/6"},
-            User:     productUser,
+            Schedule:  &melodycron.Schedule{Minute: "0", Hour: "*/6"},
+            User:      productUser,
+            Arguments: []string{"--limit=2"},
         }).
         Schedule(melodycron.CommandName(cli.NewAppInfoCommand), &melodycron.EntryConfig{
             Schedule: &melodycron.Schedule{Minute: "0", Hour: "12"},

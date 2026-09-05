@@ -45,14 +45,14 @@ The container is responsible for:
 
 ### Type registration
 
-Services are always registered by name (`serviceName string`). Optionally, a registration may also register the service under a concrete type, enabling typed resolution by type.
+Services are always registered by name (`serviceName string`). By default a registration also registers the service under its concrete type, strictly — typed resolution works out of the box, and a second service registered under the same type fails.
 
 Registration options (see [`RegisterOptions`](../../container/contract/registrar.go)):
 
 - [`WithTypeRegistration(isStrict bool)`](../../container/register_option.go)  
-  Enables type registration. When `isStrict` is true, registering a different service under the same type fails.
+  Keeps type registration on and sets its strictness; `WithTypeRegistration(false)` relaxes the REGISTRATION, not the resolution: a second registration under the same type is accepted and appended instead of failing, and by-type resolution then refuses every one of them with `service type has multiple registrations`. Nothing wins — the type simply stops being resolvable, and the services stay reachable by name.
 - [`WithoutTypeRegistration()`](../../container/register_option.go)  
-  Explicitly disables type registration for that registration call.
+  Disables type registration for that registration call — the opt-out, since the default is on and strict.
 
 Type registration is **on by default** (strict) for `RegisterService`/`MustRegisterType`, so every registered service is also resolvable by its concrete return type — no extra option needed. Resolve a service by type with the generic [`MustFromResolverByType[T]`](../../container/resolver.go) / [`FromResolverByType[T]`](../../container/resolver.go):
 
@@ -79,7 +79,7 @@ Collect with the **resolver a provider receives**, not the container itself, so 
 The example below demonstrates:
 
 - registering a service by name,
-- enabling type registration (strict),
+- registering a service under its type through the generic door, which is strict by default,
 - resolving a dependency inside a provider,
 - creating a scope and overriding a service instance.
 
@@ -113,7 +113,6 @@ func registerServices(
 		func(resolver containercontract.Resolver) (Logger, error) {
 			return &StdLogger{}, nil
 		},
-		container.WithTypeRegistration(true),
 	)
 
 	container.MustRegister[string](
@@ -174,12 +173,21 @@ func example() {
 ## Footguns & caveats
 
 - A request scope layers **over** the container, not underneath it. A provider registered on the container builds from the container alone: the service it produces belongs to the whole process, so assembling it out of one request's substitutes would hold that request forever and let that request's end take the service away from every other one. Only the service a caller actually asks the scope for is looked up through the scope, which is what layering means. A container provider that asks for something only a scope carries — a request context — is told the service does not exist, at the point the wiring mistake was made; one that asks for the logger receives the container's own, which is the logger a process-lifetime service should hold.
-- Providers must be functions compatible with [`Provider[T]`](../../container/contract/provider.go). A provider is called at most once per container instance (per service), and the result is cached.
+- Providers must be functions compatible with [`Provider[T]`](../../container/contract/provider.go). A successful creation is memoized — once per container for a container registration, once per scope for a scoped one; a provider that returned an error, panicked or yielded nil is retried on the next resolution.
 - Typed resolution by type is delegated to the underlying name registration when the type maps to a single service name, ensuring that resolving by name and by type returns the same instance (see [`container/resolver_context.go`](../../container/resolver_context.go)).
-- Circular dependency detection is scoped to a single resolver context (see [`Resolver`](../../container/contract/resolver.go) and the resolver context stack logic in [`container/container_resolver.go`](../../container/container_resolver.go)).
-- Closing is deterministic and dependency-aware: dependents are closed before dependencies (see [`container/container_close.go`](../../container/container_close.go)).
-- After `Close()`, already-created instances can still be looked up, but resolving a service that has not been created yet fails with a `container is closed` error instead of creating an instance that would never be closed; a creation that races `Close()` is closed best-effort and the resolution fails the same way (see [`container/container_resolver.go`](../../container/container_resolver.go)). A container (or scope) should still not be used after it is closed.
-- `OverrideInstance` rejects service names with the `service.` prefix (protected services). If you must override a protected service in userland tests, use `OverrideProtectedInstance` (see [`OverrideService`](../../container/contract/override.go) and its implementations in [`container/container.go`](../../container/container.go) and [`container/scope.go`](../../container/scope.go)).
+- Circular dependency detection works at two levels: the per-resolution stack (see [`Resolver`](../../container/contract/resolver.go) and the stack logic in [`container/resolver_context.go`](../../container/resolver_context.go)) catches a cycle inside one resolution, and a container-wide wait graph ([`container/container_resolver.go`](../../container/container_resolver.go)) refuses two concurrent resolutions waiting on each other's creations with `circular service dependency detected across concurrent resolutions`.
+- Closing is deterministic and dependency-aware: dependents are closed before dependencies (see [`container/container_close.go`](../../container/container_close.go)). The edge is recorded from the resolver a service was built through, so it covers resolutions made after construction too: a service that keeps its resolver and reaches through it later — a `container.Lazy` handle at first use, any replay of deferred work — is still closed before what it resolves. The one handle with no owner is one built over the **container itself** rather than over a provider's resolver: there is no node it could belong to, so what it resolves is ordered against it by creation order like any unrelated pair. Give such a service an edge by resolving what it needs inside its provider, or build the handle over the resolver the provider was handed.
+
+- **A provider that CAPTURES a collaborator writes no edge.** The graph is recorded from resolutions, so a provider closing over a value built before the container — an integration's registry assembled during module wiring, a client the composition root already holds — and simply handing it back has declared nothing, and the teardown orders it against everything else by creation order. Nothing looks wrong: the service is registered, it is closed, and the order it is closed in is a coincidence that holds until the day it does not. Resolve the collaborator inside the provider wherever that is possible — it is the same call the service would have made anyway, and an edge derived from the resolution cannot fall out of step with what the provider actually uses. Where it is genuinely not possible, because the value has nothing to resolve, declare the edge with [`WithTeardownDependency(names ...string)`](../../container/register_option.go): it writes into the same graph, in the same key space, so the teardown still reads one graph and cannot order two ways. It orders teardown and nothing else — it does not build the named service, does not make it exist, and takes no part in cycle detection during resolution; an edge naming a service that was never created is dropped by the walk, so naming an optional collaborator is not an error. An empty name is refused where the registration is made, and so is a service naming itself. `RegisterScoped` refuses it outright, because a scope keeps its own teardown graph, built per scope from the resolutions that scope actually made, and a declaration written once at registration would install nothing while reading as an ordering that holds.
+- What the graph leaves open is settled by **creation order, latest first**: two services with no edge between them are closed newest first, because a service built during the construction of another was needed by it whether or not the edge was declared. The tie-break this replaced was the node key descending — a string comparison, so whether a worker still had a logger to report its drain through was decided by its own name, and renaming `app.worker` to `zz.worker` was the whole difference between a shutdown record written and a shutdown record dropped. The logger is the case that shows it: the boot resolves it first, so it is now closed last, without anything anywhere naming it.
+- **Closing has two states, and a service's own `Close` may still resolve.** `IsClosed()` — declared on the concrete container, reached through a type assertion when holding the [`Container`](../../container/contract/container.go) contract — answers true from the moment the teardown begins and refuses every new creation for its whole duration, which is what keeps a service from being built into a container that is going away. Resolutions of what is already built keep answering until the last `Close` returns — a worker reporting its drain is entitled to the logger it reports through — and are refused with "container is closed" from then on. A resolution made after that used to answer the instance it found in the map, already closed, with a nil error, so a caller holding a resolver got a live-looking handle to a dead service.
+- A closed container refuses writes and keeps serving what it built: `Register` — the scoped registrations made through the container included — and the overrides return the container-is-closed error, a new creation is refused, and a resolution of an already-built instance still answers — which is what lets an in-flight request degrade gracefully during shutdown. A scope is stricter: every entry of a closed scope answers "scope is closed". A resolution racing `Close()` is defined behavior — a creation caught mid-race is refused and the value it built is closed rather than leaked (see [`container/container_close.go`](../../container/container_close.go) and [`container/resolver_context.go`](../../container/resolver_context.go)); the one thing `Close()` does not survive is re-entry from a service's own `Close`, which deadlocks the teardown that is waiting on it.
+- `OverrideInstance` / `MustOverrideInstance` reject service names with the `service.` prefix (protected services). If you must override a protected service in userland tests, use `OverrideProtectedInstance` or `MustOverrideProtectedInstance` (see [`OverrideService`](../../container/contract/override.go) and its implementations in [`container/container.go`](../../container/container.go) and [`container/scope.go`](../../container/scope.go)). The scoped registration paths refuse the prefix outright — with or without `Replacing()` — because a scoped registration of a protected name would be the same substitution, one scope wide.
+- An override must fit every type its name is registered under; a value the registered type cannot hold is refused, so `GetByType` keeps answering with the registered type. An override that replaces an instance the container itself built hands that instance to the teardown — it is closed with the container, once — while an override evicted by a later override stays whoever installed it's to close.
+- When the container itself closes, everything still standing in its maps joins the teardown, installed overrides included — the container's lifetime is the process's, so ownership converges on it and there is no opt-out. A scope is deliberately the opposite: it closes what it built and nothing else, and an outside override joins its teardown only through `ClosedWithScope()` (see the scope section below). The asymmetry follows the two lifetimes: a scope ends while its installer goes on running — the http kernel installs the request logger and then uses it to report the scope's own close failure — while a container ends with the process and has nobody to hand anything to. The one case the reasoning does not cover is a value shared with a SECOND container in the same process: a test suite that boots the application repeatedly over one reused client, or a host embedding melody that closes its own handles. This container closes it for all of them. Install a wrapper whose `Close` does
+  nothing and keep the real handle where it belongs.
+- A provider is validated where it is registered: the signature, and the function value itself — a typed-nil `Provider[T]` handed in as a variable is refused at the registration line instead of panicking on its first resolution. A provider declared with a concrete error type may return its nil error and is read as the success it means.
+- The scope↔container reference is held in an [`atomic.Pointer`](https://pkg.go.dev/sync/atomic#Pointer) (see [`container/scope.go`](../../container/scope.go)), so scope lookups and a concurrent `Scope.Close()` are race-free: after close, reads observe a nil container and callers receive a clean "scope is closed" error — the `Must*` forms keep the panic — instead of a partial read.
 
 ## Userland API
 
@@ -206,17 +214,21 @@ container.MustRegisterScoped(registrar, ServiceAuditTrail,
 
 The lifetime is spelled in the verb, and the two registrar interfaces share no method: `Registrar` has `Register`/`MustRegister`, `ScopedRegistrar` has `RegisterScoped`/`MustRegisterScoped`. Handing one where the other is expected does not compile, which is what keeps a container provider from being registered as scoped — a mistake that would otherwise rebuild and close it once per request without ever failing.
 
-The direction stays one-way. A scoped service reads both levels; a container provider is refused anything only a scope carries, with the same "service is not registered" a wiring mistake gets anywhere else. A container service that needs request data takes it as a method argument.
+The direction stays one-way. A scoped service reads both levels; a container provider is refused anything only a scope carries, with the same "service is not registered" a wiring mistake gets anywhere else. `Has` and `HasType` on the resolver a provider was handed answer under that same suspension, so an existence check can never disagree with the resolution it gates. A container service that needs request data takes it as a method argument.
 
-A name — or a registered type — claimed at both lifetimes is refused where it is made, in either order, unless the scoped registration declares [`Replacing()`](../../container/register_option.go). It admits substitution, not decoration: a scoped provider that resolves the name it replaces re-enters itself and is reported as a circular dependency.
+A name — or a registered type — claimed at both lifetimes is refused where it is made, unless the SCOPED registration declares [`Replacing()`](../../container/register_option.go); the container-level registration paths do not read the option. Declared where nothing collides yet, the waiver stands: a container registration of the same name arriving later is admitted without declaring anything itself. The waiver covers the name and the registered type together — a registration that means only the name opts out with `WithoutTypeRegistration()`. It admits substitution, not decoration: a scoped provider that resolves the name it replaces re-enters itself and is reported as a circular dependency. Protected `service.` names cannot be registered scoped at all.
 
 The declaration lives on [`ScopeManager`](../../container/contract/scope.go) — the interface the container satisfies by being the thing that makes scopes — rather than beside the container's own registrations. A scope does not exist until a request arrives, so what a scope will own has to be declared at boot by whatever will be creating them.
 
-`Scope.RegisterScoped` adds a service to one live scope, layered over the plan the container was booted with. It is the rare case; a scoped service is normally declared at boot so every scope gets it.
+`Scope.RegisterScoped` adds a service to one live scope, layered over the plan the container was booted with. It is the rare case; a scoped service is normally declared at boot so every scope gets it. Like the other two registration doors it refuses once the container has begun closing, because a registration accepted on a live scope would report success for a service whose every resolution the creation guard then refuses.
 
 ### Scope teardown
 
-`Close` closes what the scope built and nothing else: an override belongs to whoever installed it, and a singleton reached through the scope belongs to the root container. Services the scope built are closed in dependency order, dependents before their dependencies. An override that has nowhere else to be closed can join the teardown with [`ClosedWithScope()`](../../container/override_option.go) through `OverrideProtectedInstanceWithOptions`.
+`Close` closes what the scope built and nothing else: an override belongs to whoever installed it, and a singleton reached through the scope belongs to the root container. Services the scope built are closed in dependency order, dependents before their dependencies — one instance filed under its name and its type is collapsed into one node before the ordering runs, so the close order holds however the service was resolved, and a value neither comparable nor addressable is closed once rather than once per filing. An override that has nowhere else to be closed can join the teardown with [`ClosedWithScope()`](../../container/override_option.go) through `OverrideProtectedInstanceWithOptions`; a created instance such an override evicts is still the scope's, and still closes with it.
+
+A scope override answers the type-keyed resolutions of every type its name is registered under, exactly as the container-level override propagates — the container's registrations, the plan's and the scope's own — so a name and a type can never answer two different services inside one request. The same assignability rule guards both levels: a value a registered type cannot hold is refused before anything is written, raw assignability for an interface registration and canonical identity for a value-typed one.
+
+A [`container.Lazy`](../../container/lazy.go) handle built over a scope follows that scope's life. The memoized value is served while the scope lives; once the scope reports itself closed through `Scope.Closed()`, the handle becomes terminal — the scope-is-closed error on that call and every later one, with the value, the closure and the resolver dropped — because a memoized value from a dead request is that request's state and the alternative was serving it to every later caller forever. A resolver that cannot answer the liveness question is read as OPEN, so a handle built over the container is untouched; that is also the form safe for concurrent first uses, since every container resolution mints a fresh resolution context.
 
 ### Contracts (`container/contract`)
 
@@ -227,7 +239,6 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
 - [`type ScopeManager`](../../container/contract/scope.go)
 - [`type Scope`](../../container/contract/scope.go)
 - [`type ScopedRegistrar`](../../container/contract/scoped_registrar.go)
-- [`type ScopeManager`](../../container/contract/scope.go)
 - [`type OverrideServiceWithOptions`](../../container/contract/override.go)
 - [`type OverrideOption`](../../container/contract/override.go)
 - [`type OverrideOptions`](../../container/contract/override.go)
@@ -236,6 +247,7 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
 - [`type RegisterOptions`](../../container/contract/registrar.go)
 - [`type TypeLister`](../../container/contract/type_lister.go)
 - [`type ServiceReference`](../../container/contract/type_lister.go)
+- [`type ServiceDescription`](../../container/contract/service_description.go), [`ServiceLifetimeContainer`, `ServiceLifetimeScoped`](../../container/contract/service_description.go) — what a container can say about a registration without running its provider: the name, the owning lifetime, whether an instance already exists, and the type. Answered by `ServiceDescriptions()` on the container, which is what lets an introspection command list a container without building it
 
 ### Constructors and helpers (`container`)
 
@@ -254,6 +266,7 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
     - [`WithTypeRegistration(isStrict bool)`](../../container/register_option.go)
     - [`WithoutTypeRegistration()`](../../container/register_option.go)
     - [`Replacing()`](../../container/register_option.go)
+    - [`WithTeardownDependency(serviceNames ...string)`](../../container/register_option.go)
 - Override options:
     - [`ClosedWithScope()`](../../container/override_option.go)
     - [`WithCollectionPriority(priority int)`](../../container/register_option.go)

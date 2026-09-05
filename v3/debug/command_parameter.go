@@ -9,6 +9,7 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/config"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -34,7 +35,7 @@ func (instance *ParameterCommand) Flags() []clicontract.Flag {
 
 func (instance *ParameterCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -44,7 +45,7 @@ func (instance *ParameterCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
@@ -72,7 +73,7 @@ func (instance *ParameterCommand) Run(
 
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-        return output.Render(commandContext.Writer, envelope, option)
+        return output.Render(commandContext.Writer(), envelope, option)
     }
 
     keys := make([]string, 0, len(names))
@@ -208,7 +209,7 @@ func (instance *ParameterCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 /* redactedParameterValue keeps a parameter declared as a secret out of the rendered output while still reporting whether it carries a value at all, which is what an operator runs this command to find out. The length is withheld along with the value: on a short credential it narrows the search meaningfully. */
@@ -217,6 +218,11 @@ func redactedParameterValue(value any, isSecret bool) string {
 
     if false == isSecret {
         return formattedValue
+    }
+
+    /* a nil value carries nothing: fmt renders it as a non-empty placeholder, which the mask then reported as a value being present — the opposite of the one answer the column exists to give */
+    if true == internal.IsNilInterface(value) {
+        return redactedEmptyPlaceholder
     }
 
     if "" == formattedValue {

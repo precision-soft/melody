@@ -7,6 +7,8 @@ import (
     "strconv"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -36,6 +38,16 @@ type HmacTokenSourceConfig struct {
 
     /* VerifyBodyBeforeNonce selects the default order of the body and nonce checks. When false (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When true the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. A per-request override (route attribute HmacVerifyBodyBeforeNonceAttribute, or SetHmacVerifyBodyBeforeNonce) takes precedence for routes/calls that need the opposite trade-off. */
     VerifyBodyBeforeNonce bool
+
+    /* AcceptUntypedEnvelopes opens the migration window for the envelope's own typ, and exists because emitting the typ and requiring it arrived together: a verifier on this version refuses every envelope minted by a signer that has not been redeployed yet, so during a rolling upgrade each unmigrated caller fails before its signature is read and a fleet degrades to anonymous all at once. Set it on the verifiers FIRST, roll the signers, then clear it — that ordering is what makes the upgrade continuous.
+
+       What the window costs while it is open is the structural half of the domain separation: a JSON web token carries no typ, so one presented on this header is no longer refused on its type alone. It is still refused on its signature, which has to verify under the internal-auth secret for the key id it names, and the JWT validator still refuses this envelope's type — so the exposure is a deployment that signs JSON web tokens with the very secret it uses for internal auth. A typ that is present and wrong is refused whether or not this is set.
+
+       Default false, which is the strict reading. The window is removed in v4, where the typ is required unconditionally. */
+    AcceptUntypedEnvelopes bool
+
+    /* Clock is the clock the envelope's time window and the nonce ttl are measured against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
+    Clock clockcontract.Clock
 }
 
 func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
@@ -52,9 +64,23 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         headerName = DefaultHmacHeaderName
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
     var nonceGuard securitycontract.NonceGuard = config.NonceGuard
     if true == internal.IsNilInterface(nonceGuard) {
-        nonceGuard = NewMemoryNonceGuard()
+        nonceGuard = NewMemoryNonceGuardWithClock(clockInstance)
+    }
+
+    /* a negative future-expiry cap is refused rather than carried, the way JwtConfig refuses a negative revocation skew: verifyTimeWindow gates the check on `0 < maxFutureExpiry`, so a negative value — reachable from a config typo like signerTtl - safetyMargin computed below zero — behaves identically to the zero "unbounded" case and silently reopens the memory-pinning window the cap exists to close, a holder of a valid secret minting far-future-expiry envelopes whose nonces the guard remembers until they expire. */
+    if 0 > config.MaxFutureExpiry {
+        exception.Panic(exception.NewError(
+            "hmac token source max future expiry may not be negative; a negative value disables the future-expiry cap the field exists to enforce",
+            map[string]any{"maxFutureExpiry": config.MaxFutureExpiry.String()},
+            nil,
+        ))
     }
 
     return &HmacTokenSource{
@@ -65,7 +91,9 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         leeway:                config.Leeway,
         maxFutureExpiry:       config.MaxFutureExpiry,
         verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,
+        acceptUntypedEnvelopes: config.AcceptUntypedEnvelopes,
         serviceIdentity:       config.ServiceIdentity,
+        clock:                 clockInstance,
     }
 }
 
@@ -83,6 +111,8 @@ type HmacTokenSource struct {
     maxFutureExpiry       time.Duration
     verifyBodyBeforeNonce bool
     serviceIdentity       string
+    acceptUntypedEnvelopes bool
+    clock                 clockcontract.Clock
 }
 
 func (instance *HmacTokenSource) Name() string {
@@ -98,7 +128,7 @@ func (instance *HmacTokenSource) Resolve(
         return NewAnonymousToken(), nil
     }
 
-    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, instance.secrets)
+    envelope, keyId, decodeErr := decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue, instance.secrets, instance.acceptUntypedEnvelopes)
     if nil != decodeErr {
         return instance.reject(runtimeInstance, decodeErr)
     }
@@ -132,7 +162,7 @@ func (instance *HmacTokenSource) Resolve(
         return instance.reject(runtimeInstance, bindErr)
     }
 
-    if timeErr := instance.verifyTimeWindow(envelope, time.Now()); nil != timeErr {
+    if timeErr := instance.verifyTimeWindow(envelope, instance.clock.Now()); nil != timeErr {
         return instance.reject(runtimeInstance, timeErr)
     }
 
@@ -172,7 +202,7 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
     }
 
     if nil == httpRequest.URL {
-        /* @important a server-originated *http.Request always carries a non-nil URL, but a synthetically constructed request (an internal caller building an *http.Request directly) can leave it nil; guard it so endpoint verification fails closed instead of dereferencing a nil URL and panicking inside the request pipeline */
+        /* a server-originated *http.Request always carries a non-nil URL, but a synthetically constructed request (an internal caller building an *http.Request directly) can leave it nil; guard it so endpoint verification fails closed instead of dereferencing a nil URL and panicking inside the request pipeline */
         return exception.NewError("internal-auth request url is nil", nil, nil)
     }
 
@@ -193,9 +223,13 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
     }
 
     if envelope.Query != httpRequest.URL.RawQuery {
+        /* the two query strings carry whatever the caller put in the url — `?token=`, `?api_key=` — and this context lands in the log through reject, so only the parameter NAMES survive into it: they are what makes the mismatch diagnosable, the values are what must not be journaled. */
         return exception.NewError(
             "internal-auth query does not match the request",
-            map[string]any{"signed": envelope.Query, "request": httpRequest.URL.RawQuery},
+            map[string]any{
+                "signed":  internal.RedactQueryValuesForDiagnostics(envelope.Query),
+                "request": internal.RedactQueryValuesForDiagnostics(httpRequest.URL.RawQuery),
+            },
             nil,
         )
     }
@@ -253,7 +287,7 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
         return exception.NewError("internal-auth envelope is missing a nonce", nil, nil)
     }
 
-    ttl := time.Until(time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway))
+    ttl := time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway).Sub(instance.clock.Now())
     if 0 >= ttl {
         /* the nonce guard does not record a non-positive ttl, so an envelope at the very edge of the acceptance window would be admitted without ever being remembered — and thus replayable. verifyTimeWindow treats that edge as still valid, so reject it here to keep the recorded window exactly as wide as the accepted one. */
         return exception.NewError("internal-auth envelope is too close to expiry to guard against replay", nil, nil)
@@ -261,7 +295,8 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
 
     seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, hmacNonceGuardKey(keyId, envelope.Nonce), ttl)
     if nil != rememberErr {
-        return exception.NewError("internal-auth nonce guard failed", nil, rememberErr)
+        /* the guard failing to answer is the platform's failure, not the envelope's: the mark is what makes reject log it as the incident it is — a shared guard down degrades every internal caller to anonymous at once — instead of the routine Info a forged envelope earns. */
+        return exception.NewError("internal-auth nonce guard failed", nil, markInfrastructureFailure(rememberErr))
     }
 
     if true == seen {
@@ -315,7 +350,12 @@ func (instance *HmacTokenSource) reject(
 ) (securitycontract.Token, error) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil != logger {
-        logger.Info("internal-auth envelope rejected", exception.LogContext(cause))
+        /* every rejection fails closed to anonymous, but the two kinds must not share a severity: a bad envelope at Info is routine noise, while an infrastructure failure — the shared nonce guard down — silently degrades every internal caller to anonymous at once, and this record is the only place that incident surfaces. */
+        if true == isInfrastructureFailure(cause) {
+            logger.Error("internal-auth verification infrastructure failed", exception.LogContext(cause))
+        } else {
+            logger.Info("internal-auth envelope rejected", exception.LogContext(cause))
+        }
     }
 
     return NewAnonymousToken(), nil

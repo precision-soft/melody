@@ -5,6 +5,7 @@ import (
     "encoding/json"
     "fmt"
     "log/slog"
+    "reflect"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -24,6 +25,8 @@ import (
 Install the compartment with encrypt.UseCipherNamed("crm", cipher). Each named cipher owns its KeyProvider: key rotation inside the compartment keeps working through the key id embedded in the ciphertext, and a column of one compartment can never decrypt (or be decrypted by) another's. */
 type EncryptedStringFor[R CipherRef] string
 
+func (instance EncryptedStringFor[R]) encryptedColumn() {}
+
 func (instance EncryptedStringFor[R]) String() string {
     return redactedPlaceholder
 }
@@ -33,12 +36,31 @@ func (instance EncryptedStringFor[R]) GoString() string {
     return redactedPlaceholder
 }
 
+/* Format redacts under the numeric verbs (%d %o %b %c %U) that fmt routes through neither Stringer nor GoStringer, which would otherwise print the underlying string through the badverb form and carry the plaintext; every verb is answered with the same redacted rendering, for the reason on EncryptedString.Format. */
+func (instance EncryptedStringFor[R]) Format(state fmt.State, verb rune) {
+    _, _ = state.Write([]byte(redactedPlaceholder))
+}
+
 func (instance EncryptedStringFor[R]) LogValue() slog.Value {
     return slog.StringValue(redactedPlaceholder)
 }
 
 func (instance EncryptedStringFor[R]) MarshalJSON() ([]byte, error) {
     return json.Marshal(redactedPlaceholder)
+}
+
+/* UnmarshalJSON refuses the redaction placeholder MarshalJSON writes and decodes any other string, for the reason on EncryptedString.UnmarshalJSON. */
+func (instance *EncryptedStringFor[R]) UnmarshalJSON(data []byte) error {
+    decoded, present, decodeErr := decodeEncryptedJson(data, fmt.Sprintf("%T", *instance))
+    if nil != decodeErr {
+        return decodeErr
+    }
+
+    if true == present {
+        *instance = EncryptedStringFor[R](decoded)
+    }
+
+    return nil
 }
 
 func (instance EncryptedStringFor[R]) Value() (driver.Value, error) {
@@ -84,6 +106,15 @@ func (instance *EncryptedStringFor[R]) Scan(source any) error {
 /* refCipher resolves the named cipher a marker type selects; the marker is instantiated as its zero value, which is why CipherRef implementations should be zero-size value-receiver types. A marker whose CipherName() is empty is rejected rather than resolved: the empty name is the default cipher's reserved entry, so accepting it would quietly hand a compartment-bound column the default key — the exact cross-compartment read the marker exists to prevent. */
 func refCipher[R CipherRef]() (Cipher, error) {
     var ref R
+
+    /* a pointer-form marker (EncryptedStringFor[*CrmCipher]) compiles whenever the value form does, and its zero value is a nil pointer whose CipherName() call dereferences nil — a panic raised from inside database/sql on the first column read or write. It is answered as an error naming the marker instead. */
+    if reflected := reflect.ValueOf(any(ref)); reflect.Ptr == reflected.Kind() && true == reflected.IsNil() {
+        return nil, exception.NewError(
+            "cipher reference is a pointer type; a CipherRef must be a zero-size value type",
+            map[string]any{"cipherRef": fmt.Sprintf("%T", ref)},
+            nil,
+        )
+    }
 
     name := ref.CipherName()
     if "" == name {

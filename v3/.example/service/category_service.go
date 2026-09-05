@@ -138,9 +138,11 @@ func (instance *CategoryService) Update(
         return nil, false, nil
     }
 
-    category.Name = name
+    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the change lands on a copy: a refused update leaves the stored entity exactly as it was */
+    modified := *category
+    modified.Name = name
 
-    updated, updateErr := instance.categoryRepository.Update(ctx, category)
+    updated, updateErr := instance.categoryRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -148,7 +150,7 @@ func (instance *CategoryService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewCategoryUpdatedEvent(category)
+    updatedEvent := event.NewCategoryUpdatedEvent(&modified)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.CategoryUpdatedEventName,
@@ -158,7 +160,7 @@ func (instance *CategoryService) Update(
         return nil, true, dispatchErr
     }
 
-    return category, true, nil
+    return &modified, true, nil
 }
 
 func (instance *CategoryService) DeleteById(

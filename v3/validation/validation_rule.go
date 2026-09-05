@@ -1,7 +1,7 @@
 package validation
 
 import (
-    "fmt"
+    "strconv"
     "strings"
     "sync"
 
@@ -14,7 +14,83 @@ type validationRule struct {
     params map[string]string
 }
 
-/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named class ([:alpha:], [:^digit:], ...) opens on a '[' immediately followed by ':' and only ends on the ':]' pair, so the ']' that terminates the POSIX element is not mistaken for the enclosing class close. */
+func splitByTopLevelComma(valueString string) []string {
+    var parts []string
+
+    bracketsBalanced := hasBalancedBrackets(valueString)
+
+    current := strings.Builder{}
+    parenDepth := 0
+    curlyDepth := 0
+    wasEscaped := false
+    classScanner := charClassScanner{}
+
+    for _, character := range valueString {
+        if true == wasEscaped {
+            current.WriteRune(character)
+            wasEscaped = false
+            classScanner.noteEscaped()
+            continue
+        }
+
+        if '\\' == character {
+            current.WriteRune(character)
+            wasEscaped = true
+            continue
+        }
+
+        if true == bracketsBalanced {
+            if true == classScanner.step(character) {
+                current.WriteRune(character)
+                continue
+            }
+
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '{' == character {
+                curlyDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if '}' == character {
+                if 0 < curlyDepth {
+                    curlyDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+        }
+
+        if ',' == character {
+            if 0 == parenDepth && 0 == curlyDepth {
+                parts = append(parts, current.String())
+                current.Reset()
+                continue
+            }
+        }
+
+        current.WriteRune(character)
+    }
+
+    parts = append(parts, current.String())
+
+    return parts
+}
+
+/* charClassScanner tracks whether the scan is inside a regex character class [...], so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal rather than a close when it is the class's first content character — the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named class ([:alpha:], [:^digit:], ...) opens on a '[' immediately followed by ':' and ends only on the ':]' pair, so the ']' that terminates the POSIX element is not mistaken for the enclosing class close. */
 type charClassScanner struct {
     inClass          bool
     contentSeen      bool
@@ -95,82 +171,6 @@ func (instance *charClassScanner) noteEscaped() {
         instance.posixOpenPending = false
         instance.posixColonSeen = false
     }
-}
-
-func splitByTopLevelComma(valueString string) []string {
-    var parts []string
-
-    bracketsBalanced := hasBalancedBrackets(valueString)
-
-    current := strings.Builder{}
-    parenDepth := 0
-    curlyDepth := 0
-    wasEscaped := false
-    classScanner := charClassScanner{}
-
-    for _, character := range valueString {
-        if true == wasEscaped {
-            current.WriteRune(character)
-            wasEscaped = false
-            classScanner.noteEscaped()
-            continue
-        }
-
-        if '\\' == character {
-            current.WriteRune(character)
-            wasEscaped = true
-            continue
-        }
-
-        if true == bracketsBalanced {
-            if true == classScanner.step(character) {
-                current.WriteRune(character)
-                continue
-            }
-
-            if '(' == character {
-                parenDepth++
-                current.WriteRune(character)
-                continue
-            }
-
-            if ')' == character {
-                if 0 < parenDepth {
-                    parenDepth--
-                }
-                current.WriteRune(character)
-                continue
-            }
-
-            if '{' == character {
-                curlyDepth++
-                current.WriteRune(character)
-                continue
-            }
-
-            if '}' == character {
-                if 0 < curlyDepth {
-                    curlyDepth--
-                }
-                current.WriteRune(character)
-                continue
-            }
-        }
-
-        if ',' == character {
-            if 0 == parenDepth && 0 == curlyDepth {
-                parts = append(parts, current.String())
-                current.Reset()
-                continue
-            }
-        }
-
-        current.WriteRune(character)
-    }
-
-    parts = append(parts, current.String())
-
-    return parts
 }
 
 func hasBalancedBrackets(valueString string) bool {
@@ -309,10 +309,10 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
     return parts
 }
 
-/* @important parseIntStrict reports a parse failure instead of silently falling back to a default, so a malformed numeric constraint parameter (for example minLength=notanumber) is rejected at constraint creation rather than degrading to a default bound the caller never asked for. A valid leading integer is still accepted (Sscanf stops at the first non-digit), so a fractional bound such as 99.5 keeps truncating to 99. */
+/* parseIntStrict accepts only a string that is an integer in its entirety, so a malformed numeric constraint parameter is refused at constraint creation rather than becoming a different bound: a leading-integer parse reads lessThan=-0.5 as a bound of 0, which accepts -0.2, and 1e3 as a bound of 1. */
 func parseIntStrict(valueString string) (int, bool) {
-    var result int
-    if _, err := fmt.Sscanf(valueString, "%d", &result); nil != err {
+    result, err := strconv.Atoi(valueString)
+    if nil != err {
         return 0, false
     }
 
@@ -490,6 +490,17 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
         }
 
         rules = append(rules, rule)
+    }
+
+    /* a tag that survives the empty/skip-marker guard upstream but parses to no rule at all (for example a bare comma) is a malformed tag, not a request to validate nothing: accepting it would leave a field that visibly declares validation silently unenforced */
+    if 0 == len(rules) {
+        return nil, exception.NewError(
+            "invalid validation tag syntax",
+            exceptioncontract.Context{
+                "tag": tag,
+            },
+            nil,
+        )
     }
 
     return rules, nil

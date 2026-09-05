@@ -198,7 +198,7 @@ func TestAuthenticateByUsernameAndPasswordRefusesAUserWithoutRoles(t *testing.T)
 
 /* an identifier the cache-key grammar refuses names a row no write door admits; before the guard, the finder handed the spelling to the cache and the refusal surfaced as a 500 on the read of an id that simply does not exist.
 
-The cache under the assertion REFUSES such a key, the way the redis backend does. An in-memory backend accepts anything a Go map accepts, so over one the guard has no observable effect at all and the assertion agrees with itself — the same test written over the in-memory manager passes whether or not the guard is there. */
+   The cache under the assertion REFUSES such a key, the way the redis backend does. An in-memory backend accepts anything a Go map accepts, so over one the guard has no observable effect at all and the assertion agrees with itself — the same test written over the in-memory manager passes whether or not the guard is there. */
 func TestFindByIdAnswersAbsentForACacheUnsafeIdentifier(t *testing.T) {
     refusingCache := &keyGrammarCache{}
 

@@ -1,7 +1,6 @@
 package debug
 
 import (
-    "errors"
     "fmt"
     "reflect"
     runtimepkg "runtime"
@@ -110,7 +109,7 @@ func (instance *MiddlewareCommand) Run(
 
 /* middlewareListItem is one shape serving three documents, and the reason is the field that used to appear and disappear with them: an active row omitted it, an inactive row carried it, and a consumer keying on it could not tell an active middleware from a malformed document. It is always present now, empty where there is nothing to say.
 
-What --build cannot fill is worth naming rather than faking: MiddlewareBuildProvider hands back the built chain and nothing else, so a built row carries no name and no priority — index, function and status are all the build knows. Correlating the built chain with the described one by position would be a guess, because the description also lists the inactive entries the build never produces. A consumer that needs the name reads the default listing, which describes without building. */
+   What --build cannot fill is worth naming rather than faking: MiddlewareBuildProvider hands back the built chain and nothing else, so a built row carries no name and no priority — index, function and status are all the build knows. Correlating the built chain with the described one by position would be a guess, because the description also lists the inactive entries the build never produces. A consumer that needs the name reads the default listing, which describes without building. */
 type middlewareListItem struct {
     Index    int    `json:"index"`
     Name     string `json:"name"`
@@ -251,7 +250,8 @@ func (instance *MiddlewareCommand) populateBuiltChain(
             output.NewErrorCause(
                 buildErr.Error(),
                 map[string]any{
-                    "causeChain": exception.BuildCauseChain(errors.Unwrap(buildErr), 8),
+                    /* the chain is built from the failure itself with the head dropped, rather than from a bare errors.Unwrap: a joined failure answers Unwrap with nothing, and the report lost every cause exactly when there was more than one to show */
+                    "causeChain": causeChainBelowHead(buildErr),
                 },
             ),
         )
@@ -360,4 +360,15 @@ func middlewareFunctionName(middleware httpcontract.Middleware) string {
     return function.Name()
 }
 
+/* causeChainBelowHead walks the causes below the failure's own message through both unwrap shapes: a bare errors.Unwrap answers nothing for a joined failure, whose causes live behind the []error shape. */
+func causeChainBelowHead(err error) []string {
+    chain := exception.BuildCauseChain(err, 9)
+    if 1 >= len(chain) {
+        return nil
+    }
+
+    return chain[1:]
+}
+
 var _ clicontract.Command = (*MiddlewareCommand)(nil)
+

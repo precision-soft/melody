@@ -1,6 +1,8 @@
 package security
 
 import (
+    "github.com/precision-soft/melody/v3/internal"
+
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -20,7 +22,14 @@ func (instance *RoleVoter) Vote(token securitycontract.Token, attribute string, 
         return securitycontract.VoteAbstain
     }
 
-    if nil == token {
+    /* the token comes from the application's token source, and a nil pointer of its own token type
+    reaches here as a non-nil interface: a bare comparison takes it for a live token, IsAuthenticated
+    answers true without touching the receiver, and the Roles() call below dereferences the nil */
+    if true == internal.IsNilInterface(token) {
+        return securitycontract.VoteDenied
+    }
+
+    if false == token.IsAuthenticated() {
         return securitycontract.VoteDenied
     }
 

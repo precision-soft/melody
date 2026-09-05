@@ -7,11 +7,9 @@ import (
     "testing"
 )
 
-/* an UNSET MELODY_E2E_MAJORS must mean every major: the project's convention is that a default run is the
-full run, and a default that quietly resolved to v3 alone is exactly the gap these sections exist to close. */
+/* an UNSET MELODY_E2E_MAJORS must mean every major: the project's convention is that a default run is the full run, and a default that quietly resolved to v3 alone is exactly the gap these sections exist to close. */
 func TestExampleMajorList_UnsetCoversEveryMajor(t *testing.T) {
-    /* Setenv arms the cleanup that restores whatever the run was started with; Unsetenv then exercises the
-       LookupEnv fallback the default depends on */
+    /* Setenv arms the cleanup that restores whatever the run was started with; Unsetenv then exercises the LookupEnv fallback the default depends on */
     t.Setenv(exampleMajorListVariable, exampleMajorListDefault)
     if unsetErr := os.Unsetenv(exampleMajorListVariable); nil != unsetErr {
         t.Fatalf("unset %s: %v", exampleMajorListVariable, unsetErr)
@@ -29,8 +27,7 @@ func TestExampleMajorList_UnsetCoversEveryMajor(t *testing.T) {
     }
 }
 
-/* an EMPTY value is the opt-out, the same clear-to-skip contract the backend variables follow; the caller
-announces the skip, so the list itself has to come back empty rather than fall back to the default. */
+/* an EMPTY value is the opt-out, the same clear-to-skip contract the backend variables follow; the caller announces the skip, so the list itself has to come back empty rather than fall back to the default. */
 func TestExampleMajorList_EmptyValueSelectsNothing(t *testing.T) {
     t.Setenv(exampleMajorListVariable, "")
 
@@ -51,9 +48,7 @@ func TestExampleMajorList_AcceptsSpaceCommaAndVPrefixedEntries(t *testing.T) {
     }
 }
 
-/* the ports have to stay distinct from each other, from the :8080 the dev container supervises and from the
-:18080 stack.sh's signal check uses, or two applications fight for one socket and the section that loses reports a
-boot failure that has nothing to do with the code under test. */
+/* the ports have to stay distinct from each other, from the :8080 the dev container supervises and from the :18080 stack.sh's signal check uses, or two applications fight for one socket and the section that loses reports a boot failure that has nothing to do with the code under test. */
 func TestExampleMajorCatalog_PortsAreDistinctAndReserved(t *testing.T) {
     seen := map[int]bool{
         8080:  true,
@@ -69,9 +64,7 @@ func TestExampleMajorCatalog_PortsAreDistinctAndReserved(t *testing.T) {
     }
 }
 
-/* the command prints its boot log to stdout before the file logger exists, and those lines are json objects
-of their own; picking the FIRST decodable object would hand a log line to the decoder instead of the envelope,
-and under --format=json the envelope is a single line exactly like they are. */
+/* the command prints its boot log to stdout before the file logger exists, and those lines are json objects of their own; picking the FIRST decodable object would hand a log line to the decoder instead of the envelope, and under --format=json the envelope is a single line exactly like they are. */
 func TestExampleJsonDocument_SkipsTheBootLogLines(t *testing.T) {
     output := strings.Join(
         []string{
@@ -91,8 +84,7 @@ func TestExampleJsonDocument_SkipsTheBootLogLines(t *testing.T) {
     }
 }
 
-/* the pretty document is still read, so a run driven with --format=json-pretty by hand reports what it found
-rather than a decode failure that reads like a broken command */
+/* the pretty document is still read, so a run driven with --format=json-pretty by hand reports what it found rather than a decode failure that reads like a broken command */
 func TestExampleJsonDocument_StillReadsAPrettyPrintedEnvelope(t *testing.T) {
     output := strings.Join(
         []string{
@@ -125,8 +117,7 @@ func TestExampleReportsPositiveCount(t *testing.T) {
     }
 }
 
-/* the assertion reports the attribute by name, so an unset SameSite must never be printed as if the cookie
-carried one. */
+/* the assertion reports the attribute by name, so an unset SameSite must never be printed as if the cookie carried one. */
 func TestExampleSameSiteName(t *testing.T) {
     for sameSite, expected := range map[http.SameSite]string{
         http.SameSiteLaxMode:     "Lax",
@@ -140,9 +131,7 @@ func TestExampleSameSiteName(t *testing.T) {
     }
 }
 
-/* fail() exits through os.Exit, which runs no deferred function: without this hook a started example
-process outlives the failing run and holds its port, so the NEXT run reports an occupied port instead of the
-failure that actually happened. */
+/* fail() exits through os.Exit, which runs no deferred function: without this hook a started example process outlives the failing run and holds its port, so the NEXT run reports an occupied port instead of the failure that actually happened. */
 func TestPushFailureCleanup_RunsRegisteredTeardownAndSkipsPopped(t *testing.T) {
     failureCleanupList = nil
 

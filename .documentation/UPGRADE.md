@@ -14,7 +14,7 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Migrating to v3
 
-v1 is feature-frozen: the major is stabilized, no new feature lands on it, and what still arrives is security work and critical correctness fixes. The recommended move for an application on this major is v3, where development continues.
+v1 is feature-frozen: the major is stabilized, no new feature lands on it, and what still arrives, through 2027-08-17, is patch-level defect fixes and security work. That date is eighteen months from the release of v2, the major that replaced this one. The recommended move for an application on this major is v3, where development continues.
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version: `github.com/precision-soft/melody` becomes `github.com/precision-soft/melody/v3`, and each integration module gains the same `/v3` suffix on its module path — a package inside such a module then carries the major mid-path, as in `integrations/rueidis/v3/cache`. The one rewrite that does not compile afterwards — twelve deprecated validation constants that v3 has never carried — is recorded with its replacements in [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md).
 
@@ -22,9 +22,33 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 ## Unreleased
 
+### Application: the error handler is consulted, and the shutdown drain runs whatever failed before it
+
+**What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. An http process now makes that one decision where serving begins; a console process keeps making it at boot-end, so its dispatcher still exposes the listener set a serving process runs. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
+
+**Symptom.** An error handler wired between `Boot` and `Run` starts rendering, where it used to be accepted and never called. A shutdown whose serve or server-shutdown phase failed starts reporting the open request scopes as well, joined with the earlier cause; a run that failed for one reason alone reads exactly as it did.
+
+**Remedy.** None. An application that installed its handler before boot-end is unaffected; one that installed it later gets the behaviour its own wiring asked for. Code matching on the run error by string should read it with `errors.Is`, which traverses the join.
+
+### Http: the session-cookie cache guard keeps the rest of `Cache-Control`
+
+**What changed.** The guard that keeps a session-cookie response out of a shared cache reads every `Cache-Control` field line rather than the first, and splits the directive list outside quoted sections rather than on a bare comma.
+
+**Symptom.** A response that carried `Cache-Control` on more than one field line keeps the directives on the lines behind the first, which used to be deleted; a directive carrying a quoted field-name list keeps every name in it, where a name spelled like a directive used to be dropped out of the middle of the list.
+
+**Remedy.** None.
+
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md).
 
-This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
+Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, and none of them asks the upgrader for an action.
+
+### Logging: the json timestamp is fixed width and rendered in UTC
+
+**What changed.** The `time` field of a json record was formatted with `time.RFC3339Nano`, which trims trailing zeros from the fractional second, and with the instant in the process's own zone. It is now formatted with the nanosecond field written to its full width and the instant put in UTC first.
+
+**Symptom.** The fractional part is always exactly nine digits, and the stamp always ends in `Z` rather than carrying a local offset. The value is the same instant, and it parses under the RFC 3339 layouts a consumer already uses. What it fixes is the ordering the stamp exists for: the stamp is taken under the write mutex so that the order of the stamps is the order of the writes, but a trimmed fraction made the field variable width, so a record landing on a whole second rendered shorter and sorted, as text, after every fractional record of the same second — `.` is `0x2E` and `Z` is `0x5A`. Rendering in UTC closes the same hole for a process whose zone offset moves.
+
+**Remedy.** None for a consumer that parses the field. A test comparing the stamp to a locally-formatted instant by string equality reads UTC instead, and one that asserted a trimmed fraction compares a prefix.
 
 ### Bunorm: the registry refuses new callers while a pool is still closing
 
@@ -1220,7 +1244,7 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 }
 ```
 
-`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order that was built, and `debug:middleware` renders it.
+`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order a serving process actually built; `debug:middleware` lists the pipeline through its own description pass, leaving that report alone.
 
 ### Validation: a nil pointer embed is validated as "nothing was supplied"
 

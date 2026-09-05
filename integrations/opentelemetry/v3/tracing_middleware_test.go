@@ -8,6 +8,10 @@ import (
 
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
     "go.opentelemetry.io/otel/sdk/trace/tracetest"
+
+    "github.com/precision-soft/melody/v3/exception"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func TestTracingMiddleware_RequiresTracer(t *testing.T) {
@@ -56,5 +60,62 @@ func TestTracingMiddleware_RecordsServerSpan(t *testing.T) {
 
     if false == methodFound || false == statusFound {
         t.Fatalf("expected method and status attributes on the span")
+    }
+}
+
+func TestTracingMiddleware_ATypedNilResponseIsReadAsAbsentInsteadOfPanicking(t *testing.T) {
+    recorder := tracetest.NewSpanRecorder()
+    provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+    middleware := NewTracingMiddleware(provider.Tracer("melody-typed-nil-test"), nil)
+
+    typedNilHandler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        var response *typedNilProneResponse
+
+        return response, nil
+    }
+
+    request, runtimeInstance := testRequestAndRuntime()
+
+    if _, handlerErr := middleware(typedNilHandler)(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+        t.Fatalf("handler: %v", handlerErr)
+    }
+
+    spans := recorder.Ended()
+    if 1 != len(spans) {
+        t.Fatalf("expected the span to end cleanly over a typed-nil response, got %d spans", len(spans))
+    }
+}
+
+func TestTracingMiddleware_RecordsTheClientStatusWhenTheHandlerReturnsAnHttpExceptionError(t *testing.T) {
+    recorder := tracetest.NewSpanRecorder()
+    provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+    tracer := provider.Tracer("melody-error-test")
+
+    middleware := NewTracingMiddleware(tracer, nil)
+
+    request, runtimeInstance := testRequestAndRuntime()
+    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, exception.NewHttpException(nethttp.StatusNotFound, "not found")
+    })
+
+    if _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil == handlerErr {
+        t.Fatalf("expected the error to propagate")
+    }
+
+    spans := recorder.Ended()
+    if 1 != len(spans) {
+        t.Fatalf("expected exactly one span, got %d", len(spans))
+    }
+
+    statusCode := int64(-1)
+    for _, attribute := range spans[0].Attributes() {
+        if "http.response.status_code" == string(attribute.Key) {
+            statusCode = attribute.Value.AsInt64()
+        }
+    }
+
+    if 404 != statusCode {
+        t.Fatalf("expected the span to carry the client-facing 404 rather than omitting the status on error, got %d", statusCode)
     }
 }

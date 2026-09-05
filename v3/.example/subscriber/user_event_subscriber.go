@@ -1,8 +1,6 @@
 package subscriber
 
 import (
-    "strings"
-
     "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
@@ -16,6 +14,15 @@ type UserEventSubscriber struct{}
 
 func NewUserEventSubscriber() *UserEventSubscriber {
     return &UserEventSubscriber{}
+}
+
+/* userUsernameCacheKey answers the cache key a username is served under, empty for a username that folds to nothing — which every caller below skips. The fold itself lives in the key constructor; this asks only whether there is a name left to key on, so no listener spells the fold out beside its own call and none of them can drift from the write door. */
+func userUsernameCacheKey(username string) string {
+    if "" == repository.NormalizedUsername(username) {
+        return ""
+    }
+
+    return service.CacheKeyUserByUsername(username)
 }
 
 func (instance *UserEventSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
@@ -50,9 +57,9 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
             return byIdDeleteErr
         }
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.User().Username))
-        if "" != normalizedUsername {
-            byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
+        usernameCacheKey := userUsernameCacheKey(payloadInstance.User().Username)
+        if "" != usernameCacheKey {
+            byUsernameDeleteErr := cacheInstance.Delete(usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
             }
@@ -90,11 +97,20 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             return byIdDeleteErr
         }
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.User().Username))
-        if "" != normalizedUsername {
-            byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
+        usernameCacheKey := userUsernameCacheKey(payloadInstance.User().Username)
+        if "" != usernameCacheKey {
+            byUsernameDeleteErr := cacheInstance.Delete(usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
+            }
+        }
+
+        /* a rename leaves the by-username entry keyed on the OLD spelling: cleared only under the new one, the old key kept authenticating the pre-rename credentials for as long as the entry lived, and the old name could never be re-registered — the deleted event carries its username for exactly this reason */
+        previousUsernameCacheKey := userUsernameCacheKey(payloadInstance.PreviousUsername())
+        if "" != previousUsernameCacheKey && previousUsernameCacheKey != usernameCacheKey {
+            previousUsernameDeleteErr := cacheInstance.Delete(previousUsernameCacheKey)
+            if nil != previousUsernameDeleteErr {
+                return previousUsernameDeleteErr
             }
         }
 
@@ -130,9 +146,9 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
             return byIdDeleteErr
         }
 
-        normalizedUsername := strings.ToLower(strings.TrimSpace(payloadInstance.Username()))
-        if "" != normalizedUsername {
-            byUsernameDeleteErr := cacheInstance.Delete(service.CacheKeyUserByUsername(normalizedUsername))
+        usernameCacheKey := userUsernameCacheKey(payloadInstance.Username())
+        if "" != usernameCacheKey {
+            byUsernameDeleteErr := cacheInstance.Delete(usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
             }

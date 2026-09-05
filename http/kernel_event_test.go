@@ -99,9 +99,7 @@ func TestKernelExceptionEvent_CarriesTheFailureAndStartsWithoutAResponse(t *test
     }
 }
 
-/* Response is an interface, so a nil pointer of an implementation a listener left unassigned arrives here as
-a non-nil interface; every reader of these events asks `nil == Response()` to decide whether a response
-exists, so it is taken for one and carried to the writer that dereferences it. */
+/* Response is an interface, so a nil pointer of an implementation a listener left unassigned arrives here as a non-nil interface; every reader of these events asks `nil == Response()` to decide whether a response exists, so it is taken for one and carried to the writer that dereferences it. */
 func TestKernelEvents_SetResponseStoresTheNilATypedNilMeans(t *testing.T) {
     runtimeInstance := newTestRuntime()
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/hello", nil), nil, runtimeInstance, nil)

@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -108,8 +109,8 @@ type SmtpTransport struct {
 }
 
 func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
-    /* the runtime's context drives mid-session cancellation, so a nil runtime is rejected up front instead of reaching the cancellation watcher. */
-    if nil == runtimeInstance {
+    /* the runtime's context drives mid-session cancellation, so a nil runtime is rejected up front instead of reaching the cancellation watcher; IsNilInterface also catches a typed-nil runtime, which a plain comparison waves through onto a nil dereference at the dial. */
+    if true == internal.IsNilInterface(runtimeInstance) {
         return exception.NewError("runtime may not be nil", nil, nil)
     }
 
@@ -173,22 +174,21 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
     if "" != instance.username {
         supported, _ := client.Extension("AUTH")
         if false == supported {
-            if true == instance.requireAuth {
-                return exception.NewError(
-                    "smtp server does not advertise AUTH but it is required",
-                    map[string]any{"address": instance.address},
-                    nil,
-                )
-            }
-        } else {
-            if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
-                return deadlineErr
-            }
+            /* configured credentials fail CLOSED: a server that does not advertise AUTH cannot take them, and skipping the auth silently — the old RequireAuth-false behavior — sent the message as anonymous submission while reporting success, with the operator's configured identity quietly unused. The common trigger is a relay that only advertises AUTH after STARTTLS, on a session where tls was not negotiated. */
+            return exception.NewError(
+                "smtp server does not advertise AUTH while credentials are configured",
+                map[string]any{"address": instance.address},
+                nil,
+            )
+        }
 
-            authentication := smtp.PlainAuth("", instance.username, instance.password, instance.host)
-            if authErr := client.Auth(authentication); nil != authErr {
-                return exception.NewError("smtp auth failed", map[string]any{"address": instance.address}, authErr)
-            }
+        if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
+            return deadlineErr
+        }
+
+        authentication := smtp.PlainAuth("", instance.username, instance.password, instance.host)
+        if authErr := client.Auth(authentication); nil != authErr {
+            return exception.NewError("smtp auth failed", map[string]any{"address": instance.address}, authErr)
         }
     }
 
@@ -196,8 +196,9 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return deadlineErr
     }
 
+    /* "failed", not "rejected": the error may as well be a per-step deadline expiry or the cancellation watcher closing the connection, and a message that asserts a server verdict for those sends the operator investigating a policy decision that never happened — the cause carries the real reason */
     if mailErr := client.Mail(from); nil != mailErr {
-        return exception.NewError("smtp sender rejected", map[string]any{"from": from}, mailErr)
+        return exception.NewError("smtp mail command failed", map[string]any{"from": from}, mailErr)
     }
 
     for _, recipient := range recipientList {
@@ -206,7 +207,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         }
 
         if rcptErr := client.Rcpt(recipient); nil != rcptErr {
-            return exception.NewError("smtp recipient rejected", map[string]any{"recipient": recipient}, rcptErr)
+            return exception.NewError("smtp rcpt command failed", map[string]any{"recipient": recipient}, rcptErr)
         }
     }
 
@@ -235,7 +236,10 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
     /* from here the message is accepted: reporting any later failure would invite a retry and a duplicate delivery, so the quit path only ever logs. A deadline that cannot be re-armed also means the quit cannot be bounded — skip it and let the deferred close drop the connection. */
     if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-            logger.Warning("smtp session deadline reset failed after the message was accepted; skipping quit", map[string]any{"address": instance.address})
+            logger.Warning(
+                "smtp session deadline reset failed after the message was accepted; skipping quit",
+                exception.LogContext(deadlineErr, map[string]any{"address": instance.address}),
+            )
         }
 
         return nil
@@ -243,7 +247,11 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
 
     if quitErr := client.Quit(); nil != quitErr {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-            logger.Warning("smtp quit failed after the message was accepted", map[string]any{"address": instance.address})
+            /* log-only is right (the message is accepted; returning would invite a duplicate delivery), but the record must carry the cause — a recurring quit failure with only the address beside it cannot be told apart from a timeout, a protocol error or a closed socket */
+            logger.Warning(
+                "smtp quit failed after the message was accepted",
+                exception.LogContext(quitErr, map[string]any{"address": instance.address}),
+            )
         }
     }
 
@@ -310,7 +318,7 @@ func (instance *SmtpTransport) connect(ctx context.Context) (net.Conn, error) {
         return tlsDialer.DialContext(ctx, "tcp", instance.address)
     }
 
-    /* @important dial the raw connection and build the client with instance.host explicitly, rather than smtp.Dial(address) which derives the client server name from the address host: startTls uses instance.host for the TLS SNI and PlainAuth is constructed with instance.host, so a configured Host that differs from the Address host (dialing by IP, through a tunnel, or a CNAME) must be the server name here too — otherwise smtp.PlainAuth.Start rejects the mismatch with "wrong host name" and authentication can never succeed. The implicit-TLS branch passes instance.host to NewClient the same way. */
+    /* dial the raw connection and build the client with instance.host explicitly, rather than smtp.Dial(address) which derives the client server name from the address host: startTls uses instance.host for the TLS SNI and PlainAuth is constructed with instance.host, so a configured Host that differs from the Address host (dialing by IP, through a tunnel, or a CNAME) must be the server name here too — otherwise smtp.PlainAuth.Start rejects the mismatch with "wrong host name" and authentication can never succeed. The implicit-TLS branch passes instance.host to NewClient the same way. */
     return dialer.DialContext(ctx, "tcp", instance.address)
 }
 

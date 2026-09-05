@@ -84,7 +84,7 @@ func nextUserId(existingIdList []string) string {
 
 /* NormalizedUsername is the form a username is compared and addressed on, everywhere. Usernames are matched without regard to case, and leaving that to the database collation would make the answer depend on how the table was created.
 
-It is exported because it is not only the repositories that need it: the service caches a user under their username, the listeners drop that entry when the user changes, and a lookup, a write and an invalidation have to agree on one spelling or the cache keeps serving a user who no longer exists under a key nobody clears. One definition is what makes them agree. */
+   It is exported because it is not only the repositories that need it: the service caches a user under their username, the listeners drop that entry when the user changes, and a lookup, a write and an invalidation have to agree on one spelling or the cache keeps serving a user who no longer exists under a key nobody clears. One definition is what makes them agree. */
 func NormalizedUsername(username string) string {
     return strings.ToLower(strings.TrimSpace(username))
 }

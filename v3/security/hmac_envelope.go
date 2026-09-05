@@ -14,6 +14,9 @@ import (
 const (
     hmacEnvelopeAlgorithm = "HS256"
 
+    /* hmacEnvelopeType is the header typ every envelope is signed under and the only typ the decoder accepts. It is the domain separation between the envelope and every other HS256 credential — the JSON web token above all, which is byte-identical in shape and signs through the same primitive: without a type of its own, the only thing keeping one credential from verifying as the other was the two secrets happening to differ, which nothing enforces. */
+    hmacEnvelopeType = "melody-internal"
+
     /* DefaultHmacHeaderName is the request header the internal-auth envelope is carried on unless a source/signer overrides it. */
     DefaultHmacHeaderName = "X-Melody-Internal-Auth"
 )
@@ -34,6 +37,7 @@ type hmacEnvelope struct {
 
 type hmacEnvelopeHeader struct {
     Algorithm string `json:"alg"`
+    Type      string `json:"typ"`
     KeyId     string `json:"kid"`
 }
 
@@ -45,7 +49,7 @@ func hashBody(body []byte) string {
 }
 
 func encodeHmacHeaderValue(keyId string, envelope hmacEnvelope, secret []byte) (string, error) {
-    headerBytes, headerErr := json.Marshal(hmacEnvelopeHeader{Algorithm: hmacEnvelopeAlgorithm, KeyId: keyId})
+    headerBytes, headerErr := json.Marshal(hmacEnvelopeHeader{Algorithm: hmacEnvelopeAlgorithm, Type: hmacEnvelopeType, KeyId: keyId})
     if nil != headerErr {
         return "", exception.NewError("could not encode internal-auth header", nil, headerErr)
     }
@@ -63,8 +67,13 @@ func encodeHmacHeaderValue(keyId string, envelope hmacEnvelope, secret []byte) (
     return part0 + "." + part1 + "." + part2, nil
 }
 
-/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed app. It fails closed on any structural, key-lookup or signature problem. */
+/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed app. It fails closed on any structural, key-lookup or signature problem. It requires the envelope's own typ, which is the strict reading every caller gets unless it asks for the migration window below. */
 func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmacEnvelope, string, error) {
+    return decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue, secrets, false)
+}
+
+/* decodeHmacHeaderValueAcceptingUntypedEnvelopes is the same reading with one difference the migration window needs: an envelope carrying NO typ is accepted. A typ that is present and wrong is still refused, so the window admits exactly the envelopes a signer that predates the typ can mint and nothing else. */
+func decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue string, secrets HmacSecretProvider, acceptUntypedEnvelopes bool) (hmacEnvelope, string, error) {
     parts := strings.Split(headerValue, ".")
     if 3 != len(parts) {
         return hmacEnvelope{}, "", exception.NewError("internal-auth header has an invalid structure", nil, nil)
@@ -84,6 +93,15 @@ func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmac
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth algorithm is not supported",
             map[string]any{"algorithm": header.Algorithm},
+            nil,
+        )
+    }
+
+    /* the typ is REQUIRED, not merely accepted when present: a JSON web token carries no typ (or "JWT"), so requiring the envelope's own type refuses a JWT presented on the internal-auth header even under a custom secret provider that resolves the empty key id — the structural half of the domain separation, the other half being the JWT validator refusing this type. */
+    if hmacEnvelopeType != header.Type && false == (true == acceptUntypedEnvelopes && "" == header.Type) {
+        return hmacEnvelope{}, "", exception.NewError(
+            "internal-auth type is not accepted",
+            map[string]any{"type": header.Type},
             nil,
         )
     }

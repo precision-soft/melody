@@ -196,8 +196,7 @@ func TestNewAuthenticatorManager_CopiesTheCallersAuthenticators(t *testing.T) {
     }
 }
 
-/* The authenticator is the application's, and a nil pointer of its own token type is how "no user" gets
-written by hand; boxed in the contract it is not equal to nil. */
+/* The authenticator is the application's, and a nil pointer of its own token type is how "no user" gets written by hand; boxed in the contract it is not equal to nil. */
 func TestAuthenticatorManager_AuthenticateReadsATypedNilTokenAsAbsent(t *testing.T) {
     manager := NewAuthenticatorManager(
         &testAuthenticator{

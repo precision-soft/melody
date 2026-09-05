@@ -8,7 +8,7 @@ import (
 )
 
 func PrefersHtml(request httpcontract.Request) bool {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return false
     }
 

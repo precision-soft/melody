@@ -6,9 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `module.go` — **Behavioural change**: a nil entry in `ModuleConfig.Middlewares` or `ModuleConfig.HandlerDecorators` is refused at boot instead of skipped. A skipped observability middleware has no later consumer to fail loudly — the typical source is a discarded constructor error (`middleware, _ := NewMetricsMiddleware(meter)`), and the app then serves traffic uninstrumented while the operator reads an empty-but-healthy dashboard with nothing to distinguish "no traffic" from "not measured"
+- `metrics_middleware.go` — **Behavioural change**: a handler that returns an error is recorded at the client-facing status the kernel derives from it, not always `500`. A deliberate `404` or `403` carried as an `HttpException` used to graph as a server error under `http.server.request.*`, so a route whose normal contract is a 4xx read as 100% 5xx; only a non-http error or a 5xx exception is recorded as `500` now
+
 ### Fixed
 
+- `tracing_middleware.go` — a handler error with no response carries the client-facing status onto the span's `http.response.status_code` instead of omitting it. The attribute was set only from a live response, so a handled 4xx produced a span marked `Error` with no status code at all, and a trace query filtering on `http.response.status_code` lost every errored request
+- `otlp/tracer_provider.go` — `Config` redacts its `Headers` field on every `fmt` verb through new `String` and `Format` methods. `Headers` is exported and carries the collector auth token, so a plain `%v` of the config — dropped into a log or an error context — printed the credential in the clear; the config now renders its safe fields and `Headers:[redacted N]`, mirroring the `encrypt` key provider
+- `otlp/tracer_provider.go` — the grpc exporter dials its channel with the service config lookup disabled. grpc's dns resolver asks for a TXT record beside the address records of every new channel, melody publishes no service config that way, and the channel opens lazily on the first export: on a resolver that answers the address at once and the TXT record never — docker's embedded dns for a container name, measured at five seconds against three milliseconds — a shutdown flush that was the one to open the channel spent the tracer provider's whole close budget on that record and reported a reachable collector as unreachable, so every one-signal shutdown of the example exited non-zero on such a host
+- `metrics_middleware.go` — the per-route instruments read the status a handler commits directly to the response writer. A handler that returns a nil response after writing its own status — the streaming/proxy shape this package's own `MetricsRouteHandler` and the websocket bridge both use — recorded the constructor's `200` whatever was written, so a route failing 100% of the time could graph as 100% success under `http.server.request.*`; a hijacked connection on that path records `101` like the lifecycle seam does
+- `metrics_middleware.go`, `tracing_middleware.go` — a typed-nil concrete response no longer panics the observability layer: `nil != response` let a handler's `var resp *SomeResponse; return resp, nil` through to the `StatusCode()` dereference, and the panic was then charged to the middleware while the defect sat in the handler; the typed nil now reads as an absent response
+- `otlp/tracer_provider.go` — a negative or NaN `SampleRatio` is refused at construction instead of silently inverting to `AlwaysSample`. A negative value is the natural "tracing off" sentinel and NaN is the shape of a failed parse; both fell outside the documented `(0,1)` window check and produced 100% export exactly when the operator asked for none
 - a hijacked connection is recorded as `101 Switching Protocols` instead of the default `200`, so a websocket upgrade that lives for hours no longer lands in the same request-duration series as an ordinary request and skews the latency distribution
+
+### Security
+
+- `go.mod` — `google.golang.org/grpc` is required at v1.82.1, the fix for [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061), which govulncheck reports as reachable from this module through the otlp exporter path. The dependency pinning policy keeps the oldest version that compiles, and a reachable advisory is the exception that policy exists to admit
 
 ## [v3.1.0] - 2026-07-06 - Lifecycle Handler Decorator and OTLP Trace Export
 

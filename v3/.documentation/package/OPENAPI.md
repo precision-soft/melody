@@ -31,9 +31,10 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
 
 [`Generate`](../../openapi/generator.go) walks the router's `RouteDefinition` list. For each route it:
 
-- converts the Melody pattern to an OpenAPI path — `:id` and `{id}` segments become `{id}` path parameters;
-- maps each HTTP method to an `Operation` keyed by the route name as `operationId`;
-- enriches the operation from the [`Registry`](../../openapi/registry.go) when a [`Descriptor`](../../openapi/registry.go) is registered for the route name (summary, tags, request body, responses).
+- converts the Melody pattern to an OpenAPI path — `:id` and `{id}` segments become `{id}` path parameters; a catch-all (`*rest...`, or a trailing `*rest`) becomes `{rest}` and **ends the documented path**, because the router's registration discards every segment written after a catch-all and never matches it — a mid-pattern `*name` without the dots is a single-segment wildcard and keeps its tail;
+- maps each HTTP method to an `Operation` keyed by the route name as `operationId`. A route registered with **no** method list answers every verb, so it is documented on all eight path item verbs, each with its own operationId; a verb the format cannot model (the router registers any string) is named in the path item's `description` instead of being dropped without a trace;
+- enriches the operation from the [`Registry`](../../openapi/registry.go) when a [`Descriptor`](../../openapi/registry.go) is registered for the route name (summary, tags, request body, responses). The responses are visited in status order, so component naming — and with it the whole document — is byte-stable across runs;
+- never overwrites an operation another route already wrote: where two patterns converge on one converted path, the earlier registration wins, exactly as it does in the router's match order.
 
 ### A trailing optional parameter becomes two path items
 
@@ -53,15 +54,23 @@ The two operations share the descriptor's summary, description, tags, request bo
 
 A route **explicitly registered** at the shortened path describes it better than this mirror does, so its own operation always wins, regardless of the order the two routes were registered in: the mirror is skipped when an operation for that method already exists, and an explicit route overwrites a mirror that was written first.
 
-Schemas come from reflection over the DTO types in the descriptor. Struct fields use their `json` tag for the property name (skipping `-` and unexported fields), and `validate` tags shape the schema:
+Schemas come from reflection over the DTO types in the descriptor. Struct fields use their `json` tag for the property name (skipping `-` and unexported fields), and `validate` tags shape the schema. The mapping mirrors what the runtime validator actually enforces, and the rule that governs every branch is **fail-closed**: the document may refuse more than the server (each over-approximation is declared in [`schema.go`](../../openapi/schema.go) with its reason), but it never advertises a value the validator refuses:
 
-- `notBlank` / `notEmpty` → the property is added to `required`;
-- `email` → `format: email`;
-- `min` / `max` → `minLength` / `maxLength`, on string fields only. These mirror what the framework validator enforces (`min`/`max` are string-length checks), so the spec never advertises a numeric or collection bound the server does not enforce — `min`/`max` are deliberately not emitted as numeric `minimum`/`maximum` or array `minItems`/`maxItems`;
-- `greaterThan` / `lessThan` → exclusive `minimum` / `maximum` (these map to real numeric constraints);
-- `regex` → `pattern`.
+- `notBlank` → the property is `required` and non-nullable on every kind; on a genuine string it adds a `minLength: 1` floor, and on **any other shape** — `[]byte` and `time.Time` included, both rendered as strings — the constraint refuses the value itself (`"value must be a string"`), so the field is advertised unsatisfiable;
+- `notEmpty` → `required`, non-nullable, and the matching floor per shape (`minLength` / `minItems` / `minProperties`); a struct or scalar carrying it is unsatisfiable, exactly as the validator rejects those outright;
+- `email`, `alpha`, `numeric`, `alphanumeric` → `format: email` / an anchored character-class `pattern` on a genuine string; on any other shape the constraint refuses every non-null value while passing a nil pointer, so a nullable field is advertised as accepting exactly `null` and a non-nullable one as unsatisfiable;
+- `min` / `max` → `minLength` / `maxLength` on genuine strings only, mirroring the validator's string-length checks; on every other shape the same nil-skipping refusal applies. `min`/`max` are deliberately never emitted as numeric `minimum`/`maximum` or array `minItems`/`maxItems`, because the validator enforces no such bound;
+- `greaterThan` / `lessThan` → exclusive `minimum` / `maximum` on numeric fields (a negative bound is a legitimate declaration); on a non-numeric field the constraint rejects every value, so the field is unsatisfiable;
+- `regex` → `pattern`, emitted verbatim on a genuine string when it compiles; an uncompilable pattern advertises `maxLength: 0` (the validator accepts only the empty string there), and on a non-string shape the non-string refusal wins;
+- a rule the validator refuses **at construction** — a bare parameterized constraint (`min`, `max`, `greaterThan`, `lessThan`, `regex` with no value), an empty `regex` pattern, a malformed or negative `min`/`max` bound, a malformed tag, a tag that parses to no rule at all — fails the whole field closed before any value is examined: the field is advertised unsatisfiable **and listed `required`**, because the absent zero value goes through the same refused rule and a payload omitting the field is rejected too.
 
-Slices map to arrays (a `[]byte` to `string` / `format: byte`); maps to objects with `additionalProperties`. A named struct type is emitted once into `components/schemas` and referenced by `$ref`, so a type reused across operations is defined a single time. A nullable pointer to a named struct is wrapped as `{"allOf":[{"$ref":…}],"nullable":true}` (OpenAPI 3.0 ignores `$ref` siblings, so the nullability would otherwise be lost). Self-referential types terminate through the `$ref`.
+Slices map to arrays (a `[]byte` to `string` / `format: byte`); maps to objects with `additionalProperties`. A named struct type is emitted once into `components/schemas` and referenced by `$ref`, so a type reused across operations is defined a single time. A nullable pointer to a named struct is wrapped as `{"allOf":[{"$ref":…}],"nullable":true}` (OpenAPI 3.0 ignores `$ref` siblings, so the nullability would otherwise be lost). Self-referential types terminate through the `$ref`. A tag on a `$ref` field is read against the shape the component stands for — a struct or a named collection — with the same refusals as inline; an unsatisfiable reference is contradicted with a type-agnostic `not: {}` beside the `$ref`.
+
+### The validator lockstep
+
+[`schema.go`](../../openapi/schema.go) is a hand-written mirror of the [`validation`](VALIDATION.md) package's semantics: the production code deliberately does **not** import `validation`, so the generator keeps a dependency-free surface. What holds the two in step is not the prose — it is [`schema_test.go`](../../openapi/schema_test.go), the only file in the tree where `openapi` reaches `validation` (a test-only import). Its oracle is semantic, over values: every tag class crossed with every field shape is built into a real struct type, the document's verdict on a value is read from the generated facets alone, the validator's verdict comes from `validation.NewValidator().Validate` on the same value, and the document is never allowed to advertise a value — or an absence — the validator refuses. The declared divergences (today exactly one: `minLength` cannot express `notBlank`'s whitespace-only rejection) are enumerated in the test with their reasons.
+
+When the validator's semantics change, this mirror must change in the same session — and the lockstep suite is what turns a forgotten half into a red test instead of a silently wrong published contract. Do not replace it with assertions on the mirror's own predicates: an oracle written on predicates pins the branches of the current repair and goes blind at the next divergence.
 
 ### Types that marshal themselves
 
@@ -133,14 +142,21 @@ app melody:openapi:generate            # prints to stdout
 app melody:openapi:generate --out openapi.json
 ```
 
+A relative `--out` is anchored at the project directory (`kernel.project_dir`), exactly as the wiring command anchors its own, with the parent directories created on the way; the write lands through a temp file and a rename, and an existing file that does not hold a JSON document — someone's source a mistyped `--out` points at — is refused rather than replaced. The command is auto-registered by the application when the container carries `ServiceOpenApiRegistry`; [`NewGenerateCommandFromContainer`](../../openapi/generate_command.go) is the constructor that resolves the `Info` and the `Registry` at run time, and it says on its writer when no `ServiceOpenApiInfo` is registered, since the tolerant [`InfoFromResolver`](../../openapi/service_resolver.go) then answers an empty `Info` and the document's required title and version are empty strings.
+
 The example application registers a registry (`config/openapi.go`) and the command, describing the product-create and i18n-greeting routes.
 
 ## Footguns & caveats
 
 - Generation is opt-in and userland-wired; routes without a registered descriptor still appear (path, method, path parameters) but with a single `default` response and no body.
+- **The document enumerates every route the router carries** — internal, administrative and authentication routes included, with their methods and path-parameter names. There is no per-route opt-out. An application that mounts [`SpecHandler`](../../openapi/spec_handler.go) decides who can read that enumeration with the same firewall rules as any other route; mounting it public, as the example does, publishes the whole route table deliberately.
+- [`Registry.Describe`](../../openapi/registry.go) belongs to **boot** — module construction, before the application serves. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so a `Describe` issued while requests are in flight is a concurrent map write, which Go answers by killing the process.
+- [`SpecHandler`](../../openapi/spec_handler.go) regenerates the whole document on every request — the full reflection walk included. The document only changes at boot, so a deployment that expects the route to be hammered should cache the response in front of it (a reverse-proxy cache, or a handler of its own that generates once).
+- A `regex` pattern is validated with Go's RE2 and emitted verbatim, while OpenAPI 3.0 prescribes the ECMA-262 dialect for `pattern`; keep to the common subset (no `(?i)` inline flags, no `\p{...}` classes) or the produced document fails downstream validators.
 - The router normalizes trailing slashes, so generated path keys have no trailing slash even when the route pattern does.
-- `validate` tag parsing splits on commas; a `regex` pattern containing a comma is not supported by the schema mapping.
+- `validate` tag rules are comma-separated, and the schema mapping splits them exactly as the runtime validator does: a comma inside a `()` group, a `[...]` character class, a `{n,m}` quantifier, a quoted parameter value or behind a backslash stays part of its pattern. Only a bare top-level comma is a rule separator — in both layers alike, since that is the tag grammar itself — so a pattern that genuinely needs one escapes it (`\,`).
 - Reused named struct types are emitted once into `components/schemas` and referenced by `$ref` (see "How generation works"); an unnamed (anonymous) cyclic struct falls back to a generic `object` to avoid infinite recursion.
+- **A misconfigured tag is published as an unsatisfiable required field**, not hidden: a bare `min`, a `max=-1`, an empty `regex` pattern or a malformed bound makes the validator reject every payload, and the document says so (an impossible facet window, `not: {}` on a reference) instead of advertising a satisfiable contract the server refuses on every request. A spec-driven client failing on such a field is reporting the server's real behaviour — fix the tag.
 - A `validate` tag declared **inside** a struct whose promoted json codec is `time.Time`'s is neither advertised nor enforced: the schema for such a value is a `date-time` string with no properties to hang a constraint on, and the validator skips the struct outright. A tag on the **field holding** that struct still applies, since it constrains the field rather than anything inside it.
 
 ## Userland API
@@ -160,5 +176,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`DescribeTyped[Req, Resp any](registry *Registry, routeName string, status int, options ...DescribeOption)`](../../openapi/describe_typed.go) with `WithSummary`, `WithDescription`, `WithTags`, `WithResponse[T any](status int)`
 - [`Generate(info Info, routeDefinitions []httpcontract.RouteDefinition, registry *Registry) *Document`](../../openapi/generator.go)
 - [`NewGenerateCommand(info Info, registry *Registry) *GenerateCommand`](../../openapi/generate_command.go)
+- [`NewGenerateCommandFromContainer() *GenerateCommand`](../../openapi/generate_command.go) — the auto-registered form, resolving the `Info` and the `Registry` from the container at run time
 - [`SpecHandler(info Info, registry *Registry) httpcontract.Handler`](../../openapi/spec_handler.go)
 - [`RegistryMustFromContainer(...)`, `RegistryMustFromResolver(...)`](../../openapi/service_resolver.go) — resolve the registry registered under `ServiceOpenApiRegistry`
+- [`InfoFromResolver(resolver containercontract.Resolver) Info`](../../openapi/service_resolver.go) — the tolerant reader of `ServiceOpenApiInfo`, answering an empty `Info` when none is registered

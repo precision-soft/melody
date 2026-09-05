@@ -582,7 +582,7 @@ func TestValueContainsRedactTag_SharedBackingArraySliceNotFalseDeduped(t *testin
         Full []any
     }
 
-    /* @important Head and Full share one backing array; Head[:1] is benign and is walked first, recording the backing-array pointer. Full carries the redact-tagged secretHolder at index 1, past Head's length. A pointer-only visit key would dedup Full against Head and skip the secret (leaking it); the pointer+length key must let Full be traversed so the redact tag is detected. */
+    /* Head and Full share one backing array; Head[:1] is benign and is walked first, recording the backing-array pointer. Full carries the redact-tagged secretHolder at index 1, past Head's length. A pointer-only visit key would dedup Full against Head and skip the secret (leaking it); the pointer+length key must let Full be traversed so the redact tag is detected. */
     backing := []any{"benign", secretHolder{Secret: "leak-me"}}
     value := carrier{Head: backing[:1], Full: backing}
 
@@ -717,37 +717,37 @@ func assertChangeProbeExitsCleanly(t *testing.T, probeName string, budget time.D
     t.Fatalf("could not run the %s probe: %v; output: %s", probeName, runErr, combinedOutput)
 }
 
-/* @info a field whose map type contains itself must not send the redact-tag type walk into unbounded recursion; the walk runs for every non-anonymous field of every audited insert, update and delete, and a stack overflow there is a fatal error that takes the process down with no recover and no rollback */
+/* a field whose map type contains itself must not send the redact-tag type walk into unbounded recursion; the walk runs for every non-anonymous field of every audited insert, update and delete, and a stack overflow there is a fatal error that takes the process down with no recover and no rollback */
 func TestIsRedactedField_SelfReferentialMapTypeTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicMapType", 30*time.Second)
 }
 
-/* @info `type Node []Node` is legal Go and its element chase never reaches a non-slice, so the chase spins at full processor instead of overflowing: the process never dies, it just stops serving */
+/* `type Node []Node` is legal Go and its element chase never reaches a non-slice, so the chase spins at full processor instead of overflowing: the process never dies, it just stops serving */
 func TestIsRedactedField_SelfReferentialSliceTypeTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicSliceType", 30*time.Second)
 }
 
-/* @info `type Pointer *Pointer` is legal Go and spins the same chase, both where the field type is dereferenced for the encrypted string check and inside the redact-tag type walk */
+/* `type Pointer *Pointer` is legal Go and spins the same chase, both where the field type is dereferenced for the encrypted string check and inside the redact-tag type walk */
 func TestIsRedactedField_SelfReferentialPointerTypeTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicPointerType", 30*time.Second)
 }
 
-/* @info the same pointer shape reached as a nested struct field, where the value walk dereferences sub-field types of its own */
+/* the same pointer shape reached as a nested struct field, where the value walk dereferences sub-field types of its own */
 func TestValueContainsRedactTag_SelfReferentialPointerSubFieldTypeTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicPointerNestedType", 30*time.Second)
 }
 
-/* @info Go rejects `type Node struct { Node }` but permits `type Node struct { *Node }`, so an embed can point back at the struct the walk is already inside; the embed recursion has no nil to stop on and overflows the stack, which a deferred recover around ChangeSet does not catch */
+/* Go rejects `type Node struct { Node }` but permits `type Node struct { *Node }`, so an embed can point back at the struct the walk is already inside; the embed recursion has no nil to stop on and overflows the stack, which a deferred recover around ChangeSet does not catch */
 func TestChangeSet_SelfEmbeddedPointerCycleTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicEmbeddedPointer", 30*time.Second)
 }
 
-/* @info the same loop closed over two nodes rather than one */
+/* the same loop closed over two nodes rather than one */
 func TestChangeSet_MutuallyEmbeddedPointerCycleTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "mutuallyCyclicEmbeddedPointer", 30*time.Second)
 }
 
-/* @info the cycle guard must not swallow a finite embed chain: three distinct nodes are three distinct pointers, and every field they carry still belongs in the change-set */
+/* the cycle guard must not swallow a finite embed chain: three distinct nodes are three distinct pointers, and every field they carry still belongs in the change-set */
 func TestChangeSet_FiniteEmbeddedPointerChainIsStillWalked(t *testing.T) {
     before := &CyclicEmbeddedNode{Name: "root"}
     before.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "middle"}
@@ -768,7 +768,7 @@ func TestChangeSet_FiniteEmbeddedPointerChainIsStillWalked(t *testing.T) {
     }
 }
 
-/* @info the redact-tag type walk must keep answering true for a self-referential type that does carry a tag somewhere; guarding the cycle may not turn into refusing to look */
+/* the redact-tag type walk must keep answering true for a self-referential type that does carry a tag somewhere; guarding the cycle may not turn into refusing to look */
 func TestIsRedactedField_CyclicTypeStillReportsAReachableRedactTag(t *testing.T) {
     type taggedNode struct {
         Secret   string `audit:"redact"`
@@ -786,5 +786,133 @@ func TestIsRedactedField_CyclicTypeStillReportsAReachableRedactTag(t *testing.T)
     }
     if false == isRedactedField(holderType.Field(1)) {
         t.Fatalf("a redact tag reachable from the field type must still be found once the cycle guard is in place")
+    }
+}
+
+type changeTestCompartmentRef struct{}
+
+func (instance changeTestCompartmentRef) CipherName() string {
+    return "change-test-compartment"
+}
+
+/* the compartment-bound generic forms instantiate a distinct reflect.Type per marker, so the identity list the redaction used to match could never enumerate them: an Iban typed EncryptedStringFor[ref] reached the change-set as live plaintext */
+func TestChangeSet_RedactsTheCompartmentBoundEncryptedTypes(t *testing.T) {
+    type compartmentAccount struct {
+        Id            int64                                                     `bun:"id,pk"`
+        Iban          encrypt.EncryptedStringFor[changeTestCompartmentRef]      `bun:"iban"`
+        SearchableTin encrypt.EncryptedDeterministicStringFor[changeTestCompartmentRef] `bun:"tin"`
+    }
+
+    before := compartmentAccount{Id: 1, Iban: "DE89370400440532013000", SearchableTin: "123"}
+    after := compartmentAccount{Id: 1, Iban: "FR7630006000011234567890189", SearchableTin: "456"}
+
+    changes := ChangeSet(before, after)
+    if 2 != len(changes) {
+        t.Fatalf("expected both encrypted fields to be recorded as changed, got %d: %v", len(changes), changes)
+    }
+
+    for _, change := range changes {
+        if "<redacted>" != change.Old || "<redacted>" != change.New {
+            t.Fatalf("expected the compartment-bound field %q to be redacted, got old=%v new=%v", change.Field, change.Old, change.New)
+        }
+    }
+}
+
+/* a struct field whose TYPE holds an encrypted column one level down used to read as tag-free through the type walk while the value walk disagreed; both walks must answer redacted */
+func TestChangeSet_RedactsAStructWhoseTypeNestsAnEncryptedColumn(t *testing.T) {
+    type paymentDetails struct {
+        Iban encrypt.EncryptedString
+    }
+
+    type customer struct {
+        Id      int64          `bun:"id,pk"`
+        Payment paymentDetails `bun:"payment"`
+    }
+
+    before := customer{Id: 1, Payment: paymentDetails{Iban: "DE89"}}
+    after := customer{Id: 1, Payment: paymentDetails{Iban: "FR76"}}
+
+    changes := ChangeSet(before, after)
+    if 1 != len(changes) {
+        t.Fatalf("expected one change, got %d: %v", len(changes), changes)
+    }
+
+    if "<redacted>" != changes[0].Old || "<redacted>" != changes[0].New {
+        t.Fatalf("expected the nested encrypted column to redact the whole field, got old=%v new=%v", changes[0].Old, changes[0].New)
+    }
+}
+
+/* under plain omitempty the transition active true→false marshalled byte-identical to a delete's before-image; the present zero must render */
+func TestChange_MarshalsAPresentZeroValue(t *testing.T) {
+    type flagRow struct {
+        Id     int64 `bun:"id,pk"`
+        Active bool  `bun:"active"`
+    }
+
+    updateChanges := ChangeSet(flagRow{Id: 1, Active: true}, flagRow{Id: 1, Active: false})
+
+    updatePayload, updateErr := json.Marshal(updateChanges)
+    if nil != updateErr {
+        t.Fatalf("marshal update: %v", updateErr)
+    }
+
+    if false == strings.Contains(string(updatePayload), `"new":false`) {
+        t.Fatalf("expected the present zero to render, got %s", updatePayload)
+    }
+
+    deleteChanges := changeSetWithIgnore(flagRow{Id: 1, Active: true}, nil, nil)
+
+    deletePayload, deleteErr := json.Marshal(deleteChanges)
+    if nil != deleteErr {
+        t.Fatalf("marshal delete: %v", deleteErr)
+    }
+
+    if true == strings.Contains(string(deletePayload), `"new"`) {
+        t.Fatalf("expected the absent side to stay out of a delete's before-image, got %s", deletePayload)
+    }
+
+    if false == strings.Contains(string(deletePayload), `"old":true`) {
+        t.Fatalf("expected the delete's before-image to keep its old side, got %s", deletePayload)
+    }
+
+    /* the boxed false above is non-nil either way, so it cannot separate presence from the plain nil check; the value that can is a PRESENT nil — an any-typed field emptied to nil must render "new":null, where absence would erase the transition */
+    type attributeRow struct {
+        Id    int64 `bun:"id,pk"`
+        Extra any   `bun:"extra"`
+    }
+
+    nilChanges := ChangeSet(attributeRow{Id: 1, Extra: "x"}, attributeRow{Id: 1, Extra: nil})
+
+    nilPayload, nilErr := json.Marshal(nilChanges)
+    if nil != nilErr {
+        t.Fatalf("marshal nil transition: %v", nilErr)
+    }
+
+    if false == strings.Contains(string(nilPayload), `"new":null`) {
+        t.Fatalf("expected the present nil to render as null, got %s", nilPayload)
+    }
+}
+
+/* the one shape where the TYPE walk answers alone: an empty slice against a nil slice records a change whose values hold no element for the value walk to inspect, so only the field type can say the element carries an encrypted column — under the pre-repair type walk this change-set carried the (empty) containers unredacted while every populated shape was saved by the value walk */
+func TestChangeSet_RedactsAnEmptyContainerOfAnEncryptedCarryingType(t *testing.T) {
+    type paymentDetails struct {
+        Iban encrypt.EncryptedString
+    }
+
+    type customer struct {
+        Id       int64            `bun:"id,pk"`
+        Payments []paymentDetails `bun:"payments"`
+    }
+
+    before := customer{Id: 1, Payments: []paymentDetails{}}
+    after := customer{Id: 1, Payments: nil}
+
+    changes := ChangeSet(before, after)
+    if 1 != len(changes) {
+        t.Fatalf("expected the container transition to be recorded, got %d: %v", len(changes), changes)
+    }
+
+    if "<redacted>" != changes[0].Old {
+        t.Fatalf("expected the encrypted-carrying container to be redacted by its type alone, got old=%v", changes[0].Old)
     }
 }

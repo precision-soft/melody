@@ -10,8 +10,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* The seeded editor account. The nomenclature's write endpoints sit behind ROLE_EDITOR, so the section's own
-client — which holds ROLE_USER and is what makes the admin route answer 403 — cannot drive them. */
+/* The seeded editor account. The nomenclature's write endpoints sit behind ROLE_EDITOR, so the section's own client — which holds ROLE_USER and is what makes the admin route answer 403 — cannot drive them. */
 const (
     exampleEditorUsername = "editor"
     exampleEditorPassword = "editor"
@@ -56,9 +55,7 @@ type exampleCatalogReport struct {
     Journal    []exampleJournalEntry `json:"journal"`
 }
 
-/* exampleCachePrefix and the table names carry the major, because the three example applications share one
-redis and one mysql in development. The application declares the same shape in config/redis.go and in its
-repository row tags, and a mismatch here would read somebody else's state. */
+/* exampleCachePrefix and the table names carry the major, because the three example applications share one redis and one mysql in development. The application declares the same shape in config/redis.go and in its repository row tags, and a mismatch here would read somebody else's state. */
 func exampleCachePrefix(major exampleMajor) string {
     return "melody-example-" + major.label + ":cache:"
 }
@@ -75,9 +72,7 @@ func exampleJournalTable(major exampleMajor) string {
     return "melody_example_" + major.label + "_catalog_journal"
 }
 
-/* exampleJournalDsn answers the DSN of the database one major keeps its journal in, together with the
-environment variable that carries it — the name is what a skip message must say when the value is cleared.
-The v1 example runs its journal on postgres beside a mysql catalogue; the later majors keep both in mysql. */
+/* exampleJournalDsn answers the DSN of the database one major keeps its journal in, together with the environment variable that carries it — the name is what a skip message must say when the value is cleared. The v1 example runs its journal on postgres beside a mysql catalogue; the later majors keep both in mysql. */
 func exampleJournalDsn(major exampleMajor, mysqlDsn string, postgresDsn string) (string, string) {
     if true == major.journalOnPostgres {
         return postgresDsn, "POSTGRES_DSN"
@@ -86,8 +81,7 @@ func exampleJournalDsn(major exampleMajor, mysqlDsn string, postgresDsn string) 
     return mysqlDsn, "MYSQL_DSN"
 }
 
-/* openExampleJournal opens the journal database through the door its engine requires: the postgres handle
-is a DSN connector, the mysql one goes through the framework's own provider like every other mysql read. */
+/* openExampleJournal opens the journal database through the door its engine requires: the postgres handle is a DSN connector, the mysql one goes through the framework's own provider like every other mysql read. */
 func openExampleJournal(major exampleMajor, journalDsn string) *bun.DB {
     if true == major.journalOnPostgres {
         return openPostgres(journalDsn)
@@ -96,9 +90,7 @@ func openExampleJournal(major exampleMajor, journalDsn string) *bun.DB {
     return openMysql(major.label, journalDsn)
 }
 
-/* decodeExampleData pulls the payload out of the example's response envelope. The presenter wraps every api
-answer, so a decode straight into the payload type would silently yield a zero value and turn a broken
-assertion into a passing one. */
+/* decodeExampleData pulls the payload out of the example's response envelope. The presenter wraps every api answer, so a decode straight into the payload type would silently yield a zero value and turn a broken assertion into a passing one. */
 func decodeExampleData(label string, route string, body string, target any) {
     envelope := exampleEnvelope{}
 
@@ -121,15 +113,9 @@ func decodeExampleData(label string, route string, body string, target any) {
     }
 }
 
-/* runExampleIntegrationAssertions drives the live backends of one example application through the
-nomenclature itself rather than through routes that exist to be driven: the catalogue is kept in mysql, its
-listing is cached in redis and dropped when a product changes, every write leaves a journal entry, and the
-writes are rate limited.
+/* runExampleIntegrationAssertions drives the live backends of one example application through the nomenclature itself rather than through routes that exist to be driven: the catalogue is kept in mysql, its listing is cached in redis and dropped when a product changes, every write leaves a journal entry, and the writes are rate limited.
 
-Every check is made twice over: once through the application, and once out of band through the harness's own
-connection to the same backend. The application's own write and read pass through one code path, so a broken
-pair would cancel out and report success; the out-of-band half is what makes the claim about the backend
-rather than about the handler. */
+   Every check is made twice over: once through the application, and once out of band through the harness's own connection to the same backend. The application's own write and read pass through one code path, so a broken pair would cancel out and report success; the out-of-band half is what makes the claim about the backend rather than about the handler. */
 func runExampleIntegrationAssertions(
     major exampleMajor,
     client *exampleClient,
@@ -149,8 +135,7 @@ func runExampleIntegrationAssertions(
     removeExampleProbeRows(major, createdProductId, mysqlDsn, postgresDsn)
 }
 
-/* exampleEditorClient signs in a second client under the account that may change the nomenclature. The
-section's own client stays as it is: its ROLE_USER identity is what several assertions above are about. */
+/* exampleEditorClient signs in a second client under the account that may change the nomenclature. The section's own client stays as it is: its ROLE_USER identity is what several assertions above are about. */
 func exampleEditorClient(major exampleMajor, application *exampleApplication) *exampleClient {
     editor := newExampleClient(major)
 
@@ -171,8 +156,7 @@ func exampleEditorClient(major exampleMajor, application *exampleApplication) *e
     return editor
 }
 
-/* assertExampleCatalogReport covers the reading that needs no backend at all: it is the one assertion that
-must hold on every machine, so it is also the proof that the catalogue routes are wired. */
+/* assertExampleCatalogReport covers the reading that needs no backend at all: it is the one assertion that must hold on every machine, so it is also the proof that the catalogue routes are wired. */
 func assertExampleCatalogReport(major exampleMajor, client *exampleClient) {
     response := client.call("GET", exampleCatalogReportRoute, "application/json", "", "")
     if http.StatusOK != response.statusCode {
@@ -237,9 +221,7 @@ func splitExampleReportFields(payload string) []string {
     return append(parts, current)
 }
 
-/* assertExampleProductPersisted creates a product through the api and reads the row back out of band. Without
-a database the example keeps the catalogue in memory on purpose, and there is then nothing to read out of
-band — the write still has to be accepted, which is what the assertion falls back to. */
+/* assertExampleProductPersisted creates a product through the api and reads the row back out of band. Without a database the example keeps the catalogue in memory on purpose, and there is then nothing to read out of band — the write still has to be accepted, which is what the assertion falls back to. */
 func assertExampleProductPersisted(
     major exampleMajor,
     editor *exampleClient,
@@ -309,10 +291,7 @@ func assertExampleProductPersisted(
     return created.Id
 }
 
-/* assertExampleListingCached reads the catalogue, finds the listing in redis out of band, then changes the
-catalogue and finds it gone. Both halves matter: the first proves the listing is cached somewhere the
-application is not the only one that can see, and the second proves a write drops it rather than leaving a
-stale catalogue to be served. */
+/* assertExampleListingCached reads the catalogue, finds the listing in redis out of band, then changes the catalogue and finds it gone. Both halves matter: the first proves the listing is cached somewhere the application is not the only one that can see, and the second proves a write drops it rather than leaving a stale catalogue to be served. */
 func assertExampleListingCached(
     major exampleMajor,
     editor *exampleClient,
@@ -390,10 +369,7 @@ func assertExampleListingCached(
     removeExampleProbeRows(major, invalidated.Id, mysqlDsn, postgresDsn)
 }
 
-/* assertExampleJournalRecordedTheWrite reads the journal straight out of its own database. The entry is not
-exposed by the route that created it, so this half of the check cannot be satisfied by the same code path that
-wrote it — and for the first major the door is postgres, which is also what proves the second live connection
-carried the write while the catalogue's mysql half carried the product. */
+/* assertExampleJournalRecordedTheWrite reads the journal straight out of its own database. The entry is not exposed by the route that created it, so this half of the check cannot be satisfied by the same code path that wrote it — and for the first major the door is postgres, which is also what proves the second live connection carried the write while the catalogue's mysql half carried the product. */
 func assertExampleJournalRecordedTheWrite(major exampleMajor, editor *exampleClient, productId string, mysqlDsn string, postgresDsn string) {
     journalDsn, journalDsnVariable := exampleJournalDsn(major, mysqlDsn, postgresDsn)
     if "" == journalDsn {
@@ -432,8 +408,7 @@ func assertExampleJournalRecordedTheWrite(major exampleMajor, editor *exampleCli
         fail("[%s] the journal recorded subject %q for a product write", major.label, row.Subject)
     }
 
-    /* the seeded editor is user-2, and the journal records the identifier the token carries rather than the
-       display name, so a write attributed to the system would mean the actor was lost on the way */
+    /* the seeded editor is user-2, and the journal records the identifier the token carries rather than the display name, so a write attributed to the system would mean the actor was lost on the way */
     if "" == row.Actor || "system" == row.Actor {
         fail(
             "[%s] the journal attributed a signed-in editor's write to %q, so the actor was not carried",
@@ -444,9 +419,7 @@ func assertExampleJournalRecordedTheWrite(major exampleMajor, editor *exampleCli
     pass("[%s] the journal recorded %s of product %q by %q, read out of band", major.label, row.Action, productId, row.Actor)
 }
 
-/* assertExampleWritesAreRateLimited spends the budget on writes the handler refuses anyway, so the assertion
-costs the catalogue nothing: the middleware runs before the handler, so a body that fails validation still
-consumes the allowance. */
+/* assertExampleWritesAreRateLimited spends the budget on writes the handler refuses anyway, so the assertion costs the catalogue nothing: the middleware runs before the handler, so a body that fails validation still consumes the allowance. */
 func assertExampleWritesAreRateLimited(major exampleMajor, editor *exampleClient, redisAddress string) {
     if "" == redisAddress {
         skip("[%s] the write budget was not verified: REDIS_ADDRESS is cleared, so there is no limiter and no counter to reset", major.label)
@@ -454,8 +427,7 @@ func assertExampleWritesAreRateLimited(major exampleMajor, editor *exampleClient
         return
     }
 
-    /* the counter is keyed by client address, and every major calls from the same one, so without a reset the
-       second major starts with the first one's budget already spent */
+    /* the counter is keyed by client address, and every major calls from the same one, so without a reset the second major starts with the first one's budget already spent */
     resetExampleRateLimitCounters(major.label, redisAddress, exampleMajorRateLimitPrefix(major))
 
     refused := `{"name":""}`
@@ -495,9 +467,7 @@ func assertExampleWritesAreRateLimited(major exampleMajor, editor *exampleClient
     )
 }
 
-/* removeExampleProbeRows takes this run's rows away again. The example applications share their development
-backends, and a probe left behind would be counted by the next run's catalogue reading. The journal rows live
-in the journal's own database, which for the first major is not the one holding the product. */
+/* removeExampleProbeRows takes this run's rows away again. The example applications share their development backends, and a probe left behind would be counted by the next run's catalogue reading. The journal rows live in the journal's own database, which for the first major is not the one holding the product. */
 func removeExampleProbeRows(major exampleMajor, productId string, mysqlDsn string, postgresDsn string) {
     if "" == productId {
         return

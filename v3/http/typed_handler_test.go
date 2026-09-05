@@ -4,15 +4,20 @@ import (
     "context"
     nethttp "net/http"
     "net/http/httptest"
+    "strconv"
     "strings"
     "testing"
 
-    "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/config"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    "github.com/precision-soft/melody/v3/session"
     "github.com/precision-soft/melody/v3/validation"
 )
 
@@ -20,8 +25,42 @@ type jsonHandlerTestRequest struct {
     Name string `json:"name" validate:"notBlank"`
 }
 
+/* the shared http container carries the configuration the body-reading door resolves the request limit from: JsonHandler binds through the same door Request.BindJson does, so it needs the same services the rest of the request cycle needs rather than a container of its own with fewer */
 func newJsonHandlerRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := newHttpTestContainer()
+
+    serviceContainer.MustRegister(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            return validation.NewValidator(), nil
+        },
+    )
+
+    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+}
+
+func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) runtimecontract.Runtime {
+    serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
+        session.NewInMemoryStorage(),
+        map[string]string{
+            config.HttpMaxRequestBodyBytesKey: strconv.Itoa(maxRequestBodyBytes),
+        },
+    )
+
+    serviceContainer.MustRegister(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            return validation.NewValidator(), nil
+        },
+    )
+
+    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+}
+
+/* the panicking-responder mirror needs the journal itself and not a nop: the record is filed at the recovery site, so the only reader that can see it is a logger installed on the runtime the handler is called with */
+func newJsonHandlerRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
 
     serviceContainer.MustRegister(
         validation.ServiceValidator,
@@ -192,4 +231,239 @@ func TestJsonHandler_RejectsAnEmptyObjectThatFailsValidation(t *testing.T) {
     }
 
     requireJsonHandlerBadRequest(t, handleErr)
+}
+
+func TestJsonHandler_AnswersAnOversizedBodyWith413RatherThanInvalidJson(t *testing.T) {
+    runtimeInstance := newJsonHandlerRuntimeWithBodyLimit(8)
+
+    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"a much longer name than the limit"}`))
+    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    httpException := exception.AsHttpException(handleErr)
+    if nil == httpException {
+        t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
+    }
+
+    /* the limit used to be laundered into a flat 400 "invalid json": the client retried the same payload forever because it was told its json was broken, and the 413-at-warning treatment the kernel builds for every other body path was bypassed */
+    if nethttp.StatusRequestEntityTooLarge != httpException.StatusCode() {
+        t.Fatalf("expected status %d, got %d", nethttp.StatusRequestEntityTooLarge, httpException.StatusCode())
+    }
+}
+
+func TestJsonHandler_CarriesTheDecoderDiagnosisAsTheRefusalCause(t *testing.T) {
+    runtimeInstance := newJsonHandlerRuntime()
+
+    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name": 42}`))
+    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    httpException := exception.AsHttpException(handleErr)
+    if nil == httpException {
+        t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
+    }
+
+    /* the decoder's own diagnosis — offending offset, field, type — used to die on the line that replaced it with a flat message, so the operator had nothing to read */
+    if nil == httpException.CauseErr() {
+        t.Fatalf("expected the decoder cause to travel with the refusal")
+    }
+}
+
+func TestJsonHandler_ServesValidationDetailUnderTheValidationErrorsKey(t *testing.T) {
+    runtimeInstance := newJsonHandlerRuntime()
+
+    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":""}`))
+    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    httpException := exception.AsHttpException(handleErr)
+    if nil == httpException {
+        t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
+    }
+
+    /* flattened into the message, the per-field detail never reached the client under the one key that names it, and the listener's rule-wiring classification — which reads exactly this key — could never fire for a route bound through this door */
+    if _, exists := httpException.Context()["validationErrors"]; false == exists {
+        t.Fatalf("expected the validation detail under validationErrors, got context %v", httpException.Context())
+    }
+}
+
+func TestJsonHandler_RefusesANullBodyBoundToASlice(t *testing.T) {
+    runtimeInstance := newJsonHandlerRuntime()
+
+    handled := false
+    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body []jsonHandlerTestRequest) (httpcontract.Response, error) {
+        handled = true
+
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`null`))
+    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    /* the guard asked only about pointers, so a bulk endpoint typed on a slice took the same null past it, the validator reported the nil collection valid, and the handler was entered with it */
+    if nil == handleErr {
+        t.Fatalf("expected a null body to be refused")
+    }
+
+    if true == handled {
+        t.Fatalf("handler must not run for a null body")
+    }
+}
+
+func TestJsonHandler_RefusesANilHandleAtConstruction(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            JsonHandler[jsonHandlerTestRequest](nil)
+        },
+        "json handler may not be nil",
+    )
+}
+
+func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T) {
+    runtimeInstance := newJsonHandlerRuntime()
+
+    handler := JsonHandler(
+        func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+        WithJsonHandlerErrorResponder(func(
+            currentRuntime runtimecontract.Runtime,
+            request httpcontract.Request,
+            status int,
+            message string,
+            cause error,
+        ) (httpcontract.Response, error) {
+            return nil, nil
+        }),
+    )
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{`))
+    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    /* returned as it was, the nil pair was read by the kernel as a handler that answered nothing and served an empty 204 — a refused write reporting success to its client with no record filed */
+    if nil != response {
+        t.Fatalf("expected no response, got %v", response)
+    }
+
+    if nil == handleErr {
+        t.Fatalf("expected the refusal to stand when the responder answers nothing")
+    }
+}
+
+func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
+    recordingLogger := &errorContextRecordingLogger{}
+    runtimeInstance := newJsonHandlerRuntimeWithLogger(recordingLogger)
+
+    handler := JsonHandler(
+        func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+        WithJsonHandlerErrorResponder(func(
+            currentRuntime runtimecontract.Runtime,
+            request httpcontract.Request,
+            status int,
+            message string,
+            cause error,
+        ) (httpcontract.Response, error) {
+            panic("responder exploded")
+        }),
+    )
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{`))
+    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != response {
+        t.Fatalf("expected no response from a responder that panicked, got %v", response)
+    }
+
+    /* the refusal the responder was called to render is what stands: the panic-derived error put in its place carried no status, so a deliberate 400 recorded at warning was answered as a 500 recorded at error */
+    requireJsonHandlerBadRequest(t, handleErr)
+
+    logContext, logged := recordingLogger.errorContextFor("json handler error responder panicked")
+    if false == logged {
+        t.Fatalf("expected the contained panic to be recorded where it was caught; nothing downstream can still produce it")
+    }
+
+    errorText, hasErrorText := logContext["error"].(string)
+    if false == hasErrorText || false == strings.Contains(errorText, "responder exploded") {
+        t.Fatalf("expected the record to name the panic, got context %v", logContext)
+    }
+
+    panicStack, hasStack := logContext["panicStack"].(string)
+    if false == hasStack || "" == panicStack {
+        t.Fatalf("expected the record to carry the panic-site stack, got context %v", logContext)
+    }
+
+    if false == strings.Contains(panicStack, "goroutine") {
+        t.Fatalf("expected a goroutine stack in the panicStack field, got %q", panicStack)
+    }
+}
+
+func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testing.T) {
+    runtimeInstance := newJsonHandlerRuntime()
+
+    var receivedCause error
+    handler := JsonHandler(
+        func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+        WithJsonHandlerErrorResponder(func(
+            currentRuntime runtimecontract.Runtime,
+            request httpcontract.Request,
+            status int,
+            message string,
+            cause error,
+        ) (httpcontract.Response, error) {
+            receivedCause = cause
+
+            return TextResponse(status, message), nil
+        }),
+    )
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":""}`))
+    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    if _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil != handleErr {
+        t.Fatalf("expected the responder's response to be served, got %v", handleErr)
+    }
+
+    /* the responder used to receive a status and a flattened string, so an application that wanted the structured body could not get it from this hook either */
+    if nil == receivedCause {
+        t.Fatalf("expected the responder to be handed the refusal itself")
+    }
+
+    if nil == exception.AsHttpException(receivedCause) {
+        t.Fatalf("expected the cause to carry the http exception, got %T", receivedCause)
+    }
+}
+
+func TestWithJsonHandlerErrorResponder_RefusesANilResponder(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            WithJsonHandlerErrorResponder(nil)
+        },
+        "json handler error responder may not be nil",
+    )
 }

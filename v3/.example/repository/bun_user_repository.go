@@ -58,17 +58,8 @@ type bunUserRepository struct {
     tracker  *melodyaudit.Tracker
 }
 
-/* EnsureSchema creates the table when it is absent and writes the opening directory into it when it is empty. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
-func (instance *bunUserRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*userRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
-    }
-
+/* seedIfEmpty writes the opening directory into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
+func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
     count, countErr := instance.database.
         NewSelect().
         Model((*userRow)(nil)).
@@ -130,7 +121,7 @@ func (instance *bunUserRepository) FindById(ctx context.Context, id string) (*en
 }
 
 func (instance *bunUserRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
     if "" == wanted {
         return nil, false, nil
     }
@@ -269,7 +260,7 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
 }
 
 func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
     if "" == wanted {
         return false, nil
     }

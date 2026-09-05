@@ -6,6 +6,8 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -28,6 +30,9 @@ type HmacEnvelopeSignerConfig struct {
 
     /* Audience, when set, names the callee service this envelope is minted for and is signed into the envelope; the callee's HmacTokenSource rejects it unless its configured ServiceIdentity matches, so an envelope captured en route to one service cannot be replayed against another that trusts the same caller. Optional and opt-in: leave it empty and the callee's audience check (which is itself only active when it configures a ServiceIdentity) is not engaged, preserving the previous behavior. */
     Audience string
+
+    /* Clock is the clock the envelope's issue and expiry instants are stamped from; nil uses the system clock. Inject a frozen clock for deterministic tests. */
+    Clock clockcontract.Clock
 }
 
 func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner {
@@ -61,12 +66,18 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
         ttl = defaultHmacSignerTtl
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
     return &HmacEnvelopeSigner{
         app:        config.App,
         secrets:    config.Secrets,
         headerName: headerName,
         ttl:        ttl,
         audience:   config.Audience,
+        clock:      clockInstance,
     }
 }
 
@@ -76,6 +87,7 @@ type HmacEnvelopeSigner struct {
     headerName string
     ttl        time.Duration
     audience   string
+    clock      clockcontract.Clock
 }
 
 func (instance *HmacEnvelopeSigner) HeaderName() string {
@@ -104,7 +116,7 @@ func (instance *HmacEnvelopeSigner) Sign(
         return "", nonceErr
     }
 
-    now := time.Now()
+    now := instance.clock.Now()
 
     signedPath, signedQuery, _ := strings.Cut(path, "?")
 

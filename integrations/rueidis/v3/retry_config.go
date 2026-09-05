@@ -27,8 +27,7 @@ func NewRetryConfig(
     }
 }
 
-/* RetryConfig bounds the initial-connection retry: the provider re-dials transient failures (a redis that
-is not accepting connections yet) with capped exponential backoff, so a cold-start race does not hard-fail. */
+/* RetryConfig bounds the initial-connection retry: the provider re-dials transient failures (a redis that is not accepting connections yet) with capped exponential backoff, so a cold-start race does not hard-fail. */
 type RetryConfig struct {
     MaxAttempts       uint32
     InitialDelay      time.Duration

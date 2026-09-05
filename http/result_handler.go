@@ -5,8 +5,10 @@ import (
     nethttp "net/http"
 
     "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal"
+    "github.com/precision-soft/melody/logging"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/serializer"
 )
@@ -41,11 +43,7 @@ func NormalizeResultToResponse(
         return nil, nil
     }
 
-    /* the assertion is against the contract, the same question the controller registration door
-       asks: a caller's own Response implementation is served with its status and headers rather than
-       being handed to the serializer, which rendered it as a value — all unexported fields, so an
-       empty body under a 200 that replaced the status the caller chose. The typed nil is read through
-       the interface, where a bare comparison would take it for a live response. */
+    /* the assertion is against the contract, the same question the controller registration door asks: a caller's own Response implementation is served with its status and headers rather than being handed to the serializer, which rendered it as a value — all unexported fields, so an empty body under a 200 that replaced the status the caller chose. The typed nil is read through the interface, where a bare comparison would take it for a live response. */
     responseInstance, ok := value.(httpcontract.Response)
     if true == ok {
         if true == internal.IsNilInterface(responseInstance) {
@@ -77,6 +75,22 @@ func NormalizeResultToResponse(
             /* a header that refuses every available media type is answered as not acceptable rather than served the very type it rejected; a header that simply matches nothing still falls through to the default representation */
             if true == errors.Is(err, serializer.ErrNotAcceptable) {
                 return EmptyResponse(nethttp.StatusNotAcceptable), nil
+            }
+
+            /* a resolution failure that is not the not-acceptable refusal is recorded before the fallback serves the default representation: it was dropped whole, so a client that named an available type and received another had no diagnostic anywhere */
+            if nil != err {
+                loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
+                if nil != loggerInstance {
+                    loggerInstance.Warning(
+                        "serializer resolution failed, serving the default representation",
+                        exception.LogContext(
+                            err,
+                            exceptioncontract.Context{
+                                "acceptHeader": acceptHeader,
+                            },
+                        ),
+                    )
+                }
             }
 
             if nil == err && nil != serializerInstance {

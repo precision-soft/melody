@@ -16,7 +16,12 @@ func StreamHandler(hub *melodyhttp.ServerSentEventHub) melodyhttpcontract.Handle
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "streaming is not supported"), nil
         }
 
-        topic := queryStringOr(request, "topic", "default")
+        topic := queryStringOr(request, "topic", CatalogTopic)
+
+        /* the topic is the client's to name, so being allowed to open a stream is not being allowed to read the one asked for: the catalog topic carries the product and user writes made behind RoleEditor, and an authenticated reader without that role used to watch them go by. */
+        if false == topicIsReadableBy(runtimeInstance, topic) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "not allowed to subscribe to this topic"), nil
+        }
 
         subscriber := hub.Subscribe(topic, 16)
         defer hub.Unsubscribe(subscriber)

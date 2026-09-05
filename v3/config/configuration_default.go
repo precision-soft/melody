@@ -21,8 +21,12 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(HttpAddressKey, ":8080")
     instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, 1048576)
 
-    /* a bounded lifetime is what an application gets by not choosing one, because the unbounded storage it would otherwise fill is also what it gets by not choosing one; zero stays available as the explicit way to ask for no expiry */
+    /* the default is zero — no expiry — because that is what every deployment predating the setting already had, and picking a bound here would start logging users out at a lifetime nobody chose; the unbounded-growth hazard of the in-memory storage is answered by the boot warning, not by a quiet default. The full reasoning lives on DefaultSessionTtl. */
     instance.setDefaultParameter(HttpSessionTtlKey, DefaultSessionTtl.String())
+
+    instance.setDefaultParameter(HttpSessionTombstoneRetentionKey, DefaultSessionTombstoneRetention.String())
+
+    instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
 
     instance.setDefaultParameter(CliNameKey, "melody")
 

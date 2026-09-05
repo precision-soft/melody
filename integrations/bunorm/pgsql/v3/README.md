@@ -6,7 +6,7 @@ Import path: `github.com/precision-soft/melody/integrations/bunorm/pgsql/v3`
 
 ## Provider
 
-[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v3/connection_parameters.go) the manager registry passes to `Open` — the provider itself holds only dialect/driver tuning.
+[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v3/connection_parameters.go) the manager registry passes to `Open` — the provider itself holds only dialect, transport and driver tuning. Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or mark one melody registered from the `.env` artifacts with `MarkParameterSecret`.
 
 ```go
 provider := pgsql.NewProvider()
@@ -18,9 +18,9 @@ Unlike the [MySQL provider](../../mysql/v3/README.md), this package ships no sel
 
 ### Options
 
-* [`WithPoolConfig`](./provider_option.go) — connection-pool sizing via [`NewPoolConfig`](./pool_config.go).
-* [`WithTimeoutConfig`](./provider_option.go) — the **connect timeout only** via [`NewTimeoutConfig`](./timeout_config.go). Unlike the MySQL provider, [`TimeoutConfig`](./timeout_config.go) here carries a single `ConnectTimeout` field: `pgdriver` exposes no separate read/write deadlines, so there are none to configure. A `ConnectTimeout` of `0` skips the bounded ping context (no artificial deadline on a healthy database).
-* [`WithRetryConfig`](./provider_option.go) — connection retry/backoff via [`NewRetryConfig`](./retry_config.go). Retrying is **opt-in**: without this option `Open` makes a single attempt.
+* [`WithPoolConfig`](./provider_option.go) — connection-pool sizing via a [`PoolConfig`](./pool_config.go) built with [`NewPoolConfig`](./pool_config.go).
+* [`WithTimeoutConfig`](./provider_option.go) — every deadline the driver applies, via [`NewTimeoutConfig`](./timeout_config.go): [`TimeoutConfig`](./timeout_config.go) names the connect, read and write timeouts, because without explicit read and write deadlines `pgdriver` applies its own defaults — 10 seconds per read and 5 per write — which cut long statements with nothing in this configuration to mention they exist. For statements that must outlive even the configured deadlines, [`OpenForMigration`](./provider.go) opens a dedicated connection with the read and write deadlines lifted, which is what the migration commands run on.
+* [`WithRetryConfig`](./provider_option.go) — connection retry/backoff via a [`RetryConfig`](./retry_config.go) built with [`NewRetryConfig`](./retry_config.go). Retrying is **opt-in**: without this option `Open` makes a single attempt.
 * [`WithPostBuildHook`](./provider_option.go) — advanced connector customization (see below).
 * [`WithInsecure`](./provider_option.go) / [`WithTlsConfig`](./provider_option.go) — TLS controls (see below).
 
@@ -35,18 +35,26 @@ Applied when the matching option is not set ([`DefaultPoolConfig`](./pool_config
 | `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    |
 | `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    |
 | `TimeoutConfig` | `ConnectTimeout`        | `5s`    |
+| `TimeoutConfig` | `ReadTimeout`           | `30s`   |
+| `TimeoutConfig` | `WriteTimeout`          | `30s`   |
 | `RetryConfig`   | `MaxAttempts`           | `3`     |
 | `RetryConfig`   | `InitialDelay`          | `500ms` |
 | `RetryConfig`   | `MaxDelay`              | `5s`    |
 | `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
 
-`RetryConfig` values are also individually defaulted: a non-positive `InitialDelay`/`MaxDelay` or a `BackoffMultiplier` that is not at least `1` (including `NaN`) falls back to the value above, so a partially-filled config cannot collapse the backoff into a re-dial storm.
+All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the listed default, so passing zeros to [`NewPoolConfig`](./pool_config.go) yields the defaults rather than the zeros — on `database/sql` a zero maximum means *unlimited*, which is not a sizing anyone asks for by omission. What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two — except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff, so a partially-filled config cannot collapse the backoff into a re-dial storm.
+
+## Opening under a context, and opening for migrations
+
+- [`Provider.OpenContext`](./provider.go) implements [`bunorm.ContextOpener`](../../v3/provider.go): the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget. The registry prefers it and hands the context it was constructed with.
+- [`Provider.OpenForMigration`](./provider.go) implements [`bunorm.MigrationProvider`](../../v3/provider.go) and opens the same database with the read and write deadlines lifted, the connect timeout still armed, over a pool of the two connections a sequential migration run needs and with no connection recycled mid-run.
+- [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../../v3/provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
 
 ## TLS
 
 The provider is **secure-by-default**: `pgdriver` negotiates a TLS handshake on every Postgres connection.
 
-* [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to use plain TCP (local development or non-TLS endpoints).
+* [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to disable TLS entirely and connect over plain TCP (for local development or non-TLS endpoints).
 * [`pgsql.WithTlsConfig(*tls.Config)`](./provider_option.go) — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. When set, it takes precedence over `WithInsecure(...)`.
 
 ```go
@@ -101,7 +109,14 @@ For driver options not exposed by the typed configs, use a post-build hook confi
 ```go
 provider := pgsql.NewProvider(
     pgsql.WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
-        connector.Config().TLSConfig.InsecureSkipVerify = true
+        /* WithInsecure(true) leaves TLSConfig nil, so the hook must not assume one is there */
+        tlsConfig := connector.Config().TLSConfig
+        if nil == tlsConfig {
+            return nil
+        }
+
+        tlsConfig.InsecureSkipVerify = true
+
         return nil
     }),
 )

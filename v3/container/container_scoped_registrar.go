@@ -2,6 +2,7 @@ package container
 
 import (
     "reflect"
+    "strings"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -9,7 +10,7 @@ import (
 
 /* scopePlan is the set of scoped registrations a scope is created against. It is built once and never written to afterwards, so every scope holds a reference to the same value instead of a copy of the maps: creating a scope is a pointer load, whatever the size of the plan.
 
-A registration made after a scope already exists rebuilds the plan for the scopes created next; the ones already running keep the plan they were created with. That is the only reading under which a scope's contents do not change under its own feet halfway through a request. */
+   A registration made after a scope already exists rebuilds the plan for the scopes created next; the ones already running keep the plan they were created with. That is the only reading under which a scope's contents do not change under its own feet halfway through a request. */
 type scopePlan struct {
     providers                   map[string]providerAny
     typeProviders               map[reflect.Type]providerAny
@@ -49,6 +50,17 @@ func (instance *container) RegisterScoped(
         )
     }
 
+    /* the override path refuses to substitute a protected "service." name, and a scoped registration of the same name — with Replacing() — would perform exactly that substitution inside every scope, where the kernel resolves through. The protected namespace is the framework's, at both lifetimes. */
+    if true == strings.HasPrefix(serviceName, "service.") {
+        return exception.NewError(
+            "service is protected and cannot be registered as a scoped service",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            nil,
+        )
+    }
+
     wrappedProvider, serviceType, reflectedProviderErr := reflectedProvider(serviceName, provider)
     if nil != reflectedProviderErr {
         return reflectedProviderErr
@@ -75,7 +87,7 @@ func (instance *container) MustRegisterScoped(
 
 /* registerScoped records a provider the scopes of this container own. The registration is refused when the container already holds the name, unless the caller declared Replacing: a name that answers with a process singleton outside a scope and with a per-request service inside one is exactly the ambiguity the two lifetimes exist to keep apart, and it must be admitted deliberately rather than fall out of the order the modules registered in.
 
-There is no hard seal after boot. A late registration invalidates the published plan and the scopes created next see it, while the ones already running keep the plan they were created with — which is what lets a test register a scoped service on a container it has just built. */
+   There is no hard seal after boot. A late registration invalidates the published plan and the scopes created next see it, while the ones already running keep the plan they were created with — which is what lets a test register a scoped service on a container it has just built. */
 func (instance *container) registerScoped(
     serviceName string,
     serviceType reflect.Type,
@@ -83,6 +95,17 @@ func (instance *container) registerScoped(
     options ...containercontract.RegisterOption,
 ) error {
     registerOption := applyRegisterServiceOptions(options)
+
+    /* a scope keeps its own teardown graph, recorded per scope from the resolutions that scope actually made, so a declaration written once at registration has no scope to be written into. Accepting it silently would install nothing while reading as an ordering that holds, which is the one outcome worse than refusing. */
+    if 0 < len(registerOption.TeardownDependencyNames) {
+        return exception.NewError(
+            "a scoped registration cannot declare a teardown dependency",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            ErrScopedTeardownDependencyUnsupported,
+        )
+    }
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -114,6 +137,9 @@ func (instance *container) registerScoped(
     }
 
     instance.scopedProviders[serviceName] = provider
+    if nil != serviceType {
+        instance.scopedProviderServiceTypeByName[serviceName] = serviceType
+    }
 
     if true == registerOption.ReplacesContainerService {
         instance.scopedReplacesContainerService[serviceName] = true
@@ -133,6 +159,7 @@ func (instance *container) registerScoped(
         )
         if nil != registerScopedTypeErr {
             delete(instance.scopedProviders, serviceName)
+            delete(instance.scopedProviderServiceTypeByName, serviceName)
             delete(instance.scopedReplacesContainerService, serviceName)
             delete(instance.scopedCollectionPriorityByName, serviceName)
 
@@ -166,6 +193,10 @@ func (instance *container) registerScopedType(
         }
 
         return nil
+    }
+
+    if identityCollisionErr := instance.recordTypeIdentityKeyLocked(serviceName, canonicalType); nil != identityCollisionErr {
+        return identityCollisionErr
     }
 
     /* the cross-level check does not care whether the registration is strict: strictness decides whether a second name may share a type at the SAME lifetime, while a type answering with a singleton outside a scope and with a per-request service inside one is the ambiguity itself, whichever way it was declared. */
@@ -284,5 +315,3 @@ func (instance *container) rebuildScopePlan() *scopePlan {
 
     return plan
 }
-
-var _ containercontract.ScopedRegistrar = (*container)(nil)

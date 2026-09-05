@@ -3,6 +3,8 @@ package translation
 import (
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func newTestManager() *Manager {
@@ -15,6 +17,42 @@ func newTestManager() *Manager {
     romanian.Add("messages", "greeting", "Salut, {name}!")
 
     return NewManager("en", []string{"en"}, english, romanian)
+}
+
+/* verbatimDomainCatalog answers exactly the domain it is asked for, which the contract permits: the coercion of the empty domain is the manager door's to make, not an obligation of every catalog. */
+type verbatimDomainCatalog struct {
+    locale            string
+    messagesByDomain  map[string]map[string]string
+}
+
+func (instance *verbatimDomainCatalog) Locale() string {
+    return instance.locale
+}
+
+func (instance *verbatimDomainCatalog) Get(messageId string, domain string) (string, bool) {
+    messages, exists := instance.messagesByDomain[domain]
+    if false == exists {
+        return "", false
+    }
+
+    message, found := messages[messageId]
+    return message, found
+}
+
+/* the empty domain resolves at the one door every catalog is asked through: a catalog that takes the contract at its word and answers the asked-for domain verbatim is still asked for the default, rather than for "" */
+func TestTrans_EmptyDomainResolvesToTheDefaultAtTheManagerDoor(t *testing.T) {
+    catalog := &verbatimDomainCatalog{
+        locale: "en",
+        messagesByDomain: map[string]map[string]string{
+            DefaultDomain: {"greeting": "Hello!"},
+        },
+    }
+
+    manager := NewManager("en", []string{"en"}, catalog)
+
+    if "Hello!" != manager.Trans("greeting", nil, "", "en") {
+        t.Fatalf("expected the empty domain resolved to the default before the catalog was asked")
+    }
 }
 
 func TestTrans_InterpolatesPlaceholder(t *testing.T) {
@@ -171,4 +209,11 @@ func TestHasMessage(t *testing.T) {
     if true == manager.HasMessage("nope", "messages", "en") {
         t.Fatalf("did not expect nope to exist")
     }
+}
+
+func TestNewManager_RefusesANilCatalog(t *testing.T) {
+    /* skipped silently — the old behavior — a nil catalog built a translator answering raw message ids for a whole locale with nothing pointing at the wiring hole */
+    testhelper.AssertPanicsWithError(t, func() {
+        NewManager("en", nil, nil)
+    }, "translation catalog is nil")
 }

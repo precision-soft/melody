@@ -12,7 +12,7 @@ Melody ships as three parallel Go module lines (see the [`README.md`](./README.m
 Rules for contributions:
 
 - **New features:** v3 only. Do not add features to v1 or v2.
-- **Bug fixes:** apply to v3. **Back-port to v1 and v2 only when the fix is security-related or a critical correctness issue.** Other fixes stay on v3.
+- **Bug fixes:** apply to v3. **Back-port to v1 and v2 whenever the defect is observable there and the fix fits a patch release** — no new public symbols, no signature changes, nothing breaking. A fix that needs new API surface stays on v3, and a capability gap is not a defect: behavior that is merely poorer on a frozen line does not qualify. v1 and v2 receive such patch-level fixes through the support dates in [`README.md`](./README.md#versions--project-status) — 2027-08-17 for v1, 2027-09-08 for v2.
 - **Breaking changes:** instead of changing a v3 API in place, mark the old form with a `/* Deprecated: ... */`
   doc comment and keep it working; breaking changes accumulate toward a future v4.
 - The three versions are **intentionally duplicated** so each binds to one framework version. Do not try to consolidate or de-duplicate them — such pull requests will not be accepted.
@@ -25,7 +25,7 @@ When a change touches multiple version lines, keep each line's edit self-contain
 Prerequisites:
 
 - Go (this repository is a Go workspace of several modules; see [`go.work`](./go.work) — the root [`go.mod`](./go.mod) is the v1 framework module)
-- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke it on commit and push)
+- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke the staged checks on commit; on push the hook verifies that a green full run has stamped the exact worktree content being pushed — the gate cannot run inside the push window without the server timing the connection out, so a push without that proof is refused and the hook starts `.dev/validate/all.sh --all` in the background instead: push again when it reports green, run the gate yourself before pushing, or use `./dc push` — the one-gesture form that runs the gate in the foreground when the proof is missing and pushes automatically on green)
 
 The quickest way into the development shell is the [`./dc`](./dc) wrapper, which also installs the repository git hooks:
 
@@ -65,6 +65,8 @@ All changes must be tested and vetted under **all supported build-tag combinatio
 
 - the framework (repository root)
 - the example application ([`.example/`](./.example/))
+
+That matrix builds with the workspace active, which is a development answer rather than a publishing one: [`go.work`](./go.work) substitutes the local module for the dependency each integration's `go.mod` declares, so a green matrix says nothing about what `go get` resolves for a consumer. [`.dev/validate/compatibility.sh`](./.dev/validate/compatibility.sh) asks the other question — it builds every integration against the version it actually pins, with the workspace off — and it separates a module that merely names something a newer framework added, which the next release resolves by raising the pin, from one whose type no longer satisfies a contract that already existed, which is a breaking change no pin bump answers. [`.dev/validate/apidiff.sh`](./.dev/validate/apidiff.sh) asks the publisher's question next to it — what moved in the exported surface of each published module since its last tag, and what was added — and gates every difference on [`.dev/validate/apidiff.baseline`](./.dev/validate/apidiff.baseline), where each row carries the decision a release has to make about it.
 
 ### Required commands
 

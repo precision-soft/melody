@@ -1,8 +1,11 @@
 package security
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/v2/event"
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/internal"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
@@ -130,7 +133,8 @@ func (instance *CompiledFirewall) Login(
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
-    if nil == instance.loginHandler {
+    /* IsNilInterface and not `nil ==`: the handler comes through NewCompiledFirewall, which is public and validates nothing, so a nil pointer of the application's own handler type is a non-nil interface a bare check carries past this refusal into the call below */
+    if true == internal.IsNilInterface(instance.loginHandler) {
         return nil, exception.NewError(
             "firewall login handler is nil",
             exceptioncontract.Context{
@@ -144,14 +148,13 @@ func (instance *CompiledFirewall) Login(
     if nil != err {
         dispatchErr := instance.dispatchLoginFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            /* keep the login error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
+            /* both failures travel as causes: the login error first, so the client still sees the reason it failed rather than a generic dispatch failure, and the dispatch error beside it rather than flattened into a context slot. Flattened it said "event listener returned error" and nothing else — the listener's name, the event and the listener's own cause all live in that error's CONTEXT, which a string slot drops at the render boundary. */
             return nil, exception.NewError(
                 "security login failure event dispatch failed",
                 exceptioncontract.Context{
-                    "firewallName":  instance.name,
-                    "dispatchError": dispatchErr.Error(),
+                    "firewallName": instance.name,
                 },
-                err,
+                errors.Join(err, dispatchErr),
             )
         }
 
@@ -181,7 +184,8 @@ func (instance *CompiledFirewall) Logout(
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
-    if nil == instance.logoutHandler {
+    /* IsNilInterface and not `nil ==`, for the reason its login sibling names */
+    if true == internal.IsNilInterface(instance.logoutHandler) {
         return nil, exception.NewError(
             "firewall logout handler is nil",
             exceptioncontract.Context{
@@ -195,14 +199,13 @@ func (instance *CompiledFirewall) Logout(
     if nil != err {
         dispatchErr := instance.dispatchLogoutFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            /* keep the logout error as the cause so the client still sees the reason it failed rather than a generic dispatch failure */
+            /* both failures travel as causes: the logout error first, so the client still sees the reason it failed rather than a generic dispatch failure, and the dispatch error beside it rather than flattened into a context slot. Flattened it said "event listener returned error" and nothing else — the listener's name, the event and the listener's own cause all live in that error's CONTEXT, which a string slot drops at the render boundary. */
             return nil, exception.NewError(
                 "security logout failure event dispatch failed",
                 exceptioncontract.Context{
-                    "firewallName":  instance.name,
-                    "dispatchError": dispatchErr.Error(),
+                    "firewallName": instance.name,
                 },
-                err,
+                errors.Join(err, dispatchErr),
             )
         }
 

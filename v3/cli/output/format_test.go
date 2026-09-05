@@ -12,6 +12,9 @@ func TestParseFormat_AcceptsTheSupportedValuesAndTheUnsetCase(t *testing.T) {
         "table": FormatTable,
         "json":  FormatJson,
         " json": FormatJson,
+        /* the pretty spelling is accepted by the same gate, through IsJsonFormat: without this case a door that stopped answering for it would be refused at parsing and no test would say so */
+        "json-pretty":  FormatJsonPretty,
+        " json-pretty": FormatJsonPretty,
     }
 
     for value, expected := range cases {

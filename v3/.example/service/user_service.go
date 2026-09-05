@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/security"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     "github.com/precision-soft/melody/v3/container"
@@ -99,7 +100,7 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 }
 
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
-    normalizedUsername := strings.ToLower(strings.TrimSpace(username))
+    normalizedUsername := repository.NormalizedUsername(username)
     if "" == normalizedUsername {
         return nil, false, nil
     }
@@ -144,10 +145,10 @@ func (instance *UserService) Create(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
     username string,
-    passwordSha256Hex string,
+    passwordHash string,
     roles []string,
 ) (*entity.User, error) {
-    user := entity.NewUser(userId, username, passwordSha256Hex, roles)
+    user := entity.NewUser(userId, username, passwordHash, roles)
 
     createErr := instance.userRepository.Create(WriteContext(runtimeInstance), user)
     if nil != createErr {
@@ -171,7 +172,7 @@ func (instance *UserService) Update(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
     username string,
-    passwordSha256Hex string,
+    passwordHash string,
     roles []string,
 ) (*entity.User, bool, error) {
     ctx := WriteContext(runtimeInstance)
@@ -185,11 +186,15 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    user.Username = username
-    user.Password = passwordSha256Hex
-    user.Roles = roles
+    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: written in place, a rename the repository then REFUSED ("username already exists") had already renamed the stored account — the directory held two accounts folding onto one username while the caller was told the update failed */
+    previousUsername := user.Username
 
-    updated, updateErr := instance.userRepository.Update(ctx, user)
+    modified := *user
+    modified.Username = username
+    modified.Password = passwordHash
+    modified.Roles = roles
+
+    updated, updateErr := instance.userRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -197,7 +202,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(user)
+    updatedEvent := event.NewUserUpdatedEvent(&modified, previousUsername)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
@@ -207,7 +212,7 @@ func (instance *UserService) Update(
         return nil, true, dispatchErr
     }
 
-    return user, true, nil
+    return &modified, true, nil
 }
 
 func (instance *UserService) DeleteById(
@@ -246,16 +251,16 @@ func (instance *UserService) DeleteById(
     return true, nil
 }
 
-func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
+func (instance *UserService) AuthenticateByUsernameAndPassword(
     username string,
-    passwordSha256Hex string,
+    password string,
 ) (*entity.User, bool, error) {
     normalizedUsername := strings.TrimSpace(username)
     if "" == normalizedUsername {
         return nil, false, nil
     }
 
-    if "" == strings.TrimSpace(passwordSha256Hex) {
+    if "" == password {
         return nil, false, nil
     }
 
@@ -264,10 +269,13 @@ func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
         return nil, false, findErr
     }
     if false == found {
+        /* spend a bcrypt comparison on an absent username too: the found path below runs one, and returning here without it would answer an unknown username faster than a wrong password, an existence oracle an attacker times to enumerate usernames */
+        security.DummyPasswordMatch(password)
+
         return nil, false, nil
     }
 
-    if passwordSha256Hex != user.Password {
+    if false == security.PasswordMatches(user.Password, password) {
         return nil, false, nil
     }
 

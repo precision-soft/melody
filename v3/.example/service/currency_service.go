@@ -140,10 +140,12 @@ func (instance *CurrencyService) Update(
         return nil, false, nil
     }
 
-    currency.Code = code
-    currency.Name = name
+    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: a refused update leaves the stored entity exactly as it was */
+    modified := *currency
+    modified.Code = code
+    modified.Name = name
 
-    updated, updateErr := instance.currencyRepository.Update(ctx, currency)
+    updated, updateErr := instance.currencyRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -151,7 +153,7 @@ func (instance *CurrencyService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewCurrencyUpdatedEvent(currency)
+    updatedEvent := event.NewCurrencyUpdatedEvent(&modified)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.CurrencyUpdatedEventName,
@@ -161,7 +163,7 @@ func (instance *CurrencyService) Update(
         return nil, true, dispatchErr
     }
 
-    return currency, true, nil
+    return &modified, true, nil
 }
 
 func (instance *CurrencyService) DeleteById(

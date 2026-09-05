@@ -36,6 +36,11 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password is required"), nil
         }
 
+        /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake instead of surfacing as a hashing failure */
+        if security.PasswordMaximumBytes < len(normalizedPassword) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
+        }
+
         userService := service.MustGetUserService(runtimeInstance.Container())
 
         _, exists, findErr := userService.FindByUsername(normalizedUsername)
@@ -46,11 +51,16 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
         }
 
+        passwordHash, hashErr := security.HashPassword(normalizedPassword)
+        if nil != hashErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
+        }
+
         user, createErr := userService.Create(
             runtimeInstance,
             "",
             normalizedUsername,
-            security.Sha256Hex(normalizedPassword),
+            passwordHash,
             normalizeRoles(dto.Roles),
         )
         if nil != createErr {

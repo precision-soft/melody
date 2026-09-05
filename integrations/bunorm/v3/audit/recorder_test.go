@@ -2,9 +2,19 @@ package audit
 
 import (
     "context"
+    "database/sql"
+    "errors"
+    "fmt"
+    "os"
     "strings"
+    "sync"
     "testing"
 
+    _ "github.com/go-sql-driver/mysql"
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
+
+    "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
@@ -28,8 +38,11 @@ func (instance *fakeStorage) Save(ctx context.Context, table string, entries ...
     return nil
 }
 
+/* the mutex is the double's own: the recorder hands one logger to every request goroutine, so a capture without it races in exactly the concurrent tests that exist to prove the recorder does not */
 type fakeLogger struct {
+    mutex         sync.Mutex
     errorMessages []string
+    errorContexts []loggingcontract.Context
 }
 
 func (instance *fakeLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -38,7 +51,11 @@ func (instance *fakeLogger) Debug(message string, context loggingcontract.Contex
 func (instance *fakeLogger) Info(message string, context loggingcontract.Context)    {}
 func (instance *fakeLogger) Warning(message string, context loggingcontract.Context) {}
 func (instance *fakeLogger) Error(message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     instance.errorMessages = append(instance.errorMessages, message)
+    instance.errorContexts = append(instance.errorContexts, context)
 }
 func (instance *fakeLogger) Emergency(message string, context loggingcontract.Context) {}
 
@@ -116,5 +133,164 @@ func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
 
     if 1 != len(logger.errorMessages) {
         t.Fatalf("expected a dead-letter log on storage failure, got %d", len(logger.errorMessages))
+    }
+}
+
+func TestRecorder_WithLoggerRefusesATypedNilLogger(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil logger to be refused at the door")
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "logger is nil") {
+            t.Fatalf("expected the panic to name the nil logger, got %v", recovered)
+        }
+    }()
+
+    var logger *fakeLogger
+
+    NewRecorderWithStorage(&fakeStorage{}, nil).WithLogger(logger)
+}
+
+func TestRecorder_DeadLetterCarriesTheTableAndTheCauseChain(t *testing.T) {
+    driverErr := errors.New("driver: deadlock found when trying to get lock")
+    storage := &fakeStorage{failWith: exception.NewError("could not write the audit entries", map[string]any{"table": "account_audit"}, driverErr)}
+
+    logger := &fakeLogger{}
+    registry := NewRegistry("melody_audit").Register("parityAccount", EntityOptions{Table: "account_audit"})
+    recorder := NewRecorderWithStorage(storage, registry).WithLogger(logger)
+
+    recordErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
+    if nil == recordErr {
+        t.Fatalf("expected the failing storage to fail the record")
+    }
+
+    if 1 != len(logger.errorContexts) {
+        t.Fatalf("expected exactly one dead-letter record, got %d", len(logger.errorContexts))
+    }
+
+    deadLetterContext := logger.errorContexts[0]
+
+    if "account_audit" != deadLetterContext["table"] {
+        t.Fatalf("expected the dead-letter to name the table, got: %v", deadLetterContext["table"])
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", deadLetterContext["cause"]), "deadlock") {
+        t.Fatalf("expected the dead-letter to carry the driver cause, got: %v", deadLetterContext["cause"])
+    }
+}
+
+func TestRecorder_CloseClosesAnOwnedStorageAndLeavesABorrowedOne(t *testing.T) {
+    owned := &closableStorage{}
+    if closeErr := NewRecorderOwningStorage(owned, nil).Close(); nil != closeErr {
+        t.Fatalf("owning close: %v", closeErr)
+    }
+    if false == owned.closed {
+        t.Fatalf("expected the owning recorder to close its storage")
+    }
+
+    borrowed := &closableStorage{}
+    if closeErr := NewRecorderWithStorage(borrowed, nil).Close(); nil != closeErr {
+        t.Fatalf("borrowing close: %v", closeErr)
+    }
+    if true == borrowed.closed {
+        t.Fatalf("expected the non-owning recorder to leave the storage to its own service registration")
+    }
+}
+
+type closableStorage struct {
+    fakeStorage
+    closed bool
+}
+
+func (instance *closableStorage) Close() error {
+    instance.closed = true
+
+    return nil
+}
+
+func TestRecorder_WithLoggerDoesNotRaceTheDeadLetterRead(t *testing.T) {
+    storage := &fakeStorage{failWith: exception.NewError("could not write the audit entries", nil, nil)}
+    recorder := NewRecorderWithStorage(storage, nil).WithLogger(&fakeLogger{})
+
+    var wait sync.WaitGroup
+
+    for index := 0; index < 8; index++ {
+        wait.Add(2)
+
+        go func() {
+            defer wait.Done()
+            recorder.WithLogger(&fakeLogger{})
+        }()
+
+        go func() {
+            defer wait.Done()
+            _ = recorder.RecordInsert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
+        }()
+    }
+
+    wait.Wait()
+}
+
+type widget struct {
+    Id       int64  `bun:"id,pk"`
+    Name     string `bun:"name"`
+    Quantity int    `bun:"quantity"`
+}
+
+func TestBunormAudit_RecordsFieldLevelChangeSet(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm audit integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    auditDatabase := bun.NewDB(sqlDb, mysqldialect.New())
+
+    auditDatabase.ExecContext(ctx, "DROP TABLE IF EXISTS melody_audit")
+    if _, createErr := auditDatabase.NewCreateTable().Model((*Entry)(nil)).Exec(ctx); nil != createErr {
+        t.Fatalf("create melody_audit: %v", createErr)
+    }
+
+    recorder := NewRecorder(auditDatabase, "melody_audit")
+    actorCtx := WithActor(ctx, "alice")
+
+    before := widget{Id: 1, Name: "bolt", Quantity: 5}
+    after := widget{Id: 1, Name: "bolt", Quantity: 9}
+
+    if recordErr := recorder.RecordUpdate(actorCtx, "widget", "1", before, after); nil != recordErr {
+        t.Fatalf("record update: %v", recordErr)
+    }
+
+    var operation string
+    var actor string
+    var changes string
+    selectErr := sqlDb.QueryRowContext(ctx, "SELECT operation, actor, changes FROM melody_audit ORDER BY id DESC LIMIT 1").Scan(&operation, &actor, &changes)
+    if nil != selectErr {
+        t.Fatalf("audit select: %v", selectErr)
+    }
+
+    if "UPDATE" != operation {
+        t.Fatalf("expected UPDATE operation, got %q", operation)
+    }
+
+    if "alice" != actor {
+        t.Fatalf("expected actor alice, got %q", actor)
+    }
+
+    if false == strings.Contains(changes, "\"quantity\"") {
+        t.Fatalf("expected quantity in change-set, got %q", changes)
+    }
+
+    if false == strings.Contains(changes, "\"old\":5") || false == strings.Contains(changes, "\"new\":9") {
+        t.Fatalf("expected old/new values in change-set, got %q", changes)
     }
 }

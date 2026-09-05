@@ -27,13 +27,10 @@ func (instance *CatalogReportRefreshCommand) Flags() []melodyclicontract.Flag {
     return nil
 }
 
-/* Run is what the schedule calls. The reading is cheap enough to take inside a request, but the request that
-finds a cold cache is the one that pays for it, so the catalogue is read on a timer instead and every request
-finds a warm answer.
+/* Run is what the schedule calls. The reading is cheap enough to take inside a request, but the request that finds a cold cache is the one that pays for it, so the catalogue is read on a timer instead and every request finds a warm answer.
 
-The service is resolved by type: it is one of the constructors melody:wiring:generate found in the reporting
-package, so it carries no service name of its own. */
-func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+   The service is resolved by type: it is one of the constructors melody:wiring:generate found in the reporting package, so it carries no service name of its own. */
+func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
     if nil != resolveErr {
         return resolveErr

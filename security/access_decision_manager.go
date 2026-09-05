@@ -20,22 +20,11 @@ const (
     RefusalReasonUnanimousNoGrant         = "unanimous_no_grant"
 )
 
-/*
-RoleHierarchyAware is the optional capability an AccessDecisionManager
-implements to receive the declared role hierarchy at compilation, answering the
-manager that applies it.
+/* RoleHierarchyAware is the optional capability an AccessDecisionManager implements to receive the declared role hierarchy at compilation, answering the manager that applies it.
 
-The compilation asks for it and nothing else: it used to assert on the concrete
-*AccessDecisionManager, so a manager of the integrator's own — even a wrapper
-that only delegated, to log or cache decisions — skipped the whole hierarchy
-upgrade. ROLE_ADMIN: [ROLE_USER] then had no effect on the enforcement path
-while security.IsGranted, which expands the hierarchy straight from the
-compiled firewall, kept answering true for the same request: one door granted
-and the other answered 403, with no record on either.
+   The compilation asks for it and nothing else: it used to assert on the concrete *AccessDecisionManager, so a manager of the integrator's own — even a wrapper that only delegated, to log or cache decisions — skipped the whole hierarchy upgrade. ROLE_ADMIN: [ROLE_USER] then had no effect on the enforcement path while security.IsGranted, which expands the hierarchy straight from the compiled firewall, kept answering true for the same request: one door granted and the other answered 403, with no record on either.
 
-A manager that does not implement it and is handed a hierarchy is refused at
-compilation by name, because the alternative is that silence.
-*/
+   A manager that does not implement it and is handed a hierarchy is refused at compilation by name, because the alternative is that silence. */
 type RoleHierarchyAware interface {
     WithRoleHierarchy(roleHierarchy *RoleHierarchy) securitycontract.AccessDecisionManager
 }

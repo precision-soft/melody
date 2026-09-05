@@ -88,8 +88,8 @@ func seedCurrencyList() []*entity.Currency {
 
 func seedUserList() []*entity.User {
     return []*entity.User{
-        entity.NewUser("user-1", "user", security.Sha256Hex("user"), []string{entity.RoleUser}),
-        entity.NewUser("user-2", "editor", security.Sha256Hex("editor"), []string{entity.RoleUser, entity.RoleEditor}),
-        entity.NewUser("user-3", "admin", security.Sha256Hex("admin"), []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin}),
+        entity.NewUser("user-1", "user", security.MustHashPassword("user"), []string{entity.RoleUser}),
+        entity.NewUser("user-2", "editor", security.MustHashPassword("editor"), []string{entity.RoleUser, entity.RoleEditor}),
+        entity.NewUser("user-3", "admin", security.MustHashPassword("admin"), []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin}),
     }
 }

@@ -114,20 +114,27 @@ func NewAccessControlExactRule(path string, attributes ...string) AccessControlR
     return rule
 }
 
-/* NewAccessControlRegexRule builds a rule that matches when the pattern is found anywhere in the
-canonicalized request path. The pattern is compiled UNANCHORED and tested with regexp.MatchString, so
-it is a substring match, not a whole-path one: "/public" matches "/admin/public-notes" and
-"/x/publications" as readily as "/public". This is deliberate and mirrors the path regex of other
-frameworks, but it is the opposite of a route requirement, which melody anchors with ^(?:…)$ — so a
-rule meant to name one section must anchor itself. Write "^/public(/|$)" to bound it to the /public
-tree. Regex rules are the lowest match priority (after exact and prefix rules), and among themselves
-the first registered that matches wins. */
+/* NewAccessControlRegexRule builds a rule that matches when the pattern is found anywhere in the canonicalized request path. The pattern is compiled UNANCHORED and tested with regexp.MatchString, so it is a substring match, not a whole-path one: "/public" matches "/admin/public-notes" and "/x/publications" as readily as "/public". This is deliberate and mirrors the path regex of other frameworks, but it is the opposite of a route requirement, which melody anchors with ^(?:…)$ — so a rule meant to name one section must anchor itself. Write "^/public(/|$)" to bound it to the /public tree. Regex rules are the lowest match priority (after exact and prefix rules), and among themselves the first registered that matches wins. */
+/* accessControlRegexPatternIsAnchored reports whether a pattern is bound to the path start ("^"). That is what keeps a public rule from floating into the middle of an unrelated path — the "/status" that otherwise matched "/admin/status-board" — which is the substring reach this refusal exists to close. A start-anchored pattern can still over-match at its tail ("^/health" matches "/healthcheck"), which is why the godoc recommends the segment-boundary idiom "^/public(/|$)"; but the tail case only shadows a route that is itself protected by nothing stronger than a later regex, since exact and prefix rules outrank every regex. */
+func accessControlRegexPatternIsAnchored(pattern string) bool {
+    return strings.HasPrefix(pattern, "^")
+}
+
 func NewAccessControlRegexRule(pattern string, attributes ...string) AccessControlRule {
     normalizedPattern := strings.TrimSpace(pattern)
     if "" == normalizedPattern {
         exception.Panic(
             exception.NewError("access control regex pattern may not be empty", nil, nil),
         )
+    }
+
+    /* PUBLIC_ACCESS on a pattern not anchored to the path start opens every path the pattern matches as a substring: "/status" grants "/admin/status-board", a protected route reached through a public rule, and among regex rules the first registered wins — so a public substring rule shadows a stricter regex declared after it. This is the same over-open NewAccessControlRawPrefixRule refuses PUBLIC_ACCESS for, so it is refused here too, but only for the unanchored case: a start-anchored pattern cannot reach into the middle of a protected path, so the bounded form the godoc recommends ("^/public(/|$)") stays allowed. */
+    for _, attribute := range attributes {
+        if securitycontract.AttributePublicAccess == strings.TrimSpace(attribute) && false == accessControlRegexPatternIsAnchored(normalizedPattern) {
+            exception.Panic(
+                exception.NewError("access control PUBLIC_ACCESS may not be declared on an unanchored regex rule; anchor the pattern to the path start with ^ (for example ^/public(/|$)) so it cannot match inside a protected path", nil, nil),
+            )
+        }
     }
 
     compiled, compileErr := regexp.Compile(normalizedPattern)
@@ -218,20 +225,11 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
     return append([]string{}, instance.rules[matchedIndex].attributes...), true
 }
 
-/* canonicalizeAccessControlPath folds the spellings that reach the same resource into the one the rules are
-written in. net/http hands the path through unfolded, so "//admin/panel" and "/open/../admin/panel" are
-matched by no rule that names "/admin" — and no rule matched is granted, with the token never consulted.
+/* canonicalizeAccessControlPath folds the spellings that reach the same resource into the one the rules are written in. net/http hands the path through unfolded, so "//admin/panel" and "/open/../admin/panel" are matched by no rule that names "/admin" — and no rule matched is granted, with the token never consulted.
 
-Folding is NOT sufficient on its own, and the http kernel does not rely on it: because the router matches
-the path as sent and does not fold "..", a request routed to a protected handler under a folded spelling
-would be authorized here against the folded spelling's rule — a different, possibly more permissive one, or
-none. The kernel closes that by refusing a non-canonical request path before it is routed or authorized
-(http.requestPathIsCanonical), so every path this sees is already the one spelling. The fold remains as the
-matcher's own defence for a caller that consults AccessControl without that guard, and it can only make a
-rule match a request it did not match before — it never opens what a rule had closed for the same spelling.
+   Folding is NOT sufficient on its own, and the http kernel does not rely on it: because the router matches the path as sent and does not fold "..", a request routed to a protected handler under a folded spelling would be authorized here against the folded spelling's rule — a different, possibly more permissive one, or none. The kernel closes that by refusing a non-canonical request path before it is routed or authorized (http.requestPathIsCanonical), so every path this sees is already the one spelling. The fold remains as the matcher's own defence for a caller that consults AccessControl without that guard, and it can only make a rule match a request it did not match before — it never opens what a rule had closed for the same spelling.
 
-The surrounding whitespace is trimmed before the fold rather than left alone: the trim makes the matcher
-answer for one spelling more than the router accepts, which refuses more than intended and never less. */
+   The surrounding whitespace is trimmed before the fold rather than left alone: the trim makes the matcher answer for one spelling more than the router accepts, which refuses more than intended and never less. */
 func canonicalizeAccessControlPath(requestPath string) string {
     canonicalPath := strings.TrimSpace(requestPath)
     if "" == canonicalPath {

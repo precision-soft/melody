@@ -46,18 +46,21 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
     }
 }
 
+/* the cause travels with the refusal, so the responder answers through ApiErrorWithErr rather than ApiError: the decoder's own diagnosis and the per-field validation collection reach the error context and the debug trace instead of dying at this boundary. Returning the response rather than nothing is what keeps the refusal a refusal — a responder that answers nothing leaves the framework's own refusal standing, and returning a nil pair used to be read as a handler that answered nothing at all and served an empty 204 for a rejected write. */
 func apiJsonErrorResponder(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
     status int,
     message string,
+    cause error,
 ) (melodyhttpcontract.Response, error) {
-    return presenter.ApiError(runtimeInstance, request, status, message), nil
+    return presenter.ApiErrorWithErr(runtimeInstance, request, status, message, cause), nil
 }
 
-/* @important bound by the openapi descriptor in config; keep it exported */
+/* bound by the openapi descriptor in config; keep it exported */
 type CreateRequest struct {
-    Id          string  `json:"id" validate:"max=60"`
+    /* the id becomes a cache key component and the backend grammar refuses spaces and newlines inside a key, so a spelling the grammar refuses is turned away here instead of landing in the database and failing every later cache write. The pattern is written in the subset OPENAPI.md requires — this tag reaches the published document as a pattern facet, and OpenAPI 3.0 prescribes ECMA-262, which has no POSIX class — so \S carries what the frozen majors spell as [[:space:]]. */
+    Id          string  `json:"id" validate:"max=60,regex=^\\S+$"`
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`
     CategoryId  string  `json:"categoryId" validate:"notBlank"`

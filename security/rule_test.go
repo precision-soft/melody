@@ -5,6 +5,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     securitycontract "github.com/precision-soft/melody/security/contract"
@@ -209,5 +210,29 @@ func assertRuleRefused(t *testing.T, err error) {
 
     if nethttp.StatusForbidden != httpException.StatusCode() {
         t.Fatalf("expected the refusal to be a 403, got %d", httpException.StatusCode())
+    }
+}
+
+/* alwaysApplyingMatcher is the application's matcher answering yes for any request, which is what carries
+a request past Applies and into Check's own guards. The framework's PathPrefixMatcher refuses a request it
+cannot read, so it can never exercise them. */
+type alwaysApplyingMatcher struct{}
+
+func (instance *alwaysApplyingMatcher) Matches(request httpcontract.Request) bool {
+    return true
+}
+
+var _ securitycontract.Matcher = (*alwaysApplyingMatcher)(nil)
+
+/* A nil pointer of a request type is a non-nil interface, so the bare comparison this replaces carried it
+to the header read, which dereferences it. The rule must refuse a request it cannot read, not crash on it. */
+func TestApiKeyHeaderRule_Check_ATypedNilRequestIsForbidden(t *testing.T) {
+    rule := NewApiKeyHeaderRule(&alwaysApplyingMatcher{}, "X-Api-Key", "secret")
+
+    var unassignedRequest *http.Request
+
+    err := rule.Check(unassignedRequest)
+    if nil == err {
+        t.Fatalf("expected a typed nil request to be refused")
     }
 }

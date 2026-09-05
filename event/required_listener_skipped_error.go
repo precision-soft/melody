@@ -7,7 +7,7 @@ import (
 
 /* NewRequiredListenerSkippedError reports that a listener stopped event propagation while a listener marked required through RequiredListenerRegistrar was still behind it, so that listener never ran. The type matters more than the message: it is what lets a caller separate this class from an ordinary listener failure and refuse the dispatch outright, which is what the http kernel does for kernel.request — a stopping listener that also produced a response would otherwise have that response served with access control never consulted.
 
-Type-assert the error a dispatch returns directly rather than reaching through the cause chain with errors.As: a listener is free to dispatch further events, and one of those nested dispatches skipping a required listener of its own travels up as the cause of an ordinary listener error. Failing the outer dispatch closed for that is a different, wider policy than refusing the dispatch that actually skipped the listener. */
+   Type-assert the error a dispatch returns directly rather than reaching through the cause chain with errors.As: a listener is free to dispatch further events, and one of those nested dispatches skipping a required listener of its own travels up as the cause of an ordinary listener error. Failing the outer dispatch closed for that is a different, wider policy than refusing the dispatch that actually skipped the listener. */
 func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string) *RequiredListenerSkippedError {
     return &RequiredListenerSkippedError{
         exceptionErr: exception.NewError(
@@ -54,9 +54,19 @@ type RequiredListenerSkippedError struct {
 }
 
 func (instance *RequiredListenerSkippedError) Error() string {
+    /* the zero value is constructible outside the constructors, which always set the field; the sibling this type is shaped after answers the same way rather than dereferencing it */
+    if nil == instance.exceptionErr {
+        return "required listener skipped error carries no error value"
+    }
+
     return instance.exceptionErr.Error()
 }
 
 func (instance *RequiredListenerSkippedError) Unwrap() error {
+    /* returning the nil field through the interface would box a typed nil that passes every nil comparison downstream */
+    if nil == instance.exceptionErr {
+        return nil
+    }
+
     return instance.exceptionErr
 }

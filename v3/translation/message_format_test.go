@@ -99,3 +99,21 @@ func TestEvaluatePlural_NonStandardNumericTypesSelectCategory(t *testing.T) {
         })
     }
 }
+
+func TestFormatMessage_AbsentParameterRendersTheVisiblePlaceholder(t *testing.T) {
+    /* rendered as an empty string — what a nil map lookup stringifies to — the missing value vanished from the message with no channel through which anyone learns of it; the visible placeholder is the observable form */
+    if rendered := formatMessage("Hello, {name}!", nil, "en"); "Hello, {name}!" != rendered {
+        t.Fatalf("expected the absent parameter to stay visible, got %q", rendered)
+    }
+
+    if rendered := formatMessage("Hello, {name}!", map[string]any{"other": 1}, "en"); "Hello, {name}!" != rendered {
+        t.Fatalf("expected the absent parameter to stay visible beside present ones, got %q", rendered)
+    }
+}
+
+func TestFormatMessage_PresentNilParameterStillRendersEmpty(t *testing.T) {
+    /* a parameter present with a nil value is the caller saying so explicitly — only the ABSENT key renders as the placeholder */
+    if rendered := formatMessage("Hello, {name}!", map[string]any{"name": nil}, "en"); "Hello, !" != rendered {
+        t.Fatalf("expected the explicit nil to render empty, got %q", rendered)
+    }
+}

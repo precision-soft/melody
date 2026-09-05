@@ -4,6 +4,7 @@ import (
     "context"
     "time"
 
+    "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -23,9 +24,9 @@ const (
 
 /* CatalogJournalEntry is one change to the nomenclature: who made it, what they did, to which record, and under which request.
 
-RequestId is what ties an entry back to the call that caused it. It is empty for a change made outside a request — a scheduled refresh or a console run has no request to be attributed to, and an identifier invented for one would claim a correlation that cannot be followed anywhere.
+   RequestId is what ties an entry back to the call that caused it. It is empty for a change made outside a request — a scheduled refresh or a console run has no request to be attributed to, and an identifier invented for one would claim a correlation that cannot be followed anywhere.
 
-It lives here rather than in the entity package on purpose: the domain entities are cached through a gob serializer and carry no storage concerns, so the one type that does carry them stays beside the repository that maps it. */
+   It lives here rather than in the entity package on purpose: the domain entities are cached through a gob serializer and carry no storage concerns, so the one type that does carry them stays beside the repository that maps it. */
 type CatalogJournalEntry struct {
     Id         int64
     RequestId  string
@@ -37,9 +38,6 @@ type CatalogJournalEntry struct {
 }
 
 type CatalogJournalRepository interface {
-    /* EnsureSchema creates the journal table when it is absent. The example carries no migration runner, so the repository owns the one table it writes and creates it on the path that reaches it. */
-    EnsureSchema(ctx context.Context) error
-
     Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error)
 
     /* AppendBatch writes everything one request accumulated in a single statement. It is what the request-scoped trail flushes into, so a request that changed several records costs one round trip rather than one per change. An empty batch is not an error and touches nothing. */
@@ -61,12 +59,10 @@ func NewCatalogJournalRepository(storage *persistence.CatalogStorage) (CatalogJo
         return newInMemoryCatalogJournalRepository(), nil
     }
 
-    repositoryInstance := newBunCatalogJournalRepository(storage.Database())
-
-    ensureSchemaErr := repositoryInstance.EnsureSchema(context.Background())
-    if nil != ensureSchemaErr {
-        return nil, ensureSchemaErr
+    migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
+    if nil != migrateErr {
+        return nil, migrateErr
     }
 
-    return repositoryInstance, nil
+    return newBunCatalogJournalRepository(storage.Database()), nil
 }

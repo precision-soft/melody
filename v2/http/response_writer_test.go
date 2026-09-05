@@ -85,8 +85,7 @@ func TestRecordingResponseWriter_UnwrapReturnsUnderlying(t *testing.T) {
     }
 }
 
-/* WriteToHttpResponseWriter is a public door, so a nil pointer of a response type boxed into the contract
-reaches it and passes a plain comparison. */
+/* WriteToHttpResponseWriter is a public door, so a nil pointer of a response type boxed into the contract reaches it and passes a plain comparison. */
 func TestWriteToHttpResponseWriter_ReadsATypedNilResponseAsAbsent(t *testing.T) {
     var unassignedResponse *Response
 
@@ -294,5 +293,98 @@ func TestWriteToHttpResponseWriter_AnAcceptedStatusStillCarriesItsHeaders(t *tes
 
     if nethttp.StatusCreated != recorder.Code {
         t.Fatalf("expected the accepted status on the connection, got %d", recorder.Code)
+    }
+}
+
+/* Set-Cookie is the one field the response cannot own: its lines are separate cookies, so replacing the writer's values with the response's deleted the cookie the handler wrote on the writer its own contract handed it, and the client simply never received it */
+func TestWriteToHttpResponseWriter_KeepsACookieTheHandlerWroteOnTheWriter(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    nethttp.SetCookie(recorder, &nethttp.Cookie{Name: "handler_cookie", Value: "kept", Path: "/"})
+
+    response := NewResponse(nethttp.StatusOK, []byte("body"))
+    SetCookie(response, &nethttp.Cookie{Name: "melody_session", Value: "abc", Path: "/"})
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil != writeErr {
+        t.Fatalf("unexpected error: %v", writeErr)
+    }
+
+    emitted := recorder.Header().Values("Set-Cookie")
+    if 2 != len(emitted) {
+        t.Fatalf("expected both cookies on the wire, got %v", emitted)
+    }
+
+    handlerCookieEmitted := false
+    responseCookieEmitted := false
+    for _, cookieLine := range emitted {
+        if true == strings.HasPrefix(cookieLine, "handler_cookie=kept") {
+            handlerCookieEmitted = true
+        }
+        if true == strings.HasPrefix(cookieLine, "melody_session=abc") {
+            responseCookieEmitted = true
+        }
+    }
+
+    if false == handlerCookieEmitted {
+        t.Fatalf("expected the handler's own cookie to survive, got %v", emitted)
+    }
+
+    if false == responseCookieEmitted {
+        t.Fatalf("expected the response's cookie to be emitted, got %v", emitted)
+    }
+}
+
+/* a key the response does name is still owned by it, so the request id the kernel puts on the raw writer reaches the client once */
+func TestWriteToHttpResponseWriter_StillReplacesANonCookieHeaderTheResponseNames(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    recorder.Header().Set(HeaderRequestId, "from-the-writer")
+
+    response := NewResponse(nethttp.StatusOK, []byte("body"))
+    response.Headers().Set(HeaderRequestId, "from-the-response")
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil != writeErr {
+        t.Fatalf("unexpected error: %v", writeErr)
+    }
+
+    emitted := recorder.Header().Values(HeaderRequestId)
+    if 1 != len(emitted) || "from-the-response" != emitted[0] {
+        t.Fatalf("expected the response to own the header it names, got %v", emitted)
+    }
+}
+
+/* the shape an operator's own net/http middleware takes when it wraps the writer for ResponseController compatibility and forwards no Flush of its own */
+type intermediateResponseWriterWrapper struct {
+    nethttp.ResponseWriter
+}
+
+func (instance *intermediateResponseWriterWrapper) Unwrap() nethttp.ResponseWriter {
+    return instance.ResponseWriter
+}
+
+type flushCountingResponseRecorder struct {
+    *httptest.ResponseRecorder
+    flushes int
+}
+
+func (instance *flushCountingResponseRecorder) Flush() {
+    instance.flushes++
+    instance.ResponseRecorder.Flush()
+}
+
+/* the flush is forwarded through the whole wrapper chain, not to the immediate delegate: a wrapper between the kernel's recorder and the connection that carries Unwrap but no Flush turned every flush a streaming handler issued into a silent no-op, with the frames sitting in the buffer and no error anywhere */
+func TestRecordingResponseWriter_FlushReachesTheConnectionThroughAnIntermediateWrapper(t *testing.T) {
+    connection := &flushCountingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+    writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})
+
+    writer.Flush()
+    writer.Flush()
+
+    if 2 != connection.flushes {
+        t.Fatalf("expected both flushes to reach the connection, got %d", connection.flushes)
+    }
+
+    if false == writer.HeadersWritten() {
+        t.Fatal("expected the flush that reached the connection to record the commit")
     }
 }

@@ -25,18 +25,72 @@ cleanup() {
 trap cleanup EXIT
 
 # git opened the connection to the remote before it ran this hook — it had to, because the remote sha below on
-# stdin comes from that connection's ref advertisement. The validation then holds it idle for minutes and the
-# server closes it, so git dies with SIGPIPE while sending the pack, right after this hook reports success.
+# stdin comes from that connection's ref advertisement. Anything long-running here therefore kills the push:
+# the server's receive-pack times out waiting for the pack while the gate runs, and git dies with SIGPIPE
+# right after the hook reports success — keepalives do not feed the remote process, so no transport tuning
+# fixes it. The full gate cannot run inside this window, and it does not need to: it runs BEFORE the push,
+# and what runs here is the proof that it did.
 #
-# Keepalives are the remedy and they cannot be applied to a push already under way, so this only arms the next
-# one. ./dc does the same on every invocation; this is here for whoever pushes from a fresh clone without
-# having run the wrapper first, and it says so rather than fixing it silently.
+# A green `.dev/validate/all.sh --all` stamps the tree hash of the exact worktree content it validated into
+# `.temp/validate-stamp`. This hook recomputes that hash and compares — milliseconds. A match means the
+# content being pushed is byte-identical to what the full gate proved; any edit after the run computes a
+# different hash and is refused by name. The stamp's age is deliberately not judged: identity of content is
+# the guarantee, and a clock would only refuse pushes the gate already covers.
 if [[ "" = "$(git config --get core.sshCommand || true)" ]]; then
     git config core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20"
-    info "armed ssh keepalives for the next push (core.sshCommand); if this push dies without a message, that is why — run it again"
 fi
 
-info "running full validations (unconditional)"
-bash "${ROOT_DIR}/.dev/validate/all.sh" --all
+VALIDATION_STAMP_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-stamp"
+VALIDATION_RUN_LOG_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-run.log"
 
-success "pre-push validation passed"
+# a push without a valid proof is refused — that part is not negotiable, the gate cannot run inside the
+# push window — but the refusal STARTS the gate instead of only naming it, so the worst case is pushing
+# twice: the first push kicks the full run off in the background and the second one, after it reports
+# green, passes on the stamp it wrote. One gate at a time: two concurrent runs would fight over the same
+# service containers, so a refusal while one is already running says wait rather than starting another.
+refuse_and_start_validation() {
+    local REASON_STRING="${1:?}"
+
+    if pgrep -f '\.dev/validate/all\.sh' >/dev/null 2>&1; then
+        # a progress snapshot from the run's log, so the refusal answers "how far along" instead of only
+        # "wait" — but only when the log is demonstrably the RUNNING gate's (written in the last two
+        # minutes): a hand-started run logs to its own terminal, and quoting a stale file as its progress
+        # would report a finished run as the live one.
+        local PROGRESS_STRING="its log: the shell it was started from"
+        if [[ -f "${VALIDATION_RUN_LOG_FILE_PATH}" ]] && [[ -n "$(find "${VALIDATION_RUN_LOG_FILE_PATH}" -mmin -2 2>/dev/null)" ]]; then
+            local GREEN_SECTION_COUNT_NUMBER
+            GREEN_SECTION_COUNT_NUMBER="$(grep -ac "end \].*success" "${VALIDATION_RUN_LOG_FILE_PATH}" || true)"
+            local CURRENT_SECTION_STRING
+            CURRENT_SECTION_STRING="$(tail -1 "${VALIDATION_RUN_LOG_FILE_PATH}" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | cut -c1-90)"
+            PROGRESS_STRING="${GREEN_SECTION_COUNT_NUMBER} section(s) green so far, now at: ${CURRENT_SECTION_STRING} — follow it with 'tail -f ${VALIDATION_RUN_LOG_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/}'"
+        fi
+        fail "${REASON_STRING} — the full gate is ALREADY RUNNING (${PROGRESS_STRING}); push again when it reports green, or run './dc push' to follow it and push automatically"
+    fi
+
+    mkdir -p "$(dirname "${VALIDATION_RUN_LOG_FILE_PATH}")"
+    nohup bash "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/all.sh" --all > "${VALIDATION_RUN_LOG_FILE_PATH}" 2>&1 < /dev/null &
+    disown 2>/dev/null || true
+
+    fail "${REASON_STRING} — the full gate was STARTED in the background (log: ${VALIDATION_RUN_LOG_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/}); push again when it finishes green, or run './dc push' to follow it and push automatically"
+}
+
+if [[ ! -f "${VALIDATION_STAMP_FILE_PATH}" ]]; then
+    refuse_and_start_validation "no validation stamp"
+fi
+
+STAMPED_TREE_HASH_STRING="$(cut -d' ' -f1 < "${VALIDATION_STAMP_FILE_PATH}")"
+STAMPED_AT_STRING="$(cut -d' ' -f2 < "${VALIDATION_STAMP_FILE_PATH}")"
+
+if [[ ! "${STAMPED_TREE_HASH_STRING}" =~ ^[0-9a-f]{40}$ ]]; then
+    refuse_and_start_validation "malformed validation stamp (${VALIDATION_STAMP_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/})"
+fi
+
+if ! CURRENT_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
+    fail "could not compute the worktree hash to check against the validation stamp"
+fi
+
+if [[ "${STAMPED_TREE_HASH_STRING}" != "${CURRENT_TREE_HASH_STRING}" ]]; then
+    refuse_and_start_validation "the worktree changed since the last full validation (stamped ${STAMPED_TREE_HASH_STRING} at ${STAMPED_AT_STRING}, current ${CURRENT_TREE_HASH_STRING})"
+fi
+
+success "pre-push: worktree matches the full validation stamped at ${STAMPED_AT_STRING}"

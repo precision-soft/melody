@@ -88,18 +88,12 @@ func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
     instance.notFoundHandler = handler
 }
 
-/* SetErrorHandler installs the application's own error rendering, and it is read at boot: the
-application registers the framework exception listener only when no handler is installed by then,
-because that listener answers every kernel.exception dispatch first and a handler behind it can
-never run. An installed handler therefore takes over what the listener did — negotiation, the
-request-id header, the validation errors payload — and when it returns nil the kernel's own default
-rendering answers instead. */
+/* SetErrorHandler installs the application's own error rendering, and it is read at boot: the application registers the framework exception listener only when no handler is installed by then, because that listener answers every kernel.exception dispatch first and a handler behind it can never run. An installed handler therefore takes over what the listener did — negotiation, the request-id header, the validation errors payload — and when it returns nil the kernel's own default rendering answers instead. */
 func (instance *Kernel) SetErrorHandler(handler httpcontract.ErrorHandler) {
     instance.errorHandler = handler
 }
 
-/* HasErrorHandler reports whether the application installed an error handler; the composition root
-reads it before deciding to register the framework exception listener. */
+/* HasErrorHandler reports whether the application installed an error handler; the composition root reads it before deciding to register the framework exception listener. */
 func (instance *Kernel) HasErrorHandler() bool {
     return nil != instance.errorHandler
 }
@@ -327,7 +321,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         loggingcontract.Context{
                             "method":         request.Method,
                             "path":           request.URL.Path,
-                            "query":          request.URL.RawQuery,
+                            "query":          internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                             "scheme":         scheme,
                             "host":           request.Host,
                             "allowedMethods": allowedMethods,
@@ -339,7 +333,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         loggingcontract.Context{
                             "method": request.Method,
                             "path":   request.URL.Path,
-                            "query":  request.URL.RawQuery,
+                            "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                             "scheme": scheme,
                             "host":   request.Host,
                         },
@@ -351,7 +345,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     loggingcontract.Context{
                         "method": request.Method,
                         "path":   request.URL.Path,
-                        "query":  request.URL.RawQuery,
+                        "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
                         "scheme": scheme,
                         "host":   request.Host,
                     },
@@ -386,6 +380,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             /* net/http documents this sentinel as "abort the connection and suppress the log", and only a panic reaching its own serve loop closes the connection without a response; converted into an error it would answer an aborted upload with a 500 and an error line. The identity check matches net/http's own, so an application error merely wrapping the sentinel is unaffected. */
             if nethttp.ErrAbortHandler == recoveredValue {
+                /* the abort suppresses the response, not the ownership of what it holds: a response in flight may own an open file (FileResponse/ServeReader) and loses its only reference as this panic unwinds past the kernel, so both the assigned response and the one the chain shim still holds are closed before the sentinel is re-raised. Below, the same two closes run on every other panic path; invokeErrorHandlerSafely refuses to honour the sentinel at all for exactly this leak, and honouring it here without closing would be the leak that refusal names. */
+                closeDiscardedResponseBody(finalResponse, requestLogger)
+
+                if chainResponse != finalResponse {
+                    closeDiscardedResponseBody(chainResponse, requestLogger)
+                }
+
                 panic(recoveredValue)
             }
 
@@ -942,9 +943,9 @@ func (instance *Kernel) requestIdLogger(
 
 /* logHandlerError files the one record for a handler-returned failure, under the discipline the panic recovery and the exception listener already share: an error something upstream already logged is not filed again, a deliberate 4xx is a refusal recorded at warning, a client's own cancellation is named for what it is, and everything else keeps the error level. The one 4xx that is not a refusal is the one whose validation errors blame the DECLARATION — a struct tag naming a rule that does not exist refuses every request that route will ever serve — and it is classified here through the same reader the exception listener uses, because this writer runs FIRST on the production path and marks what it filed: the listener's own error branch is unreachable for anything this record already carried, so a route broken by a typo sat at warning among the users who mistyped their address. The record marks the error, so the exception listener attaches its request coordinates to it instead of filing the same failure a second time — without the mark every handler failure produced two records, the first at error even for a routine 404 or 429.
 
-A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure.
+   A handler that honours its context and returns the request context's own cancellation is reporting the client's disconnect, not a fault of its own: recorded at error it paged the operator for every abandoned slow request, in a record that read exactly like a genuine handler failure.
 
-The reported error is the value the caller must put on the exception event: a handler's plain errors.New carries no AlreadyLogged implementer for the mark to live on, so it comes back wrapped in a marked carrier keeping the original as its cause. The caller's own error is what still reaches the application's error handler. */
+   The reported error is the value the caller must put on the exception event: a handler's plain errors.New carries no AlreadyLogged implementer for the mark to live on, so it comes back wrapped in a marked carrier keeping the original as its cause. The caller's own error is what still reaches the application's error handler. */
 /* normalizeBodyLimitError maps a *MaxBytesError a handler surfaced onto a 413 HttpException so it renders as "payload too large" at warning, the way the pre-handler urlencoded and BindJson paths already answer an oversized body. Any other error is returned untouched. */
 func normalizeBodyLimitError(handlerErr error) error {
     if nil == handlerErr {

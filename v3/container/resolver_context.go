@@ -22,8 +22,7 @@ func newResolverContext(containerInstance *container) *resolverContext {
         scopeInstance:     nil,
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
-        stack:             make([]string, 0, 8),
-        stackTypes:        make([]reflect.Type, 0, 8),
+        stack:             newResolutionStack(),
     }
 }
 
@@ -33,8 +32,22 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
         scopeInstance:     scopeInstance,
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
-        stack:             make([]string, 0, 8),
-        stackTypes:        make([]reflect.Type, 0, 8),
+        stack:             newResolutionStack(),
+    }
+}
+
+/* resolutionStack is the live chain of node keys one resolution is in the middle of building, held apart from the context so a provider's own view of the resolution can carry a different owner while still pushing and popping the one chain the cycle detection reads.
+
+   types runs parallel to keys: the canonical type of a type node, nil for a name node. It lives inside the shared chain rather than beside it on the context, because the view handed to a provider shares the chain and the collection exclusion reads the two together — a type slice held per view would answer for a different depth than the keys it is indexed against. The exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
+type resolutionStack struct {
+    keys  []string
+    types []reflect.Type
+}
+
+func newResolutionStack() *resolutionStack {
+    return &resolutionStack{
+        keys:  make([]string, 0, 8),
+        types: make([]reflect.Type, 0, 8),
     }
 }
 
@@ -43,13 +56,37 @@ type resolverContext struct {
     scopeInstance     *scope
     contextId         uint64
     rootRequestedKey  string
-    stack             []string
-    /* stackTypes runs parallel to stack: the canonical type of a type node, nil for a name node. The collection exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
-    stackTypes []reflect.Type
+    stack             *resolutionStack
+    /* ownerKey is the node whose provider was handed this view of the resolution, and it is what a resolution performed after that provider returned belongs to. The live stack answers the question while the provider is running and is empty the moment it returns, so a service that holds its resolver and reaches through it later — container.Lazy, any replay of deferred work — used to record no dependency edge at all, and the teardown then closed its dependencies in name order instead of after it. A handle built over the container itself has no owner and keeps that behaviour, because there is no node the container could be said to belong to. */
+    ownerKey string
     /* scopeSuspended is set while a provider registered on the CONTAINER builds its service, and it is what keeps the two apart. The container is request-agnostic: a service it owns is one instance for the whole process, so its construction may read only what the container holds. A request scope layers over the container for the code that runs inside a request, not underneath the container's own wiring, and a factory that reached through it would assemble a process-lifetime singleton out of one request's values.
 
        Suspension is a refusal, not a substitution. A container provider that asks for something only a scope carries — the request context — is told the service does not exist, which is a wiring mistake reported where it is made; a provider that asks for the logger gets the container's agnostic one, because that is the logger a process-lifetime service should hold. Only the service actually being requested is looked up through the scope, which is the layering a caller means by resolving through a scope at all. */
     scopeSuspended bool
+}
+
+/* childOwnedBy is the view of this resolution handed to the provider of one node: the same container, the same scope, the same resolution id and the same live stack, so cycle detection and the wait graph are unchanged, with the owning node written on it. A provider that keeps it and resolves through it after it has returned is then still recorded as depending on what it resolves.
+
+   The suspension rides on the view rather than being set on the shared context and restored afterwards: the caller's own resolution continues above this frame and must keep seeing the scope, and a restore that runs at the wrong moment — after a panic unwound past it, say — would leave the wrong answer behind for everything further up. */
+func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended bool) *resolverContext {
+    return &resolverContext{
+        containerInstance: instance.containerInstance,
+        scopeInstance:     instance.scopeInstance,
+        contextId:         instance.contextId,
+        rootRequestedKey:  instance.rootRequestedKey,
+        stack:             instance.stack,
+        ownerKey:          nodeKey,
+        scopeSuspended:    scopeSuspended,
+    }
+}
+
+/* parentNodeKey answers the node a resolution starting here depends on: the node currently being built while a provider is running, and the node that owns this view once it has returned. */
+func (instance *resolverContext) parentNodeKey() string {
+    if 0 < len(instance.stack.keys) {
+        return instance.stack.keys[len(instance.stack.keys)-1]
+    }
+
+    return instance.ownerKey
 }
 
 /* scopeVisible reports whether this resolution may read the request scope. */
@@ -57,13 +94,63 @@ func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
 
-/* containerInstanceStore keeps a finished service in the container's own maps. It is the store of every container-owned creation: the value is a process-lifetime singleton and the container is the only thing that outlives every scope. */
-func containerInstanceStore(storeInContainer func(value any)) instanceStore {
-    return instanceStore{
-        keep: func(value any) error {
-            storeInContainer(value)
+/* Closed reports whether the thing this resolution reads has stopped answering resolutions, which is the liveness question a LazyService that captured a provider's resolver asks — the shape the godoc recommends for teardown ordering — so that such a handle turns terminal with it instead of serving a dead request's state.
 
-            return nil
+   The question is asked of whatever scopeVisible answers for, which is the same predicate that decides where the resolution itself reads, and the two must agree. A resolution that reads the request scope ends with its request. One that reads the CONTAINER — because it has no scope, or because the scope is suspended for a provider the container owns, whose service is one instance for the whole process — ends only once the teardown has finished, since until then the container deliberately still answers a closing service what it depends on. Consulting only the scope pointer answered for whichever request happened to trigger a singleton's construction: the handle it captured went terminal when that one request ended, while the container went on answering the same name directly for the rest of the process. */
+func (instance *resolverContext) Closed() bool {
+    if true == instance.scopeVisible() {
+        return instance.scopeInstance.Closed()
+    }
+
+    return instance.containerInstance.resolutionsRefused()
+}
+
+/* isScopeClosed lets a collection refuse through this resolver exactly as it refuses through the scope itself. AllImplementing tells a dispatcher to collect with the resolver its provider received, so without this the refusal the collection promises never fired for the one resolver its own godoc recommends, and a request-outliving goroutine collected a silently empty set from a scope that enumerates nothing once closed. The question is asked of whatever scopeVisible answers for, the same predicate Closed above uses: a resolution the container owns has no scope to be closed and follows the container lifetime, which the Gets below refuse loudly on their own. */
+func (instance *resolverContext) isScopeClosed() bool {
+    return true == instance.scopeVisible() && true == instance.scopeInstance.isScopeClosed()
+}
+
+/* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */
+func containerNameStore(
+    containerInstance *container,
+    serviceName string,
+    canonicalTargetType reflect.Type,
+) instanceStore {
+    return instanceStore{
+        keep: func(value any) (any, bool, error) {
+            if existingValue, exists := containerInstance.instances[serviceName]; true == exists {
+                return existingValue, true, nil
+            }
+
+            containerInstance.instances[serviceName] = value
+            containerInstance.builtServiceNames[serviceName] = struct{}{}
+            containerInstance.recordCreationOrderLocked(containerNameNodeKey(serviceName))
+
+            if nil != canonicalTargetType {
+                containerInstance.typeInstances[canonicalTargetType] = value
+                containerInstance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalTargetType))
+            }
+
+            return value, false, nil
+        },
+    }
+}
+
+/* containerTypeStore is containerNameStore's counterpart for a type-keyed registration with no name to file under. */
+func containerTypeStore(
+    containerInstance *container,
+    canonicalTargetType reflect.Type,
+) instanceStore {
+    return instanceStore{
+        keep: func(value any) (any, bool, error) {
+            if existingValue, exists := containerInstance.typeInstances[canonicalTargetType]; true == exists {
+                return existingValue, true, nil
+            }
+
+            containerInstance.typeInstances[canonicalTargetType] = value
+            containerInstance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalTargetType))
+
+            return value, false, nil
         },
     }
 }
@@ -86,14 +173,30 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         scopedProvider, scopedProviderExists = instance.scopeInstance.scopedProviderByName(serviceName)
     }
 
-    nodeKey := "service:" + serviceName
+    nodeKey := containerNameNodeKey(serviceName)
     if true == scopedProviderExists {
         nodeKey = scopedNameNodeKey(serviceName)
     }
 
-    parentKey := ""
-    if 0 < len(instance.stack) {
-        parentKey = instance.stack[len(instance.stack)-1]
+    parentKey := instance.parentNodeKey()
+
+    /* a resolution that has nothing to write takes the read lock instead of the exclusive one. Every resolution used to take the container's exclusive lock, even one that only reads a singleton built long ago, so dependency injection had a hard ceiling that did not move with the number of cores — the http kernel alone resolves four services per request, and an application cannot route around it without giving up the container.
+
+       Nothing to write means all three at once: no scope layered over this resolution, no node to record an edge for, and the instance already built. The last two are what keep the ordering guarantee intact — a resolution that would record an edge, including one made through a resolver a provider kept, falls through to the exclusive path that writes the graph. */
+    if false == instance.scopeVisible() && "" == parentKey {
+        instance.containerInstance.mutex.RLock()
+        memoizedValue, memoized := instance.containerInstance.instances[serviceName]
+        teardownFinished := instance.containerInstance.teardownFinished
+        instance.containerInstance.mutex.RUnlock()
+
+        /* the fast path answers out of the map, so it is the path that must ask whether the map still means anything: the creation guard below refuses a closed container, but a memoized instance never reaches it, and a resolution performed after the teardown was answered with a closed service and a nil error */
+        if true == teardownFinished {
+            return nil, newContainerClosedError(serviceName)
+        }
+
+        if true == memoized {
+            return memoizedValue, nil
+        }
     }
 
     pushKeyErr := instance.pushKey(nodeKey, nil)
@@ -110,6 +213,13 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
         /* an installed override answers before anything is built, which is what keeps overriding a mechanism of its own rather than a competitor of registration */
         if true == exists {
+            /* the edge is recorded even though nothing is built: a scoped dependent resolving a scoped service the scope ALREADY holds depends on it exactly as hard as the resolution that built it, and without the edge the teardown falls back to closing the two in name order — the graph guarantee would hold only for whichever resolution happened to come first. */
+            if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
+                instance.containerInstance.mutex.Lock()
+                registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
+                instance.containerInstance.mutex.Unlock()
+            }
+
             return value, nil
         }
 
@@ -130,20 +240,22 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
     instance.containerInstance.mutex.Lock()
     defer instance.containerInstance.mutex.Unlock()
 
-    if "" != parentKey && false == isScopedNodeKey(nodeKey) {
+    /* a scoped parent writes no edge into the container's graph: the teardown walks that graph only over container-created representatives, so a scope-keyed dependent is skipped there, while the scope's own teardown reads only the scope's graph — the entry would never be consulted, and the container's graph is never pruned, so a live-scope registration under a request-derived name would leave one permanent entry per name for the life of the process */
+    if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
         instance.containerInstance.registerDependencyLocked(
             parentKey,
             nodeKey,
         )
     }
 
-    /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
+    /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
     provider, providerExists := instance.containerInstance.providers[serviceName]
 
     return instance.containerInstance.serviceWithCreationGuardLocked(
         guardedCreation{
             requestedKey: requestedKey,
             creatingKey:  serviceName,
+            ownerNodeKey: nodeKey,
             getCreatingState: func() (*creationState, bool) {
                 state, exists := instance.containerInstance.creatingByName[serviceName]
                 return state, exists
@@ -184,9 +296,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
                     providerFunctionString: providerFunctionString,
                 }
             },
-            store: containerInstanceStore(func(value any) {
-                instance.containerInstance.instances[serviceName] = value
-            }),
+            store:         containerNameStore(instance.containerInstance, serviceName, nil),
             suspendsScope: true,
         },
         instance,
@@ -225,9 +335,17 @@ func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type) 
     }
 }
 
+/* MustGet panics with the failure the way FromResolver returns it: a melody error travels out whole with the service name written into its context in place, and only a foreign error is wrapped naming the service — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it, and the mark shed here made one logged provider failure file a second record at the recovery site. */
 func (instance *resolverContext) MustGet(serviceName string) any {
     value, getErr := instance.Get(serviceName)
     if nil != getErr {
+        melodyErr, isMelodyErr := getErr.(*exception.Error)
+        if true == isMelodyErr && nil != melodyErr {
+            melodyErr.SetContextValue("serviceName", serviceName)
+
+            exception.Panic(melodyErr)
+        }
+
         exception.Panic(
             exception.NewError(
                 "failed to get service instance",
@@ -284,10 +402,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         nodeKey = scopedTypeNodeKey(typeKey)
     }
 
-    parentKey := ""
-    if 0 < len(instance.stack) {
-        parentKey = instance.stack[len(instance.stack)-1]
-    }
+    parentKey := instance.parentNodeKey()
 
     pushKeyErr := instance.pushKey(nodeKey, canonicalTargetType)
     if nil != pushKeyErr {
@@ -302,6 +417,13 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         }
 
         if true == exists {
+            /* mirror Get: an already-held scoped instance is depended on as hard as one built by this resolution */
+            if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
+                instance.containerInstance.mutex.Lock()
+                registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
+                instance.containerInstance.mutex.Unlock()
+            }
+
             return value, nil
         }
 
@@ -364,7 +486,8 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     instance.containerInstance.mutex.Lock()
     defer instance.containerInstance.mutex.Unlock()
 
-    if "" != parentKey && false == isScopedNodeKey(nodeKey) {
+    /* the same parent filter as the by-name path: a scope-keyed dependent is skipped by the container teardown and the entry is never pruned, so recording it would only grow the graph */
+    if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
         instance.containerInstance.registerDependencyLocked(
             parentKey,
             nodeKey,
@@ -396,13 +519,14 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             return value, nil
         }
 
-        /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
+        /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
         provider, providerExists := instance.containerInstance.providers[serviceName]
 
         return instance.containerInstance.serviceWithCreationGuardLocked(
             guardedCreation{
                 requestedKey: requestedKey,
                 creatingKey:  serviceName,
+                ownerNodeKey: nodeKey,
                 getCreatingState: func() (*creationState, bool) {
                     state, exists := instance.containerInstance.creatingByName[serviceName]
                     return state, exists
@@ -443,23 +567,21 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                         providerFunctionString: providerFunctionString,
                     }
                 },
-                store: containerInstanceStore(func(resolvedValue any) {
-                    instance.containerInstance.instances[serviceName] = resolvedValue
-                    instance.containerInstance.typeInstances[canonicalTargetType] = resolvedValue
-                }),
+                store:         containerNameStore(instance.containerInstance, serviceName, canonicalTargetType),
                 suspendsScope: true,
             },
             instance,
         )
     }
 
-    /* @important snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the typeProviders map there would race concurrent Register writes. */
+    /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the typeProviders map there would race concurrent Register writes. */
     provider, providerExists := instance.containerInstance.typeProviders[canonicalTargetType]
 
     return instance.containerInstance.serviceWithCreationGuardLocked(
         guardedCreation{
             requestedKey: requestedKey,
             creatingKey:  typeKey,
+            ownerNodeKey: nodeKey,
             getCreatingState: func() (*creationState, bool) {
                 state, exists := instance.containerInstance.creatingByType[typeKey]
                 return state, exists
@@ -500,21 +622,27 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                     providerFunctionString: providerFunctionString,
                 }
             },
-            store: containerInstanceStore(func(value any) {
-                instance.containerInstance.typeInstances[canonicalTargetType] = value
-            }),
+            store:         containerTypeStore(instance.containerInstance, canonicalTargetType),
             suspendsScope: true,
         },
         instance,
     )
 }
 
+/* MustGetByType panics with the failure the way FromResolverByType returns it: the melody error travels out whole with the type written into its context in place, and only a foreign error is wrapped naming the type. */
 func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     value, getByTypeErr := instance.GetByType(targetType)
     if nil != getByTypeErr {
         typeString := ""
         if nil != targetType {
             typeString = targetType.String()
+        }
+
+        melodyErr, isMelodyErr := getByTypeErr.(*exception.Error)
+        if true == isMelodyErr && nil != melodyErr {
+            melodyErr.SetContextValue("type", typeString)
+
+            exception.Panic(melodyErr)
         }
 
         exception.Panic(
@@ -531,8 +659,9 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     return value
 }
 
+/* Has answers under the same suspension Get enforces: a container-owned provider asking about a scope-only name used to hear "yes" from the very entries its Get would refuse, and an existence check that disagrees with the resolution it gates turns into a wiring decision made on one request's substitutes — or a Has-then-MustGet panic. */
 func (instance *resolverContext) Has(serviceName string) bool {
-    if nil != instance.scopeInstance {
+    if true == instance.scopeVisible() {
         return instance.scopeInstance.Has(serviceName)
     }
 
@@ -540,11 +669,56 @@ func (instance *resolverContext) Has(serviceName string) bool {
 }
 
 func (instance *resolverContext) HasType(targetType reflect.Type) bool {
-    if nil != instance.scopeInstance {
+    if true == instance.scopeVisible() {
         return instance.scopeInstance.HasType(targetType)
     }
 
     return instance.containerInstance.HasType(targetType)
+}
+
+func (instance *resolverContext) pushKey(creatingKey string, creatingType reflect.Type) error {
+    if "" == creatingKey {
+        return exception.NewError(
+            "creating key is empty",
+            nil,
+            nil,
+        )
+    }
+
+    for _, key := range instance.stack.keys {
+        if key == creatingKey {
+            return exception.NewError(
+                "circular service dependency detected",
+                exceptioncontract.Context{
+                    "creatingKey": creatingKey,
+                    "stack":       instance.stackStringWithRepeat(creatingKey),
+                },
+                nil,
+            )
+        }
+    }
+
+    instance.stack.keys = append(instance.stack.keys, creatingKey)
+    instance.stack.types = append(instance.stack.types, creatingType)
+
+    return nil
+}
+
+func (instance *resolverContext) popKey() {
+    if 0 == len(instance.stack.keys) {
+        return
+    }
+
+    instance.stack.keys = instance.stack.keys[:len(instance.stack.keys)-1]
+    instance.stack.types = instance.stack.types[:len(instance.stack.types)-1]
+}
+
+func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) string {
+    parts := make([]string, 0, len(instance.stack.keys)+1)
+    parts = append(parts, instance.stack.keys...)
+    parts = append(parts, repeatedKey)
+
+    return strings.Join(parts, " -> ")
 }
 
 /* TypesImplementing lets a provider collect its collaborators through AllImplementing with the resolver it was handed instead of needing the container itself. A resolution that can see its scope collects what the scope can reach — its scoped registrations included — while a container provider, whose scope is suspended for the duration, collects only what the container holds. The two answers differ on purpose: a process singleton must not gather members that live for one request. */
@@ -566,17 +740,17 @@ func (instance *resolverContext) ReferencesImplementing(interfaceType reflect.Ty
 
 /* isResolvingReference reports whether the reference is the service this context is creating right now — the innermost node of the resolution stack. Only that service is excluded from a collection: it is the composite dispatcher collecting the handlers it belongs to. A reference deeper on the path is not excluded, so collecting it runs into the creation guard and fails loudly as the circular dependency it is — excluding it instead would freeze a collection whose content depends on which service happened to boot first. On a type node the exclusion is narrowed to the name this context actually holds in creation, so a sibling name of the same type — registered while the creation ran — stays collectable; the type comparison itself is reflect.Type identity, never the type's String(), which two types from same-named packages share. */
 func (instance *resolverContext) isResolvingReference(reference containercontract.ServiceReference) bool {
-    if 0 == len(instance.stack) {
+    if 0 == len(instance.stack.keys) {
         return false
     }
 
-    topIndex := len(instance.stack) - 1
+    topIndex := len(instance.stack.keys) - 1
 
-    if "service:"+reference.ServiceName == instance.stack[topIndex] {
+    if containerNameNodeKey(reference.ServiceName) == instance.stack.keys[topIndex] {
         return true
     }
 
-    topType := instance.stackTypes[topIndex]
+    topType := instance.stack.types[topIndex]
     if nil == topType || topType != reference.ServiceType {
         return false
     }
@@ -593,50 +767,9 @@ func (instance *resolverContext) isResolvingReference(reference containercontrac
     return false
 }
 
-func (instance *resolverContext) pushKey(creatingKey string, creatingType reflect.Type) error {
-    if "" == creatingKey {
-        return exception.NewError(
-            "creating key is empty",
-            nil,
-            nil,
-        )
-    }
-
-    for _, key := range instance.stack {
-        if key == creatingKey {
-            return exception.NewError(
-                "circular service dependency detected",
-                exceptioncontract.Context{
-                    "creatingKey": creatingKey,
-                    "stack":       instance.stackStringWithRepeat(creatingKey),
-                },
-                nil,
-            )
-        }
-    }
-
-    instance.stack = append(instance.stack, creatingKey)
-    instance.stackTypes = append(instance.stackTypes, creatingType)
-
-    return nil
-}
-
-func (instance *resolverContext) popKey() {
-    if 0 == len(instance.stack) {
-        return
-    }
-
-    instance.stack = instance.stack[:len(instance.stack)-1]
-    instance.stackTypes = instance.stackTypes[:len(instance.stackTypes)-1]
-}
-
-func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) string {
-    parts := make([]string, 0, len(instance.stack)+1)
-    parts = append(parts, instance.stack...)
-    parts = append(parts, repeatedKey)
-
-    return strings.Join(parts, " -> ")
-}
-
-var _ containercontract.Resolver = (*resolverContext)(nil)
-var _ containercontract.TypeLister = (*resolverContext)(nil)
+var (
+    _ containercontract.Resolver   = (*resolverContext)(nil)
+    _ containercontract.TypeLister = (*resolverContext)(nil)
+    _ referenceResolutionChecker   = (*resolverContext)(nil)
+    _ closedScopeChecker           = (*resolverContext)(nil)
+)

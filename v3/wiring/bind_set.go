@@ -2,7 +2,7 @@ package wiring
 
 /* BindSet declares how the scalar arguments of the scanned constructors are filled. A constructor argument whose type is not a service — a string, a number, a duration — cannot be resolved from the container, so it is bound by argument name to a configuration parameter, the way an application binds its own settings once instead of threading them through every provider.
 
-A bind declared on a package applies only to the constructors found under it; a bind declared on the set itself applies everywhere. The generator reports a bind that never matched an argument, which is what turns a misspelled name into an error rather than a silently unfilled dependency. */
+   A bind declared on a package applies only to the constructors found under it; a bind declared on the set itself applies everywhere. The generator reports a bind that never matched an argument, which is what turns a misspelled name into an error rather than a silently unfilled dependency. */
 func NewBindSet() *BindSet {
     return &BindSet{
         packages:        make([]*PackageBinding, 0),

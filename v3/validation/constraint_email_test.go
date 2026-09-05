@@ -33,3 +33,30 @@ func TestEmail_PointerToStringValidPasses(t *testing.T) {
         t.Fatalf("expected valid *string email to pass, got: %s", validationError.Error())
     }
 }
+
+func TestEmail_NonStringIsRejected(t *testing.T) {
+    constraint := &Email{}
+
+    validationError := constraint.Validate(12345, "field")
+
+    if nil == validationError {
+        t.Fatalf("fail-open: non-string passed the email constraint")
+    }
+}
+
+func TestEmail_AnAbsentValueIsOptionalityRatherThanAMalformedAddress(t *testing.T) {
+    constraint := &Email{}
+
+    if validationError := constraint.Validate(nil, "field"); nil != validationError {
+        t.Fatalf("expected an absent value to pass, got %v", validationError)
+    }
+
+    var absentPointer *string
+    if validationError := constraint.Validate(absentPointer, "field"); nil != validationError {
+        t.Fatalf("expected a nil pointer to pass, got %v", validationError)
+    }
+
+    if validationError := constraint.Validate(pointerOf("user@example.com"), "field"); nil != validationError {
+        t.Fatalf("expected a valid address to pass, got %v", validationError)
+    }
+}

@@ -3040,15 +3040,7 @@ func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
     }
 }
 
-/*
-TestErrorDetailsOf_CarriesTheFailuresOwnContext pins the guard where it lives.
-The envelope's details and cause were nil on every failure alike, so the
-machine document — the one a deploy pipeline reads — was the single rendering
-that threw away what the error already carried. The rule is asserted here
-rather than through the command, because the generate failures reachable from
-the command carry no context of their own and would leave the rule
-unobservable: the guard would pass just as well emptied.
-*/
+/* TestErrorDetailsOf_CarriesTheFailuresOwnContext pins the guard where it lives. The envelope's details and cause were nil on every failure alike, so the machine document — the one a deploy pipeline reads — was the single rendering that threw away what the error already carried. The rule is asserted here rather than through the command, because the generate failures reachable from the command carry no context of their own and would leave the rule unobservable: the guard would pass just as well emptied. */
 func TestErrorDetailsOf_CarriesTheFailuresOwnContext(t *testing.T) {
     runErr := exception.NewError(
         "the cron manifest could not be renamed into place",
@@ -3163,7 +3155,7 @@ func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *t
 
 /* a run that fails part way through still names what it already did, on the text rendering as well as the json one. Emptying a destination is irreversible and the sweep hands back what it emptied beside its failure, so returning without printing left the operator of a broken deploy with manifests blanked and not one line saying which — neither a "pruned" line nor the "wrote" lines of the writes that had succeeded.
 
-It is driven through the report door rather than through a sweep made to fail, because what can still fail a sweep is now filesystem trivia: the candidates it will open are regular files only, and as the process that wrote them it can read them. The state is constructed instead of waited for. */
+   It is driven through the report door rather than through a sweep made to fail, because what can still fail a sweep is now filesystem trivia: the candidates it will open are regular files only, and as the process that wrote them it can read them. The state is constructed instead of waited for. */
 func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testing.T) {
     var stdout bytes.Buffer
     commandContext := &clicontract.CommandContext{Writer: &stdout}
@@ -3263,5 +3255,118 @@ func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
 
     if false == subdirectoryInfo.IsDir() {
         t.Fatal("expected the created log path to be a directory")
+    }
+}
+
+/* the emptying is irreversible, so ownership must not be a substring question: a file that QUOTES the marker inside a longer line, or past the leading lines, is not one this generator wrote — and a custom dialect that suffixes the builtin marker declares files of its own, which a substring match claimed for the builtin run */
+func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) {
+    tempDir := t.TempDir()
+
+    owned := filepath.Join(tempDir, "owned")
+    if writeErr := os.WriteFile(owned, []byte("# GENERATED FILE\n# DO NOT EDIT LOCALLY\n"+CrontabOwnershipMarker+"\n0 3 * * * job\n"), 0o644); nil != writeErr {
+        t.Fatalf("write owned: %v", writeErr)
+    }
+
+    quoting := filepath.Join(tempDir, "quoting")
+    if writeErr := os.WriteFile(quoting, []byte("# deployment notes\n# files carrying `"+CrontabOwnershipMarker+"` are managed\n"), 0o644); nil != writeErr {
+        t.Fatalf("write quoting: %v", writeErr)
+    }
+
+    late := filepath.Join(tempDir, "late")
+    lateContent := strings.Repeat("# filler line\n", ownershipMarkerLineLimit) + CrontabOwnershipMarker + "\n"
+    if writeErr := os.WriteFile(late, []byte(lateContent), 0o644); nil != writeErr {
+        t.Fatalf("write late: %v", writeErr)
+    }
+
+    suffixed := filepath.Join(tempDir, "suffixed")
+    if writeErr := os.WriteFile(suffixed, []byte(CrontabOwnershipMarker+" (custom-dialect)\n---\n"), 0o644); nil != writeErr {
+        t.Fatalf("write suffixed: %v", writeErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(owned, CrontabOwnershipMarker); nil != checkErr || false == carries {
+        t.Fatalf("expected the generated header to prove ownership, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(quoting, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected the quoting file to stay the operator's, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(late, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected a marker past the leading lines to prove nothing, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(suffixed, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected the suffixed custom marker to stay the custom dialect's, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(suffixed, CrontabOwnershipMarker+" (custom-dialect)"); nil != checkErr || false == carries {
+        t.Fatalf("expected the custom marker to prove its own files, got carries=%v err=%v", carries, checkErr)
+    }
+}
+
+/* the binary is the fourth path-shaped value the generator resolves, and its parameter follows the rule of the other three: relative from the configuration means under the project, relative from the flag means where the shell is. */
+func TestRunAnchorsARelativeBinaryParameterAtTheProjectDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:            "deploy",
+            ParameterBinary:          filepath.Join("bin", "app"),
+            ParameterDestinationFile: filepath.Join(projectDirectory, "var", "cron", "crontab"),
+            ParameterLogsDir:         filepath.Join(projectDirectory, "var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(t, commands, nil, configuration)
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    body, _ := os.ReadFile(filepath.Join(projectDirectory, "var", "cron", "crontab"))
+    if false == strings.Contains(string(body), filepath.Join(projectDirectory, "bin", "app")+" backup:run") {
+        t.Fatalf("expected the relative binary parameter anchored at the project directory, got:\n%s", string(body))
+    }
+}
+
+func TestRunKeepsARelativeBinaryFlagRelativeToTheWorkingDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:            "deploy",
+            ParameterBinary:          "/opt/melody/app",
+            ParameterDestinationFile: filepath.Join(projectDirectory, "var", "cron", "crontab"),
+            ParameterLogsDir:         filepath.Join(projectDirectory, "var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(t, commands, []string{"--binary", filepath.Join("bin", "app")}, configuration)
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    body, _ := os.ReadFile(filepath.Join(projectDirectory, "var", "cron", "crontab"))
+    if false == strings.Contains(string(body), filepath.Join(workingDirectory, "bin", "app")+" backup:run") {
+        t.Fatalf("expected the relative binary flag resolved against the working directory, got:\n%s", string(body))
+    }
+
+    if true == strings.Contains(string(body), filepath.Join(projectDirectory, "bin", "app")) {
+        t.Fatalf("a flag path must not be anchored at the project directory, got:\n%s", string(body))
     }
 }

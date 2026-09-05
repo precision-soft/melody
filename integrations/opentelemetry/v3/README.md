@@ -28,13 +28,20 @@ if nil != meterErr {
 	return meterErr
 }
 
-metricsMiddleware, _ := opentelemetry.NewMetricsMiddleware(meter)
+metricsMiddleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
+if nil != middlewareErr {
+	return middlewareErr
+}
 // register metricsMiddleware via RegisterHttpMiddlewares
+// (the module refuses a nil middleware at boot: a discarded constructor error
+// would otherwise serve traffic silently uninstrumented)
 
 // expose the registry; e.g. route GET /metrics -> opentelemetry.MetricsHandler(registry)
 ```
 
-`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes.
+`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes. The status attribute follows the response a handler returns, or — for the nil-response streaming/proxy shape — the status the handler committed directly to the writer (`101` for a hijacked upgrade).
+
+`NewPrometheusMeter` builds a pull-based meter: the underlying meter provider has no background goroutine and no close door is offered — it lives for the process, which is the lifetime a Prometheus registry serves anyway.
 
 Or build the meter, the middleware, and the `/metrics` handler in one call:
 
@@ -56,7 +63,7 @@ The tracing middleware extracts the incoming trace context from request headers,
 
 The `TracerProvider` the tracing middleware needs is not something you have to assemble yourself: the [`otlp`](./otlp) subpackage ships one wired to an OTLP exporter.
 
-[`otlp.NewTracerProvider(ctx, otlp.Config{...})`](./otlp/tracer_provider.go) returns a batching `*sdktrace.TracerProvider`. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans.
+[`otlp.NewTracerProvider(ctx, otlp.Config{...})`](./otlp/tracer_provider.go) returns a batching `*sdktrace.TracerProvider`. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans. `Config.SampleRatio` accepts `(0,1)` to keep that fraction and `0` / `>=1` to keep everything; a negative or NaN ratio is refused at construction, because both used to fall through to `AlwaysSample`.
 
 [`otlp.NewModule`](./otlp/module.go) is the plug-and-play alternative and is the recommended path: it registers the provider as the container service `otlp.ServiceTracerProvider` (`"opentelemetry.otlp.tracer_provider"`) wrapped in a `Close()`-able handle, so the container's shutdown flushes for you, and it installs the tracing middleware itself.
 
@@ -83,7 +90,7 @@ app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
 | `Insecure`       | skip transport security — for a collector on the local network                                                  | `false`           |
 | `BatchTimeout`   | batch span processor flush interval                                                                             | `5s`              |
 
-`ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them.
+`ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
 
 ### Register as a module
 

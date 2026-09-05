@@ -9,12 +9,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* GrantRoleCommand declares its own --role flag to show that an application command may reuse a name the
-runtime also understands: the runtime's --mode/--role are recognized only before the command name, so
-`example:grant:role --role admin` reaches this command intact rather than being captured (and rejected) by
-the process-role parser. It also holds the user service through a container.Lazy handle built at
-command-registration time — the service is resolved at the first run, not when the command is constructed,
-so the boot-phase composition never resolves the container early. */
+/* GrantRoleCommand declares its own --role flag to show that an application command may reuse a name the runtime also understands: the runtime's --mode/--role are recognized only before the command name, so `example:grant:role --role admin` reaches this command intact rather than being captured (and rejected) by the process-role parser. It also holds the user service through a container.Lazy handle built at command-registration time — the service is resolved at the first run, not when the command is constructed, so the boot-phase composition never resolves the container early. */
 type GrantRoleCommand struct {
     userService *melodycontainer.LazyService[*service.UserService]
 }
@@ -44,7 +39,7 @@ func (instance *GrantRoleCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     role := commandContext.String("role")
     user := commandContext.String("user")
 

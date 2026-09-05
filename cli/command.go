@@ -106,6 +106,9 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 /* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file must not carry escape codes around an output that honoured the flag */
                 noColor := resolvedOption.NoColor
 
+                /* the banner is decoration, and quiet is the documented governor of decoration: StandardFlags defaults it to true so a scripted invocation stays clean without asking, DebugFlags to false so an introspection command keeps its frame, and a command that declares neither reads false and keeps the banner it always had. The banner ignored the flag entirely, so the one output the contract promises quiet suppresses was the one it never touched. */
+                quiet := resolvedOption.Quiet
+
                 printGreenFullLine := func(writer io.Writer) {
                     if true == noColor {
                         return
@@ -141,6 +144,35 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     )
                 }
 
+                /* printGreenVerdictLine is the finish form of printGreenStatusLine: the text on either side of the verdict is escaped as data, and the verdict is coloured AFTER that. Coloured before, the banner's own escape sequence went through the escaping together with the data, and every failed run with colour on — the default — printed \x1b[31m as literal text around [failed], while the no-color run, which never coloured the verdict, printed it right. A sanitiser handed an already formatted line cannot tell the author's bytes from the client's, so the presentation is added last. */
+                printGreenVerdictLine := func(writer io.Writer, textBeforeVerdict string, verdict string, failed bool, textAfterVerdict string) {
+                    escapedBefore := internal.EscapeControlCharacters(textBeforeVerdict)
+                    escapedAfter := internal.EscapeControlCharacters(textAfterVerdict)
+
+                    if true == noColor {
+                        _, _ = fmt.Fprintf(writer, "%s%s%s\n", escapedBefore, verdict, escapedAfter)
+
+                        return
+                    }
+
+                    colouredVerdict := verdict
+                    if true == failed {
+                        colouredVerdict = AnsiRed + verdict + AnsiWhite
+                    }
+
+                    _, _ = fmt.Fprintf(
+                        writer,
+                        "%s%s\r%s%s%s%s%s\n",
+                        AnsiBackgroundGreen,
+                        AnsiEraseLine,
+                        AnsiWhite,
+                        escapedBefore,
+                        colouredVerdict,
+                        escapedAfter,
+                        AnsiReset,
+                    )
+                }
+
                 printRedStatusLine := func(writer io.Writer, text string) {
                     text = internal.EscapeControlCharacters(text)
 
@@ -161,24 +193,30 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     )
                 }
 
-                printGreenFullLine(writer)
+                if false == quiet {
+                    printGreenFullLine(writer)
 
-                printGreenStatusLine(
-                    writer,
-                    fmt.Sprintf(
-                        "%s [%s] [started] [%s] %s",
-                        logFiller,
-                        normalizedCommandName,
-                        startedAt.Format(time.DateTime),
-                        logFiller,
-                    ),
-                )
+                    printGreenStatusLine(
+                        writer,
+                        fmt.Sprintf(
+                            "%s [%s] [started] [%s] %s",
+                            logFiller,
+                            normalizedCommandName,
+                            startedAt.Format(time.DateTime),
+                            logFiller,
+                        ),
+                    )
 
-                printGreenFullLine(writer)
+                    printGreenFullLine(writer)
+                }
 
                 var commandErr error
 
                 defer func() {
+                    if true == quiet {
+                        return
+                    }
+
                     finishedAt := time.Now()
                     duration := finishedAt.Sub(startedAt)
 
@@ -186,25 +224,18 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
 
                     printGreenFullLine(writer)
 
-                    statusText := "[success]"
-                    if nil != commandErr {
-                        statusText = "[failed]"
-                        if false == noColor {
-                            statusText = fmt.Sprintf("%s[failed]%s", AnsiRed, AnsiWhite)
-                        }
+                    verdict := "[success]"
+                    failed := nil != commandErr
+                    if true == failed {
+                        verdict = "[failed]"
                     }
 
-                    printGreenStatusLine(
+                    printGreenVerdictLine(
                         writer,
-                        fmt.Sprintf(
-                            "%s [%s] [finished] %s [%s] [duration=%s] %s",
-                            logFiller,
-                            normalizedCommandName,
-                            statusText,
-                            finishedAt.Format(time.DateTime),
-                            durationSecondsString,
-                            logFiller,
-                        ),
+                        fmt.Sprintf("%s [%s] [finished] ", logFiller, normalizedCommandName),
+                        verdict,
+                        failed,
+                        fmt.Sprintf(" [%s] [duration=%s] %s", finishedAt.Format(time.DateTime), durationSecondsString, logFiller),
                     )
 
                     printGreenFullLine(writer)

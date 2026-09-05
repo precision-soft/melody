@@ -68,7 +68,7 @@ func NewOptions(
     }
 }
 
-/* SetAllowedDotPrefixList names the dot-prefixed first path elements the file server may retrieve. The default carries ".well-known" alone, which is where an ACME http-01 challenge, security.txt and assetlinks.json are published, and every other dot-prefixed element stays refused so a stray .env or .git never leaves the public directory. The allowance never reaches past the first element, so ".well-known/.env" is refused exactly like "/.env". An empty list refuses every dot-prefixed path. */
+/* SetAllowedDotPrefixList names the dot-prefixed first path elements the file server may retrieve. The default carries ".well-known" alone, which is where an ACME http-01 challenge, security.txt and assetlinks.json are published, and every other dot-prefixed element stays refused so a stray .env or .git never leaves the public directory. The allowance never reaches past the first element, so ".well-known/.env" is refused exactly like "/.env". An empty list refuses every dot-prefixed path. NewFileServer copies the configuration at construction, so this is set before the server is built; called later it configures the next server, not one already serving. */
 func (instance *FileServerConfig) SetAllowedDotPrefixList(allowedDotPrefixList []string) {
     copied := []string{}
     if nil != allowedDotPrefixList {
@@ -78,11 +78,16 @@ func (instance *FileServerConfig) SetAllowedDotPrefixList(allowedDotPrefixList [
     instance.allowedDotPrefixList = copied
 }
 
-/* SetExcludedPathList names the path prefixes the file server declines without looking at the disk. A declined request continues down the rest of the chain, so an excluded prefix is how the part of the url it names is handed to the application: to a middleware that authenticates it, to a stricter policy, or to a file server of its own. An entry is a prefix of the request path exactly as security.NewPathPrefixMatcher reads one — the raw path, before the strip prefix is removed and before the path is folded — so a rule written for a firewall and a rule written here select the same requests. An empty entry therefore names every path and switches the file server off entirely. The default list is empty, which excludes nothing. */
+/* SetExcludedPathList names the path prefixes the file server declines without looking at the disk. A declined request continues down the rest of the chain, so an excluded prefix is how the part of the url it names is handed to the application: to a middleware that authenticates it, to a stricter policy, or to a file server of its own. An entry is a prefix of the request path exactly as security.NewPathPrefixMatcher reads one — the raw path, before the strip prefix is removed and before the path is folded — so a rule written for a firewall and a rule written here select the same requests. An empty entry therefore names every path and switches the file server off entirely. The default list is empty, which excludes nothing. NewFileServer copies the configuration at construction, so this is set before the server is built; called later it configures the next server, not one already serving. */
 func (instance *FileServerConfig) SetExcludedPathList(excludedPathList []string) {
     copied := []string{}
-    if nil != excludedPathList {
-        copied = append([]string{}, excludedPathList...)
+    for _, excludedPath := range excludedPathList {
+        /* an excluded path is compared with a prefix test against the request path, which always begins with a slash, so an entry without one could never match and would silently exclude nothing — the configuration door refuses such an entry; here it is normalized to the shape that matches, so a caller who wrote "admin" excludes "/admin" as intended rather than nothing. */
+        if 0 < len(excludedPath) && '/' != excludedPath[0] {
+            excludedPath = "/" + excludedPath
+        }
+
+        copied = append(copied, excludedPath)
     }
 
     instance.excludedPathList = copied

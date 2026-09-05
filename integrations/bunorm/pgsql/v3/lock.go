@@ -63,6 +63,7 @@ func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.
     }
 }
 
+/* pgsqlLock carries both spellings of its name: the one the caller gave, which every error context names, and the two halves of the advisory key the server was actually asked for, which the contexts name beside it — a diagnostic that showed only the caller's spelling left the operator with nothing to match against pg_locks. */
 type pgsqlLock struct {
     database       *bun.DB
     name           string
@@ -89,7 +90,7 @@ func (instance *pgsqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
 
     connection, connectionErr := instance.database.DB.Conn(runtimeInstance.Context())
     if nil != connectionErr {
-        return false, exception.NewError("pgsql lock connection failed", map[string]any{"name": instance.name}, connectionErr)
+        return false, exception.NewError("pgsql lock connection failed", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, connectionErr)
     }
 
     var acquired sql.NullBool
@@ -103,7 +104,7 @@ func (instance *pgsqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
         /* pg_try_advisory_lock may have taken the lock server-side before Scan failed (for example on context cancellation), so release it — ending the session if the unlock cannot be issued — before the connection returns to the pool. */
         _ = releaseLockedConnection(connection, instance.keyHigh, instance.keyLow, instance.releaseTimeout)
 
-        return false, exception.NewError("pgsql lock acquire failed", map[string]any{"name": instance.name}, queryErr)
+        return false, exception.NewError("pgsql lock acquire failed", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, queryErr)
     }
 
     if false == acquired.Valid || false == acquired.Bool {
@@ -126,7 +127,7 @@ func (instance *pgsqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     }
 
     if releaseErr := instance.releasePinnedConnection(); nil != releaseErr {
-        return exception.NewError("pgsql lock release failed", map[string]any{"name": instance.name}, releaseErr)
+        return exception.NewError("pgsql lock release failed", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, releaseErr)
     }
 
     return nil
@@ -137,14 +138,14 @@ func (instance *pgsqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     defer instance.mutex.Unlock()
 
     if nil == instance.connection {
-        return exception.NewError("pgsql lock is no longer held", map[string]any{"name": instance.name}, nil)
+        return exception.NewError("pgsql lock is no longer held", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, nil)
     }
 
     /* a PostgreSQL session advisory lock has no ttl to extend: it is held for as long as its backend session lives. "Refresh" is therefore a liveness probe — if the pinned connection still answers, the lock is still held and there is nothing to renew. The probe runs on a fresh, bounded context so a transient cause (a canceled or expired request context) is never mistaken for a lost lock — unlike a ttl-based lease there is nothing here to lose on a transient error, so we must not release on it. Only a genuinely dead connection (its session, and so the lock, already gone) fails the refresh. */
     if false == instance.pinnedConnectionAlive() {
         instance.discardPinnedConnection()
 
-        return exception.NewError("pgsql lock is no longer held", map[string]any{"name": instance.name}, nil)
+        return exception.NewError("pgsql lock is no longer held", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, nil)
     }
 
     return nil

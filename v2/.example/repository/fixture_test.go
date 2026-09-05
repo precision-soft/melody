@@ -95,10 +95,7 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
     return count
 }
 
-/*
-countingRows answers every count select with the given total and every other
-select with no rows, which is all the seeding and listing guards need.
-*/
+/* countingRows answers every count select with the given total and every other select with no rows, which is all the seeding and listing guards need. */
 func countingRows(total int64) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if true == strings.Contains(query, "count(*)") {

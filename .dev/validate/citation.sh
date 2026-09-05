@@ -86,12 +86,13 @@ cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 
 BASELINE_PATH_STRING=".dev/validate/citation.baseline"
 
-# the majors this run gates. v3 is measured and printed like the rest and is not gated, for the reason the
-# parity band gives for its own pair list: it is the line still under development, its documents are the
-# next stage's work, and a lane that is red for a known reason teaches a team to ignore the lane.
+# the majors this run gates. All three are gated: v3's documents were brought to the same bar during the
+# stabilization sweep, so a finding there is as actionable as one on the published majors, and the
+# baseline holds the declared collisions for each.
 GATED_MAJOR_STRING_LIST=(
     "v1"
     "v2"
+    "v3"
 )
 
 MAJOR_FILTER_STRING=""
@@ -130,9 +131,14 @@ trap 'rm -rf "${TEMPORARY_DIRECTORY_STRING}"' EXIT
 # every path the tree would carry into a commit: what git tracks, plus what it does not yet track and does
 # not ignore either. `git ls-files` alone answers with the index, and the index belongs to whoever is
 # committing, so a document a session ADDS would be invisible to every dimension below until someone staged
-# it — the shape of blindness the parity band was measured to have and had to be repaired for.
+# it — the shape of blindness the parity band was measured to have and had to be repaired for. The files
+# DELETED in the working tree are subtracted for the mirror-image reason: the index still lists them, and a
+# reader handed a path with no file behind it dies mid-band on the one state every deleting session passes
+# through before its commit.
 list_repository_path() {
-    git ls-files --cached --others --exclude-standard -- "$@" | sort -u
+    comm -23 \
+        <(git ls-files --cached --others --exclude-standard -- "$@" | sort -u) \
+        <(git ls-files --deleted -- "$@" | sort -u)
 }
 
 # ------------------------------------------------------------------------------------------------------

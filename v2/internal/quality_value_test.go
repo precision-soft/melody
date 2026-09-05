@@ -18,6 +18,8 @@ func TestParseQualityValue_EnforcesTheRfcGrammar(t *testing.T) {
         {"1.", 1},
         {"1.0", 1},
         {"1.000", 1},
+        {"1.0000", 1},
+        {"0.5000000", 0.5},
     } {
         parsedValue, valid := ParseQualityValue(validCase.value)
         if false == valid {
@@ -40,7 +42,7 @@ func TestParseQualityValue_EnforcesTheRfcGrammar(t *testing.T) {
 }
 
 func TestParseQualityValue_RefusesEachShapeOutsideTheGrammar(t *testing.T) {
-    for _, refused := range []string{"", "2", "-0.5", "1.5", "1.001", "0.1234", "1.0000", "0.5x", "0..5", "05", "1,0"} {
+    for _, refused := range []string{"", "2", "-0.5", "1.5", "1.001", "0.1234", "0.12345", "1.0001", "0.5x", "0..5", "05", "1,0"} {
         parsed, valid := ParseQualityValue(refused)
         if true == valid {
             t.Fatalf("expected %q to be refused by the qvalue grammar, got %v", refused, parsed)
@@ -52,8 +54,10 @@ func TestParseQualityValue_RefusesEachShapeOutsideTheGrammar(t *testing.T) {
         "1":     1,
         "0.5":   0.5,
         "0.001": 0.001,
-        "1.0":   1,
-        "1.000": 1,
+        "1.0":    1,
+        "1.000":  1,
+        "1.0000": 1,
+        "0.8000": 0.8,
     } {
         parsed, valid := ParseQualityValue(accepted)
         if false == valid {

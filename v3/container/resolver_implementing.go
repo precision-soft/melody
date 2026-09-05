@@ -19,9 +19,9 @@ type closedScopeChecker interface {
 
 /* AllImplementing resolves every registered service that satisfies the interface T: every type registration whose type implements it — one registered under the interface type itself included — and every instance of a type registered under several names, in an order that never changes between runs (descending WithCollectionPriority, then type and name). A component that has to act on all of a kind — dispatching to every message handler, scheduling every cron task — collects them here instead of being handed a list assembled by hand, which is the list that goes stale when a service is added.
 
-The services are resolved by their registered names through the resolver handed in, so a collection gathered on a request scope yields the scope's overrides. The service whose provider is doing the collecting is excluded instead of failing the collection: the composite dispatcher that is itself one of the handlers it dispatches to collects the others, the way a tagged iterator excludes its referencing service. Only that innermost service is excluded — a deeper service on the same resolution path stays in the collection and fails as the circular dependency it is, since excluding it would freeze a collection whose content depends on which service happened to boot first.
+   The services are resolved by their registered names through the resolver handed in, so a collection gathered on a request scope yields the scope's overrides. The service whose provider is doing the collecting is excluded instead of failing the collection: the composite dispatcher that is itself one of the handlers it dispatches to collects the others, the way a tagged iterator excludes its referencing service. Only that innermost service is excluded — a deeper service on the same resolution path stays in the collection and fails as the circular dependency it is, since excluding it would freeze a collection whose content depends on which service happened to boot first.
 
-It resolves the services it finds, so a provider that fails aborts the collection rather than yielding a partial set. Collect with the resolver the provider receives, never with the container itself: a container blocks on its own in-flight creation the way every container Get does, so handing it to a provider that is part of the collection waits on itself. A closed scope refuses the collection the way its Get refuses, rather than dispatching to a silently empty set. */
+   It resolves the services it finds, so a provider that fails aborts the collection rather than yielding a partial set. Collect with the resolver the provider receives, never with the container itself: a container blocks on its own in-flight creation the way every container Get does, so handing it to a provider that is part of the collection waits on itself. A closed scope refuses the collection the way its Get refuses, rather than dispatching to a silently empty set. */
 func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
     interfaceType := reflect.TypeOf((*T)(nil)).Elem()
 
@@ -59,7 +59,7 @@ func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
             map[string]any{
                 "interface": interfaceType.String(),
             },
-            nil,
+            ErrScopeClosed,
         )
     }
 

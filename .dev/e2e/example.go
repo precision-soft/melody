@@ -17,14 +17,12 @@ import (
     "time"
 )
 
-/* exampleMajorListVariable names the environment variable that selects which majors the per-major example
-sections exercise. Unset means every major — the project's default run is the full run. */
+/* exampleMajorListVariable names the environment variable that selects which majors the per-major example sections exercise. Unset means every major — the project's default run is the full run. */
 const exampleMajorListVariable = "MELODY_E2E_MAJORS"
 
 const exampleMajorListDefault = "1 2 3"
 
-/* the shared credentials the three example applications seed identically (repository/seed.go):
-"user" holds ROLE_USER only, which is what makes the admin route below answer 403 rather than 200. */
+/* the shared credentials the three example applications seed identically (repository/seed.go): "user" holds ROLE_USER only, which is what makes the admin route below answer 403 rather than 200. */
 const (
     exampleUsername       = "user"
     examplePassword       = "user"
@@ -33,31 +31,20 @@ const (
     exampleReadinessRoute = "/routes/"
 )
 
-/* exampleMajor names one major's .example application: where it lives in the tree and which port the harness
-serves its copy on. The ports are distinct so all three can run at once, and none of them is 8080 (the
-dev-supervised v3 example) or 18080 (stack.sh's signal-shutdown check). */
+/* exampleMajor names one major's .example application: where it lives in the tree and which port the harness serves its copy on. The ports are distinct so all three can run at once, and none of them is 8080 (the dev-supervised v3 example) or 18080 (stack.sh's signal-shutdown check). */
 type exampleMajor struct {
     number            int
     label             string
     relativeDirectory string
     port              int
-    /* integrationDemos is off for v3 on purpose. Its example drives the same rate-limit counter that
-       EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running
-       the demos here as well would spend a budget another section is counting. */
+    /* integrationDemos is off for v3 on purpose. Its example drives the same rate-limit counter that EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running the demos here as well would spend a budget another section is counting. */
     integrationDemos bool
-    /* showcaseProbes and sessionRestartProbe gate the wirings the two published examples carry — cors, gzip,
-       the api-key firewall, per-field validation errors, the trusted-proxy client address, the file-backed
-       session storage and the static cache validators. The three examples deliberately do not mirror each
-       other, so these are per-major capabilities like integrationDemos, not shared surface. */
+    /* showcaseProbes and sessionRestartProbe gate the wirings the two published examples carry — cors, gzip, the api-key firewall, per-field validation errors, the trusted-proxy client address, the file-backed session storage and the static cache validators. The three examples deliberately do not mirror each other, so these are per-major capabilities like integrationDemos, not shared surface. */
     showcaseProbes      bool
     sessionRestartProbe bool
-    /* loginThrottleProbe names the majors whose example puts the login submit behind the shared per-address
-       write budget. It is a per-major capability like the two above: v3's example declares the route public and
-       leaves it unthrottled, so asserting the refusal there would assert a wiring it does not carry. */
+    /* loginThrottleProbe names the majors whose example puts the login submit behind the shared per-address write budget. It is a per-major capability like the two above: v3's example declares the route public and leaves it unthrottled, so asserting the refusal there would assert a wiring it does not carry. */
     loginThrottleProbe bool
-    /* journalOnPostgres names where the major keeps its catalog journal: the v1 example runs two live
-       databases in one process — the catalogue on mysql, the journal on postgres — so its out-of-band
-       journal reads go through the postgres door while the later majors keep reading mysql. */
+    /* journalOnPostgres names where the major keeps its catalog journal: the v1 example runs two live databases in one process — the catalogue on mysql, the journal on postgres — so its out-of-band journal reads go through the postgres door while the later majors keep reading mysql. */
     journalOnPostgres bool
 }
 
@@ -67,14 +54,9 @@ var exampleMajorCatalog = []exampleMajor{
     {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false},
 }
 
-/* exampleMysqlDsn answers the dsn of one major's own database. The three examples share the development mysql
-but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads
-what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one
-the supervised sections use, and this swaps the database segment of it for the major being driven.
+/* exampleMysqlDsn answers the dsn of one major's own database. The three examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
 
-An empty dsn stays empty: it is how a caller says there is no database to reach, and the sections that receive
-it already announce their out-of-band half as skipped. A dsn with no database segment is answered unchanged
-rather than repaired — the caller configured it, and silently pointing it somewhere else would hide that. */
+   An empty dsn stays empty: it is how a caller says there is no database to reach, and the sections that receive it already announce their out-of-band half as skipped. A dsn with no database segment is answered unchanged rather than repaired — the caller configured it, and silently pointing it somewhere else would hide that. */
 func exampleMysqlDsn(major exampleMajor, mysqlDsn string) string {
     if "" == mysqlDsn {
         return ""
@@ -94,16 +76,12 @@ func exampleMysqlDsn(major exampleMajor, mysqlDsn string) string {
     return mysqlDsn[:separatorIndex+1] + exampleMysqlDatabase(major) + parameters
 }
 
-/* exampleMysqlDatabase names one major's database. The spelling is the one the .env of that example carries and
-the one .dev/docker/mysql/init.sql creates. */
+/* exampleMysqlDatabase names one major's database. The spelling is the one the .env of that example carries and the one .dev/docker/mysql/init.sql creates. */
 func exampleMysqlDatabase(major exampleMajor) string {
     return "melody_example_v" + strconv.Itoa(major.number)
 }
 
-/* exampleMajorList resolves the majors to exercise from MELODY_E2E_MAJORS, which accepts space or comma
-separated major numbers ("1 2 3", "1,3", "v2"). An UNSET variable means all three, so a default run drives every
-major; an empty value opts out of the per-major sections the same way clearing a backend variable opts out of
-the sections that backend gates. An unknown entry is a hard error rather than a silent narrowing of coverage. */
+/* exampleMajorList resolves the majors to exercise from MELODY_E2E_MAJORS, which accepts space or comma separated major numbers ("1 2 3", "1,3", "v2"). An UNSET variable means all three, so a default run drives every major; an empty value opts out of the per-major sections the same way clearing a backend variable opts out of the sections that backend gates. An unknown entry is a hard error rather than a silent narrowing of coverage. */
 func exampleMajorList() []exampleMajor {
     raw, isSet := os.LookupEnv(exampleMajorListVariable)
     if false == isSet {
@@ -143,8 +121,7 @@ func exampleMajorByNumber(number int) (exampleMajor, bool) {
     return exampleMajor{}, false
 }
 
-/* exampleRepositoryDirectory locates the repository root from the harness's own working directory (.dev/e2e),
-so the sections address the example applications by tree position instead of hardcoding the container path. */
+/* exampleRepositoryDirectory locates the repository root from the harness's own working directory (.dev/e2e), so the sections address the example applications by tree position instead of hardcoding the container path. */
 func exampleRepositoryDirectory() string {
     workingDirectory, workingDirectoryErr := os.Getwd()
     if nil != workingDirectoryErr {
@@ -178,8 +155,7 @@ The binary is built UNTAGGED on purpose: under melody_env_embedded the env files
 the example directory, so a .env.local written into the workspace afterwards would be ignored and the
 application would fight the supervised one for :8080. */
 func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDsn string, postgresDsn string) {
-    /* swapped here rather than at each reader: everything below this line is about ONE major, and the dsn the
-       caller passes names v3's database whatever major is being driven */
+    /* swapped here rather than at each reader: everything below this line is about ONE major, and the dsn the caller passes names v3's database whatever major is being driven */
     mysqlDsn = exampleMysqlDsn(major, mysqlDsn)
 
     workspace := filepath.Join(os.TempDir(), "melody-e2e-example-"+major.label)
@@ -213,12 +189,7 @@ func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDs
     stopApplicationOnFailure()
 }
 
-/* assertExampleSessionSurvivesRestart proves the file-backed session storage the v1 example configures through
-APP_SESSION_FILE: a fresh client signs in, the process is stopped through the same graceful-shutdown assertion
-the section ends with, a NEW process is started over the same workspace, and the same cookie jar must still
-admit the protected route — which can only hold if the session outlived the process on disk. The caller's
-failure-cleanup slot is swapped to the new process, and the new handle is returned so the closing shutdown
-assertion drives the process that is actually serving. */
+/* assertExampleSessionSurvivesRestart proves the file-backed session storage the v1 example configures through APP_SESSION_FILE: a fresh client signs in, the process is stopped through the same graceful-shutdown assertion the section ends with, a NEW process is started over the same workspace, and the same cookie jar must still admit the protected route — which can only hold if the session outlived the process on disk. The caller's failure-cleanup slot is swapped to the new process, and the new handle is returned so the closing shutdown assertion drives the process that is actually serving. */
 func assertExampleSessionSurvivesRestart(
     major exampleMajor,
     workspace string,
@@ -263,9 +234,7 @@ func assertExampleSessionSurvivesRestart(
     return restarted
 }
 
-/* prepareExampleWorkspace assembles the runnable copy: the built binary, the example's own .env, its public
-directory (the static surface the traversal probes need) and the .env.local that moves the http address off the
-port the dev container already serves. */
+/* prepareExampleWorkspace assembles the runnable copy: the built binary, the example's own .env, its public directory (the static surface the traversal probes need) and the .env.local that moves the http address off the port the dev container already serves. */
 func prepareExampleWorkspace(major exampleMajor, workspace string) {
     if removeErr := os.RemoveAll(workspace); nil != removeErr {
         fail("[%s] example application: clear the workspace %s: %v", major.label, workspace, removeErr)
@@ -295,10 +264,7 @@ func prepareExampleWorkspace(major exampleMajor, workspace string) {
         fail("[%s] example application: write the workspace .env: %v", major.label, writeErr)
     }
 
-    /* nothing a browser needs beyond the HTML is committed: the bundle is emitted from assets/app.ts and the
-       four icons are copied out of <root>/.assets, both into a git-ignored public/, by the one `npm run build`
-       the container entrypoint runs per major at startup. Their absence is caught HERE, where the cause can be
-       named, instead of downstream as bare 404s that read like a routing or static-surface fault. */
+    /* nothing a browser needs beyond the HTML is committed: the bundle is emitted from assets/app.ts and the four icons are copied out of <root>/.assets, both into a git-ignored public/, by the one `npm run build` the container entrypoint runs per major at startup. Their absence is caught HERE, where the cause can be named, instead of downstream as bare 404s that read like a routing or static-surface fault. */
     if _, statErr := os.Stat(filepath.Join(directory, "assets", "package.json")); nil == statErr {
         producedPathList := []string{
             filepath.Join("public", "assets", "app.js"),
@@ -325,8 +291,7 @@ func prepareExampleWorkspace(major exampleMajor, workspace string) {
     }
 }
 
-/* exampleBuildEnvironment keeps the module resolution the harness itself runs under (GOWORK=off plus go on the
-path), since every example resolves the framework through its own replace directives. */
+/* exampleBuildEnvironment keeps the module resolution the harness itself runs under (GOWORK=off plus go on the path), since every example resolves the framework through its own replace directives. */
 func exampleBuildEnvironment() []string {
     environment := []string{
         "PATH=" + os.Getenv("PATH"),
@@ -347,10 +312,7 @@ func exampleBuildEnvironment() []string {
     return environment
 }
 
-/* exampleRunEnvironment deliberately withholds the harness's backend variables from the application: melody
-resolves configuration from the .env files beside the executable, so the application under test runs configured
-exactly as it ships. Clearing REDIS_ADDRESS to skip the redis-backed sections therefore cannot reach in and
-reconfigure the example too. */
+/* exampleRunEnvironment deliberately withholds the harness's backend variables from the application: melody resolves configuration from the .env files beside the executable, so the application under test runs configured exactly as it ships. Clearing REDIS_ADDRESS to skip the redis-backed sections therefore cannot reach in and reconfigure the example too. */
 func exampleRunEnvironment() []string {
     return []string{
         "PATH=" + os.Getenv("PATH"),
@@ -358,8 +320,7 @@ func exampleRunEnvironment() []string {
     }
 }
 
-/* exampleApplication is a started example process together with the channel its exit status arrives on; Wait is
-called exactly once, in the goroutine, so both the readiness loop and the shutdown assertion can observe it. */
+/* exampleApplication is a started example process together with the channel its exit status arrives on; Wait is called exactly once, in the goroutine, so both the readiness loop and the shutdown assertion can observe it. */
 type exampleApplication struct {
     major    exampleMajor
     command  *exec.Cmd
@@ -375,8 +336,7 @@ func (instance *exampleApplication) kill() {
     _ = instance.command.Process.Kill()
 }
 
-/* logTail returns the last lines the application wrote, for the diagnostics that must say WHY the section could
-not run rather than blaming the property under test. */
+/* logTail returns the last lines the application wrote, for the diagnostics that must say WHY the section could not run rather than blaming the property under test. */
 func (instance *exampleApplication) logTail(lines int) string {
     content, readErr := os.ReadFile(instance.logPath)
     if nil != readErr {
@@ -391,8 +351,7 @@ func (instance *exampleApplication) logTail(lines int) string {
     return strings.Join(all, "\n")
 }
 
-/* requireFreeExamplePort refuses to start on an occupied port: a leftover application from an interrupted run
-would answer every probe below and the section would pass without ever exercising the freshly built binary. */
+/* requireFreeExamplePort refuses to start on an occupied port: a leftover application from an interrupted run would answer every probe below and the section would pass without ever exercising the freshly built binary. */
 func requireFreeExamplePort(major exampleMajor) {
     connection, dialErr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", major.port), time.Second)
     if nil != dialErr {
@@ -443,8 +402,7 @@ func startExampleApplication(major exampleMajor, workspace string) *exampleAppli
     return application
 }
 
-/* waitForExampleReadiness polls the public route until it answers, and gives up the moment the process exits —
-an application that died at boot must produce a boot diagnostic, not a readiness timeout. */
+/* waitForExampleReadiness polls the public route until it answers, and gives up the moment the process exits — an application that died at boot must produce a boot diagnostic, not a readiness timeout. */
 func waitForExampleReadiness(major exampleMajor, application *exampleApplication) {
     client := &http.Client{Timeout: 2 * time.Second}
     deadline := time.Now().Add(60 * time.Second)
@@ -482,9 +440,7 @@ func waitForExampleReadiness(major exampleMajor, application *exampleApplication
     )
 }
 
-/* exampleClient drives one running example over HTTP. Redirects are never followed (the entry point's 302 and
-the logout redirect are the assertions themselves) and the cookie jar is what makes the login flow real: the
-session id travels back on the following requests exactly as a browser would send it. */
+/* exampleClient drives one running example over HTTP. Redirects are never followed (the entry point's 302 and the logout redirect are the assertions themselves) and the cookie jar is what makes the login flow real: the session id travels back on the following requests exactly as a browser would send it. */
 type exampleClient struct {
     major  exampleMajor
     client *http.Client
@@ -518,16 +474,12 @@ type exampleResponse struct {
     headerList http.Header
 }
 
-/* call issues one request against the running example. The path is joined to the base url as a raw string so an
-encoded traversal attempt ("%2e%2e") reaches the application still encoded instead of being folded away by the
-client. */
+/* call issues one request against the running example. The path is joined to the base url as a raw string so an encoded traversal attempt ("%2e%2e") reaches the application still encoded instead of being folded away by the client. */
 func (instance *exampleClient) call(method string, path string, accept string, contentType string, body string) exampleResponse {
     return instance.callWithHeaderList(method, path, accept, contentType, nil, body)
 }
 
-/* callWithHeaderList is call with arbitrary request headers on top, which is what the cors, gzip, api-key and
-forwarded-address probes speak through: an explicit Accept-Encoding also switches off the Go transport's
-transparent gunzip, so the wire bytes arrive as the server sent them. */
+/* callWithHeaderList is call with arbitrary request headers on top, which is what the cors, gzip, api-key and forwarded-address probes speak through: an explicit Accept-Encoding also switches off the Go transport's transparent gunzip, so the wire bytes arrive as the server sent them. */
 func (instance *exampleClient) callWithHeaderList(method string, path string, accept string, contentType string, headerList map[string]string, body string) exampleResponse {
     var reader io.Reader
     if "" != body {
@@ -614,18 +566,10 @@ const (
     exampleFrontendBundle     = "/assets/app.js"
 )
 
-/* the login-throttle probe stops here rather than looping forever: the examples allow 30 writes a minute, so
-a ceiling comfortably past it turns "the throttle is missing" into a failure with a number in it instead of a
-run that never ends. */
+/* the login-throttle probe stops here rather than looping forever: the examples allow 30 writes a minute, so a ceiling comfortably past it turns "the throttle is missing" into a failure with a number in it instead of a run that never ends. */
 const exampleLoginThrottleAttemptCeiling = 60
 
-/* the icons every page links in its head. They exist in exactly ONE place in the tree — <root>/.assets — and
-are git-ignored under every example, so nothing here is a second copy that could go stale. What puts them in
-public/ is assets/sync-icons.mjs, run as the prebuild step of `npm run build` and by the container entrypoint
-for each major, which is the same single command that produces the bundle. Asserting them is what defends that
-wiring: they used to be produced only by a hand-written copy loop inside the entrypoint, so a build from a
-clean clone answered 404 for all four while the packaging matrix promised a binary requiring "nothing else" at
-runtime. */
+/* the icons every page links in its head. They exist in exactly ONE place in the tree — <root>/.assets — and are git-ignored under every example, so nothing here is a second copy that could go stale. What puts them in public/ is assets/sync-icons.mjs, run as the prebuild step of `npm run build` and by the container entrypoint for each major, which is the same single command that produces the bundle. Asserting them is what defends that wiring: they used to be produced only by a hand-written copy loop inside the entrypoint, so a build from a clean clone answered 404 for all four while the packaging matrix promised a binary requiring "nothing else" at runtime. */
 var exampleSyncedIconList = []string{
     "/favicon.ico",
     "/assets/favicon.svg",
@@ -647,14 +591,12 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
 
     assertExampleStaticTraversal(major, client)
 
-    /* the showcase probes run BEFORE the integration demos on purpose: the throttled writes they spend are
-       reset by the rate-limit subsection in there, which clears the counters before its exact count */
+    /* the showcase probes run BEFORE the integration demos on purpose: the throttled writes they spend are reset by the rate-limit subsection in there, which clears the counters before its exact count */
     if true == major.showcaseProbes {
         runExampleShowcaseAssertions(major, application, redisAddress)
     }
 
-    /* the demo routes sit under the example's ROLE_USER catch-all, so they are driven here — between the
-       login and the logout — with the session the login flow established */
+    /* the demo routes sit under the example's ROLE_USER catch-all, so they are driven here — between the login and the logout — with the session the login flow established */
     if true == major.integrationDemos {
         runExampleIntegrationAssertions(major, client, application, redisAddress, mysqlDsn, postgresDsn)
     }
@@ -667,15 +609,13 @@ func assertExamplePublicRoutes(major exampleMajor, client *exampleClient) {
     if http.StatusOK != listing.statusCode {
         fail("[%s] %s answered %d, wanted 200 from the public route listing", major.label, exampleRoutesRoute, listing.statusCode)
     }
-    /* a 200 alone would also come from an error page, so the assertion is that the route table itself is in the
-       body — the application booted its routes, it did not merely open a socket */
+    /* a 200 alone would also come from an error page, so the assertion is that the route table itself is in the body — the application booted its routes, it did not merely open a socket */
     if false == strings.Contains(listing.body, "example.login.submit") {
         fail("[%s] %s answered 200 without the route table in it: %s", major.label, exampleRoutesRoute, exampleTruncate(listing.body))
     }
     pass("[%s] the public route listing served the booted route table", major.label)
 
-    /* the url generator emits patterns WITHOUT the trailing slash, so the form it hands to a client has to
-       resolve as well as the declared one */
+    /* the url generator emits patterns WITHOUT the trailing slash, so the form it hands to a client has to resolve as well as the declared one */
     withoutSlash := client.call("GET", exampleRoutesRouteNoSlash, "", "", "")
     if http.StatusOK != withoutSlash.statusCode {
         fail(
@@ -688,18 +628,14 @@ func assertExamplePublicRoutes(major exampleMajor, client *exampleClient) {
     }
     pass("[%s] both %s and the generator's %s resolve to the same route", major.label, exampleRoutesRoute, exampleRoutesRouteNoSlash)
 
-    /* the 404 is probed under a PUBLIC prefix on purpose: anywhere else the ROLE_USER catch-all answers first
-       and the not-found handler is never reached */
+    /* the 404 is probed under a PUBLIC prefix on purpose: anywhere else the ROLE_USER catch-all answers first and the not-found handler is never reached */
     missing := client.call("GET", exampleMissingRoute, "", "", "")
     if http.StatusNotFound != missing.statusCode {
         fail("[%s] %s answered %d, wanted 404 from the not-found handler", major.label, exampleMissingRoute, missing.statusCode)
     }
     pass("[%s] an unrouted path under a public prefix answered 404", major.label)
 
-    /* the monitoring probe is asked the way a monitoring system asks: anonymously, and without claiming to be a
-       browser. Both spellings of the answer it used to get are failures here — the 302 an html-accepting client
-       received through the entry point, and the 401 everything else received — and the body is read because a
-       200 alone is also what an error page carries. */
+    /* the monitoring probe is asked the way a monitoring system asks: anonymously, and without claiming to be a browser. Both spellings of the answer it used to get are failures here — the 302 an html-accepting client received through the entry point, and the 401 everything else received — and the body is read because a 200 alone is also what an error page carries. */
     health := client.call("GET", exampleHealthRoute, "", "", "")
     if http.StatusOK != health.statusCode {
         fail(
@@ -714,9 +650,7 @@ func assertExamplePublicRoutes(major exampleMajor, client *exampleClient) {
     }
     pass("[%s] the monitoring probe answered %s anonymously", major.label, exampleHealthRoute)
 
-    /* the index file and the root are one resource under two spellings, so they must carry one policy. The root
-       rule is anchored at "^/$", which is why the explicit spelling needs its own rule and used to be answered
-       by the ROLE_USER catch-all while "/" was public. */
+    /* the index file and the root are one resource under two spellings, so they must carry one policy. The root rule is anchored at "^/$", which is why the explicit spelling needs its own rule and used to be answered by the ROLE_USER catch-all while "/" was public. */
     indexFile := client.call("GET", exampleIndexFileRoute, "", "", "")
     if http.StatusOK != indexFile.statusCode {
         fail(
@@ -791,8 +725,7 @@ func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
     }
     pass("[%s] the session loaded from the cookie admitted the protected route", major.label)
 
-    /* the seeded account holds ROLE_USER only, so the admin route must answer 403 and not 401: a 401 here would
-       mean the session was not loaded at all and the run would be proving nothing about authorization */
+    /* the seeded account holds ROLE_USER only, so the admin route must answer 403 and not 401: a 401 here would mean the session was not loaded at all and the run would be proving nothing about authorization */
     forbidden := client.call("GET", exampleAdminRoute, "", "", "")
     if http.StatusForbidden != forbidden.statusCode {
         fail(
@@ -805,18 +738,11 @@ func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
     pass("[%s] the admin route answered 403 to the authenticated non-admin session", major.label)
 }
 
-/* assertExampleBrowserAssets asserts the two halves of what a browser needs before any of the example's pages
-does anything at all, and it asserts them on CONTENT rather than on the status code: a static surface answers 200
-for a file that is present and empty just as readily as for one that is whole.
+/* assertExampleBrowserAssets asserts the two halves of what a browser needs before any of the example's pages does anything at all, and it asserts them on CONTENT rather than on the status code: a static surface answers 200 for a file that is present and empty just as readily as for one that is whole.
 
-Neither half is committed: both are produced by `npm run build` in the example's assets/ directory — the icons
-copied out of the single source by sync-icons.mjs, the bundle emitted from app.ts by esbuild — which the
-container entrypoint runs for each major at startup.
+   Neither half is committed: both are produced by `npm run build` in the example's assets/ directory — the icons copied out of the single source by sync-icons.mjs, the bundle emitted from app.ts by esbuild — which the container entrypoint runs for each major at startup.
 
-What the bundle half defends is the state it came out of: every page loaded /assets/app.js and drove every
-interaction through window.melodyExample.*, while no assets/ directory existed in v1 or v2 at all, so the file
-could not be produced by anything and the whole browser interface was dead behind five pages that rendered
-perfectly. A 404 here means that source, or the step that runs it, is gone again. */
+   What the bundle half defends is the state it came out of: every page loaded /assets/app.js and drove every interaction through window.melodyExample.*, while no assets/ directory existed in v1 or v2 at all, so the file could not be produced by anything and the whole browser interface was dead behind five pages that rendered perfectly. A 404 here means that source, or the step that runs it, is gone again. */
 func assertExampleBrowserAssets(major exampleMajor, client *exampleClient) {
     for _, iconPath := range exampleSyncedIconList {
         icon := client.call("GET", iconPath, "", "", "")
@@ -835,9 +761,7 @@ func assertExampleBrowserAssets(major exampleMajor, client *exampleClient) {
         fail("[%s] %s answered %d, wanted 200 — the browser interface is dead without it; the bundle is built from assets/app.ts by `npm run build`", major.label, exampleFrontendBundle, bundle.statusCode)
     }
 
-    /* the bundle's whole contract with the pages is the object it installs on window: the pages call
-       window.melodyExample.http/ui/routing on every interaction, and a bundle that loads without installing it
-       leaves every one of them throwing on an undefined read */
+    /* the bundle's whole contract with the pages is the object it installs on window: the pages call window.melodyExample.http/ui/routing on every interaction, and a bundle that loads without installing it leaves every one of them throwing on an undefined read */
     for _, expected := range []string{"melodyExample", "melodyRoutes"} {
         if false == strings.Contains(bundle.body, expected) {
             fail("[%s] %s answered 200 but carries no %q — it is not the example's bundle", major.label, exampleFrontendBundle, expected)
@@ -845,9 +769,7 @@ func assertExampleBrowserAssets(major exampleMajor, client *exampleClient) {
     }
     pass("[%s] the frontend bundle is served and installs window.melodyExample (%d bytes)", major.label, len(bundle.body))
 
-    /* the manifest the bundle generates URLs from is spliced into every page. The RouteGenerator reads it as an
-       OBJECT under a "routes" key; a bare array — the shape v1 and v2 used to emit — decodes into a value whose
-       .routes is undefined, so the generator is built empty and throws on the first route name it is asked for. */
+    /* the manifest the bundle generates URLs from is spliced into every page. The RouteGenerator reads it as an OBJECT under a "routes" key; a bare array — the shape v1 and v2 used to emit — decodes into a value whose .routes is undefined, so the generator is built empty and throws on the first route name it is asked for. */
     loginPage := client.call("GET", exampleLoginRoute, "", "", "")
     if http.StatusOK != loginPage.statusCode {
         fail("[%s] %s answered %d, wanted 200", major.label, exampleLoginRoute, loginPage.statusCode)
@@ -863,23 +785,13 @@ func assertExampleBrowserAssets(major exampleMajor, client *exampleClient) {
 
 /* assertExampleLoginIsThrottled proves the credential door sits behind the shared per-address write budget.
 
-The signal has to distinguish the throttle from every other refusal: an unthrottled login answers 401 to a
-wrong password however many times it is asked, so the assertion is that the answer CHANGES — 401 up to the
-allowance and 429 past it. A run that only checked "some request was refused" would pass with the throttle
-removed, because the wrong password refuses on its own.
+   The signal has to distinguish the throttle from every other refusal: an unthrottled login answers 401 to a wrong password however many times it is asked, so the assertion is that the answer CHANGES — 401 up to the allowance and 429 past it. A run that only checked "some request was refused" would pass with the throttle removed, because the wrong password refuses on its own.
 
-The budget is reset on the way in AND on the way out. On the way in because the login flow above already
-spent two writes against it and the exact exhaustion point is what the allowance means; on the way out
-because this is the only probe in the harness whose whole purpose is to leave the budget empty, and every
-section after it signs somebody in — the showcase probes and the session-restart probe do it through the same
-throttled door, so an exhausted budget left behind fails them with a 429 that says nothing about what they
-assert.
+   The budget is reset on the way in AND on the way out. On the way in because the login flow above already spent two writes against it and the exact exhaustion point is what the allowance means; on the way out because this is the only probe in the harness whose whole purpose is to leave the budget empty, and every section after it signs somebody in — the showcase probes and the session-restart probe do it through the same throttled door, so an exhausted budget left behind fails them with a 429 that says nothing about what they assert.
 
-The password is deliberately wrong: a correct one would rotate the session under the client's jar on every
-accepted attempt and leave the flow below signed in as somebody else's request.
+   The password is deliberately wrong: a correct one would rotate the session under the client's jar on every accepted attempt and leave the flow below signed in as somebody else's request.
 
-The allowance is read from the answer rather than hardcoded here: the two examples configure their own, and a
-harness constant would silently stop measuring the exhaustion point if either changed it. */
+   The allowance is read from the answer rather than hardcoded here: the two examples configure their own, and a harness constant would silently stop measuring the exhaustion point if either changed it. */
 func assertExampleLoginIsThrottled(major exampleMajor, client *exampleClient, redisAddress string) {
     if "" == redisAddress {
         skip("[%s] REDIS_ADDRESS is cleared, so the login throttle has no limiter behind it and was not asserted", major.label)
@@ -952,9 +864,7 @@ func exampleOrdinalSuffix(number int) string {
     return "th"
 }
 
-/* assertExampleStaticTraversal probes the static surface with percent-encoded dot segments, which a client will
-not fold away. The served asset is asserted FIRST: without it a disabled static surface would answer every
-traversal probe with a 404 and the section would report a containment it never tested. */
+/* assertExampleStaticTraversal probes the static surface with percent-encoded dot segments, which a client will not fold away. The served asset is asserted FIRST: without it a disabled static surface would answer every traversal probe with a 404 and the section would report a containment it never tested. */
 func assertExampleStaticTraversal(major exampleMajor, client *exampleClient) {
     asset := client.call("GET", exampleStaticAsset, "", "", "")
     if http.StatusOK != asset.statusCode {
@@ -996,8 +906,7 @@ func assertExampleLogout(major exampleMajor, client *exampleClient) {
     }
     pass("[%s] logout redirected to /", major.label)
 
-    /* the jar still holds the cookie, which is the point: the session it names must no longer authenticate
-       anything, so the protected route has to answer 401 again */
+    /* the jar still holds the cookie, which is the point: the session it names must no longer authenticate anything, so the protected route has to answer 401 again */
     after := client.call("GET", exampleUserRoute, "", "", "")
     if http.StatusUnauthorized != after.statusCode {
         fail(
@@ -1054,15 +963,10 @@ func exampleTruncate(body string) string {
     return body
 }
 
-/* exampleAnsiPattern strips the cursor and colour sequences the command output frames its sections with, so the
-assertions match on the text a reader sees rather than on the escapes around it. */
+/* exampleAnsiPattern strips the cursor and colour sequences the command output frames its sections with, so the assertions match on the text a reader sees rather than on the escapes around it. */
 var exampleAnsiPattern = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]")
 
-/* runExampleCliAssertions exercises the command-line half of the same application. product:list declares no
-flags in the v2 example and only its own --limit in v3, so the standard set is legitimately unknown there; the
-flag layer is exercised through the framework's own debug:router instead, which declares the standard
---format/--limit set in every major. The v1 example commands carry the standard flag set themselves, and their
-process-side envelope is asserted by the V1 sections of stack.sh. */
+/* runExampleCliAssertions exercises the command-line half of the same application. product:list declares no flags in the v2 example and only its own --limit in v3, so the standard set is legitimately unknown there; the flag layer is exercised through the framework's own debug:router instead, which declares the standard --format/--limit set in every major. The v1 example commands carry the standard flag set themselves, and their process-side envelope is asserted by the V1 sections of stack.sh. */
 func runExampleCliAssertions(major exampleMajor, workspace string) {
     information := runExampleCommand(major, workspace, "app:info")
 
@@ -1112,8 +1016,7 @@ func runExampleCliAssertions(major exampleMajor, workspace string) {
     if 2 != len(envelope.Data.Items) {
         fail("[%s] debug:router --limit=2 emitted %d items, wanted 2", major.label, len(envelope.Data.Items))
     }
-    /* a total that is not larger than the limit would make the truncation vacuous: the flag has to have cut
-       something away for this to prove it was honoured */
+    /* a total that is not larger than the limit would make the truncation vacuous: the flag has to have cut something away for this to prove it was honoured */
     if 2 >= envelope.Data.Total {
         fail("[%s] debug:router reported total=%d, so --limit=2 truncated nothing", major.label, envelope.Data.Total)
     }
@@ -1135,12 +1038,7 @@ func runExampleCommand(major exampleMajor, workspace string, arguments ...string
     return plain
 }
 
-/* exampleJsonDocument isolates the command's json envelope from the boot log lines printed before it: the
-configuration is logged to stdout before the file logger exists, and those lines are json objects of their own.
-Under --format=json the envelope is one line like every log line above it, so what tells them apart is the meta
-key no log record carries; the last such line is the document, since the command writes it after its own boot.
-The brace fallback below reads a --format=json-pretty document, whose opening brace is the only line that is
-exactly "{". */
+/* exampleJsonDocument isolates the command's json envelope from the boot log lines printed before it: the configuration is logged to stdout before the file logger exists, and those lines are json objects of their own. Under --format=json the envelope is one line like every log line above it, so what tells them apart is the meta key no log record carries; the last such line is the document, since the command writes it after its own boot. The brace fallback below reads a --format=json-pretty document, whose opening brace is the only line that is exactly "{". */
 func exampleJsonDocument(output string) string {
     lines := strings.Split(output, "\n")
 
@@ -1201,9 +1099,7 @@ func exampleTail(output string, lines int) string {
     return strings.Join(all, "\n")
 }
 
-/* assertExampleGracefulShutdown proves the first signal is enough. The liveness probe is taken immediately
-before the signal because an exit-zero from an application that had already left on its own would satisfy the
-status assertion while proving nothing about the graceful path. */
+/* assertExampleGracefulShutdown proves the first signal is enough. The liveness probe is taken immediately before the signal because an exit-zero from an application that had already left on its own would satisfy the status assertion while proving nothing about the graceful path. */
 func assertExampleGracefulShutdown(major exampleMajor, application *exampleApplication) {
     client := &http.Client{Timeout: 2 * time.Second}
 

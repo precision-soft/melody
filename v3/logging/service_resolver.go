@@ -5,6 +5,7 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/internal"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -18,20 +19,30 @@ func LoggerMustFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontr
     return runtime.MustFromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
 }
 
+/* LoggerFromRuntime resolves the logger and answers nil when it cannot, with the failure recorded through the emergency logger, because the caller's nil check silently skips its own record next. The typed-nil branch is latent defense: the container refuses a provider-returned typed nil with an error today, so the branch is reachable only through a resolution path that does not — but a typed nil that did slip through would pass the plain comparison and panic on the first method call, inside the listener reporting somebody else's failure. */
 func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
     loggerInstance, err := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
-    if nil == loggerInstance || nil != err {
-        if nil != err {
-            EmergencyLogger().Emergency(
-                "could not get the logger from runtime",
-                exception.LogContext(
-                    err,
-                    exceptioncontract.Context{
-                        "service": ServiceLogger,
-                    },
-                ),
-            )
-        }
+    if nil != err {
+        EmergencyLogger().Emergency(
+            "could not get the logger from runtime",
+            exception.LogContext(
+                err,
+                exceptioncontract.Context{
+                    "service": ServiceLogger,
+                },
+            ),
+        )
+
+        return nil
+    }
+
+    if nil == loggerInstance || true == internal.IsNilInterface(loggerInstance) {
+        EmergencyLogger().Emergency(
+            "the logger resolved from runtime is nil",
+            exceptioncontract.Context{
+                "service": ServiceLogger,
+            },
+        )
 
         return nil
     }

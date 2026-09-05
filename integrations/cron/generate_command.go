@@ -248,6 +248,7 @@ func (instance *GenerateCommand) resolveRunOptions(
         }
         logsDir = absoluteLogsDir
 
+        /* the logs directory is created while the options are still being resolved, before anything is rendered or written, and deliberately so: it is where the generated lines redirect every job's output, and under system cron a shell whose redirection cannot create its file aborts the whole command, so the directory has to exist by the time the manifest runs whatever became of this generation. Creating it is idempotent and leaves nothing a failed run would need to undo, which is why a run that fails later still leaves it behind. */
         if mkdirErr := os.MkdirAll(logsDir, 0o755); nil != mkdirErr {
             return nil, exception.NewError(
                 "cron: could not create the logs directory",
@@ -258,7 +259,8 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.logsDir = logsDir
 
-    options.binary = resolveDefault(commandContext, configuration, flagNameBinary, ParameterBinary)
+    /* the binary is a path like its three siblings, and its parameter is anchored the way theirs are: a relative melody.cron.binary meant "under the project" and was baked into the manifest relative to wherever the generator happened to run from, while a relative --binary keeps the shell's own convention */
+    options.binary = resolveDefaultPath(commandContext, configuration, flagNameBinary, ParameterBinary)
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
     heartbeatPath := resolveDefaultPath(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
@@ -441,9 +443,9 @@ func (instance *GenerateCommand) writeDestinations(
 
 /* pruneStaleDestinations empties the destinations this generator wrote earlier and this run no longer produces. Without it a version that retires an entry leaves its file untouched and crond keeps running the retired job forever, and a version that MOVES an entry to another destination leaves it live in both — the double execution the runner refuses at construction, produced silently by the generator.
 
-Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose first bytes carry the ownership marker of the template generating now, so a file this generator cannot prove it wrote is left exactly as it is.
+   Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose first bytes carry the ownership marker of the template generating now, so a file this generator cannot prove it wrote is left exactly as it is.
 
-Emptying means rendering the template with no entries: the destination keeps its header and with it the marker, so it stays recognizable to the next run rather than becoming an unowned file the sweep would refuse to touch ever again. */
+   Emptying means rendering the template with no entries: the destination keeps its header and with it the marker, so it stays recognizable to the next run rather than becoming an unowned file the sweep would refuse to touch ever again. */
 func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]string, error) {
     if false == options.prune {
         return nil, nil
@@ -519,6 +521,10 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
 /* ownershipMarkerReadLimit bounds what is read to decide ownership: the marker rides in the header block every rendered destination opens with, and a file large enough to push it past this is not one this generator wrote. */
 const ownershipMarkerReadLimit = 8 * 1024
 
+/* ownershipMarkerLineLimit bounds WHERE in that head the marker may stand: every builtin template renders it inside the leading comment block, within the first few lines. The old check was a substring search over the whole 8KiB head, and emptying is irreversible — an operator's README or commented backup that merely QUOTED the marker anywhere in its opening kilobytes was emptied as if this generator had written it. */
+const ownershipMarkerLineLimit = 10
+
+/* fileCarriesOwnershipMarker recognises ownership by an EXACT marker line among the file's leading lines. Exactness is what keeps two markers apart when one extends the other: a custom dialect that declares its own marker by suffixing the builtin one documents its files as its own, and a substring match read the builtin marker inside the longer line and emptied the custom dialect's files from a builtin run. The builtin dialects share one identical marker line, so the deliberate cross-dialect reconciliation between them is untouched. */
 func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
     fileInstance, openErr := os.Open(path)
     if nil != openErr {
@@ -541,12 +547,23 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
         )
     }
 
-    return strings.Contains(string(head[:read]), marker), nil
+    lines := strings.SplitN(string(head[:read]), "\n", ownershipMarkerLineLimit+1)
+    if ownershipMarkerLineLimit < len(lines) {
+        lines = lines[:ownershipMarkerLineLimit]
+    }
+
+    for _, line := range lines {
+        if marker == strings.TrimSpace(line) {
+            return true, nil
+        }
+    }
+
+    return false, nil
 }
 
 /* reportWrites is the generator's one report door, reached from the run's defer on every path: the written summary as text lines, or as the single machine-readable document under --format=json — the failure inside it, beside whatever the run had already written before it stopped. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it.
 
-The run's own failure stays the verdict the command returns; a rendering failure becomes one only when the run itself succeeded, which is the rule the sibling integration's exit door states in the same words. In text mode the failure travels alone, as it always has: the cli entry point prints it. */
+   The run's own failure stays the verdict the command returns; a rendering failure becomes one only when the run itself succeeded, which is the rule the sibling integration's exit door states in the same words. In text mode the failure travels alone, as it always has: the cli entry point prints it. */
 func (instance *GenerateCommand) reportWrites(
     commandContext *clicontract.CommandContext,
     option output.Option,
@@ -632,6 +649,7 @@ func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned 
     }
 }
 
+/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
     if nil != createErr {
@@ -816,6 +834,7 @@ func resolveEntryDestination(entryDestination string, defaultDestination string,
     return joined, nil
 }
 
+/* isWithinDir answers on the cleaned NAMES, deliberately: the guard exists for a DestinationFile whose spelling walks out of dir(--out) with "..", the mistake a configuration can make on paper. A symbolic link inside the directory that points elsewhere is not that mistake — it is the operator's layout, placed there on purpose, and following it here would refuse a destination the operator arranged exactly as an absolute path is allowed to. */
 func isWithinDir(candidate string, parent string) bool {
     if candidate == parent {
         return true
@@ -1132,7 +1151,8 @@ func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(runErr, &provider) && nil != provider {
+    /* the As target is read through the typed-nil door its runner sibling reads through: a typed-nil link in the chain satisfies As and passes a plain nil comparison, and Context() on the nil receiver panics inside the very report that was rendering the failure */
+    if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
         }

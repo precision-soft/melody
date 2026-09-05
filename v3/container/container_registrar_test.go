@@ -4,6 +4,7 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func TestContainer_RegisterAndGetService(t *testing.T) {
@@ -47,16 +48,31 @@ func TestContainer_Register_ReturnsErrorOnInvalidArguments(t *testing.T) {
 func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
     serviceContainer := NewContainer()
 
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    serviceContainer.MustRegister(
-        "",
-        func(resolver containercontract.Resolver) (*testService, error) {
-            return &testService{}, nil
+    /* an unqualified recover accepts any panic at all, including one thrown by a guard three lines away; the message is what names the refusal under test */
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            serviceContainer.MustRegister(
+                "",
+                func(resolver containercontract.Resolver) (*testService, error) {
+                    return &testService{}, nil
+                },
+            )
         },
+        "service name is required to register a service",
     )
+}
+
+/* the refusal is SHADOWED: the contract gate underneath answers an untyped nil with the identical message and the identical context, so this test pins the verdict rather than the position of the guard. The scoped sibling below is not shadowed — that one spells "scoped service" — which is why the two are asserted separately. */
+func TestContainerRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register("app.nil.provider", nil)
+    if nil == registerErr {
+        t.Fatalf("expected an untyped nil provider to be refused")
+    }
+
+    if "the provider is required to register a service" != registerErr.Error() {
+        t.Fatalf("unexpected refusal message: %q", registerErr.Error())
+    }
 }

@@ -2,12 +2,14 @@ package security
 
 import (
     "fmt"
+    nethttp "net/http"
     "runtime/debug"
 
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -29,7 +31,9 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            if nil == requestEvent || nil == requestEvent.Request() {
+            /* IsNilInterface on the request and not `nil ==`: a nil pointer of a request type is a non-nil
+            interface a bare check reads as a live request, and the firewall walk below dereferences it. */
+            if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 
@@ -56,7 +60,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                         return dispatchErr
                     }
 
-                    requestEvent.SetResponse(exceptionEvent.Response())
+                    requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                     return nil
                 }
             }
@@ -66,12 +70,38 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
             if nil != resolveErr {
                 setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 
+                /* normalized before the record is written so the logged mark has a link to live on: a token source is free to return a plain error, and a mark that does not stick would have the kernel exception listener file the same failure a second time */
+                resolveErr = exception.FromError(resolveErr)
+
                 logger := logging.LoggerFromRuntime(runtimeInstance)
                 if nil != logger {
-                    logger.Error(
-                        "security token source resolution failed",
-                        exception.LogContext(resolveErr),
+                    method := ""
+                    path := ""
+                    if nil != requestEvent.Request().HttpRequest() {
+                        method = requestEvent.Request().HttpRequest().Method
+                        if nil != requestEvent.Request().HttpRequest().URL {
+                            path = requestEvent.Request().HttpRequest().URL.Path
+                        }
+                    }
+
+                    /* a token the client got wrong — an expired jwt, a malformed Authorization, a bad signature — surfaces as a sub-500 HttpException, and that is a refusal recorded at warning, the classification its api-key sibling already earns by travelling to the exception listener. Depositing it at error, and then marking it so the listener adds nothing, made every client with an expired token page whoever reads the error stream. A token backend that is genuinely down, or any error that is not a deliberate 4xx, keeps the error level. The switch is on the named methods rather than Log, so a capture logger that overrides only one level is not stepped past. */
+                    resolutionMessage := "security token source resolution failed"
+                    resolutionContext := exception.LogContext(
+                        resolveErr,
+                        exceptioncontract.Context{
+                            "method": method,
+                            "path":   path,
+                        },
                     )
+
+                    httpException := exception.AsHttpException(resolveErr)
+                    if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+                        logger.Warning(resolutionMessage, resolutionContext)
+                    } else {
+                        logger.Error(resolutionMessage, resolutionContext)
+                    }
+
+                    _ = exception.MarkLogged(resolveErr)
                 }
 
                 exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), resolveErr)
@@ -81,11 +111,12 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                     return dispatchErr
                 }
 
-                requestEvent.SetResponse(exceptionEvent.Response())
+                requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                 return nil
             }
 
-            if nil == token {
+            /* the token source is the application's, so the same reading the recovery above already applies to the source applies to what it hands back: a typed nil is the nil it means, and taking it for a live token publishes it into the security context every voter then reads */
+            if true == internal.IsNilInterface(token) {
                 token = NewAnonymousToken()
             }
 
@@ -112,6 +143,8 @@ func resolveTokenSourceSafely(
     runtimeInstance runtimecontract.Runtime,
     requestEvent *http.KernelRequestEvent,
 ) (token securitycontract.Token, resolveErr error) {
+    tokenSource := firewall.TokenSource()
+
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -123,11 +156,17 @@ func resolveTokenSourceSafely(
             recoveredErr = err
         }
 
+        /* the recovered value may itself be a nil token source panicking on Resolve: read its name only when it is present, or the deferred function panics a second time after recover and the original diagnostic escapes unrecovered */
+        tokenSourceName := ""
+        if false == internal.IsNilInterface(tokenSource) {
+            tokenSourceName = tokenSource.Name()
+        }
+
         resolveErr = exception.NewError(
             "security token source panicked during resolution",
             exceptioncontract.Context{
                 "firewallName":    firewall.Name(),
-                "tokenSourceName": firewall.TokenSource().Name(),
+                "tokenSourceName": tokenSourceName,
                 "panicType":       fmt.Sprintf("%T", recoveredValue),
                 "panicValue":      fmt.Sprintf("%v", recoveredValue),
                 "panicStack":      string(debug.Stack()),
@@ -136,7 +175,7 @@ func resolveTokenSourceSafely(
         )
     }()
 
-    token, resolveErr = firewall.TokenSource().Resolve(runtimeInstance, requestEvent.Request())
+    token, resolveErr = tokenSource.Resolve(runtimeInstance, requestEvent.Request())
 
     return token, resolveErr
 }

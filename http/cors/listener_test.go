@@ -372,3 +372,25 @@ func TestRegisterListeners_WiresTheResponseDoorToo(t *testing.T) {
         t.Fatalf("expected the response door to decorate the error response, got %q", errorResponse.Headers().Get("Access-Control-Allow-Origin"))
     }
 }
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRequestListener(dispatcher, DefaultService())
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), unassignedRequest)
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected no response for a request the listener cannot read")
+    }
+}

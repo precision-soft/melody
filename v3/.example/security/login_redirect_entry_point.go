@@ -1,8 +1,6 @@
 package security
 
 import (
-    "strings"
-
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -20,7 +18,7 @@ type loginRedirectEntryPoint struct {
 }
 
 func (instance *loginRedirectEntryPoint) Start(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-    if true == isHtmlRequest(request) {
+    if true == melodyhttp.PrefersHtml(request) {
         return melodyhttp.RedirectFound(instance.loginPath), nil
     }
 
@@ -28,23 +26,6 @@ func (instance *loginRedirectEntryPoint) Start(runtimeInstance melodyruntimecont
         401,
         "unauthorized",
     ), nil
-}
-
-func isHtmlRequest(request melodyhttpcontract.Request) bool {
-    if nil == request || nil == request.HttpRequest() {
-        return false
-    }
-
-    acceptHeader := request.HttpRequest().Header.Get("Accept")
-    if "" == acceptHeader {
-        return false
-    }
-
-    if true == strings.Contains(acceptHeader, "text/html") {
-        return true
-    }
-
-    return false
 }
 
 var _ melodysecuritycontract.EntryPoint = (*loginRedirectEntryPoint)(nil)

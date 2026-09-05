@@ -17,10 +17,7 @@ const (
     twoFactorVerifyRoute = "/twofactor/verify"
 )
 
-/* twoFactorTable and twoFactorPrimaryKeyColumn name the demo enrollment table (.example/twofactor/store.go). The
-primary key is the USER IDENTIFIER, which is exactly why the section mints a fresh one per run: enrolling a fixed
-identifier succeeds once and then collides with the row the previous run left behind, so the section would go red
-on its second execution for a reason that has nothing to do with the code under test. */
+/* twoFactorTable and twoFactorPrimaryKeyColumn name the demo enrollment table (.example/twofactor/store.go). The primary key is the USER IDENTIFIER, which is exactly why the section mints a fresh one per run: enrolling a fixed identifier succeeds once and then collides with the row the previous run left behind, so the section would go red on its second execution for a reason that has nothing to do with the code under test. */
 const (
     twoFactorTable             = "melody_example_v3_two_factor"
     twoFactorPrimaryKeyColumn  = "user_identifier"
@@ -28,8 +25,7 @@ const (
     twoFactorExpiredPeriodBack = 5
 )
 
-/* twoFactorCollisionRetryCount is how many further periods the expired-code search may walk back when a candidate
-happens to render the same six digits as the current code. */
+/* twoFactorCollisionRetryCount is how many further periods the expired-code search may walk back when a candidate happens to render the same six digits as the current code. */
 const twoFactorCollisionRetryCount = 5
 
 type twoFactorEnrollPayload struct {
@@ -39,11 +35,7 @@ type twoFactorEnrollPayload struct {
     RecoveryCodes  []string `json:"recoveryCodes"`
 }
 
-/* runTwoFactorCheck enrolls a throwaway user, verifies a code its own authenticator-app stand-in produced
-(totp:code), and then attacks the verification four ways. The replay pair is the interesting one: an accepted TOTP
-code stays arithmetically valid for its whole window, so the only thing stopping a captured code from being reused
-inside that window is the replay guard — and the SECOND replay proves the guard keys on the NORMALIZED code, which
-is what makes "409 643" fail to buy a second use of a code already spent as "409643". */
+/* runTwoFactorCheck enrolls a throwaway user, verifies a code its own authenticator-app stand-in produced (totp:code), and then attacks the verification four ways. The replay pair is the interesting one: an accepted TOTP code stays arithmetically valid for its whole window, so the only thing stopping a captured code from being reused inside that window is the replay guard — and the SECOND replay proves the guard keys on the NORMALIZED code, which is what makes "409 643" fail to buy a second use of a code already spent as "409643". */
 func runTwoFactorCheck(baseUrl string) {
     client := newLiveExampleClient(baseUrl)
 
@@ -135,11 +127,7 @@ func assertTwoFactorVerifyRefused(client *liveExampleClient, user string, code s
     pass("%s was refused with 401", what)
 }
 
-/* assertTwoFactorExpiredCodeRefused generates a code for a timestamp several periods in the past. The command has
-no --at flag, so this is computed in-process through the same totp package the application verifies with, which is
-what keeps the two from drifting apart on a config change. The generated code is checked against the current one
-first: on the roughly one-in-a-million chance that they collide, the section would otherwise assert that a VALID
-code is refused. */
+/* assertTwoFactorExpiredCodeRefused generates a code for a timestamp several periods in the past. The command has no --at flag, so this is computed in-process through the same totp package the application verifies with, which is what keeps the two from drifting apart on a config change. The generated code is checked against the current one first: on the roughly one-in-a-million chance that they collide, the section would otherwise assert that a VALID code is refused. */
 func assertTwoFactorExpiredCodeRefused(client *liveExampleClient, user string, secret string) {
     expired, _, periodsBack, computeErr := twoFactorExpiredCodeAt(secret, time.Now())
     if nil != computeErr {
@@ -159,14 +147,9 @@ func assertTwoFactorExpiredCodeRefused(client *liveExampleClient, user string, s
     pass("a code generated %d periods in the past was refused with 401 (the window is bounded)", periodsBack)
 }
 
-/* twoFactorExpiredCodeAt returns a code that sits outside the verification window at the reference instant, the code
-that IS current there, and how many periods back it had to reach.
+/* twoFactorExpiredCodeAt returns a code that sits outside the verification window at the reference instant, the code that IS current there, and how many periods back it had to reach.
 
-Two details make it worth its own function. The period comes from the totp package's own resolved config, so the
-"N periods back" distance can never drift from the window Verify honours. And the candidate is compared against the
-CURRENT code: a six-digit code repeats about once in a million periods, and on that collision the section would be
-asserting that a perfectly valid code must be refused — a red run with no defect behind it. The search walks further
-back until the two differ, and reports a failure rather than returning a colliding code. */
+   Two details make it worth its own function. The period comes from the totp package's own resolved config, so the "N periods back" distance can never drift from the window Verify honours. And the candidate is compared against the CURRENT code: a six-digit code repeats about once in a million periods, and on that collision the section would be asserting that a perfectly valid code must be refused — a red run with no defect behind it. The search walks further back until the two differ, and reports a failure rather than returning a colliding code. */
 func twoFactorExpiredCodeAt(secret string, reference time.Time) (string, string, int, error) {
     resolved := totp.Config{}.Resolve()
     step := time.Duration(resolved.Period) * time.Second
@@ -194,9 +177,7 @@ func twoFactorExpiredCodeAt(secret string, reference time.Time) (string, string,
     )
 }
 
-/* assertTwoFactorNeverEnrolledFailsClosed probes a user that was never enrolled. The failure it guards against is
-fail-OPEN: a lookup that reported "no enrollment" and treated the absent second factor as satisfied would answer
-200 and hand every un-enrolled account a free pass through the second factor. */
+/* assertTwoFactorNeverEnrolledFailsClosed probes a user that was never enrolled. The failure it guards against is fail-OPEN: a lookup that reported "no enrollment" and treated the absent second factor as satisfied would answer 200 and hand every un-enrolled account a free pass through the second factor. */
 func assertTwoFactorNeverEnrolledFailsClosed(client *liveExampleClient) {
     user := liveExampleUnique("e2e-never-enrolled")
 
@@ -222,9 +203,7 @@ func twoFactorVerify(client *liveExampleClient, user string, code string) liveEx
     })
 }
 
-/* twoFactorSpacedCode splits a six-digit code the way an authenticator app displays it. Verification normalizes
-before comparing, so this is the SAME code — which is precisely why the replay guard has to key on the normalized
-form. */
+/* twoFactorSpacedCode splits a six-digit code the way an authenticator app displays it. Verification normalizes before comparing, so this is the SAME code — which is precisely why the replay guard has to key on the normalized form. */
 func twoFactorSpacedCode(code string) string {
     if 6 != len(code) {
         return code
@@ -233,10 +212,7 @@ func twoFactorSpacedCode(code string) string {
     return code[:3] + " " + code[3:]
 }
 
-/* cleanUpTwoFactorEnrollment deletes the row the section created. The identifier is unique per run, so a leftover
-row breaks nothing — but it accumulates one row per run forever in a shared dev database, so it is removed when the
-harness has a connection of its own. When MYSQL_DSN is cleared the row is announced rather than left silent: a
-reader who later finds unexplained rows in the demo table must be able to trace them to this section. */
+/* cleanUpTwoFactorEnrollment deletes the row the section created. The identifier is unique per run, so a leftover row breaks nothing — but it accumulates one row per run forever in a shared dev database, so it is removed when the harness has a connection of its own. When MYSQL_DSN is cleared the row is announced rather than left silent: a reader who later finds unexplained rows in the demo table must be able to trace them to this section. */
 func cleanUpTwoFactorEnrollment(user string) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {

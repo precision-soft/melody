@@ -39,6 +39,9 @@
 #                        while an ordinary parameter still prints in clear
 #   - OPTIONAL ENV KEY   the default processor falls back when the key is unset, an .env.local override
 #                        wins over the fallback, and the empty-string fallback resolves to ""
+#   - V3 MIGRATIONS      the db:* family over the v3 example's own six-migration set — the catalogue, the
+#                        journal and the two-factor enrollment table — with the machine document asserted
+#                        from a live application and the rollback read straight out of mysql
 #   - V1 CRON RUNNER     the v1 example registers the cron module: melody:cron:run boots from the shared
 #                        Configuration, reports its user-carrying entries and answers the json envelope
 #   - V1 MIGRATIONS      the bunorm/migrate command family runs the same migration set the v1 providers
@@ -58,7 +61,7 @@
 # Everything runs inside the dev container against the compose stack, through the helpers in common.sh.
 # The example's .env.local is written and restored by the process-role check; it is git-ignored.
 #
-# The checks up to OPTIONAL ENV KEY drive the v3 example, and say so in the banner they print at the start; the
+# The checks up to V3 MIGRATIONS drive the v3 example, and say so in the banner they print at the start; the
 # sections whose banner begins with V1 or V2 drive /app/.example and /app/v2/.example through
 # e2e_example_directory. The v3 pin is not an
 # oversight to be generalized later. Some of those checks exercise a module that exists only in v3: wiring
@@ -67,9 +70,10 @@
 # and example:grant:role, the command-owned --role flag, the process_role line its app:info prints, the
 # product:list --limit flag, the cron configuration the templates render, and the parameter the optional-env-key
 # check reads. Generalizing those would mean changing the v1 and v2 example applications, not this script. The
-# V1 and V2 sections exist for the mirror-image reason: the cron module registration, the bunorm/migrate
-# command family and the cli/output rendering of the example's own commands are wiring the two published
-# majors carry and the v3 example does not.
+# V1 and V2 sections exist for the mirror-image reason: the cron module registration and the cli/output
+# rendering of the example's own commands are wiring the two published majors carry over their own
+# migration sets, and each major's set is its own — the tables, the identifiers and the count differ, so
+# one section per major is what states them.
 #
 # The coverage that DOES generalize across the three majors — boot, a public route, the login/session flow,
 # path-traversal containment, a 404, the command line and a single-SIGINT shutdown — lives in the run.sh harness,
@@ -90,13 +94,14 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=91
+EXPECTED_CHECK_COUNT_INTEGER=118
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
 info "stack checks drive the v3 example application: ${EXAMPLE_DIRECTORY_STRING}"
 info "v3-only module: wiring generate, openapi generate, outbox relay, encrypt bulk"
 info "v3-only through the example app: exclusive/grant demo commands, command-owned --role, app:info process_role, product:list --limit, cron configuration, optional-env-key parameter"
+info "the v3 example registers the bunorm/migrate family over its own six-migration set (V3 DATABASE MIGRATIONS)"
 info "the V1 sections drive the v1 example application: $(e2e_example_directory 1) (cron module, bunorm/migrate family, cli/output envelope, dev debug commands)"
 info "the V2 sections drive the v2 example application: $(e2e_example_directory 2) (the same four, over a five-migration set that carries the journal)"
 info "per-major coverage (boot, login/session, traversal, 404, cli, SIGINT) runs in .dev/e2e/run.sh for majors: ${MELODY_E2E_MAJORS:-<none>}"
@@ -303,6 +308,53 @@ else
     else
         check_fail "the default crontab template lost its user column (got '${WITH_USER_SIXTH_FIELD_STRING}')"
     fi
+
+    # the ownership marker is what --prune reads to prove a file is the generator's own; asserted on the
+    # file the run just wrote, not on the command's word
+    if printf '%s' "${CRONTAB_WITH_USER_STRING}" | grep -qF '# owned by melody:cron:generate'; then
+        check_pass "the generated crontab carries the ownership marker"
+    else
+        check_fail "the generated crontab does not carry the ownership marker"
+    fi
+
+    # EntryConfig.Arguments reach the generated line: the example schedules product:list with --limit=2
+    if printf '%s' "${CRONTAB_WITH_USER_STRING}" | grep -q 'product:list --limit=2'; then
+        check_pass "EntryConfig.Arguments reach the generated crontab line (product:list --limit=2)"
+    else
+        check_fail "EntryConfig.Arguments did not reach the generated crontab line"
+    fi
+fi
+
+# --prune reconciles dir(--out): a stale file the marker proves ours is emptied down to its header, and
+# the operator's own file beside it is untouched — both read back from the directory afterwards, which is
+# what proves the sweep, not the command's report of it
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -rf /tmp/cron-prune-band && mkdir -p /tmp/cron-prune-band; go run . melody:cron:generate --out /tmp/cron-prune-band/stale.crontab >/dev/null 2>&1; printf '# written by the operator\n*/5 * * * * root /usr/local/bin/backup\n' > /tmp/cron-prune-band/operator.crontab; go run . melody:cron:generate --out /tmp/cron-prune-band/crontab --prune >/dev/null 2>&1; cat /tmp/cron-prune-band/stale.crontab 2>/dev/null"
+PRUNED_STALE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${PRUNED_STALE_STRING}" | grep -qF '# owned by melody:cron:generate' && ! printf '%s' "${PRUNED_STALE_STRING}" | grep -q 'product:list'; then
+    check_pass "--prune emptied the stale destination down to its marker-carrying header"
+else
+    check_fail "--prune left the stale destination running or destroyed its marker"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "cat /tmp/cron-prune-band/operator.crontab 2>/dev/null"
+OPERATOR_FILE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${OPERATOR_FILE_STRING}" | grep -q '/usr/local/bin/backup'; then
+    check_pass "--prune left the operator's unowned file untouched"
+else
+    check_fail "--prune touched a file it cannot prove it wrote"
+fi
+
+# the k8s manifests open with the same marker as a leading YAML comment, which is what makes a k8s output
+# directory reconcilable by the same sweep
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/cron-band-k8s.yaml; go run . melody:cron:generate --template k8s --image registry.example/app:1 --out /tmp/cron-band-k8s.yaml >/dev/null 2>&1; cat /tmp/cron-band-k8s.yaml 2>/dev/null"
+K8S_MANIFEST_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${K8S_MANIFEST_STRING}" | grep -qF '# owned by melody:cron:generate' && printf '%s' "${K8S_MANIFEST_STRING}" | grep -q 'apiVersion: batch/v1'; then
+    check_pass "the k8s manifests carry the ownership marker beside their CronJob documents"
+else
+    check_fail "the k8s manifests do not carry the ownership marker (or rendered no CronJob)"
 fi
 
 check_section_end "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"
@@ -335,6 +387,18 @@ if [[ "${RUNNER_WARNING_AFTER_INTEGER:-0}" -gt "${RUNNER_WARNING_BEFORE_INTEGER:
     check_pass "the runner resolved the shared Configuration (it reported the user-carrying product:list entry, ${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0})"
 else
     check_fail "the runner did not report the user-carrying entry (${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0}), so nothing proves it parsed the Configuration"
+fi
+
+# the entry count in the envelope is deterministic whatever the wall minute: configured counts entries,
+# not dispatches, and the v3 example schedules exactly three commands — the same shape the v1 and v2
+# sections assert, which the v3 runner answered with an empty stream before it rendered the envelope
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:cron:run --once --format=json 2>/dev/null"
+RUNNER_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+
+if printf '%s' "${RUNNER_JSON_STRING}" | grep -q '"configured":3'; then
+    check_pass "the v3 runner's json envelope counts the three configured entries"
+else
+    check_fail "the v3 runner's json envelope does not count the three configured entries: ${RUNNER_JSON_STRING:-<empty>}"
 fi
 
 check_section_end "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
@@ -922,6 +986,228 @@ trap - EXIT
 check_section_end "OPTIONAL ENV KEY" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# V3 DEBUG COMMANDS — the dev-registered family answers from the v3 example, and the two commands that
+# used to build in order to list now describe by default. The split is asserted on STATE — the state
+# column, the scoped block, and the two exit codes — not on the command's own word about itself.
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 DEBUG COMMANDS" "${TAG_VALIDATE}" "e2e"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:version 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'MELODY: v'; then
+    check_pass "v3 debug:version reports the framework version"
+else
+    check_fail "v3 debug:version did not report the framework version (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:events --format=json 2>/dev/null"
+V3_EVENTS_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+if printf '%s' "${V3_EVENTS_JSON_STRING}" | grep -q '"command":"debug:events"'; then
+    check_pass "v3 debug:events answers its json envelope"
+else
+    check_fail "v3 debug:events did not answer its envelope (${V3_EVENTS_JSON_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:middleware 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_MIDDLEWARE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_MIDDLEWARE_OUTPUT_STRING}" | grep -q 'static'; then
+    check_pass "v3 debug:middleware lists the static middleware of the example's pipeline"
+else
+    check_fail "v3 debug:middleware did not list the pipeline (${V3_MIDDLEWARE_OUTPUT_STRING:-<empty>})"
+fi
+
+# the describing listing carries what only the description channel knows: the definition name, the
+# priority the ordering used and the status of each entry. The build channel hands back the built chain
+# alone, so a listing produced by building could name none of the three
+if printf '%s' "${V3_MIDDLEWARE_OUTPUT_STRING}" | grep -q 'priority' && printf '%s' "${V3_MIDDLEWARE_OUTPUT_STRING}" | grep -q 'reason'; then
+    check_pass "v3 debug:middleware describes the pipeline rather than building it"
+else
+    check_fail "v3 debug:middleware did not carry the description columns (${V3_MIDDLEWARE_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --limit=0 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_CONTAINER_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_CONTAINER_OUTPUT_STRING}" | grep -q 'service.example.product.repository'; then
+    check_pass "v3 debug:container lists the example's registered services"
+else
+    check_fail "v3 debug:container did not list the example services (${V3_CONTAINER_OUTPUT_STRING:-<empty>})"
+fi
+
+# the scoped block is the half the pre-repair listing could not reach at all: it walked Names(), which
+# does not see scoped registrations, so a scoped definition was invisible to the command that exists to
+# show what the container holds
+if printf '%s' "${V3_CONTAINER_OUTPUT_STRING}" | grep -q 'service-example-reporting-request-trail'; then
+    check_pass "v3 debug:container lists the request-scoped report trail"
+else
+    check_fail "v3 debug:container does not list the scoped report trail (${V3_CONTAINER_OUTPUT_STRING:-<empty>})"
+fi
+
+# state, not the command's word: a service the boot never resolved reads registered, which it can only
+# do if nothing ran its provider. The old listing called Get on every name, so every row would read built
+if printf '%s' "${V3_CONTAINER_OUTPUT_STRING}" | grep -q 'service.example.product.repository *| registered'; then
+    check_pass "v3 debug:container ran no provider for the listing"
+else
+    check_fail "v3 debug:container built a service it only had to list (${V3_CONTAINER_OUTPUT_STRING:-<empty>})"
+fi
+
+# the deployment gate, end to end: the bare listing succeeds where the sweep refuses. The scoped report
+# trail depends on the request context, which a console process has no scope carrying — so --build has a
+# real failure to report here, and that is what makes the two exit codes a measurement rather than a pair
+# of zeroes
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --limit=0 >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 debug:container exits zero when it only describes"
+else
+    check_fail "v3 debug:container did not exit zero while describing (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --build --limit=0 --format=json 2>/dev/null"
+V3_CONTAINER_BUILD_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+if printf '%s' "${V3_CONTAINER_BUILD_JSON_STRING}" | grep -q '"code":"debug.buildFailed"' && printf '%s' "${V3_CONTAINER_BUILD_JSON_STRING}" | grep -q 'service-example-reporting-request-trail'; then
+    check_pass "v3 debug:container --build reports its failures on the envelope, naming them"
+else
+    check_fail "v3 debug:container --build did not report the sweep failure (${V3_CONTAINER_BUILD_JSON_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --build --limit=0 >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=1'; then
+    check_pass "v3 debug:container --build fails a deployment gate on a service that does not resolve"
+else
+    check_fail "v3 debug:container --build did not fail the gate (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# the two discriminators the dispatch breaks ties on: without them two overlapping routes render
+# identically and the command cannot answer which one responds
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:router --limit=3 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'priority' && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'order'; then
+    check_pass "v3 debug:router reports the priority and the registration order"
+else
+    check_fail "v3 debug:router did not report the discriminators (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+check_section_end "V3 DEBUG COMMANDS" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 DATABASE MIGRATIONS — the db:* family and the composition root run one set over six tables
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
+
+# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops all six tables of the v3 example's own
+# melody_example_v3 database — the four catalogue ones, the journal, and the two-factor enrollment table
+# neither frozen major carries. Every later step exists to put the state back — the next boot restores the
+# schema, and the two resolutions after it reseed the catalogue and the user directory — so the section must
+# run to its end whatever the intermediate verdicts, which check_fail already guarantees. The journal is
+# append-only with no seeds and nobody is enrolled by default, so an empty journal and an empty enrollment
+# table ARE their restored state. The framework's own tables are untouched: the outbox store and the audit
+# registry open their schema through the module that owns it, and the set claims neither.
+#
+# This major differs from the two frozen ones in WHEN the set is applied. Its composition root is eager —
+# the connection is dialled at boot and the two-factor build step applies the set there — where v1 and v2
+# apply it lazily at the first repository resolution. So every command of this application boots over an
+# up-to-date schema, and what the checks below read is the database itself rather than a command's word for
+# it: the count of the example's own tables before and after each step.
+#
+# The six are named one by one rather than matched on a prefix: the audit registry's own table is called
+# melody_example_v3_audit and would be counted by any LIKE that catches the six, while it belongs to the
+# framework module that opens it and correctly survives a rollback of this set. Its survival is the check's
+# quiet half — a set that had claimed it would take it down with the rest.
+V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'melody_example_v3' AND table_name IN ('melody_example_v3_category', 'melody_example_v3_currency', 'melody_example_v3_product', 'melody_example_v3_user', 'melody_example_v3_catalog_journal', 'melody_example_v3_two_factor')"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:init >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 db:init is idempotent over the existing bookkeeping tables"
+else
+    check_fail "v3 db:init failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:migrate >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 db:migrate answers success over the set the composition root already applied"
+else
+    check_fail "v3 db:migrate failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_STATUS_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${V3_STATUS_OUTPUT_STRING}" | grep -q '0 pending' && printf '%s' "${V3_STATUS_OUTPUT_STRING}" | grep -q '20260819000006'; then
+    check_pass "v3 db:status reports the applied set by name with nothing pending"
+else
+    check_fail "v3 db:status does not report the applied set (${V3_STATUS_OUTPUT_STRING:-<empty>})"
+fi
+
+# the machine document is the half of the command family a person never reads: one closed json object on one
+# line, keyed on stable names rather than on the headings the table renders, with the server's own identity
+# beside the set. Only an application wired to a live database can answer it, which is why it is asserted
+# here rather than in the package's own tests.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:status --format=json 2>/dev/null | tail -1"
+V3_STATUS_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+
+if printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"migrations":{"applied":\["20260819000006"' \
+    && printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"database":"melody_example_v3"' \
+    && printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"error":null'; then
+    check_pass "v3 db:status --format=json renders one document naming the set, the database and no error"
+else
+    check_fail "the v3 db:status machine document is not the expected envelope (${V3_STATUS_JSON_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:unlock >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 db:unlock clears the lock table over a database nobody is migrating"
+else
+    check_fail "v3 db:unlock failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:rollback 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qi 'rolled back'; then
+    check_pass "v3 db:rollback reverted the last group (the six live tables are dropped until the next boot)"
+else
+    check_fail "v3 db:rollback did not report the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# read out of band, between the rollback and the next boot: this is the one window in which the drop is
+# observable, because the very next application process applies the set again on its way up
+V3_TABLE_COUNT_AFTER_ROLLBACK_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING}")"
+if [[ "0" = "${V3_TABLE_COUNT_AFTER_ROLLBACK_STRING}" ]]; then
+    check_pass "the six v3 example tables are gone from mysql after the rollback (read out of band; the audit table, which the set does not own, stands)"
+else
+    check_fail "the rollback left ${V3_TABLE_COUNT_AFTER_ROLLBACK_STRING:-<no answer>} v3 example tables standing"
+fi
+
+# a fresh process resolves the product repository, which runs the same migration set programmatically and
+# then reseeds the empty catalogue — the first-request tolerance the migration switch had to preserve. The
+# boot has already recreated every table by this point; what this step adds is the seed, which belongs to
+# the repository rather than to the set
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . product:list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'prod-1'; then
+    check_pass "a fresh v3 resolution migrated and reseeded the emptied catalogue (prod-1 is back)"
+else
+    check_fail "the fresh v3 resolution did not restore the catalogue (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+V3_TABLE_COUNT_AFTER_RESTORE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING}")"
+if [[ "6" = "${V3_TABLE_COUNT_AFTER_RESTORE_STRING}" ]]; then
+    check_pass "the operator's set and the application's are one: all six tables are back (read out of band)"
+else
+    check_fail "the restored schema holds ${V3_TABLE_COUNT_AFTER_RESTORE_STRING:-<no answer>} of the six v3 example tables"
+fi
+
+# the user table has no command of its own; resolving the user repository by name through debug:container
+# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs;
+# the seeded rows are read back out of band, because a resolution that succeeds without reseeding
+# exits 0 all the same and the failure would surface only as login failures in the next run
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container service.example.user.repository >/dev/null 2>&1; echo status=\$?"
+V3_USER_ROW_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COUNT(*) FROM melody_example_v3_user")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0' && [[ "${V3_USER_ROW_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
+    check_pass "resolving the v3 user repository reseeded the user directory (rows read out of band)"
+else
+    check_fail "the v3 user repository resolution did not restore the directory (status ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, rows ${V3_USER_ROW_COUNT_STRING:-<no answer>})"
+fi
+
+check_section_end "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
 # The V1 sections: the wiring only the v1 example carries today. They address the v1 example explicitly
 # instead of reassigning EXAMPLE_DIRECTORY_STRING, so every invocation states which major it drives.
 # ---------------------------------------------------------------------------------------------------
@@ -1029,12 +1315,15 @@ else
 fi
 
 # the user table has no command of its own; resolving the user repository by name through debug:container
-# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs
+# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs;
+# the seeded rows are read back out of band, because a resolution that succeeds without reseeding
+# exits 0 all the same and the failure would surface only as login failures in the next run
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . debug:container service.example.user.repository >/dev/null 2>&1; echo status=\$?"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
-    check_pass "resolving the v1 user repository reseeded the user directory"
+V1_USER_ROW_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v1" "SELECT COUNT(*) FROM melody_example_v1_user")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0' && [[ "${V1_USER_ROW_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
+    check_pass "resolving the v1 user repository reseeded the user directory (rows read out of band)"
 else
-    check_fail "the v1 user repository resolution failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+    check_fail "the v1 user repository resolution did not restore the directory (status ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, rows ${V1_USER_ROW_COUNT_STRING:-<no answer>})"
 fi
 
 check_section_end "V1 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
@@ -1314,12 +1603,15 @@ else
 fi
 
 # the user table has no command of its own; resolving the user repository by name through debug:container
-# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs
+# is the one deterministic door that reseeds it, which the login flow of the dev-supervised app needs;
+# the seeded rows are read back out of band, because a resolution that succeeds without reseeding
+# exits 0 all the same and the failure would surface only as login failures in the next run
 run_in_dev_capture "${V2_EXAMPLE_DIRECTORY_STRING}" "go run . debug:container service.example.user.repository >/dev/null 2>&1; echo status=\$?"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
-    check_pass "resolving the v2 user repository reseeded the user directory"
+V2_USER_ROW_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v2" "SELECT COUNT(*) FROM melody_example_v2_user")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0' && [[ "${V2_USER_ROW_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
+    check_pass "resolving the v2 user repository reseeded the user directory (rows read out of band)"
 else
-    check_fail "the v2 user repository resolution failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+    check_fail "the v2 user repository resolution did not restore the directory (status ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, rows ${V2_USER_ROW_COUNT_STRING:-<no answer>})"
 fi
 
 check_section_end "V2 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"

@@ -29,7 +29,7 @@ func (instance *Alpha) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return nil
+        return NewValidationError(field, "value must be a string", ConstraintAlphaErrorNotAlpha, nil)
     }
 
     if "" == stringValue {

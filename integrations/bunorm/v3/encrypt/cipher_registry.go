@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "reflect"
     "sync"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -31,7 +32,15 @@ func UseCipherNamed(name string, cipherInstance Cipher) {
     storeCipher(name, cipherInstance)
 }
 
+/* storeCipher installs, replaces or — for a bare nil — uninstalls a registry entry; the bare nil is the documented deinstall door test binaries reset compartments with. A TYPED nil is a different thing entirely: it is a wiring error (a resolution that failed and was installed anyway), it is not a deinstall request, and stored it would be handed out by cipherByName with a nil error and dereferenced inside database/sql at the first column write. It is refused here, at the boot-time door whose caller can be named. */
 func storeCipher(name string, cipherInstance Cipher) {
+    if nil != cipherInstance {
+        reflected := reflect.ValueOf(cipherInstance)
+        if reflect.Ptr == reflected.Kind() && true == reflected.IsNil() {
+            exception.Panic(exception.NewError("cipher instance is a typed nil", map[string]any{"cipherName": name}, nil))
+        }
+    }
+
     cipherRegistryMutex.Lock()
     defer cipherRegistryMutex.Unlock()
 

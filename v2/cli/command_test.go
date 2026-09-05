@@ -446,6 +446,71 @@ func TestRegister_ActionEmitsNothingButTheDocumentInJsonFormat(t *testing.T) {
     }
 }
 
+func runRegisteredStandardFlagsCommand(
+    t *testing.T,
+    arguments []string,
+) string {
+    t.Helper()
+
+    runtimeInstance := newTestRuntime()
+
+    rootCommand := NewCommandContext("app", "desc")
+
+    buffer := &bytes.Buffer{}
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.StandardFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _, _ = fmt.Fprint(commandContext.Writer, "{\"meta\":{}}\n")
+
+            return nil
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    rootCommand.Writer = buffer
+    rootCommand.ErrWriter = buffer
+    rootCommand.ExitErrHandler = func(
+        handlerContext context.Context,
+        handlerCommandContext *clicontract.CommandContext,
+        handlerErr error,
+    ) {
+    }
+
+    registered := rootCommand.Commands[0]
+    registered.Writer = buffer
+    registered.ErrWriter = buffer
+
+    commandArguments := make([]string, 0, len(arguments)+2)
+    commandArguments = append(commandArguments, "app", "hello")
+    commandArguments = append(commandArguments, arguments...)
+
+    runErr := rootCommand.Run(context.Background(), commandArguments)
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    return buffer.String()
+}
+
+/* quiet is the documented governor of decoration and the banner is decoration: StandardFlags defaults it to true, so a scripted invocation reads the command's own output alone, and the frame comes back with one explicit --quiet=false */
+func TestRegister_ActionHonoursQuietForTheBanner(t *testing.T) {
+    written := runRegisteredStandardFlagsCommand(t, nil)
+
+    if "{\"meta\":{}}\n" != written {
+        t.Fatalf("expected the command's own output alone under the quiet default, got %q", written)
+    }
+
+    written = runRegisteredStandardFlagsCommand(t, []string{"--quiet=false"})
+
+    if false == strings.Contains(written, "[hello] [started]") || false == strings.Contains(written, "[hello] [finished]") {
+        t.Fatalf("expected the banner back under --quiet=false, got %q", written)
+    }
+}
+
 func TestRegister_ActionEmitsTheBannerInTableFormat(t *testing.T) {
     written := runRegisteredCommand(t, []string{"--format=table"})
 
@@ -962,5 +1027,52 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
     }
     if false == strings.Contains(written, `hello\x1b[2J`) {
         t.Fatalf("expected the escaped command name spelling, got %q", written)
+    }
+}
+
+/* the finish banner colours the verdict red on failure, and it built the coloured verdict before the escaping that keeps client-derived text from repainting the line — so every failed run with colour on, the default, printed the banner's own escape sequence as the literal text \x1b[31m around [failed], while --no-color, which never coloured the verdict, printed it right. The verdict is coloured after the escaping: its sequence reaches the terminal raw, and a control character in the data around it — here the command's own name — is still spelled visibly. */
+func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing.T) {
+    command := &testCommand{
+        nameValue:        "bo\rom",
+        descriptionValue: "boom command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return errors.New("boom")
+        },
+    }
+
+    written, runErr := runRegisteredCommandWithRuntime(newTestRuntime(), command, nil)
+    if nil == runErr {
+        t.Fatal("expected the command's failure to be returned")
+    }
+
+    if false == strings.Contains(written, "[finished] \x1b[31m[failed]\x1b[97m [") {
+        t.Fatalf("expected the verdict coloured with a raw escape sequence, got %q", written)
+    }
+
+    if true == strings.Contains(written, `\x1b[31m`) {
+        t.Fatalf("the banner escaped its own colour sequence: %q", written)
+    }
+
+    if false == strings.Contains(written, `[bo\rom] [finished]`) || true == strings.Contains(written, "[bo\rom]") {
+        t.Fatalf("expected the command name escaped on the finish line, got %q", written)
+    }
+}
+
+/* the no-color banner never coloured the verdict and always printed it right; the split keeps that line byte for byte */
+func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
+    command := &testCommand{
+        nameValue:        "boom",
+        descriptionValue: "boom command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return errors.New("boom")
+        },
+    }
+
+    written, _ := runRegisteredCommandWithRuntime(newTestRuntime(), command, []string{"--no-color"})
+
+    if false == strings.Contains(written, "[boom] [finished] [failed] [") || true == strings.Contains(written, "\x1b[") {
+        t.Fatalf("expected the plain failed verdict and no escape sequence, got %q", written)
     }
 }

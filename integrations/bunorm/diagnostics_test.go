@@ -57,7 +57,7 @@ func (instance *capturingDiagnosticLogger) captured() []capturedDiagnosticRecord
 
 /* bun's own diagnostics reach the application's journal instead of standard error. They are the developer's declaration mistakes — here a query carrying an argument with nowhere to put it — and written to standard error as unstructured text they are invisible to a deployment whose journal is a json file.
 
-The warning is provoked through bun's public surface rather than by calling its logger, because what has to be proven is that bun uses the destination this package installs, not that a *log.Logger writes where it was pointed. The setting is taken through installBunDiagnostics rather than through the exported door, whose once — correct for a process-wide setting — would make every run after the first prove nothing. */
+   The warning is provoked through bun's public surface rather than by calling its logger, because what has to be proven is that bun uses the destination this package installs, not that a *log.Logger writes where it was pointed. The setting is taken through installBunDiagnostics rather than through the exported door, whose once — correct for a process-wide setting — would make every run after the first prove nothing. */
 func TestRouteDiagnostics_SendsBunsOwnChannelToTheJournal(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
 

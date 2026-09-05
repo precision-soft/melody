@@ -117,6 +117,10 @@ func main() {
     runSessionRotationCheck()
     sections++
 
+    section("SESSION TOMBSTONE (in-process)")
+    runSessionTombstoneCheck()
+    sections++
+
     redisAddress := os.Getenv("REDIS_ADDRESS")
 
     if address := redisAddress; "" != address {
@@ -180,9 +184,7 @@ func main() {
     }
 
     if baseUrl := os.Getenv("EXAMPLE_BASE_URL"); "" != baseUrl {
-        /* the section resets the example's rate limit counters straight in redis, so it needs redis as much as it needs the
-           application: without this it hard-failed on the very "clear REDIS_ADDRESS to skip the redis-backed sections" run that
-           run.sh documents */
+        /* the section resets the example's rate limit counters straight in redis, so it needs redis as much as it needs the application: without this it hard-failed on the very "clear REDIS_ADDRESS to skip the redis-backed sections" run that run.sh documents */
         if "" == redisAddress {
             fmt.Println("\nSKIPPED: EXAMPLE OVER HTTP needs REDIS_ADDRESS to reset the rate limit counters")
         } else {
@@ -201,11 +203,7 @@ func main() {
             sections++
         }
 
-        /* the sections below drive the SAME supervised application over http and are gated on EXAMPLE_BASE_URL
-           alone: none of them touches redis directly, so clearing REDIS_ADDRESS must not take them out too. The
-           one exception states its own second gate — the server-sent-event section needs the redis backplane to
-           reach the application as a second replica. They run in this order for a reason: METRICS asserts EXACT
-           request-count deltas, so it goes last and its deltas bracket only its own requests. */
+        /* the sections below drive the SAME supervised application over http and are gated on EXAMPLE_BASE_URL alone: none of them touches redis directly, so clearing REDIS_ADDRESS must not take them out too. The one exception states its own second gate — the server-sent-event section needs the redis backplane to reach the application as a second replica. They run in this order for a reason: METRICS asserts EXACT request-count deltas, so it goes last and its deltas bracket only its own requests. */
         infrastructureSections++
 
         section("OPENAPI SERVED (live example application)")
@@ -248,8 +246,7 @@ func main() {
         runTwoFactorCheck(baseUrl)
         sections++
 
-        /* the mint workspace is shared by the sections above, so it cannot be torn down by whichever of them
-           finishes first */
+        /* the mint workspace is shared by the sections above, so it cannot be torn down by whichever of them finishes first */
         releaseExampleMintWorkspace()
 
         section("MYSQL AND AUDIT (live example application)")
@@ -260,9 +257,7 @@ func main() {
         runMultipartCheck(baseUrl)
         sections++
 
-        /* the server-sent-event section needs BOTH halves: the application to stream from and redis to reach it
-           through as a second replica. Clearing either one must announce what did not run rather than degrade to a
-           single-replica check that silently drops the cross-replica, origin-suppression and framing coverage. */
+        /* the server-sent-event section needs BOTH halves: the application to stream from and redis to reach it through as a second replica. Clearing either one must announce what did not run rather than degrade to a single-replica check that silently drops the cross-replica, origin-suppression and framing coverage. */
         if "" == redisAddress {
             fmt.Println("\nSKIPPED: SERVER-SENT EVENTS needs REDIS_ADDRESS — the cross-replica delivery, id/retry framing, id sanitisation, origin suppression, topic isolation and malformed-payload coverage did not run")
         } else {
@@ -271,18 +266,13 @@ func main() {
             sections++
         }
 
-        /* LAST of the group on purpose: the metrics assertions are exact request-count deltas, so anything issued
-           against this application afterwards would move a counter that was already measured */
+        /* LAST of the group on purpose: the metrics assertions are exact request-count deltas, so anything issued against this application afterwards would move a counter that was already measured */
         section("METRICS (live example application)")
         runMetricsCheck(baseUrl)
         sections++
     }
 
-    /* the per-major example sections need no backend of the harness's own: each application is configured from the .env beside
-       its own executable, which is what keeps clearing REDIS_ADDRESS (or any other backend variable) from reconfiguring them.
-       The harness's own connections are handed in for the out-of-band half of the integration demos — the read that proves the
-       application really reached the backend rather than merely reporting that it did. Clearing one of them therefore skips the
-       verification, not the application's behaviour: the example still wires and still serves the demo. */
+    /* the per-major example sections need no backend of the harness's own: each application is configured from the .env beside its own executable, which is what keeps clearing REDIS_ADDRESS (or any other backend variable) from reconfiguring them. The harness's own connections are handed in for the out-of-band half of the integration demos — the read that proves the application really reached the backend rather than merely reporting that it did. Clearing one of them therefore skips the verification, not the application's behaviour: the example still wires and still serves the demo. */
     exampleMajors := exampleMajorList()
     if 0 == len(exampleMajors) {
         fmt.Printf("\nSKIPPED: %s is empty — no major's .example application was built, booted or driven\n", exampleMajorListVariable)
@@ -294,9 +284,7 @@ func main() {
         sections++
     }
 
-    /* the in-process sections (websocket, encrypt, session) always run, so they can never witness a missing backend: the guard
-       has to count only the sections a backend gates, or a run against an empty environment reports "ALL 3 SECTIONS PASSED" and
-       the twelve that matter are silently skipped */
+    /* the in-process sections (websocket, encrypt, session) always run, so they can never witness a missing backend: the guard has to count only the sections a backend gates, or a run against an empty environment reports "ALL 3 SECTIONS PASSED" and the twelve that matter are silently skipped */
     if 0 == infrastructureSections {
         fail("no infrastructure env set — expected one or more of REDIS_ADDRESS / POSTGRES_DSN / AMQP_DSN / MINIO_ENDPOINT")
     }
@@ -347,14 +335,10 @@ func fail(format string, args ...any) {
     os.Exit(1)
 }
 
-/* failureCleanupList holds the teardown steps a failing run must take before it exits. os.Exit runs no deferred
-function, so a section that started a child process has to register its teardown here or the process outlives the
-run and holds its port against the next one — which the next run would then report as an occupied port instead of
-the failure that actually happened. */
+/* failureCleanupList holds the teardown steps a failing run must take before it exits. os.Exit runs no deferred function, so a section that started a child process has to register its teardown here or the process outlives the run and holds its port against the next one — which the next run would then report as an occupied port instead of the failure that actually happened. */
 var failureCleanupList []func()
 
-/* pushFailureCleanup registers a teardown step and returns the function that unregisters it, so a section that
-finished cleanly does not leave a stale entry behind for a later, unrelated failure to run. */
+/* pushFailureCleanup registers a teardown step and returns the function that unregisters it, so a section that finished cleanly does not leave a stale entry behind for a later, unrelated failure to run. */
 func pushFailureCleanup(cleanup func()) func() {
     index := len(failureCleanupList)
     failureCleanupList = append(failureCleanupList, cleanup)

@@ -5,13 +5,25 @@ import (
     "net/netip"
     "strings"
 
+    "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 const forwardedForHeaderName = "X-Forwarded-For"
 
 /* NewForwardedClientIpResolver returns a ClientIpResolver that walks X-Forwarded-For right-to-left, skipping addresses that match the trusted proxy list, and returns the first untrusted address — the real client as attested by the trusted edge. It reuses the same ForwardedHeadersPolicy handed to Kernel.SetForwardedHeadersPolicy, so there is a single trusted-proxy list to maintain. It falls back to DefaultClientIp — the direct peer — whenever the forwarded chain cannot be trusted: forwarded headers are not trusted by policy, the trusted list is empty, the direct peer is not a trusted proxy (the header is then attacker-controlled), the chain has no parseable untrusted address, or every entry is a trusted proxy. Plug it into a rate-limit config with SetClientIpResolver so per-IP limits behind a reverse proxy key on the client instead of the proxy. */
 func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) ClientIpResolver {
+    /* an entry that parses as neither a prefix nor an address is refused here rather than skipped on every request: the skip narrowed the trusted list in silence, which reads at runtime as every client behind that proxy sharing one rate-limit bucket. The kernel refuses the same list on the same terms. */
+    if validationErr := internal.ValidateTrustedProxyList(policy.TrustedProxyList); nil != validationErr {
+        exception.Panic(validationErr)
+    }
+
+    /* the trusted list is copied at construction rather than captured live: the closure reads it on every request to pick the limiter key, and a caller reusing its slice after construction would rewrite the trust decision mid-serving as a data race — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
+    copiedTrustedProxyList := make([]string, len(policy.TrustedProxyList))
+    copy(copiedTrustedProxyList, policy.TrustedProxyList)
+    policy.TrustedProxyList = copiedTrustedProxyList
+
     return func(request httpcontract.Request) string {
         if false == policy.TrustForwardedHeaders {
             return DefaultClientIp(request)

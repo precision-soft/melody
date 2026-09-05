@@ -6,6 +6,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.77
 	github.com/precision-soft/melody/integrations/amqp/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/awss3/v3 v3.0.0
+	github.com/precision-soft/melody/integrations/bunorm/migrate/v3 v3.1.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql/v3 v3.1.0
 	github.com/precision-soft/melody/integrations/bunorm/v3 v3.3.0
 	github.com/precision-soft/melody/integrations/cron/v3 v3.3.0
@@ -16,6 +17,7 @@ require (
 	github.com/precision-soft/melody/v3 v3.11.0
 	github.com/redis/rueidis v1.0.71
 	github.com/uptrace/bun v1.2.17
+	golang.org/x/crypto v0.51.0
 )
 
 require (
@@ -63,14 +65,13 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/grpc v1.81.1 // indirect
+	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
@@ -91,5 +92,7 @@ replace github.com/precision-soft/melody/integrations/rueidis/v3 => ../../integr
 replace github.com/precision-soft/melody/integrations/bunorm/v3 => ../../integrations/bunorm/v3
 
 replace github.com/precision-soft/melody/integrations/bunorm/mysql/v3 => ../../integrations/bunorm/mysql/v3
+
+replace github.com/precision-soft/melody/integrations/bunorm/migrate/v3 => ../../integrations/bunorm/migrate/v3
 
 replace github.com/precision-soft/melody/integrations/outbox/v3 => ../../integrations/outbox/v3

@@ -10,18 +10,13 @@ import (
     "time"
 )
 
-/* exampleRateLimitBudget mirrors the write allowance the example wires on the nomenclature's write endpoints
-(config/redis.go, catalogWriteAllowance). */
+/* exampleRateLimitBudget mirrors the write allowance the example wires on the nomenclature's write endpoints (config/redis.go, catalogWriteAllowance). */
 const exampleRateLimitBudget = 30
 
-/* exampleRateLimitPrefix mirrors the key prefix the supervised v3 example gives its redis rate limiter, so the
-harness can clear the counters of a previous run rather than inherit a spent budget inside the same fixed
-window. It carries the major for the same reason the application does: three applications share one redis. */
+/* exampleRateLimitPrefix mirrors the key prefix the supervised v3 example gives its redis rate limiter, so the harness can clear the counters of a previous run rather than inherit a spent budget inside the same fixed window. It carries the major for the same reason the application does: three applications share one redis. */
 const exampleRateLimitPrefix = "melody-example-v3:rate_limit:"
 
-/* the throttled endpoint is a real one — creating a product — so the body below is deliberately invalid: the
-rate-limit middleware runs before the handler, so a refused write still spends the allowance and the catalogue
-is left exactly as it was. */
+/* the throttled endpoint is a real one — creating a product — so the body below is deliberately invalid: the rate-limit middleware runs before the handler, so a refused write still spends the allowance and the catalogue is left exactly as it was. */
 const (
     exampleThrottledWriteRoute = "/products/api/create/"
     exampleThrottledWriteBody  = `{"name":""}`
@@ -54,8 +49,7 @@ func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress st
     client := newExampleHttpClient()
     signInExampleHttpEditor(client, baseUrl, "")
 
-    /* a spoofed forwarded address from an untrusted peer must not mint a fresh budget: every call below is
-       counted against the loopback peer address, so the budget is spent once and stays spent */
+    /* a spoofed forwarded address from an untrusted peer must not mint a fresh budget: every call below is counted against the loopback peer address, so the budget is spent once and stays spent */
     spentAt := 0
     for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
         spoofed := fmt.Sprintf("203.0.113.%d", attempt)
@@ -95,14 +89,9 @@ func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress st
     runExampleLoadBalancerCheck(client, loadBalancerUrl, redisAddress)
 }
 
-/* runExampleLoadBalancerCheck drives the load-balancer half — the ONLY place the trusted-proxy chain is
-proven: through the load balancer the peer is nginx (a trusted proxy), so the forwarded chain is honoured and
-the budget is enforced against the resolved client address.
+/* runExampleLoadBalancerCheck drives the load-balancer half — the ONLY place the trusted-proxy chain is proven: through the load balancer the peer is nginx (a trusted proxy), so the forwarded chain is honoured and the budget is enforced against the resolved client address.
 
-Because it is the sole proof of that property, an unset EXAMPLE_LOAD_BALANCER_URL must announce a SKIP rather
-than pass silently — otherwise a regression in the forwarded-chain resolution goes green (the same false-green
-class the REDIS_ADDRESS skip already guards against: the direct-path checks still pass, this assertion never
-runs, and the section is reported fully passed). */
+   Because it is the sole proof of that property, an unset EXAMPLE_LOAD_BALANCER_URL must announce a SKIP rather than pass silently — otherwise a regression in the forwarded-chain resolution goes green (the same false-green class the REDIS_ADDRESS skip already guards against: the direct-path checks still pass, this assertion never runs, and the section is reported fully passed). */
 func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, redisAddress string) {
     if "" == loadBalancerUrl {
         skip("example http: EXAMPLE_LOAD_BALANCER_URL is not set — the load balancer trusted-proxy half did not run")
@@ -111,8 +100,7 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
 
     resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
 
-    /* the cookie jar keys sessions by the host of the url, so the session established against the direct
-       address is not sent to the load balancer: this half signs in through the load balancer itself */
+    /* the cookie jar keys sessions by the host of the url, so the session established against the direct address is not sent to the load balancer: this half signs in through the load balancer itself */
     signInExampleHttpEditor(client, loadBalancerUrl, exampleHostHeader)
 
     balancerSpentAt := 0
@@ -140,9 +128,7 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
 /* exampleHostHeader is the virtual host the load balancer serves the example under. */
 const exampleHostHeader = "example.melody.localhost.precision-soft.com"
 
-/* newExampleHttpClient keeps a cookie jar so the session the sign-in establishes travels on every following
-call, exactly as a browser would send it. Redirects are not followed: a redirect answer to a write would
-otherwise be read as a success. */
+/* newExampleHttpClient keeps a cookie jar so the session the sign-in establishes travels on every following call, exactly as a browser would send it. Redirects are not followed: a redirect answer to a write would otherwise be read as a success. */
 func newExampleHttpClient() *http.Client {
     jar, jarErr := cookiejar.New(nil)
     if nil != jarErr {
@@ -162,8 +148,7 @@ func signInExampleHttpEditor(client *http.Client, baseUrl string, hostHeader str
     signInExampleHttp(client, baseUrl, hostHeader, exampleHttpEditorUsername, exampleHttpEditorPassword)
 }
 
-/* the admin is what a section signs in as when it drives the directory: the user routes are behind ROLE_ADMIN,
-which the editor does not hold. */
+/* the admin is what a section signs in as when it drives the directory: the user routes are behind ROLE_ADMIN, which the editor does not hold. */
 func signInExampleHttpAdmin(client *http.Client, baseUrl string) {
     signInExampleHttp(client, baseUrl, "", exampleHttpAdminUsername, exampleHttpAdminPassword)
 }
@@ -241,10 +226,7 @@ func requestExample(client *http.Client, method string, baseUrl string, path str
     return response.StatusCode
 }
 
-/* resetExampleRateLimitCounters clears the counters one limiter wrote, so a section starts from a full budget
-instead of inheriting a spent one. The prefix is a parameter because the applications under test keep separate
-counters: they share one redis, and a section that measures an exact exhaustion point cannot have another
-application spending its budget. */
+/* resetExampleRateLimitCounters clears the counters one limiter wrote, so a section starts from a full budget instead of inheriting a spent one. The prefix is a parameter because the applications under test keep separate counters: they share one redis, and a section that measures an exact exhaustion point cannot have another application spending its budget. */
 func resetExampleRateLimitCounters(label string, redisAddress string, prefix string) {
     if "" == redisAddress {
         fail("%s: REDIS_ADDRESS is required to clear the rate limit counters", label)
