@@ -44,6 +44,20 @@ func (instance EncryptedStringFor[R]) MarshalJSON() ([]byte, error) {
     return json.Marshal(redactedPlaceholder)
 }
 
+/* UnmarshalJSON refuses the redaction placeholder MarshalJSON writes and decodes any other string, for the reason on EncryptedString.UnmarshalJSON. */
+func (instance *EncryptedStringFor[R]) UnmarshalJSON(data []byte) error {
+    decoded, present, decodeErr := decodeEncryptedJson(data, fmt.Sprintf("%T", *instance))
+    if nil != decodeErr {
+        return decodeErr
+    }
+
+    if true == present {
+        *instance = EncryptedStringFor[R](decoded)
+    }
+
+    return nil
+}
+
 func (instance EncryptedStringFor[R]) Value() (driver.Value, error) {
     cipherInstance, cipherErr := refCipher[R]()
     if nil != cipherErr {

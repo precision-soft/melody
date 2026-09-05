@@ -4,6 +4,8 @@ import (
     "fmt"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestStaticKeyProvider_ActiveKeyIdsCurrentFirst(t *testing.T) {
@@ -67,5 +69,30 @@ func TestStaticKeyProvider_RedactsKeysUnderNumericVerbs(t *testing.T) {
         if redacted != testCase.rendered {
             t.Fatalf("%s: expected the redacted rendering %q, got %q", testCase.name, redacted, testCase.rendered)
         }
+    }
+}
+
+func TestStaticKeyProvider_RefusesAnAllZeroKey(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the all-zero key to be refused")
+        }
+
+        recoveredErr, isErr := recovered.(error)
+        if false == isErr || false == strings.Contains(recoveredErr.Error(), "encryption key is all zero bytes") || "zeroed" != exception.LogContext(recoveredErr)["keyId"] {
+            t.Fatalf("expected the refusal to name the shape and the key id, got: %v", recovered)
+        }
+    }()
+
+    NewStaticKeyProvider("zeroed", map[string][]byte{"zeroed": make([]byte, 32)})
+}
+
+/* a key of one repeated non-zero byte is accepted on purpose: the door refuses the one shape a key that was never generated has, and judges nothing else about a key that is the operator's */
+func TestStaticKeyProvider_AcceptsAKeyOfOneRepeatedByte(t *testing.T) {
+    provider := NewStaticKeyProvider("filled", map[string][]byte{"filled": newKey(1)})
+
+    if "filled" != provider.CurrentKeyId() {
+        t.Fatalf("expected the repeated-byte key to be accepted")
     }
 }

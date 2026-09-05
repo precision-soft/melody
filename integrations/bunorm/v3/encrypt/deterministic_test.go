@@ -9,6 +9,8 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v3/exception"
+
     _ "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
@@ -132,5 +134,37 @@ func TestBunormDeterministicEncryption_SearchableAtRest(t *testing.T) {
         if "alice@example.com" != string(match.Email) {
             t.Fatalf("expected a decrypted alice row, got %q", match.Email)
         }
+    }
+}
+
+func TestEncryptedDeterministicString_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
+    payload, marshalErr := json.Marshal(EncryptedDeterministicString("lookup value"))
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    decoded := EncryptedDeterministicString("untouched")
+    unmarshalErr := json.Unmarshal(payload, &decoded)
+    if nil == unmarshalErr {
+        t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
+    }
+
+    if "encrypt.EncryptedDeterministicString" != exception.LogContext(unmarshalErr)["type"] {
+        t.Fatalf("expected the refusal to name the column type, got: %v", exception.LogContext(unmarshalErr))
+    }
+
+    if "untouched" != string(decoded) {
+        t.Fatalf("expected the refused document to leave the value untouched, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedDeterministicString_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
+    var decoded EncryptedDeterministicString
+    if unmarshalErr := json.Unmarshal([]byte(`"hello"`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if "hello" != string(decoded) {
+        t.Fatalf("expected the plaintext to decode, got %q", string(decoded))
     }
 }

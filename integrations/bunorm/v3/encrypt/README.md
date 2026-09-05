@@ -14,7 +14,7 @@ The `<ENC>\0gcm1\0` marker lets reads distinguish ciphertext from plaintext:
 
 - `Decrypt` returns an **unmarked** value (legacy/un-migrated plaintext) unchanged — that pass-through is what lets a column be encrypted one write at a time.
 - `Decrypt` **fails** on a **marked** value whose payload no longer decodes (malformed body, invalid base64, shorter than a nonce). The marker is written by this cipher and nothing else, so a broken body behind it is damage, not plaintext — in practice a column too narrow for the ciphertext under a non-strict `sql_mode`, where MySQL truncates the write and only warns. Reading it back verbatim would hand the application a marker plus half a base64 blob as if it had stored them. `Scan` and the bulk `Migrator` report it for the same reason.
-- `Encrypt` is a **no-op** on an already-marked value (no double-encryption). The marker alone is not trusted: a marked value passes through only if it actually decrypts under its (known) key, so a plaintext that merely *looks* like ciphertext is sealed normally instead of being stored raw and poisoning later reads. A marked value carrying an **unknown** `keyId` is sealed the same way — to the write path it is application data, since this cipher only ever writes ids from its own key set. That is why a retired key must **stay in the `KeyProvider`** until every value sealed under it has been re-encrypted: drop it early and the next write that touches such a value seals it a second time, unrecoverably. The bulk `Migrator` is the strict counterpart: reading STORED values, it stops the run on any marked value that no longer decrypts — a missing key or a truncated write — instead of sealing over it.
+- `Encrypt` is a **no-op** on an already-marked value (no double-encryption). The deterministic doors ask one question more: a marked value that authenticates but was sealed with a random nonce is not passed through by `EncryptDeterministic` — it is re-sealed deterministically under the key id it already carries (never the door's, so it is not a rotation), because a random-nonce seal in a deterministic column is a value `CiphertextCandidates` can never produce and the equality lookup would miss the row; a seal that is deterministic already passes through, whatever key it carries. The marker alone is not trusted: a marked value passes through only if it actually decrypts under its (known) key, so a plaintext that merely *looks* like ciphertext is sealed normally instead of being stored raw and poisoning later reads. A marked value carrying an **unknown** `keyId` is sealed the same way — to the write path it is application data, since this cipher only ever writes ids from its own key set. That is why a retired key must **stay in the `KeyProvider`** until every value sealed under it has been re-encrypted: drop it early and the next write that touches such a value seals it a second time, unrecoverably. The bulk `Migrator` is the strict counterpart: reading STORED values, it stops the run on any marked value that no longer decrypts — a missing key or a truncated write — instead of sealing over it.
 - The `keyId` travels in the value, so decryption always uses the key that wrote it (rotation-safe).
 
 > **A sealed value is binary, never a `string` argument.** The marker's two `\0` glue bytes are what makes it a marker, and bun's formatter drops embedded NUL bytes when it inlines a `string` into the SQL text. Through the model — `EncryptedString`, `EncryptedDeterministicString`, or a pointer to either — this never arises: their `Value()` returns `[]byte`, so bun emits a binary literal and every byte survives. It arises when userland writes the raw statement itself: `db.ExecContext(ctx, "update ... set email = ?", string(sealed))` stores the value with its glue bytes stripped, which no longer matches the marker, so the next read takes the unmarked pass-through and hands the application the base64 body as if it were plaintext. Pass `[]byte` for a sealed value in a raw statement, and see [Searchable (deterministic) encryption](#searchable-deterministic-encryption) for the same reason behind `CiphertextCandidates` returning `[][]byte`.
@@ -50,6 +50,8 @@ provider := encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": key32Byte
 encrypt.UseCipher(encrypt.NewCipher(provider)) // process-wide, set once at boot
 ```
 
+Generate every key from `crypto/rand` (32 bytes). `NewStaticKeyProvider` refuses a key of the wrong length and a key of **all zero bytes** — the shape of a key that was never generated — and judges nothing else about a key: its strength is yours.
+
 Type a column as `EncryptedString` to encrypt it transparently:
 
 ```go
@@ -59,8 +61,8 @@ type User struct {
 }
 ```
 
-`EncryptedString` masks its plaintext in `fmt`/`slog`/error output (`String`/`LogValue` return
-`<redacted>`); use an explicit `string(value)` conversion to read the real value. It **fails closed** —
+`EncryptedString` masks its plaintext in `fmt`/`slog`/error/json output (`String`/`LogValue`/`MarshalJSON` return
+`<redacted>`); use an explicit `string(value)` conversion to read the real value. The redaction is one-way on purpose: `UnmarshalJSON` decodes a plaintext string as itself and leaves the value untouched on `null`, but **refuses the placeholder** — a document this package redacted, decoded back into the column, would otherwise seal `<redacted>` over the secret on the next write. It **fails closed** —
 `Value`/`Scan` return an error if no cipher is configured, so a misconfigured app never silently writes plaintext into an "encrypted" column.
 
 ## Key rotation

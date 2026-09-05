@@ -211,3 +211,62 @@ func TestBunormEncryption_CiphertextAtRest(t *testing.T) {
         t.Fatalf("expected the encryption marker (with nul glue bytes intact) at rest, got %q", rawSecret)
     }
 }
+
+func TestEncryptedString_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
+    payload, marshalErr := json.Marshal(EncryptedString("super-secret"))
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    decoded := EncryptedString("untouched")
+    unmarshalErr := json.Unmarshal(payload, &decoded)
+    if nil == unmarshalErr {
+        t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
+    }
+
+    if false == strings.Contains(unmarshalErr.Error(), "redacted encrypted value cannot be decoded back into an encrypted column") {
+        t.Fatalf("expected the refusal to name the placeholder, got: %v", unmarshalErr)
+    }
+
+    if "untouched" != string(decoded) {
+        t.Fatalf("expected the refused document to leave the value untouched, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedString_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
+    var decoded EncryptedString
+    if unmarshalErr := json.Unmarshal([]byte(`"hello"`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if "hello" != string(decoded) {
+        t.Fatalf("expected the plaintext to decode, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedString_UnmarshalJSONLeavesTheValueOnNull(t *testing.T) {
+    type holder struct {
+        Email EncryptedString `json:"email"`
+    }
+
+    decoded := holder{Email: "kept"}
+    if unmarshalErr := json.Unmarshal([]byte(`{"email":null}`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if "kept" != string(decoded.Email) {
+        t.Fatalf("expected a json null to leave the value untouched, got %q", string(decoded.Email))
+    }
+}
+
+func TestEncryptedString_UnmarshalJSONRefusesANonStringValue(t *testing.T) {
+    var decoded EncryptedString
+    unmarshalErr := json.Unmarshal([]byte(`42`), &decoded)
+    if nil == unmarshalErr {
+        t.Fatalf("expected a number to be refused, got %q", string(decoded))
+    }
+
+    if false == strings.Contains(unmarshalErr.Error(), "encrypted column json value is not a string") {
+        t.Fatalf("expected the refusal to name the shape, got: %v", unmarshalErr)
+    }
+}

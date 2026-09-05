@@ -5,6 +5,8 @@ import (
     "fmt"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 type crmCipherRef struct{}
@@ -226,3 +228,38 @@ func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
 
 /* the compartment-bound column carries the EncryptedColumn marker its non-generic sibling carries, which is what the auto-redaction type walk recognises it by. The assertion lives here rather than beside the type because instantiating a generic column needs a CipherRef marker, and the package deliberately ships none — a marker is the integrator's, minted per compartment. */
 var _ EncryptedColumn = EncryptedStringFor[crmCipherRef]("")
+
+func TestEncryptedStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
+    payload, marshalErr := json.Marshal(EncryptedStringFor[crmCipherRef]("super-secret"))
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    decoded := EncryptedStringFor[crmCipherRef]("untouched")
+    unmarshalErr := json.Unmarshal(payload, &decoded)
+    if nil == unmarshalErr {
+        t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
+    }
+
+    if false == strings.Contains(fmt.Sprint(exception.LogContext(unmarshalErr)["type"]), "encrypt.EncryptedStringFor[") {
+        t.Fatalf("expected the refusal to name the column type, got: %v", exception.LogContext(unmarshalErr))
+    }
+
+    if "untouched" != string(decoded) {
+        t.Fatalf("expected the refused document to leave the value untouched, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedStringFor_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
+    var decoded EncryptedStringFor[crmCipherRef]
+    if unmarshalErr := json.Unmarshal([]byte(`"hello"`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if "hello" != string(decoded) {
+        t.Fatalf("expected the plaintext to decode, got %q", string(decoded))
+    }
+}
+
+/* the generic instantiation cannot be asserted in the source file, because the package ships no marker of its own on purpose: the marker is the integrator's, one per compartment */
+var _ json.Unmarshaler = (*EncryptedStringFor[crmCipherRef])(nil)

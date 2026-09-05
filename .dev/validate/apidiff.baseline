@@ -88,6 +88,10 @@ integrations/bunorm/v3 ~ compatible ~ ContextOpener ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ ./encrypt.EncryptedColumn ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*Migrator).EnsureColumnCapacity ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*Migrator).EnsureColumnCapacityForReencrypt ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*EncryptedString).UnmarshalJSON ~ added ~ keep ~ the read side of the redacting MarshalJSON: a document it produced and decoded back into the column stored the placeholder as the value and the next Value() sealed it over the secret; a defect repair, and v3.14.0 is the last minor that ships features
+integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*EncryptedDeterministicString).UnmarshalJSON ~ added ~ keep ~ the same read side on the deterministic column type, the same reason as the sibling row
+integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*EncryptedStringFor[R]).UnmarshalJSON ~ added ~ keep ~ the same read side on the compartment-bound column type, the same reason as the sibling row
+integrations/bunorm/v3 ~ compatible ~ ./encrypt.(*EncryptedDeterministicStringFor[R]).UnmarshalJSON ~ added ~ keep ~ the same read side on the compartment-bound deterministic column type, the same reason as the sibling row
 integrations/bunorm/v3 ~ compatible ~ ErrProviderReturnedNilDatabase ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ (*ManagerRegistry).CloseMigrationDatabase ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ (*ManagerRegistry).MigrationDatabase ~ added ~ unclassified ~

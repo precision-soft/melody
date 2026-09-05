@@ -153,7 +153,9 @@ func (instance *Recorder) deadLetter(table string, entry Entry, saveErr error) {
         return
     }
 
-    /* the record carries the failure's whole cause chain and context, not a flattened message: an exception.Error renders its message alone through Error(), so "could not write the audit entries" without the driver error and the table was the entire diagnostic an operator got for a trail that stopped filling */
+    /* the record carries the failure's whole cause chain and context, not a flattened message: an exception.Error renders its message alone through Error(), so "could not write the audit entries" without the driver error and the table was the entire diagnostic an operator got for a trail that stopped filling.
+
+       It carries the change-set too, on purpose: the dead-letter is the fallback store of an entry the trail could not keep ("logged, not dropped" is the readme's contract), and without the changes the record would say only that something was lost. What reaches the journal is the change-set as the trail would have stored it — an encrypted column and an audit:"redact" field are already the placeholder — so the trail's own redaction policy is the journal's, and a field that must not reach either is tagged, not filtered here. */
     logger.Error("audit entry could not be stored; dead-lettering", exception.LogContext(saveErr, map[string]any{
         "table":     table,
         "entity":    entry.Entity,

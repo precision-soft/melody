@@ -511,3 +511,117 @@ func TestCipher_DecryptReportsAStructurallyShortPayloadAsDamage(t *testing.T) {
         t.Fatalf("expected the structural class, got: %v", decryptErr)
     }
 }
+
+func TestCipher_EncryptDeterministicConvertsARandomSealInPlace(t *testing.T) {
+    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+
+    sealed, sealErr := cipher.Encrypt("alice")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    stored, encryptErr := cipher.EncryptDeterministic(sealed)
+    if nil != encryptErr {
+        t.Fatalf("deterministic encrypt: %v", encryptErr)
+    }
+
+    if sealed == stored {
+        t.Fatalf("expected the random-nonce seal to be re-sealed deterministically, not passed through")
+    }
+
+    if false == deterministicCandidateMatches(t, cipher, "alice", stored) {
+        t.Fatalf("expected the converted value to be found by the equality lookup")
+    }
+
+    decrypted, decryptErr := cipher.Decrypt(stored)
+    if nil != decryptErr || "alice" != decrypted {
+        t.Fatalf("expected the converted value to keep its plaintext, got %q (%v)", decrypted, decryptErr)
+    }
+}
+
+func TestCipher_EncryptDeterministicKeepsTheKeyARandomSealCarries(t *testing.T) {
+    retiredCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    sealedUnderRetired, sealErr := retiredCipher.Encrypt("alice")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    rotated := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)}))
+
+    stored, encryptErr := rotated.EncryptDeterministic(sealedUnderRetired)
+    if nil != encryptErr {
+        t.Fatalf("deterministic encrypt: %v", encryptErr)
+    }
+
+    keyId, _, keyIdErr := keyIdOf(stored)
+    if nil != keyIdErr || "v1" != keyId {
+        t.Fatalf("expected the conversion to keep the key id the seal carried, got %q (%v)", keyId, keyIdErr)
+    }
+
+    expected, expectedErr := retiredCipher.EncryptDeterministic("alice")
+    if nil != expectedErr || expected != stored {
+        t.Fatalf("expected the deterministic seal under the carried key, got another value (%v)", expectedErr)
+    }
+}
+
+func TestCipher_EncryptDeterministicWithKeyIdKeepsTheKeyARandomSealCarries(t *testing.T) {
+    retiredCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    sealedUnderRetired, sealErr := retiredCipher.Encrypt("alice")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    rotated := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)}))
+
+    stored, encryptErr := rotated.EncryptDeterministicWithKeyId(sealedUnderRetired, "v2")
+    if nil != encryptErr {
+        t.Fatalf("deterministic encrypt: %v", encryptErr)
+    }
+
+    keyId, _, keyIdErr := keyIdOf(stored)
+    if nil != keyIdErr || "v1" != keyId {
+        t.Fatalf("expected the conversion to keep the key id the seal carried rather than rotate to the door's, got %q (%v)", keyId, keyIdErr)
+    }
+
+    if false == deterministicCandidateMatches(t, rotated, "alice", stored) {
+        t.Fatalf("expected the converted value to be found by the equality lookup")
+    }
+}
+
+func TestCipher_EncryptDeterministicPassesThroughADeterministicSealUnderARetiredKey(t *testing.T) {
+    retiredCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    sealedUnderRetired, sealErr := retiredCipher.EncryptDeterministic("alice")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    rotated := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)}))
+
+    stored, encryptErr := rotated.EncryptDeterministic(sealedUnderRetired)
+    if nil != encryptErr {
+        t.Fatalf("deterministic encrypt: %v", encryptErr)
+    }
+
+    if sealedUnderRetired != stored {
+        t.Fatalf("expected a deterministic seal under a retired key still in the set to pass through unchanged")
+    }
+}
+
+func TestCipher_EncryptPassesThroughADeterministicSeal(t *testing.T) {
+    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+
+    deterministic, sealErr := cipher.EncryptDeterministic("alice")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    /* the random door asks only whether the value authenticates: a deterministic seal is confidential whichever nonce it carries, so it is not re-sealed */
+    stored, encryptErr := cipher.Encrypt(deterministic)
+    if nil != encryptErr {
+        t.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    if deterministic != stored {
+        t.Fatalf("expected the random door to pass a deterministic seal through unchanged")
+    }
+}

@@ -222,7 +222,7 @@ func (instance *AsyncStorage) deadLetter(table string, entry Entry, saveErr erro
         return
     }
 
-    /* the record carries the failure's whole cause chain and context, not a flattened message — see Recorder.deadLetter */
+    /* the record carries the failure's whole cause chain and context, not a flattened message, and the change-set as the trail would have stored it, already under the trail's redaction — see Recorder.deadLetter for both */
     logger.Error("async audit entry could not be stored; dead-lettering", exception.LogContext(saveErr, map[string]any{
         "table":     table,
         "entity":    entry.Entity,

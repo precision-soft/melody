@@ -1,7 +1,12 @@
 package encrypt
 
 import (
+    "encoding/json"
+    "fmt"
+    "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestEncryptedDeterministicStringFor_EqualPlaintextsProduceEqualCiphertexts(t *testing.T) {
@@ -56,3 +61,38 @@ func TestEncryptedDeterministicStringFor_RedactsString(t *testing.T) {
 
 /* the searchable compartment-bound column carries the same marker, pinned here for the reason written on its EncryptedStringFor sibling. */
 var _ EncryptedColumn = EncryptedDeterministicStringFor[crmCipherRef]("")
+
+func TestEncryptedDeterministicStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
+    payload, marshalErr := json.Marshal(EncryptedDeterministicStringFor[crmCipherRef]("lookup value"))
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    decoded := EncryptedDeterministicStringFor[crmCipherRef]("untouched")
+    unmarshalErr := json.Unmarshal(payload, &decoded)
+    if nil == unmarshalErr {
+        t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
+    }
+
+    if false == strings.Contains(fmt.Sprint(exception.LogContext(unmarshalErr)["type"]), "encrypt.EncryptedDeterministicStringFor[") {
+        t.Fatalf("expected the refusal to name the column type, got: %v", exception.LogContext(unmarshalErr))
+    }
+
+    if "untouched" != string(decoded) {
+        t.Fatalf("expected the refused document to leave the value untouched, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedDeterministicStringFor_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
+    var decoded EncryptedDeterministicStringFor[crmCipherRef]
+    if unmarshalErr := json.Unmarshal([]byte(`"hello"`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if "hello" != string(decoded) {
+        t.Fatalf("expected the plaintext to decode, got %q", string(decoded))
+    }
+}
+
+/* the generic instantiation cannot be asserted in the source file — see the sibling assertion on EncryptedStringFor */
+var _ json.Unmarshaler = (*EncryptedDeterministicStringFor[crmCipherRef])(nil)

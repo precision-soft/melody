@@ -3,6 +3,7 @@ package encrypt
 import (
     "database/sql/driver"
     "encoding/json"
+    "fmt"
     "log/slog"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -34,6 +35,20 @@ func (instance EncryptedString) LogValue() slog.Value {
 
 func (instance EncryptedString) MarshalJSON() ([]byte, error) {
     return json.Marshal(redactedPlaceholder)
+}
+
+/* UnmarshalJSON is the read side of the redaction: a document MarshalJSON produced carries the placeholder where the plaintext was, and decoding it back into the column used to store the placeholder as the value, so the next Value() sealed "<redacted>" in place of the secret with no error anywhere on the way. The placeholder is refused by name; any other string is the plaintext the application typed, and a json null leaves the value untouched. */
+func (instance *EncryptedString) UnmarshalJSON(data []byte) error {
+    decoded, present, decodeErr := decodeEncryptedJson(data, fmt.Sprintf("%T", *instance))
+    if nil != decodeErr {
+        return decodeErr
+    }
+
+    if true == present {
+        *instance = EncryptedString(decoded)
+    }
+
+    return nil
 }
 
 func (instance EncryptedString) Value() (driver.Value, error) {
@@ -91,9 +106,32 @@ func scanRaw(source any) (string, bool, error) {
     }
 }
 
+/* decodeEncryptedJson is the shared read side of the four column types' MarshalJSON. It answers the decoded plaintext and whether one was present: a json null is the no-op encoding/json asks of every Unmarshaler, so nothing is present and nothing is an error. The redaction placeholder is refused rather than stored, because a value equal to it can only have come from a document this package redacted — an application that round-trips such a document would otherwise seal the placeholder over its own secret in silence. The refusal names the column type so the wiring that decoded the document is the one reported. */
+func decodeEncryptedJson(data []byte, columnType string) (string, bool, error) {
+    if "null" == string(data) {
+        return "", false, nil
+    }
+
+    var decoded string
+    if unmarshalErr := json.Unmarshal(data, &decoded); nil != unmarshalErr {
+        return "", false, exception.NewError("encrypted column json value is not a string", map[string]any{"type": columnType}, unmarshalErr)
+    }
+
+    if redactedPlaceholder == decoded {
+        return "", false, exception.NewError(
+            "a redacted encrypted value cannot be decoded back into an encrypted column; MarshalJSON removed the plaintext",
+            map[string]any{"type": columnType},
+            nil,
+        )
+    }
+
+    return decoded, true, nil
+}
+
 func errCipherNotConfigured() error {
     return exception.NewError("encryption cipher is not configured; call encrypt.UseCipher(...) first", nil, nil)
 }
 
 var _ driver.Valuer = EncryptedString("")
+var _ json.Unmarshaler = (*EncryptedString)(nil)
 var _ EncryptedColumn = EncryptedString("")
