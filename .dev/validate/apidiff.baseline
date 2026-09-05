@@ -112,10 +112,14 @@ integrations/cron/v3 ~ compatible ~ ErrBusyboxDivergentDaySchedule ~ added ~ unc
 integrations/cron/v3 ~ compatible ~ ErrCommandTimeout ~ added ~ unclassified ~
 integrations/cron/v3 ~ compatible ~ ErrK8sInvalidNamespace ~ added ~ unclassified ~
 integrations/cron/v3 ~ compatible ~ ErrUnknownTimezone ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ JoinShellTokens ~ added ~ keep ~ integrators writing a crontab-like dialect — the readme's own custom template, the ansible-cron example — need the validation and the shell quoting the builtin crontab dialect renders through; the example rendered a second crontab line from a schedule field carrying a space and a % the builtin refuses by name, because these were package-private
 integrations/cron/v3 ~ compatible ~ (*K8sTemplate).OwnershipMarker ~ added ~ unclassified ~
 integrations/cron/v3 ~ compatible ~ (*K8sTemplate).RendersUserColumn ~ added ~ unclassified ~
 integrations/cron/v3 ~ compatible ~ OwnedTemplate ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ ShellQuoteIfNeeded ~ added ~ keep ~ integrators writing a crontab-like dialect — the readme's own custom template, the ansible-cron example — need the validation and the shell quoting the builtin crontab dialect renders through; the example rendered a second crontab line from a schedule field carrying a space and a % the builtin refuses by name, because these were package-private
 integrations/cron/v3 ~ compatible ~ UserColumnTemplate ~ added ~ unclassified ~
+integrations/cron/v3 ~ compatible ~ ValidateScheduleFields ~ added ~ keep ~ integrators writing a crontab-like dialect — the readme's own custom template, the ansible-cron example — need the validation and the shell quoting the builtin crontab dialect renders through; the example rendered a second crontab line from a schedule field carrying a space and a % the builtin refuses by name, because these were package-private
+integrations/cron/v3 ~ compatible ~ ValidateUserField ~ added ~ keep ~ integrators writing a crontab-like dialect — the readme's own custom template, the ansible-cron example — need the validation and the shell quoting the builtin crontab dialect renders through; the example rendered a second crontab line from a schedule field carrying a space and a % the builtin refuses by name, because these were package-private
 integrations/cron/v3 ~ incompatible ~ CrontabForbiddenChars ~ removed ~ unclassified ~
 integrations/cron/v3 ~ incompatible ~ ErrSharedRunnerCommandFlags ~ removed ~ unclassified ~
 integrations/cron/v3 ~ incompatible ~ ForbiddenChar ~ removed ~ unclassified ~

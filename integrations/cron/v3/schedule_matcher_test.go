@@ -531,7 +531,7 @@ func TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable(t *testing.T) {
                 t.Skipf("the matcher rejects %q, so the generator is free to reject it too", field)
             }
 
-            generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab)
+            generatorErr := ValidateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab)
             if nil != generatorErr {
                 t.Fatalf("the matcher accepts %q but the generator rejects it, so a schedule that runs in-process cannot be generated: %v", field, generatorErr)
             }
@@ -556,7 +556,7 @@ func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) 
                 t.Fatal("the matcher accepted a step on a single value")
             }
 
-            generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: testCase.schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab)
+            generatorErr := ValidateScheduleFields(Entry{Name: "job", Schedule: testCase.schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab)
             if nil == generatorErr {
                 t.Fatal("the generator accepted a step on a single value, so it would emit a schedule the runner refuses to boot on")
             }
@@ -582,7 +582,7 @@ func TestScheduleMatcher_TheSuggestedExplicitRangeIsAccepted(t *testing.T) {
         t.Fatalf("expected the explicit range to be accepted by the matcher, got %v", matcherErr)
     }
 
-    if generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != generatorErr {
+    if generatorErr := ValidateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != generatorErr {
         t.Fatalf("expected the explicit range to be accepted by the generator, got %v", generatorErr)
     }
 
@@ -609,7 +609,7 @@ func TestScheduleMatcher_WhitespaceIsRejectedByBothHalves(t *testing.T) {
                 t.Fatalf("the matcher accepted a field carrying whitespace: %q", field)
             }
 
-            if generatorErr := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab); nil == generatorErr {
+            if generatorErr := ValidateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab); nil == generatorErr {
                 t.Fatalf("the generator accepted a field carrying whitespace, so it would render a crontab crond refuses to parse: %q", field)
             }
         })
@@ -737,7 +737,7 @@ func TestScheduleMatcher_KubernetesGeneratableDayFieldsAlwaysParse(t *testing.T)
     } {
         entry := Entry{Name: "job", Schedule: schedule}
 
-        if generatorErr := validateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil != generatorErr {
+        if generatorErr := ValidateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil != generatorErr {
             t.Fatalf("expected the generator to accept %+v under the kubernetes dialect, got %v", schedule, generatorErr)
         }
 

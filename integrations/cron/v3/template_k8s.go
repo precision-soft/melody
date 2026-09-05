@@ -193,7 +193,7 @@ func buildCronJobManifest(entry Entry, image string, namespace string, restartPo
     }
 
     /* the same per-field schedule validation the crontab template applies; embedded whitespace, %, CR or LF are all invalid in a k8s cron schedule too, so reject them with a clear error rather than emitting a broken manifest */
-    if scheduleValidationErr := validateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil != scheduleValidationErr {
+    if scheduleValidationErr := ValidateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil != scheduleValidationErr {
         return "", "", scheduleValidationErr
     }
 

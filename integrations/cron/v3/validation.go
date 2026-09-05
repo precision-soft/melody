@@ -98,8 +98,8 @@ func ValidateNoForbiddenCharacters(tokens []string, forbidden []ForbiddenCharact
     return nil
 }
 
-/* validateUserField reads the same whitespace rule the schedule fields read: any unicode space, not the ascii four. The user column sits on the generated line beside them, and crond splits that line on a vertical tab or a no-break space exactly as it splits on a plain space — so a user carrying one either fails the daemon's user lookup, and the entry silently never runs, or shifts the column boundary and hands part of the name to the shell as the command. */
-func validateUserField(label string, value string) error {
+/* ValidateUserField reads the same whitespace rule the schedule fields read: any unicode space, not the ascii four. The user column sits on the generated line beside them, and crond splits that line on a vertical tab or a no-break space exactly as it splits on a plain space — so a user carrying one either fails the daemon's user lookup, and the entry silently never runs, or shifts the column boundary and hands part of the name to the shell as the command. The value is then held to CrontabForbiddenCharacters. label names the field in the refusal. It is exported for a custom template whose dialect places the user on a crontab line beside the schedule — ansible.builtin.cron does — so that dialect refuses the user the builtin crontab dialect refuses. */
+func ValidateUserField(label string, value string) error {
     if -1 != strings.IndexFunc(value, unicode.IsSpace) {
         return exception.NewError(
             fmt.Sprintf("cron: %s %q contains whitespace; user fields must be single tokens", label, value),
@@ -160,7 +160,7 @@ func exampleSteppedRangeOf(item string, fieldName string) string {
     return item[:slashIndex] + "-" + maximum + item[slashIndex:]
 }
 
-/* busyboxDayFieldsDiverge reports whether busybox crond would run this pair of day fields under a different rule than vixie crond and the in-process matcher. The two daemons classify a day field differently: vixie reads the spelling's first character — a star-based field counts as unrestricted — while busybox reads the expanded value set — a field admitting every value counts as unused and the other field alone governs (measured on busybox 1.37: DayOfWeek "0-6" beside DayOfMonth "16" runs only on the 16th, where vixie and the matcher run every day). The check is semantic rather than a shape list: both models are evaluated over every day-of-month / day-of-week combination and any disagreement is the divergence, so a pair the two daemons happen to read identically — a stepped wildcard beside the plain one, or "0-6" beside it — passes. It expects fields that already passed validateScheduleFields; a spelling that does not parse is answered as non-divergent and left to that refusal. */
+/* busyboxDayFieldsDiverge reports whether busybox crond would run this pair of day fields under a different rule than vixie crond and the in-process matcher. The two daemons classify a day field differently: vixie reads the spelling's first character — a star-based field counts as unrestricted — while busybox reads the expanded value set — a field admitting every value counts as unused and the other field alone governs (measured on busybox 1.37: DayOfWeek "0-6" beside DayOfMonth "16" runs only on the 16th, where vixie and the matcher run every day). The check is semantic rather than a shape list: both models are evaluated over every day-of-month / day-of-week combination and any disagreement is the divergence, so a pair the two daemons happen to read identically — a stepped wildcard beside the plain one, or "0-6" beside it — passes. It expects fields that already passed ValidateScheduleFields; a spelling that does not parse is answered as non-divergent and left to that refusal. */
 func busyboxDayFieldsDiverge(dayOfMonthExpression string, dayOfWeekExpression string) bool {
     dayOfMonth, dayOfMonthErr := parseCronField(dayOfMonthExpression, cronFieldBounds{name: "DayOfMonth", minimum: dayOfMonthMinimum, maximum: dayOfMonthMaximum})
     if nil != dayOfMonthErr {
@@ -231,7 +231,8 @@ func busyboxDayDecision(dayMatches bool, dayUnused bool, weekdayMatches bool, we
     return dayMatches || weekdayMatches
 }
 
-func validateScheduleFields(entry Entry, forbidden []ForbiddenCharacter, dialect RunnerDialect) error {
+/* ValidateScheduleFields refuses a schedule the scheduler behind dialect would read differently from the in-process matcher, or not at all: whitespace inside a field, a character of forbidden, a step on a single value, and a field outside the dialect's bounds — names folded onto their numbers first, and "?" read as the wildcard only under the kubernetes dialect. A nil Schedule is the wildcard on every field and passes. The builtin dialects call it before rendering anything; a custom template that writes the five fields into a crontab — ansible.builtin.cron does — calls it with CrontabForbiddenCharacters and RunnerDialectCrontab, so a field carrying a space cannot become a second crontab line and a field carrying % cannot end the line early. */
+func ValidateScheduleFields(entry Entry, forbidden []ForbiddenCharacter, dialect RunnerDialect) error {
     if nil == entry.Schedule {
         return nil
     }

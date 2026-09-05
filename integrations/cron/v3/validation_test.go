@@ -9,11 +9,11 @@ import (
 )
 
 func TestValidateUserFieldRejectsForbiddenCharacter(t *testing.T) {
-    if false == errors.Is(validateUserField("user", "svc%role"), ErrForbiddenCharacter) {
+    if false == errors.Is(ValidateUserField("user", "svc%role"), ErrForbiddenCharacter) {
         t.Fatalf("expected ErrForbiddenCharacter for a user token containing a crontab line-continuation %%")
     }
 
-    if nil != validateUserField("user", "deploy") {
+    if nil != ValidateUserField("user", "deploy") {
         t.Fatalf("expected a normal user token to validate")
     }
 }
@@ -82,7 +82,7 @@ func TestValidateScheduleFieldsRejectsOutOfRangeValues(t *testing.T) {
     }
 
     for _, testCase := range cases {
-        err := validateScheduleFields(Entry{Name: "job", Schedule: testCase.schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab)
+        err := ValidateScheduleFields(Entry{Name: "job", Schedule: testCase.schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab)
         if nil == err {
             t.Fatalf("expected an out-of-range %s to fail generation, got nil", testCase.field)
         }
@@ -97,11 +97,11 @@ func TestValidateScheduleFieldsRejectsOutOfRangeValues(t *testing.T) {
 func TestValidateScheduleFieldsDayOfWeekSevenPerDialect(t *testing.T) {
     entry := Entry{Name: "job", Schedule: &Schedule{DayOfWeek: "7"}}
 
-    if err := validateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != err {
+    if err := ValidateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != err {
         t.Fatalf("expected day of week 7 to pass under the crontab dialect, got: %v", err)
     }
 
-    if err := validateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil == err {
+    if err := ValidateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil == err {
         t.Fatalf("expected day of week 7 to fail under the kubernetes dialect")
     }
 }
@@ -114,16 +114,16 @@ func TestValidateScheduleFieldsQuestionMarkPerDialect(t *testing.T) {
     } {
         entry := Entry{Name: "job", Schedule: schedule}
 
-        if err := validateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil != err {
+        if err := ValidateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil != err {
             t.Fatalf("expected the question mark to pass under the kubernetes dialect, got: %v", err)
         }
 
-        if err := validateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil == err {
+        if err := ValidateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil == err {
             t.Fatalf("expected the question mark to fail under the crontab dialect")
         }
     }
 
-    if err := validateScheduleFields(Entry{Name: "job", Schedule: &Schedule{Minute: "?"}}, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil == err {
+    if err := ValidateScheduleFields(Entry{Name: "job", Schedule: &Schedule{Minute: "?"}}, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil == err {
         t.Fatalf("expected the question mark to stay day-field-only under the kubernetes dialect")
     }
 }
@@ -138,7 +138,7 @@ func TestValidateScheduleFieldsAcceptsValidShapes(t *testing.T) {
     }
 
     for index, schedule := range cases {
-        if err := validateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != err {
+        if err := ValidateScheduleFields(Entry{Name: "job", Schedule: schedule}, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != err {
             t.Fatalf("expected schedule %d to pass, got: %v", index, err)
         }
     }
@@ -200,7 +200,7 @@ func TestValidateUserField_RefusesEveryUnicodeSpace(t *testing.T) {
     }
 
     for spelling, value := range spellings {
-        err := validateUserField("user", value)
+        err := ValidateUserField("user", value)
         if nil == err {
             t.Fatalf("%s: a user carrying whitespace must be refused", spelling)
         }
@@ -213,7 +213,7 @@ func TestValidateUserField_RefusesEveryUnicodeSpace(t *testing.T) {
 
 /* the wrapping refusal names the entry, the field and the value; the parse error beneath it carries the bounds and the dialect that chose them. A reader of the outer record sees the first, the journal's cause chain walks to the second — so the pin unwraps one link, where the frozen majors' generator validation deliberately names no dialect because theirs judges everything against the crontab limits alone. */
 func TestValidateScheduleFields_TheRefusalCauseNamesTheFieldAndTheDialect(t *testing.T) {
-    err := validateScheduleFields(
+    err := ValidateScheduleFields(
         Entry{Name: "job:probe", Schedule: &Schedule{DayOfWeek: "7"}},
         CrontabForbiddenCharacters,
         RunnerDialectKubernetes,

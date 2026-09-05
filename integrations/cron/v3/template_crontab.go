@@ -126,9 +126,9 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
         }
 
         if true == instance.includeUserColumn {
-            builder.WriteString(fmt.Sprintf("* * * * * %s %s\n", userColumn, joinShellTokens(options.HeartbeatCommand)))
+            builder.WriteString(fmt.Sprintf("* * * * * %s %s\n", userColumn, JoinShellTokens(options.HeartbeatCommand)))
         } else {
-            builder.WriteString(fmt.Sprintf("* * * * * %s\n", joinShellTokens(options.HeartbeatCommand)))
+            builder.WriteString(fmt.Sprintf("* * * * * %s\n", JoinShellTokens(options.HeartbeatCommand)))
         }
 
         sectionsWritten++
@@ -151,9 +151,9 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
         }
 
         if true == instance.includeUserColumn {
-            builder.WriteString(fmt.Sprintf("* * * * * %s /bin/touch %s\n", userColumn, shellQuoteIfNeeded(options.HeartbeatPath)))
+            builder.WriteString(fmt.Sprintf("* * * * * %s /bin/touch %s\n", userColumn, ShellQuoteIfNeeded(options.HeartbeatPath)))
         } else {
-            builder.WriteString(fmt.Sprintf("* * * * * /bin/touch %s\n", shellQuoteIfNeeded(options.HeartbeatPath)))
+            builder.WriteString(fmt.Sprintf("* * * * * /bin/touch %s\n", ShellQuoteIfNeeded(options.HeartbeatPath)))
         }
 
         sectionsWritten++
@@ -178,7 +178,7 @@ func (instance *CrontabTemplate) heartbeatUserColumn(
         return "", exception.NewError(missingUserMessage, missingUserContext, ErrHeartbeatUserMissing)
     }
 
-    if userValidationErr := validateUserField("heartbeat user", options.HeartbeatUser); nil != userValidationErr {
+    if userValidationErr := ValidateUserField("heartbeat user", options.HeartbeatUser); nil != userValidationErr {
         return "", userValidationErr
     }
 
@@ -195,12 +195,12 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
             )
         }
 
-        if userValidationErr := validateUserField(fmt.Sprintf("entry %q user", entry.Name), entry.User); nil != userValidationErr {
+        if userValidationErr := ValidateUserField(fmt.Sprintf("entry %q user", entry.Name), entry.User); nil != userValidationErr {
             return "", userValidationErr
         }
     }
 
-    if scheduleValidationErr := validateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != scheduleValidationErr {
+    if scheduleValidationErr := ValidateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != scheduleValidationErr {
         return "", scheduleValidationErr
     }
 
@@ -241,7 +241,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
             return "", validationErr
         }
 
-        commandPart = joinShellTokens(entry.Command)
+        commandPart = JoinShellTokens(entry.Command)
     } else {
         if "" == entry.Binary {
             return "", exception.NewError(
@@ -256,7 +256,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
             return "", validationErr
         }
 
-        commandPart = joinShellTokens(tokens)
+        commandPart = JoinShellTokens(tokens)
     }
 
     logRedirect := ""

@@ -280,7 +280,7 @@ Render(entries []Entry, options RenderOptions) (string, error)
 }
 ```
 
-`Render` is called once per output destination — `entries` are already expanded for multi-instance and have their `Binary`/`User` defaulted; `options` carries the resolved heartbeat configuration for this specific destination. The returned string is written atomically to disk by `melody:cron:generate` — each individual file is a temp-file-plus-rename, so `crond` never observes a truncated crontab. Any error (including `ValidateNoForbiddenCharacters` with your template's own forbidden-character list) aborts the generation immediately.
+`Render` is called once per output destination — `entries` are already expanded for multi-instance and have their `Binary`/`User` defaulted; `options` carries the resolved heartbeat configuration for this specific destination. The returned string is written atomically to disk by `melody:cron:generate` — each individual file is a temp-file-plus-rename, so `crond` never observes a truncated crontab. Any error (including `ValidateNoForbiddenCharacters` with your template's own forbidden-character list, and — on the v3 binding — `ValidateScheduleFields` and `ValidateUserField` for a dialect that writes a crontab line) aborts the generation immediately.
 
 There is **no all-or-nothing guarantee across destinations.** `melody:cron:generate` walks the destinations in lexicographic order and renders and writes each one before moving to the next, so an error raised while rendering the third of four files leaves the first two already on disk and the last two absent. Per-file atomicity holds; a whole-run rollback does not. Validate a multi-destination configuration in a test, or treat a failed generation as "the output directory is now in an unknown state" and re-run once the error is fixed.
 
@@ -351,25 +351,33 @@ func (instance *AnsibleCronTemplate) Name() string {
 return "ansible-cron"
 }
 
+/* ansible.builtin.cron writes the crontab line itself — the schedule fields, the user and the job joined on a space,
+   nothing validated and nothing escaped — so the dialect holds every value to what the builtin crontab dialect holds
+   it to, through the binding's exported validators, and quotes the job through the binding's shell quoting */
 func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
-forbidden := []melodycron.ForbiddenCharacter{
-{Char: '\n', Reason: "a literal newline terminates the yaml scalar"},
-}
-
 var builder strings.Builder
 builder.WriteString(ansibleCronOwnershipMarker + "\n---\n")
 
 for _, entry := range entries {
+if userErr := melodycron.ValidateUserField("ansible-cron entry "+entry.Name+" user", entry.User); nil != userErr {
+return "", userErr
+}
+
+if scheduleErr := melodycron.ValidateScheduleFields(entry, melodycron.CrontabForbiddenCharacters, melodycron.RunnerDialectCrontab); nil != scheduleErr {
+return "", scheduleErr
+}
+
 job := entry.Command
 if 0 == len(job) {
 job = append([]string{entry.Binary}, entry.Args...)
 }
 
-if validationErr := melodycron.ValidateNoForbiddenCharacters(job, forbidden, "ansible-cron entry "+entry.Name); nil != validationErr {
+if validationErr := melodycron.ValidateNoForbiddenCharacters(job, melodycron.CrontabForbiddenCharacters, "ansible-cron entry "+entry.Name); nil != validationErr {
 return "", validationErr
 }
 
-// ... one ansible.builtin.cron task per entry, from the schedule fields + instance.TaskNamePrefix ...
+// ... one ansible.builtin.cron task per entry: the schedule fields, entry.User and
+//     melodycron.JoinShellTokens(job), each emitted as a double-quoted YAML scalar ...
 }
 
 return builder.String(), nil
@@ -569,7 +577,7 @@ When no command declares a schedule and `--heartbeat-path` (after the cascade) i
 
 ## Package surface
 
-The v1, v2 and v3 bindings share a common core surface — `OwnedTemplate`, `UserColumnTemplate`, `RendersUserColumn`, `CrontabOwnershipMarker` and `ErrBusyboxDivergentDaySchedule` included, in all three since the v3 binding's generator caught up. Four things still tell the bindings apart: v3 additionally ships the built-in `k8s` template with its errors and parameters, plus a `Commands` helper; v3 alone gives the in-process runner a zone of its own, through `Configuration.InTimezone`, `Configuration.TimezoneName`, the runner's `--timezone` flag and `ErrUnknownTimezone`; v3 alone has dropped the deprecated abbreviated aliases the frozen majors keep; and v3 alone has dropped `ErrSharedRunnerCommandFlags` with the construction refusal behind it, which the frozen majors still need and this one no longer can use. Code using the v3-only identifiers, or the aliases, compiles on one side only.
+The v1, v2 and v3 bindings share a common core surface — `OwnedTemplate`, `UserColumnTemplate`, `RendersUserColumn`, `CrontabOwnershipMarker` and `ErrBusyboxDivergentDaySchedule` included, in all three since the v3 binding's generator caught up. Four things still tell the bindings apart: v3 additionally ships the built-in `k8s` template with its errors and parameters, plus a `Commands` helper and the validators and shell quoting a custom crontab-like dialect renders through (`ValidateScheduleFields`, `ValidateUserField`, `JoinShellTokens`, `ShellQuoteIfNeeded`); v3 alone gives the in-process runner a zone of its own, through `Configuration.InTimezone`, `Configuration.TimezoneName`, the runner's `--timezone` flag and `ErrUnknownTimezone`; v3 alone has dropped the deprecated abbreviated aliases the frozen majors keep; and v3 alone has dropped `ErrSharedRunnerCommandFlags` with the construction refusal behind it, which the frozen majors still need and this one no longer can use. Code using the v3-only identifiers, or the aliases, compiles on one side only.
 
 Common to all three, from any of `github.com/precision-soft/melody/integrations/cron`, `.../cron/v2`, or `.../cron/v3`:
 
