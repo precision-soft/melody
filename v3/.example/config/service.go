@@ -21,6 +21,7 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodytranslation "github.com/precision-soft/melody/v3/translation"
     melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
+    bun "github.com/uptrace/bun"
 )
 
 func (instance *Module) RegisterServices(registrar melodyapplicationcontract.ServiceRegistrar) {
@@ -29,15 +30,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         instance.registerOutboxTransportService(registrar)
     }
 
-    /* the storage handle is registered whether or not there is a connection behind it, because the generated wiring fills the repository constructors by resolving their arguments from the container by type: a handle that were absent without a database would take the whole nomenclature with it. */
-    database := instance.database
-
-    registrar.RegisterService(
-        persistence.ServiceCatalogStorage,
-        func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
-            return persistence.NewCatalogStorage(database), nil
-        },
-    )
+    instance.registerCatalogStorageService(registrar)
 
     /* the hub is registered so the event listeners can reach it. They follow every change to the nomenclature and are where the notification belongs, beside the cache invalidation and the journal entry — but a listener is handed a runtime rather than this module, and the container is what the two have in common. */
     serverSentEventHub := instance.serverSentEventHub
@@ -135,6 +128,29 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 }
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
+
+/* registerCatalogStorageService publishes the handle every repository is built on. It is registered whether or not there is a connection behind it, because the generated wiring fills the repository constructors by resolving their arguments from the container by type: a handle that were absent without a database would take the whole nomenclature with it.
+
+   The handle is RESOLVED rather than captured, and that is what puts the database chain on the request path at all. This provider is the one door an ordinary http process passes through, and a provider that hands back an already-built collaborator resolves nothing — so the container records no dependency and neither the registry nor the pool is ever built inside it. Captured, the two services registerDatabaseServices publishes were registered and never instantiated: the registry provider, which is where SetLogger moves the pool's own reporting and bun's diagnostics off the emergency logger, did not run for the life of an http process, and the ordered teardown had nothing to close. Resolving writes the edge that teardown reads — storage, handle, registry, journal, in that order — and runs the logger swap at the first repository resolution. */
+func (instance *Module) registerCatalogStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    hasDatabase := nil != instance.database
+
+    registrar.RegisterService(
+        persistence.ServiceCatalogStorage,
+        func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
+            if false == hasDatabase {
+                return persistence.NewCatalogStorage(nil), nil
+            }
+
+            database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return persistence.NewCatalogStorage(database), nil
+        },
+    )
+}
 
 /* RegisterScopedServices declares the services that belong to one scope — one http request here. The generator emits them into their own function because the two registrars share no method: this hook receives a scoped registrar, RegisterServices receives a container one, and handing either to the other does not compile.
 

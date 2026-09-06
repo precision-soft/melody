@@ -45,7 +45,6 @@ type Module struct {
     translator melodytranslationcontract.Translator
 
     serverSentEventHub       *melodyhttp.ServerSentEventHub
-    serverSentEventBackplane *melodyrueidis.ServerSentEventBackplane
 
     openApiInfo     melodyopenapi.Info
     openApiRegistry *melodyopenapi.Registry

@@ -72,15 +72,12 @@ func Configure(app *melodyapplication.Application) {
         RunnerCommands:       cronRunnerCommands(),
     }))
 
-    /* the SSE stream and the websocket handler both block on this hub; http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so without closing the hub a single connected client holds the whole shutdown timeout and is then cut mid-flight */
-    app.OnHttpShutdown(moduleInstance.serverSentEventHub.Shutdown)
+    /* the SSE stream and the websocket handler both block on this hub; http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so without closing the hub a single connected client holds the whole shutdown timeout and is then cut mid-flight.
 
-    /* the redis backplane owns a listen goroutine and a pub/sub subscription; the composition root that builds one owes it a Close, the duty its amqp twin's module documents. Unclosed, its reconnect loop outlived the shared client's teardown and retried forever against a client that can only answer closed — silent in the shipped binary, a leaked goroutine per lifecycle in any host that builds and tears the application down more than once. */
-    if nil != moduleInstance.serverSentEventBackplane {
-        app.OnHttpShutdown(func() {
-            _ = moduleInstance.serverSentEventBackplane.Close()
-        })
-    }
+       This is also the only close the redis backplane needs: Shutdown takes the reference the hub holds, drains the publishes already inside it and closes it, and the shipped backplanes clear themselves from the hub as the first step of their own Close. A second close issued from here is not harmless duplication — the http shutdown hooks run on their own goroutines, so whichever won decided where that drain happened, and the loser then closed a backplane that was already closed. One owner, one close.
+
+       The hub itself is reached twice on purpose, and that pair is idempotent through its own closed flag: this hook releases the streaming handlers the moment shutdown begins, and the container's ordered teardown closes it again through the Close it carries — which is the only one a process that never ran an http server reaches at all. */
+    app.OnHttpShutdown(moduleInstance.serverSentEventHub.Shutdown)
 
     app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
         Hub:       moduleInstance.serverSentEventHub,

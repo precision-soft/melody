@@ -4,7 +4,6 @@ import (
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     "github.com/precision-soft/melody/v3/.example/message"
     "github.com/precision-soft/melody/v3/.example/messagehandler"
-    "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
@@ -52,20 +51,14 @@ func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Tran
         return melodymessagebus.NewInMemoryTransport(64)
     }
 
-    provider := amqp.NewProvider()
+    /* the transport is handed ONLY a dialer, and nothing dials at boot. The rule is the one its twin states at buildOutboxTransport: a connection opened in the composition root is owned by nobody, because the transport closes only a connection it dialed itself, so the first use dials one the transport owns and its registered closer actually closes.
 
-    /* the boot-time dial stays as fail-fast VALIDATION of the DSN, but only as a probe that is closed at once: a connection opened here and handed to the transport would be owned by nobody — the transport closes only a connection it dialed itself — so it outlived every teardown. With just the dialer, the first use dials a connection the transport owns and its registered closer actually closes. */
-    probe, openErr := provider.Open(dsn)
-    if nil != openErr {
-        exception.Panic(exception.FromError(openErr))
-    }
-    _ = probe.Close()
-
+       The boot-time dial that used to stand here was fail-fast validation of the dsn, and it was paid by every process — a full amqp handshake before db:migrate --help prints its usage — while the transport dialed a second time at first use anyway. Its close was the plain Close of the client, which is an RPC over the send locks: on a broker that stopped reading, boot would have joined a write in flight and never returned. A dsn this application cannot dial now surfaces at the first publish, through the transport's own retry loop, which is where a broker that is merely down surfaces too. */
     registry := amqp.NewMessageRegistry()
     amqp.RegisterMessage[message.WelcomeEmail](registry, messageBusWelcomeType)
 
     return amqp.NewTransport(amqp.TransportConfig{
-        Dialer:     provider.Dialer(dsn),
+        Dialer:     amqp.NewProvider().Dialer(dsn),
         Queue:      messageBusQueue,
         Prefetch:   10,
         Registry:   registry,
