@@ -29,11 +29,19 @@ var (
 var (
     ensureMutex          sync.Mutex
     migratedDatabaseList = map[*bun.DB]struct{}{}
+    refusedDatabaseList  = map[*bun.DB]refusedMigrationAttempt{}
 )
+
+/* refusedMigrationAttempt is what an attempt that waited out the whole window leaves behind, so the ones
+   after it are told what it learned instead of waiting for it again. */
+type refusedMigrationAttempt struct {
+    refusal   error
+    refusedAt time.Time
+}
 
 /* EnsureMigrated applies the Migrations set to the example's database, once per handle and per process. The repository constructors the generated wiring fills call it at first resolution, and the two-factor build step calls it before it publishes its store, which is what keeps a freshly recreated volume usable without an operator step: the tables appear when the first request reaches a repository, exactly as they did when each repository owned its own create statement.
 
-   Only a success is recorded; a failed attempt is retried at the next resolution. The mutex serializes the callers of one process, and the bun migration lock serializes processes sharing the database — several instances of this example race here whenever a volume starts empty. */
+   A success is recorded for good. A refusal that spent the retry window waiting for another process is recorded for as long as that window, so the resolutions arriving inside it are answered with it instead of each waiting again; every other failure is recorded not at all and is retried at the next resolution. The mutex serializes the callers of one process, and the bun migration lock serializes processes sharing the database — several instances of this example race here whenever a volume starts empty. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     if nil == database {
         return exception.NewError("migration: bun database is nil", nil, nil)
@@ -46,6 +54,22 @@ func EnsureMigrated(ctx context.Context, database *bun.DB) error {
         return nil
     }
 
+    /* an attempt that was refused is remembered for as long as the wait that produced it, and the callers
+       that arrive inside that span are answered with it rather than made to repeat it.
+
+       Without this the cost of one lock nobody releases is paid per resolution and serially, because the
+       whole protocol runs under this mutex: measured on a window shortened to 300ms, three concurrent
+       resolutions took 1.5s — five windows, not one — and at the real window that is two and a half minutes
+       of requests holding on a refusal already known, each of them answering 500 afterwards. The refusal is
+       the same value, so nothing about what a caller is told changes; only how long it takes to be told. */
+    if refused, wasRefused := refusedDatabaseList[database]; true == wasRefused {
+        if migrationLockRetryWindow > time.Since(refused.refusedAt) {
+            return refused.refusal
+        }
+
+        delete(refusedDatabaseList, database)
+    }
+
     migrator := migrate.NewMigrator(
         database,
         Migrations,
@@ -56,8 +80,18 @@ func EnsureMigrated(ctx context.Context, database *bun.DB) error {
         return initErr
     }
 
+    lockStartedAt := time.Now()
+
     locked, lockErr := acquireMigrationLock(ctx, migrator)
     if nil != lockErr {
+        /* only a refusal that COST the wait is remembered, and that is the whole of the harm: a refusal
+           that came back at once — a failed init, a lock that could not be released after the set was
+           applied — costs nothing to reach again, so the next resolution reaches it again and heals as soon
+           as the database does. A caller that walked away is not evidence about the database either. */
+        if migrationLockRetryWindow <= time.Since(lockStartedAt) && nil == ctx.Err() {
+            refusedDatabaseList[database] = refusedMigrationAttempt{refusal: lockErr, refusedAt: time.Now()}
+        }
+
         return lockErr
     }
 

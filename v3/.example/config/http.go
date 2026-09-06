@@ -154,12 +154,25 @@ func (instance *Module) buildCatalogWriteThrottle() {
         nil,
     )
 
-    rateLimitConfig.SetClientIpResolver(melodyhttpmiddleware.NewForwardedClientIpResolver(melodyhttpcontract.ForwardedHeadersPolicy{
-        TrustForwardedHeaders: true,
-        TrustedProxyList:      []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
-    }))
+    rateLimitConfig.SetClientIpResolver(forwardedClientIpResolver())
 
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
+}
+
+/* forwardedClientIpResolver reads which client a request came from, the way every budget of this example
+   has to read it: behind the compose load balancer the X-Forwarded-For client, on a direct hit the peer
+   address, and a header sent by a peer outside the trusted ranges ignored rather than believed.
+
+   Both budgets share it because they are two halves of one policy and the trusted ranges must not drift
+   apart: this one meters the writes that reach a handler, the request budget in event.go meters every
+   request ahead of authentication. Left on the peer address, that one charged the whole world to the
+   proxy — measured through the compose stack, the key was the balancer's own 172.18.0.9 — so one client
+   could spend everyone's hour. */
+func forwardedClientIpResolver() melodyhttpmiddleware.ClientIpResolver {
+    return melodyhttpmiddleware.NewForwardedClientIpResolver(melodyhttpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+    })
 }
 
 /* throttledWrite puts an endpoint that changes the nomenclature behind the shared per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage.

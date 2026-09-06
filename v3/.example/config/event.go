@@ -89,14 +89,24 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
         ))
     }
 
-    melodyhttpmiddleware.RegisterRateLimitRequestListener(
-        eventDispatcher,
-        melodyhttpmiddleware.NewRateLimitConfig(
-            melodyhttpmiddleware.NewFixedWindowLimiter(budget, time.Hour),
-            nil,
-            nil,
-        ),
+    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetConfig(budget))
+}
+
+/* requestBudgetConfig is the hourly budget as this example wires it. The client key is resolved through the
+   same trusted-proxy door the write throttle uses: with the peer address alone, every client behind the
+   compose load balancer — behind any reverse proxy — is charged to one key, so the budget stops being per
+   client and becomes a single hourly allowance the first runaway script spends for everyone, on a listener
+   that runs ahead of authentication and therefore refuses them at the door. */
+func requestBudgetConfig(budget int) *melodyhttpmiddleware.RateLimitConfig {
+    rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
+        melodyhttpmiddleware.NewFixedWindowLimiter(budget, time.Hour),
+        nil,
+        nil,
     )
+
+    rateLimitConfig.SetClientIpResolver(forwardedClientIpResolver())
+
+    return rateLimitConfig
 }
 
 /* registerRequiredRequestContextListener demonstrates a required kernel.request listener. It prepares a per-request attribute that later stages depend on, so it must always run; marking it required through the event RequiredListenerRegistrar makes the kernel fail closed if any other kernel.request listener stops propagation before it — the same guarantee the security access-control listener gets automatically. A listener that deliberately short-circuits the request phase past required listeners would instead opt out with eventDispatcher.MarkListenerMaySkipRequiredListeners(registration). */

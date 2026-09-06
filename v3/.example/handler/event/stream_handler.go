@@ -11,16 +11,18 @@ import (
 
 func StreamHandler(hub *melodyhttp.ServerSentEventHub) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        topic := queryStringOr(request, "topic", CatalogTopic)
+
+        /* the topic is the client's to name, so being allowed to open a stream is not being allowed to read the one asked for: the catalog topic carries the product and user writes made behind RoleEditor.
+
+           The gate stands ahead of the writer because NewServerSentEventWriter COMMITS the response — it sets the event-stream headers, writes 200 and flushes — and the kernel discards whatever a handler returns after the headers are committed. Decided below it, this refusal would reach neither the client, which reads a successful stream that closes at once and reconnects forever, nor the access log, which records the committed 200. */
+        if false == topicIsReadableBy(runtimeInstance, topic) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "not allowed to subscribe to this topic"), nil
+        }
+
         serverSentEventWriter, serverSentEventErr := melodyhttp.NewServerSentEventWriter(writer)
         if nil != serverSentEventErr {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "streaming is not supported"), nil
-        }
-
-        topic := queryStringOr(request, "topic", CatalogTopic)
-
-        /* the topic is the client's to name, so being allowed to open a stream is not being allowed to read the one asked for: the catalog topic carries the product and user writes made behind RoleEditor, and an authenticated reader without that role used to watch them go by. */
-        if false == topicIsReadableBy(runtimeInstance, topic) {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "not allowed to subscribe to this topic"), nil
         }
 
         subscriber := hub.Subscribe(topic, 16)

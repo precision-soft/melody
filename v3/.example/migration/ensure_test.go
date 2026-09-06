@@ -6,6 +6,7 @@ import (
     "errors"
     "sync"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -287,5 +288,87 @@ func TestEnsureMigratedCreatesTheTwoFactorTableWithTheCatalogue(t *testing.T) {
 
     if twoFactorCount := recorder.countMatching(isTwoFactorCreateTable); 1 != twoFactorCount {
         t.Fatalf("expected the two-factor table to be created by the single set, got %d", twoFactorCount)
+    }
+}
+
+/* the wait is paid once, not once per resolution. The whole protocol runs under one process mutex, so a
+   lock nobody releases used to cost the window to every caller in turn: measured on a 300ms window, three
+   concurrent resolutions took 1.5s and each later request added its own. What the refusal says does not
+   change — it is the same value, handed back — so the assertion is on the COST and on the identity of what
+   is returned, the two things that separate a remembered refusal from a repeated one. */
+func TestEnsureMigratedAnswersARememberedRefusalWithoutWaitingAgain(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    previousWindow := migrationLockRetryWindow
+    migrationLockRetryWindow = 150 * time.Millisecond
+    defer func() {
+        migrationLockRetryWindow = previousWindow
+    }()
+
+    lockHeld := errors.New("lock row exists")
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return lockHeld
+        }
+
+        return nil
+    }
+
+    startedAt := time.Now()
+    firstErr := EnsureMigrated(context.Background(), database)
+    firstCost := time.Since(startedAt)
+
+    if nil == firstErr {
+        t.Fatal("expected the held lock to refuse the first resolution")
+    }
+    if migrationLockRetryWindow > firstCost {
+        t.Fatalf("expected the first resolution to wait out the window, got %v", firstCost)
+    }
+
+    startedAt = time.Now()
+    secondErr := EnsureMigrated(context.Background(), database)
+    secondCost := time.Since(startedAt)
+
+    if secondErr != firstErr {
+        t.Fatalf("expected the remembered refusal itself, got %v", secondErr)
+    }
+    if migrationLockRetryWindow <= secondCost {
+        t.Fatalf("expected the second resolution to be answered without waiting again, got %v", secondCost)
+    }
+}
+
+/* the memory is not a verdict: once the window it was recorded for has passed, the next resolution asks the
+   database again, so a lock that was released heals the process without a restart. */
+func TestEnsureMigratedForgetsTheRefusalOnceItsWindowHasPassed(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    previousWindow := migrationLockRetryWindow
+    migrationLockRetryWindow = 50 * time.Millisecond
+    defer func() {
+        migrationLockRetryWindow = previousWindow
+    }()
+
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return errors.New("lock row exists")
+        }
+
+        return nil
+    }
+
+    if firstErr := EnsureMigrated(context.Background(), database); nil == firstErr {
+        t.Fatal("expected the held lock to refuse the first resolution")
+    }
+
+    time.Sleep(2 * migrationLockRetryWindow)
+
+    recorder.reset()
+    recorder.execHook = nil
+
+    if healedErr := EnsureMigrated(context.Background(), database); nil != healedErr {
+        t.Fatalf("expected the resolution after the window to try the database again, got %v", healedErr)
+    }
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
+        t.Fatalf("expected the healed resolution to migrate, got %d creates", createCount)
     }
 }
