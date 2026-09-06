@@ -4,9 +4,11 @@ import (
     "context"
     "errors"
     "fmt"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
+    "strings"
     "time"
 
     melodyconfig "github.com/precision-soft/melody/v2/config"
@@ -102,19 +104,30 @@ func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.R
     return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
 }
 
-/* falling through to the default serializer rendered the failure in the very representation the client refused; the success path already answered not acceptable, so the two paths disagreed about the same header */
-func TestBuildApiResponseHonoursAnExplicitRefusal(t *testing.T) {
+/* the two paths answer an unreadable Accept header differently on purpose, so each direction carries its own probe. On a SUCCESS there is nothing to say except in a representation the client rejected, and this is where the refusal is honoured — the reading this test used to make for the error path as well.
+
+   On a REFUSAL the status is the answer, and masking a 401 or a 404 behind an empty 406 leaves the client with no way to tell why it was turned away; the framework's own error renderer states that asymmetry beside its fallback and takes it for every resolution failure alike. What the fallthrough costs is one body rendered in a type the client said it did not want, on a response whose point is its status. */
+func TestBuildApiResponseAnswersNotAcceptableOnTheSuccessPath(t *testing.T) {
     runtimeInstance := runtimeServingJsonAlone(t)
 
     request := requestAcceptingLines(t, runtimeInstance, "*/*;q=0")
 
-    response := buildApiResponse(runtimeInstance, request, nethttp.StatusForbidden, apiResponse{Success: false})
+    response := buildApiResponse(
+        runtimeInstance,
+        request,
+        nethttp.StatusOK,
+        apiResponse{Success: true, Payload: "payload", Errors: []string{}},
+    )
     if nil == response {
         t.Fatalf("expected a response")
     }
 
     if nethttp.StatusNotAcceptable != response.StatusCode() {
-        t.Fatalf("expected the explicit refusal to be answered 406 on the error path, got %d", response.StatusCode())
+        t.Fatalf("expected the success path to answer 406, got %d", response.StatusCode())
+    }
+
+    if "" != responseBodyOf(t, response) {
+        t.Fatalf("expected an empty body, got %q", responseBodyOf(t, response))
     }
 }
 
@@ -135,6 +148,47 @@ func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
 
     if nethttp.StatusForbidden != response.StatusCode() {
         t.Fatalf("expected the refusal to keep its own status, got %d", response.StatusCode())
+    }
+}
+
+func responseBodyOf(t *testing.T, response melodyhttpcontract.Response) string {
+    t.Helper()
+
+    reader := response.BodyReader()
+    if nil == reader {
+        return ""
+    }
+
+    body, readErr := io.ReadAll(reader)
+    if nil != readErr {
+        t.Fatalf("read body: %v", readErr)
+    }
+
+    return string(body)
+}
+
+func TestBuildApiResponseKeepsTheStatusOfARefusalTheClientRefusesToRead(t *testing.T) {
+    runtimeInstance := runtimeServingJsonAlone(t)
+
+    request := requestAcceptingLines(t, runtimeInstance, "*/*;q=0")
+
+    response := buildApiResponse(
+        runtimeInstance,
+        request,
+        nethttp.StatusForbidden,
+        apiResponse{Success: false, Errors: []string{"forbidden"}},
+    )
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    if nethttp.StatusForbidden != response.StatusCode() {
+        t.Fatalf("expected the refusal to keep its own status, got %d", response.StatusCode())
+    }
+
+    body := responseBodyOf(t, response)
+    if false == strings.Contains(body, "forbidden") {
+        t.Fatalf("expected the refusal to name itself in the body, got %q", body)
     }
 }
 

@@ -73,10 +73,9 @@ func (instance *ProductService) List() ([]*entity.Product, error) {
 func (instance *ProductService) FindById(id string) (*entity.Product, bool, error) {
     cacheKey := CacheKeyProductById(id)
 
-    cached, rememberErr := cache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             product, found, findErr := instance.productRepository.FindById(ctx, id)
             if nil != findErr {
@@ -89,7 +88,6 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
 
             return product, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr

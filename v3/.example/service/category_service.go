@@ -63,10 +63,9 @@ func (instance *CategoryService) List() ([]*entity.Category, error) {
 func (instance *CategoryService) FindById(id string) (*entity.Category, bool, error) {
     cacheKey := CacheKeyCategoryById(id)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             category, found, findErr := instance.categoryRepository.FindById(ctx, id)
             if nil != findErr {
@@ -79,7 +78,6 @@ func (instance *CategoryService) FindById(id string) (*entity.Category, bool, er
 
             return category, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr

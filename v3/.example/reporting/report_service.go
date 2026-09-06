@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "strconv"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/repository"
@@ -15,6 +16,9 @@ import (
 
 /* catalogReadingCacheKey is where a reading is left for whoever asks next. The scheduled refresh writes it and every request reads it, which is the whole point: the request that finds a cold cache is the one that pays for the reading. */
 const catalogReadingCacheKey = "catalog.reading"
+
+/* catalogReadingRecordedAtField names the stamp inside the payload. The reading is one cached value, so the instant it was taken at travels inside that value rather than beside it: a second key would expire on its own schedule, and a reading whose stamp had lapsed would be served with the wrong age or with none. */
+const catalogReadingRecordedAtField = "recorded_at="
 
 /* the services in this package are never registered by hand: melody:wiring:generate scans the package and renders their registrations into generated/wiring_gen.go, which is what config.Module registers. They are here to exercise the generated wiring against a real container — a dependency resolved by type, two scalars bound to configuration parameters and one bound through a directive. */
 
@@ -86,12 +90,16 @@ func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogRead
 
         payload, ok := stored.(string)
         if true == ok {
-            return &CatalogReading{
-                RecordedAt: instance.clock.Now(),
-                Headline:   instance.Headline(),
-                Payload:    payload,
-                FromCache:  true,
-            }, nil
+            /* the stamp comes out of the payload, not off the clock: stamping the moment of service would have made RecordedAt say "now" for a reading taken a whole refresh interval ago, which is the one thing a caller reads it to find out. A payload this application cannot read the stamp back from is not served as a fresh reading at all — it falls through to Refresh below, which takes one. */
+            recordedAt, readable := recordedAtOf(payload)
+            if true == readable {
+                return &CatalogReading{
+                    RecordedAt: recordedAt,
+                    Headline:   instance.Headline(),
+                    Payload:    payload,
+                    FromCache:  true,
+                }, nil
+            }
         }
     }
 
@@ -114,7 +122,7 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
 
     payload := "products=" + strconv.Itoa(len(products)) +
         " journal=" + strconv.Itoa(journalCount) +
-        " recorded_at=" + recordedAt.UTC().Format(time.RFC3339)
+        " " + catalogReadingRecordedAtField + recordedAt.UTC().Format(time.RFC3339)
 
     setErr := instance.cache.Set(catalogReadingCacheKey, payload, instance.refreshInterval)
     if nil != setErr {
@@ -127,6 +135,26 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
         Payload:    payload,
         FromCache:  false,
     }, nil
+}
+
+/* recordedAtOf reads back the instant Refresh wrote into the payload, and says whether it found one. The stamp is the last field and carries no spaces, so it is read to the end of the value or to the next field, whichever comes first — a payload written by an older shape of this service, or by nothing at all, simply answers false. */
+func recordedAtOf(payload string) (time.Time, bool) {
+    fieldIndex := strings.Index(payload, catalogReadingRecordedAtField)
+    if 0 > fieldIndex {
+        return time.Time{}, false
+    }
+
+    value := payload[fieldIndex+len(catalogReadingRecordedAtField):]
+    if separatorIndex := strings.IndexByte(value, ' '); 0 <= separatorIndex {
+        value = value[:separatorIndex]
+    }
+
+    recordedAt, parseErr := time.Parse(time.RFC3339, value)
+    if nil != parseErr {
+        return time.Time{}, false
+    }
+
+    return recordedAt, true
 }
 
 func (instance *CatalogReportService) Headline() string {

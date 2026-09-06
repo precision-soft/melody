@@ -46,7 +46,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* the cause travels with the refusal, so the responder answers through ApiErrorWithErr rather than ApiError: the decoder's own diagnosis and the per-field validation collection reach the error context and the debug trace instead of dying at this boundary. Returning the response rather than nothing is what keeps the refusal a refusal — a responder that answers nothing leaves the framework's own refusal standing, and returning a nil pair used to be read as a handler that answered nothing at all and served an empty 204 for a rejected write. */
+/* the cause travels with the refusal, so the responder answers through ApiRefusal rather than ApiError: a validation failure is rendered field by field, and every other refusal keeps its generic message with the decoder's own diagnosis in the debug-gated context instead of dying at this boundary. Answering the generic message alone left a form with nothing to attach to an input — the framework hands the per-field collection to this responder precisely so it need not be destroyed here, and a door that installs no responder at all has it rendered by the kernel's exception listener. Returning the response rather than nothing is what keeps the refusal a refusal — a responder that answers nothing leaves the framework's own refusal standing, and returning a nil pair used to be read as a handler that answered nothing at all and served an empty 204 for a rejected write. */
 func apiJsonErrorResponder(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -54,7 +54,7 @@ func apiJsonErrorResponder(
     message string,
     cause error,
 ) (melodyhttpcontract.Response, error) {
-    return presenter.ApiErrorWithErr(runtimeInstance, request, status, message, cause), nil
+    return presenter.ApiRefusal(runtimeInstance, request, status, message, cause), nil
 }
 
 /* bound by the openapi descriptor in config; keep it exported */

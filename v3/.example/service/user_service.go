@@ -65,10 +65,9 @@ func (instance *UserService) List() ([]*entity.User, error) {
 func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
     cacheKey := CacheKeyUserById(id)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             user, found, findErr := instance.userRepository.FindById(ctx, id)
             if nil != findErr {
@@ -81,7 +80,6 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 
             return user, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -107,10 +105,9 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
 
     cacheKey := CacheKeyUserByUsername(normalizedUsername)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
             if nil != findErr {
@@ -123,7 +120,6 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
 
             return user, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr

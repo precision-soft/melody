@@ -280,7 +280,7 @@ Every JSON endpoint answers through the same envelope, built in [`presenter/erro
 
 The envelope is the reason a client never decodes straight into the answer type: a decode that skipped it would read a failure as a zero value. The end-to-end harness unwraps it in `decodeExampleData` for exactly that reason.
 
-The two representations are negotiated: a client that asks for HTML gets the page or an HTML error, one that asks for JSON gets this envelope, and one whose `Accept` header refuses every representation the application can produce is answered `406` rather than being handed JSON it said it would not take.
+The two representations are negotiated: a client that asks for HTML gets the page or an HTML error, one that asks for JSON gets this envelope, and one whose `Accept` header refuses every representation the application can produce is answered `406` on a SUCCESS, rather than being handed JSON it said it would not take. A refusal keeps the status it earned and is served in the default representation instead — masking a 401 or a 404 behind an empty `406` would leave the client nothing to read but the negotiation, and the only thing withheld is a representation it had already rejected.
 
 ---
 

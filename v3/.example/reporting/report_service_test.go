@@ -7,6 +7,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/service"
+    melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyhttp "github.com/precision-soft/melody/v3/http"
 )
@@ -186,5 +189,175 @@ func TestRequestReportTrailSummaryNamesItsOwnRequest(t *testing.T) {
 
     if "request-5: 1 entries" != trail.Summary() {
         t.Fatalf("the trail summarised as %q, wanted the formatter's rendering of its own request", trail.Summary())
+    }
+}
+
+/* readingCache keeps the values it is given, as they are: the reading is a string either way, and a double that round-tripped through a serializer would answer the same string for a reason that has nothing to do with what these probes ask. */
+type readingCache struct {
+    values map[string]any
+}
+
+func (instance *readingCache) Get(key string) (any, bool, error) {
+    value, exists := instance.values[key]
+
+    return value, exists, nil
+}
+
+func (instance *readingCache) Set(key string, value any, ttl time.Duration) error {
+    instance.values[key] = value
+
+    return nil
+}
+
+func (instance *readingCache) Delete(key string) error {
+    delete(instance.values, key)
+
+    return nil
+}
+
+func (instance *readingCache) Has(key string) (bool, error) {
+    _, exists := instance.values[key]
+
+    return exists, nil
+}
+
+func (instance *readingCache) Clear() error {
+    instance.values = map[string]any{}
+
+    return nil
+}
+
+func (instance *readingCache) Many(keys []string) (map[string]any, error) {
+    result := map[string]any{}
+    for _, key := range keys {
+        if value, exists := instance.values[key]; true == exists {
+            result[key] = value
+        }
+    }
+
+    return result, nil
+}
+
+func (instance *readingCache) SetMultiple(items map[string]any, ttl time.Duration) error {
+    for key, value := range items {
+        instance.values[key] = value
+    }
+
+    return nil
+}
+
+func (instance *readingCache) DeleteMultiple(keys []string) error {
+    for _, key := range keys {
+        delete(instance.values, key)
+    }
+
+    return nil
+}
+
+func (instance *readingCache) Increment(key string, delta int64) (int64, error) {
+    return 0, nil
+}
+
+func (instance *readingCache) Decrement(key string, delta int64) (int64, error) {
+    return 0, nil
+}
+
+func (instance *readingCache) Close() error {
+    return nil
+}
+
+var _ melodycachecontract.Cache = (*readingCache)(nil)
+
+type emptyProductRepository struct{}
+
+func (instance *emptyProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    return []*entity.Product{}, nil
+}
+
+func (instance *emptyProductRepository) FindById(ctx context.Context, id string) (*entity.Product, bool, error) {
+    return nil, false, nil
+}
+
+func (instance *emptyProductRepository) Create(ctx context.Context, product *entity.Product) error {
+    return nil
+}
+
+func (instance *emptyProductRepository) Update(ctx context.Context, product *entity.Product) (bool, error) {
+    return false, nil
+}
+
+func (instance *emptyProductRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+    return false, nil
+}
+
+var _ repository.ProductRepository = (*emptyProductRepository)(nil)
+
+func newReportServiceUnderTest(t *testing.T, clockInstance *melodyclock.FrozenClock, cacheInstance melodycachecontract.Cache) *CatalogReportService {
+    t.Helper()
+
+    reportService, buildErr := NewCatalogReportService(
+        NewReportFormatter(),
+        service.NewProductService(&emptyProductRepository{}, nil, nil, cacheInstance, nil, clockInstance),
+        &stubJournalRepository{},
+        cacheInstance,
+        clockInstance,
+        "catalog",
+        10,
+        time.Minute,
+    )
+    if nil != buildErr {
+        t.Fatalf("new report service: %v", buildErr)
+    }
+
+    return reportService
+}
+
+/* the stamp is what a caller reads to find out how old the answer is, so a cached reading must carry the instant the reading was TAKEN — stamping the moment of service made a reading a whole refresh interval old say "now". */
+func TestCatalogReadingFromTheCacheKeepsTheInstantItWasTakenAt(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    if _, refreshErr := reportService.Refresh(context.Background()); nil != refreshErr {
+        t.Fatalf("refresh: %v", refreshErr)
+    }
+
+    clockInstance.Advance(90 * time.Second)
+
+    reading, readingErr := reportService.Reading(context.Background())
+    if nil != readingErr {
+        t.Fatalf("reading: %v", readingErr)
+    }
+
+    if false == reading.FromCache {
+        t.Fatalf("expected the reading to come from the cache")
+    }
+
+    if false == reading.RecordedAt.Equal(takenAt) {
+        t.Fatalf("expected the instant the reading was taken at (%s), got %s", takenAt.Format(time.RFC3339), reading.RecordedAt.Format(time.RFC3339))
+    }
+}
+
+/* a payload this service cannot read the stamp back from is not served as a reading at all: it would have to be given an instant nobody measured. */
+func TestCatalogReadingTakesAFreshReadingWhenTheCachedPayloadCarriesNoInstant(t *testing.T) {
+    servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(servedAt)
+    cacheInstance := &readingCache{values: map[string]any{catalogReadingCacheKey: "products=1 journal=2"}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    reading, readingErr := reportService.Reading(context.Background())
+    if nil != readingErr {
+        t.Fatalf("reading: %v", readingErr)
+    }
+
+    if true == reading.FromCache {
+        t.Fatalf("expected a fresh reading, got one served from the cache")
+    }
+
+    if false == reading.RecordedAt.Equal(servedAt) {
+        t.Fatalf("expected the fresh reading to carry the current instant, got %s", reading.RecordedAt.Format(time.RFC3339))
     }
 }
