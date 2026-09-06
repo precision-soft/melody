@@ -4,6 +4,8 @@ The `.example` directory contains a small **product catalog** application built 
 
 It is **not** a full production product. Its purpose is to demonstrate how Melody is intended to be used in userland, with realistic wiring and clear architectural boundaries: routing, HTTP handlers, dependency injection, structured logging, sessions and authentication, security access control, caching, events, and CLI commands.
 
+Changes to this application are filed in its own [`CHANGELOG.md`](./CHANGELOG.md) rather than in the framework's: the example is not a published module and carries no version of its own, so its blocks name the tags of the major it ships inside.
+
 ---
 
 ## What it represents

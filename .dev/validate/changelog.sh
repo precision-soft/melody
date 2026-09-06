@@ -154,9 +154,15 @@ list_repository_path() {
 # ------------------------------------------------------------------------------------------------------
 
 # a changelog belongs to the module it sits in, and the module names its major: the bare melody path and a
-# bare integration path are v1, and every `.../vN` is vN. Discovered rather than listed, for the reason the
-# citation band discovers its majors — the list kept by hand is the one forgotten when the next major is
+# bare integration path are v1, and a `vN` path segment is vN. Discovered rather than listed, for the reason
+# the citation band discovers its majors — the list kept by hand is the one forgotten when the next major is
 # cut.
+#
+# The version segment is read wherever it stands rather than at the end alone, because a module can sit
+# INSIDE a major: `.../melody/v2/.example` is the v2 example application, and reading only a trailing `/vN`
+# called it v1 — which is worse than not classifying it, since the cross-major dimension would then compare
+# a v3 example entry against a v1 one and could report a divergence between two majors that never met. The
+# first segment wins, which is the outer major for a nested module and the only one for every other.
 major_of_changelog() {
     local CHANGELOG_PATH_STRING="${1:?}"
 
@@ -180,7 +186,7 @@ major_of_changelog() {
     local MODULE_PATH_STRING
     MODULE_PATH_STRING="$(awk '/^module / { print $2; exit }' "${DIRECTORY_STRING}/go.mod")"
 
-    if [[ "${MODULE_PATH_STRING}" =~ /(v[0-9]+)$ ]]; then
+    if [[ "${MODULE_PATH_STRING}" =~ /(v[0-9]+)(/|$) ]]; then
         printf '%s' "${BASH_REMATCH[1]}"
 
         return 0
@@ -207,6 +213,18 @@ family_of_changelog() {
 
     if [[ "${DIRECTORY_STRING}" =~ ^v[0-9]+$ ]]; then
         printf '.'
+
+        return 0
+    fi
+
+    # the two layouts a version segment appears in are mirror images, and both have to fold onto one family
+    # or the dimension goes quiet exactly where it is needed. An integration carries its major at the END
+    # (`integrations/bunorm/v3`), handled above; a module nested inside a major carries it at the FRONT
+    # (`v2/.example`), and without this the example of v1 and the example of v2 sat in two families of one
+    # member each — the pairing that asks whether the two published majors file the same sentence alike
+    # simply had nothing to pair, and said so with the same silence as a clean tree.
+    if [[ "${DIRECTORY_STRING}" =~ ^v[0-9]+/(.*)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
 
         return 0
     fi

@@ -41,6 +41,10 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
         }
 
+        if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
+        }
+
         userService := service.MustGetUserService(runtimeInstance.Container())
 
         _, exists, findErr := userService.FindByUsername(normalizedUsername)

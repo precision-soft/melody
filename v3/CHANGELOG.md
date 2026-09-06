@@ -4,6 +4,8 @@ All notable changes to `precision-soft/melody/v3` will be documented in this fil
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+The example application inside this major keeps its own changelog, released on these same tags: [`.example/CHANGELOG.md`](.example/CHANGELOG.md).
+
 ## [Unreleased]
 
 ### Added
@@ -44,7 +46,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - validation: `IsRuleWiringErrorCode` reports whether a validation code names a mistake in the DECLARATION rather than in the value — a rule the registry does not know, a tag the parser cannot read, a pattern that does not compile — none of which any client input can produce; `ValidationErrors.HasRuleWiringError` asks it over a collection, and `ValidationErrors.WithoutRuleWiringContext` projects the collection onto what the client may see, stripping the internal context of the entries that blame the declaration while every other entry keeps the bounds and lengths a client needs to correct its request
 - validation: `ValidationErrors` implements `json.Marshaler`, rendering the collection as the array it is so a log record carrying it says the same thing the http response body says
 - exception: `PanicCause` reads a recovered panic value as the cause of the error a recovery boundary fabricates in its place; a typed nil answers no cause, because its `Error()` would dereference a nil receiver at the first render
-- example: two opt-in wirings join the example's switches, each unwired on the empty value like every other door.
 
 - tooling: `.dev/validate/documentation.sh` checks the package documents against the code of every major, and now runs in the staged mode as well as the full one
 
@@ -53,11 +54,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: `security/contract.Claims` carries `IssuedAt` and `DeviceIdentifier`.
 - security: `NewJwtTokenValidatorWithRevocationEpoch` makes a JSON web token revocable, which it has never been
 
-- example: the development stack serves all three example applications at once, each under a name that says which it is
-- example: the example application is a working nomenclature rather than a set of routes that exist to be driven.
-- example: every redis key and every table the example writes carries its major.
-- example: the schema is owned by one migration set in `v3/.example/migration/`
-- example: the packages melody:wiring:generate scans expose exactly one constructor per service
 - config: `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`) names the path prefixes the built-in file server declines without touching the disk, comma separated. **Breaking**: the accessor is added to `config/contract.HttpConfiguration`, which breaks an out-of-tree implementation of that interface
 - http: `SimpleRateLimitWithResolver`, `IpRateLimitWithResolver` and `UserRateLimitWithResolver` take the client-ip resolver the convenience helpers could not reach.
 - http: `static.FileServerConfig.SetAllowedDotPrefixList` names the dot-prefixed first path elements the file server may retrieve.
@@ -191,14 +187,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: a zero-value `FirewallOverrideConfiguration{}` inherits the global access control the way `NewFirewallOverrideConfiguration()` does. The struct also gains the `WithAccessControl`, `WithRoleHierarchy`, `WithAccessDecisionManager`, `WithMergeStrategy` and `WithInheritGlobalAccessControl` setters it lacked, and a setter called on the exact zero value first reads the constructor defaults.
 - security: the role voters refuse a token that reports roles while answering `IsAuthenticated()` false — the shape a half-logged-in token takes.
 - security: `AccessDecisionManager.DecideAll` over an empty attribute list refuses instead of granting.
-- example: the connection is declared in a `bunorm.ManagerRegistry` instead of opened directly.
-- example: each major's example application holds its schema in a database of its own rather than the one all three shared.
 
-- example: the request-scoped service is the nomenclature's journal accumulator rather than a route that reports on itself.
-- example: every catalogue and directory write is recorded through `bunorm/audit` on the tables the application actually uses, so who changed which field, from what to what, is answerable after the fact for the products and the accounts rather than for a table kept for the purpose.
-- example: a change to the nomenclature is announced on the websocket to every open page, emitted by the same listener that invalidates the cache and writes the journal entry, and the product list carries a bell that counts what arrived and reloads on click.
-- example: the two-factor enrollment table carries the major, like every other table the application writes
-- example: the routes and commands are named for what they do.
 
 - logging: `LogOnRecover` only logs.
 - config: `Resolve()` reports an error once the application is serving.
@@ -307,11 +296,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- example: a cache key built from what a client typed is escaped, so a lookup that should miss no longer errors. The cache contract forbids a space or a newline in a key and both backends refuse one, deliberately with the same words; the by-id and by-username keys spliced the value in raw, so a username with an interior space made the unauthenticated login door answer 500 where a well-formed name answers 401, and `/products/api/read/a%20b/` answered 500 where an absent identifier answers 404. The escape is reversible, so no two values fold onto one key, and an ordinary identifier is left as it reads.
-- example: the development load balancer forwards the host the client asked for. `$host` is derived from `server_name` and carries no port, so an application behind it was told a different host than the browser used on any published port but 80 — enough to make coder/websocket's same-origin default refuse every `/ws` upgrade with 403, indistinguishable from the refusal a foreign origin gets. The websocket module keeps no `OriginPatterns`: that default is what stops a foreign page from riding a signed-in visitor's session cookie onto the feed.
-- example: the hourly request budget is charged to the client rather than to the proxy in front of it. The listener was built with no client resolver, so the key fell back to the direct peer address — measured through the compose stack, the load balancer's own — and one runaway script spent the whole hour for everyone behind it, on a door that meters ahead of authentication and therefore refuses them at the login page. It now reads the client through the same trusted-proxy resolver the catalogue write throttle uses, which the two share so their trusted ranges cannot drift apart.
-- example: a migration lock nobody releases is waited out once, not once per request. The whole protocol runs under one process mutex and only a success was remembered, so every resolution that arrived after a refused one repeated the full retry window in turn: measured on a window shortened to 300ms, three concurrent resolutions cost 1.5s and each later request added its own, which at the shipped window is two and a half minutes of requests queueing on an answer already known. A refusal that spent the window is now remembered for as long as that window and handed to whoever arrives inside it; a refusal that came back at once — a failed init, a lock that could not be released after the set was applied — is remembered not at all, so it still heals at the next resolution.
-- example: a database provisioned before the move to bcrypt gets its seeded accounts back. The digest those rows hold is one bcrypt refuses, `seedIfEmpty` writes nothing into a table that already has rows, and the doors that could set a new password sit behind the administrator account that is itself locked out — so the readme's `admin` / `admin` was a promise no older volume could keep. The three seeded accounts are rewritten at the repository's first resolution, and only while they hold a value bcrypt cannot read; an account an operator created keeps its row, because this application never knew its password, and is reset through the administrator door.
 
 - internal: the atomic file writer `WriteFileAtomically` — behind `melody:openapi:generate --out` and the route-manifest command — flushes the temp file and fsyncs the destination directory before reporting success, so a crash after the rename cannot publish a present-but-empty artifact or a name that does not survive a crash; the `migrate` and `cron` writers already sync and this one did not. It also keeps the mode the destination already carries, falling back to `0644` only for a new file, instead of forcing `0644` unconditionally — a rewrite no longer widens a deliberately-`0600` document under a restrictive umask. `wiring:generate`'s own byte-identical copy of the writer is deleted in favour of this one, which it can import directly
 - messagebus: one bad transport in the registered map no longer costs the teardown of every transport sorted after it. `TransportsCloser.Close` walked the map in name order calling `Close()` unguarded, so a nil entry — or any transport whose own `Close` panicked — abandoned the loop where it stood. The container recovers a panicking service close and records it, so the process survived; what did not survive was the rest of the map, whose broker connections then lived as long as the process while a single record blamed a single service. Each close is now contained on its own, and a nil entry is named as nil rather than reported as a panic over a nil dereference, which tells the operator what the wiring got wrong instead of what the process did about it. The entry is read through the typed-nil door, because a composition root that builds a transport conditionally hands back a non-nil interface around a nil pointer, which a plain `nil ==` comparison lets straight through to the dereference. The `amqp` module already refused a nil transport at its own registration door; the map `RegisterTransports` takes is handed in whole by the composition root, which had no such door — and closing the transports at boot on every process, the repair above, is what made that loop run everywhere instead of only under `melody:messagebus:consume`
@@ -386,18 +370,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - application: the process context of a cli run and the unknown-command suggestion envelope take their instants from the kernel's clock instead of `time.Now()`, so a frozen-clock test reads the same start instant everywhere the run's identity travels and the suggestion envelope's duration is measured on the clock the rest of the process answers.
 - validation: `greaterThan` and `lessThan` judge a float-typed field against the declared bound exactly, at every magnitude.
 - cache: the in-memory backend's expiry sweep enumerates the keys under the read lock rather than the exclusive one.
-- example: the error presenter reads every `Accept` line and answers a header that refuses everything with 406.
-- example: the entry point and the access-denied handler decide html through `melodyhttp.PrefersHtml` instead of their own `isHtmlRequest`, which read the first `Accept` line only and matched `text/html` with a substring search, so it ignored q-values, ignored a refusal, and answered html to a client that had asked for anything containing that token.
-- example: `service.CacheKeyUserByUsername` folds the username itself.
-- example: the admin-versus-admin rule is asked once.
-- example: the health handler stamps its response from the injected clock rather than `time.Now()`
-- example: the product create request refuses an id containing whitespace.
 - documentation: `ROADMAP.md` no longer lists as near- or mid-term three capabilities this major has shipped
 - documentation: `DOCUMENTATION.md` carries the five passages it was behind on — the archetype-free documents, the lowercase exception for `.github/ISSUE_TEMPLATE/`, the rule that an integration module documents itself in its own readme, the clause that the upgrade guide covers only releases made since it was introduced, and the `Exported API` exception the command-surface documents take — and names its own `README.md` the **module** root rather than the repository root, which is what `../README.md` resolves to from a major's documentation directory
 
 - application: a teardown failure can no longer go unreported when two closes of the same application race each other.
-- example: the eagerly opened redis client is finally closed at teardown, through the rueidis module's new `Connection` owner service
-- example: the amqp connections of the message bus and of the outbox are finally closed at teardown, by giving the transports only a DIALER.
 - openapi: a field whose rule set rejects every value is listed `required`, because the validator validates the absent zero value through the same refused rule — a payload omitting the field is rejected exactly like one carrying it.
 - openapi: the lockstep with the validator is held by an executable proof instead of by comments.
 - validation: the cycle set is scoped to the current descent path, an entry leaving it when its subtree returns, because only an ancestor still on the path can close a cycle.
@@ -478,7 +454,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: `JsonHandler` can no longer turn a refused request into a success.
 - http: `melody:routes:manifest` mirrors the openapi generate command in the four places that decide whether its artifact is trustworthy, none of which it did while its own comment said it mirrored that command.
 - http: the pipeline build report travels with the refusal instead of being dropped for it.
-- example: the two doors onto the route table now honour one gate.
 
 - http: the per-field detail of a failed validation reaches the client. The exception listener rendered only the flat message beside the moment, so the detail the validator computed — attached to the exception by `BindJsonAndValidate` — reached neither the client nor, structured, anything else; the listener now projects the `validationErrors` context key into the response body through `WithoutRuleWiringContext`, so an entry blaming the declaration keeps its field, message and code for the client while its context — the developer's own typo, the refused parameters — stays in the record where it belongs
 - http: a deliberate 4xx a handler returned is recorded at warning while a 5xx and every non-http error keep the error level — a refusal is not an incident.
@@ -562,8 +537,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - exception: `MarkLogged` marks the nearest `AlreadyLogged` implementer in the chain rather than only the value it is handed, and answers a typed nil unchanged instead of attempting to mark it.
 - documentation: fifty-six exported doors this major has always carried are listed at last, added beside the same repair on the two published majors so a reader of any of the three finds the same surface.
-- example: the shared icons every page links — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — are produced by the same `npm run build` that produces the frontend bundle, so the one command a fresh clone needs for the browser interface delivers everything a browser asks for.
-- example: the comment in `.env` no longer claims that an already-set process or host environment variable overrides the value beside it. melody reads configuration only from the `.env` files and writes a warning naming each process variable it ignored, so the pattern the comment taught — commit `.env` with development values and inject the secrets through a `env:` entry in an orchestrator manifest — started the application against the values in the file with the injected secret reaching nothing.
 - security: `InMemoryTokenStore` no longer drops the members of `Claims` it was not written to know about.
 - container: `HasType` canonicalises the type it is asked about, so it can no longer answer "no" for a service `GetByType` resolves happily.
 - container: a provider that panics no longer leaves the resolution around it blind to its scope.
@@ -636,13 +609,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - logging: `EnsureLogger` replaces a typed nil logger with the no-op logger instead of returning it unchanged and letting the first call panic — the case the function exists to guard
 - container: two distinct services of one type that carries no fields are each closed at teardown instead of one of them being silently skipped.
 - cache: the in-memory backend no longer holds its exclusive lock across the whole map.
-- example: the embedded static build embeds dot-prefixed and underscore-prefixed paths (`all:public`), so it serves the same file set as the filesystem build
 - http/cors: an `OPTIONS` request carrying an `Origin` but no `Access-Control-Request-Method` is no longer treated as a preflight.
 - http/cors: `Vary: Origin` is emitted on every response, not only on one whose origin was allowed.
 - http/cors: `NewService` no longer panics on a credentialed configuration that decides origins through `AllowOriginFunc`.
-- example: the in-memory repositories guard their slice with a read-write mutex, and `All` hands back a copy of it.
-- example: the api error presenter emits the raw error message, the concrete Go type and the unwrap chain only when the kernel environment is the development one, the same gate the framework exception listener applies, and stays closed when that environment cannot be resolved at all.
-- example: the openapi descriptors bind the handler's own request and response types instead of hand-written copies of them declared beside the registry.
 - documentation: fifteen exported symbols this major has always carried are documented at last — `cache.Item` and `cache.NewItem`, `logging.LoggerFromResolver` and `LoggerMustFromResolver`, `output.NewTablePrinter`, `NewMeta`, `NewWarning`, `NewError`, `NewErrorCause`, `security.NewFirewall`, `NewFirewallManager`, `NewFirewallRegistry`, and `application.MiddlewareFactory`, `RouteRegistrar` and `SecurityModule` — along with three caveats only one major carried
 - debug: a secret parameter whose value is nil renders as `(empty)` instead of the mask.
 
@@ -735,7 +704,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - container: a scoped parent writes no edge into the container's dependency graph.
 - container: a resolution with nothing to write takes the container's READ lock instead of its exclusive one.
 - container: `Replacing()`'s documentation says what the code does.
-- example: the scoped request-trail service leaves the `service.` namespace the framework reserves for its own.
 - exception: a foreign error whose `Context()` panics no longer takes down the recovery that is reporting it.
 - httpclient: a client configured with a base url refuses a target that leaves that origin, judged on the RESOLVED url.
 - httpclient: a `[]byte` request body is copied instead of aliased.
@@ -807,16 +775,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: a regex rule carrying `PUBLIC_ACCESS` is refused unless every branch of its pattern is anchored to the path start. The previous guard tested the pattern TEXT for a leading `^`, which is a different question: Go reads `^/public|/status` as `(^/public)|(/status)`, so it passed while its second branch floated anywhere and granted `/admin/status-board` — a protected route reached through a public rule, and among regex rules the first registered wins. The parsed expression is asked instead, through `regexp/syntax`, which also stops refusing patterns the textual test rejected by mistake: `(?i)^/public(/|$)` and `\A/public` panicked at boot and are accepted now, while `(?m)^/public`, which matches after a newline too, is refused
 - security: `security.NewAccessControlRule` builds the raw-prefix rule it has always built. Bounding it to a path segment under the same name and signature narrowed every existing rule with no compile-time signal — and a path that falls out of a rule is not refused but UNGOVERNED, since the listener answers "no rule matched" by returning and letting the request through. Measured: `NewAccessControlRule("/admin", "ROLE_ADMIN")` stopped claiming `/admin-tools/delete`, `/administrator` and `/admin.json`, and where a weaker catch-all existed it downgraded instead. The bounded form keeps `NewAccessControlRuleWithSegmentPrefix`; both are superseded by `accesscontrol`
 - http: `RedirectResponse` classifies the location the header writer will emit rather than the one the caller passed. `net/textproto` folds away leading spaces and tabs as it writes the field, so ` //evil.example.com` carried neither the scheme-relative prefix nor a scheme for the guard to find and reached the browser as `//evil.example.com` — a location built from client input left the origin through the door whose GoDoc promises the unsafe composition fails at the first probe
-- example: the login handler no longer writes the authentication cause into the response's errors list. That list is rendered with no debug gate at all and this is an unauthenticated door, so every cause `AuthenticateByUsernameAndPassword` can reach — a cache-backend refusal naming the store address, a driver error naming the schema, table and host, a gob deserialization failure, "invalid cache value for user" — reached anonymous callers verbatim with `APP_DEBUG` off.
 - security: the access-control listener no longer serves a request an entry point or access-denied handler refused with a typed-nil response.
 - http: the rate-limit request listener no longer serves a refused request unmetered. `OnLimitExceeded` is application-supplied, and a typed-nil response from it passed the plain check the same way the access-control listener's did, so the 429 fallback never ran and the over-budget request reached the handler; it is read through `IsNilInterface` now, matching the middleware twin
 - config: `MarkSecret` no longer leaves a value assembled through a parameter's `kernel.*` alias unredacted. The post-resolve propagation matched templates by the marked name alone, so a dsn built from a secret read through the other spelling of the same kernel-aliased parameter printed in full beside the redacted key; the propagation now follows every alias the parameter answers to
 - security: `NewHmacTokenSource` refuses a negative `MaxFutureExpiry`. The check that caps how far ahead an envelope's expiry may sit is gated on `0 < maxFutureExpiry`, so a negative value — reachable from a config typo — behaved like the zero "unbounded" case and reopened the memory-pinning window the cap exists to close; it is refused at construction the way `JwtConfig` refuses a negative revocation skew
 - security: `totp.Config.Period` is clamped. `base = at.Unix() / int64(Period)`, so a period at or above `1<<63` converted to a non-positive int64 and froze the counter at 0, verifying one secret-derived code at every instant forever; a period past `maxPeriod` falls back to the default, mirroring the skew clamp
-- example: the login doors rotate the session id before writing the authenticated identity. Both of them — the json login handler and the security `LoginHandler` the firewall drives — wrote the identity onto the session the request arrived with, so a session id an attacker chose before authentication and planted in the victim's browser stayed valid once it carried the victim's identity, which is session fixation.
-- example: the seeded passwords are bcrypt. `security.Sha256Hex` — an unsalted digest, which is what a reader of a showcase would have copied — is replaced by `HashPassword`/`MustHashPassword` (`bcrypt.GenerateFromPassword`) at seeding and in the two user handlers, and by `PasswordMatches` (`bcrypt.CompareHashAndPassword`, constant-time on its own) at authentication, where the digest was compared with `!=`.
-- example: a login refused because the stored value is not a bcrypt digest costs what a real comparison costs. bcrypt rejects such a value on its prefix, before deriving any key, so an account written before this application moved to bcrypt answered in 308ns where an absent username pays a full 40ms comparison — measured at 131.184 times faster. Response time therefore named the accounts whose credential this application would refuse whatever was typed, which is the existence oracle `DummyPasswordMatch` exists to close, inverted and sharpened; `PasswordMatches` now spends the comparison bcrypt skipped.
-- example: the stream door authorizes the topic before it opens the stream. `NewServerSentEventWriter` commits the response — event-stream headers, 200, flush — and the kernel discards whatever a handler returns after the headers are committed, so the topic refusal added beside it was never written: a subscriber without the role read a successful stream that ended at once and reconnected forever, while the access log recorded a 200 for every attempt.
 
 - http: `RedirectResponse` — and `RedirectFound`/`RedirectMovedPermanently` through it — refuses a location that leaves the application: a scheme (`https:`, `mailto:`, `javascript:`), a scheme-relative `//host`, or a backslash, which several browsers fold to a slash while `net/url` does not. `RedirectExternalResponse` is the new unguarded form, whose name is the caller's assertion that the target is trusted.
 - http: `ConfinedFileResponse` and `ConfinedAttachmentResponse` serve a file selected by a name a client may steer, confined to a root directory: an absolute or climbing name is refused rather than folded away, the joined path is resolved through every symlink and checked to still lie under the resolved root, and only a regular file is answered.
@@ -829,7 +792,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - config: a godotenv parse failure is reported by shape, not by quoting the file it failed on. The library's error embeds the offending line, so a syntax error anywhere in a `.env` copied that line — a credential among the likeliest — into the boot record.
 - config: a secret parameter withholds the parse failure underneath its conversion error. The strconv and parse errors quote the value they refused, which is exactly the right diagnostic for a mistyped pool size and exactly the wrong log line for a credential that failed a conversion it was never meant for.
 - config: a reference to a non-string parameter reports the type it found instead of the value. The raw value went into the error context whole, and a parameter referenced from a template is commonly the one holding a dsn with a password in it.
-- example: the embedded-env build embeds the committed `.env` alone. The `.env*` glob also baked the gitignored `.env.local` — the machine-local override file that holds real credentials precisely because it never enters git — into the shipped binary, where the loader's precedence then let it override the committed configuration at runtime.
 - http: the static file server refuses a path element beginning with a dot, so a `.env` or `.git/config` left in the public directory is no longer served — and, with the shipped cache defaults, no longer stored by a shared cache.
 - http: a static file server configured with both a strip prefix and an embedded public directory can no longer serve a file outside that directory.
 - security: the access control matcher folds the spellings that reach the same resource into the one the rules are written in before it matches. net/http hands the path through unfolded, so `//admin/panel` and `/open/../admin/panel` were matched by no rule that names `/admin` — and a path no rule matches is granted, with the token never consulted, so a route that answers those spellings (a catch-all mount for a single-page app, a proxy, a documentation tree) served them to anyone.
@@ -839,8 +801,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - http: a request path that folds to a different spelling — `//admin/panel`, `/open/../admin/panel` — is refused with a 400 before it is routed, authorized or handled.
 - http: the access log and the kernel's 405 and no-route records keep the query parameter NAMES and redact every value, through the one `internal.RedactQueryValuesForDiagnostics` the security package's own sanitizer now shares.
-- example: `/events/publish` is a POST behind `RoleEditor` and `/events/stream` is behind `RoleUser` with the topic authorized against the caller.
-- example: `google.golang.org/grpc` is required at v1.82.1, the fix for [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061), which govulncheck reports as reachable from the example through the opentelemetry otlp exporter it wires
 
 ## [v3.13.0] - 2026-07-24 - Faithful OpenAPI Mirror, Wiring Codegen Guards and Contained Teardown Panics
 

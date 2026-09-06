@@ -87,7 +87,11 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
             targetUser.Password = passwordHash
         }
 
-        targetUser.Roles = normalizeRoles(dto.Roles)
+        if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
+        }
+
+        targetUser.Roles = rolesForUpdate(dto.Roles, targetUser.Roles)
 
         updatedUser, updated, updateErr := userService.Update(
             runtimeInstance,
@@ -130,6 +134,15 @@ type adminUserUpdateRequest struct {
     Username string   `json:"username"`
     Password string   `json:"password"`
     Roles    []string `json:"roles"`
+}
+
+/* rolesForUpdate answers the roles an update should store: the ones the body named, normalised, or the ones the target already holds when the body named none. An omitted username and an omitted password are kept a few lines above, and roles were the one field an omission REMOVED — the target came back holding the base role alone, an administrator editing their own account included. A list sent EXPLICITLY empty is an opinion and still falls back to the base role, which is the rule normalizeRoles carries; the decoder separates the two, leaving the field nil only when the caller never named it. */
+func rolesForUpdate(requested []string, current []string) []string {
+    if nil == requested {
+        return current
+    }
+
+    return normalizeRoles(requested)
 }
 
 /* protectsAnotherAdmin answers whether the change the actor is asking for would touch an administrator who is not the actor. An administrator may edit and delete their own account and everyone below them, and may not reach a peer: an account that can grant roles is the one account whose holder must not be able to lock a colleague out or take their place quietly. Both the update and the delete door ask the same question, so the two cannot drift apart on who is protected — only on the words they refuse with. */

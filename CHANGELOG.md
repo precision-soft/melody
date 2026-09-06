@@ -4,6 +4,8 @@ All notable changes to `precision-soft/melody` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+The example application inside this major keeps its own changelog, released on these same tags: [`.example/CHANGELOG.md`](.example/CHANGELOG.md).
+
 **v1 is feature-frozen.** The major is stabilized: no new feature lands here, while patch-level defect fixes and security fixes still do, through 2027-08-17. New development continues on [v3](v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
 
 ## [Unreleased]
@@ -106,6 +108,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v1.19.0] - 2026-08-18 - Stabilization Sweep, Hardened Failure Paths and Feature Freeze
 
+The example application's entries for this release are filed in [`.example/CHANGELOG.md`](.example/CHANGELOG.md), under the block of the same version. They stood in this block when the release was published, so the body published on GitHub carries them until the next release-notes sync brings that body in line with this file, which is the intent: the release notes of a major describe the framework, and the example's own changelog is where its application-level changes are read.
+
 ### Added
 
 - tooling: `.dev/validate/changelog.sh` and `.dev/validate/changelog.baseline` read the SHAPE of every changelog block, which nothing here had ever read.
@@ -129,12 +133,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: `NewAccessControlRawPrefixRule` names the cross-segment prefix rule, and `NewAccessControlRule` now builds the segment-bounded one — the plain name is the bounded tool. **Behavioural change**
 - security: `RolesReplacer`, the optional capability a `Token` implements to answer its own twin under another role set, and `(*AuthenticatedToken).WithRoles`, which implements it.
 - logging: `RunShieldedStep` runs one step under the exit handler's own budget and answers whether it finished, so the normal return of `Run` tears down under the same shield the panic path has had since the exit-step budget was installed
-- example: the example carries the source of its own frontend bundle, in `.example/assets/` — `app.ts`, the `melody-routes.ts` URL generator, and the `package.json` that bundles them into `public/assets/app.js` with esbuild.
-- example: a stateless api-key firewall on `/products/api`, which is the door `APP_API_TOKEN` always promised — the key shipped in `.env`, was marked secret, and nothing read it.
-- example: the cors LISTENERS, armed by `APP_CORS_ALLOW_ORIGINS` (comma separated; empty keeps cors unwired): a preflight aimed at an access-controlled path is answered 204 before routing and before the security chain can refuse it, and the refusals the security listeners produce carry the cors headers — responses the middleware chain never sees, which is why the listeners are the door the example demonstrates rather than the middleware.
-- example: file-backed session storage as a configuration choice — `APP_SESSION_FILE` names the snapshot (a relative path is anchored to the project directory) and the example registers `session.NewFileStorageFromPath` under the framework's storage service id, which wins over the has-guarded in-memory default; empty keeps the default.
-- example: a second live database in the same process — the catalog journal moves onto `bunorm/pgsql` while the catalogue stays on mysql, which is what shows the provider is a choice rather than an assumption.
-- example: the request-scoped change attribution, `service.ChangeAttribution` — the example's own demonstration of `RegisterScopedServices` and of `container.Lazy`.
 - security: `RoleHierarchyAware`, the optional capability an `AccessDecisionManager` implements to receive the declared role hierarchy at compilation, and `(*AccessDecisionManager).WithRoleHierarchy`, which implements it for the built-in manager by wrapping its own role voters.
 - http: `Kernel.SetMethodPolicy` installs the method policy the kernel reads on every request — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header. **Breaking**
 - exception: `PanicCause` reads a recovered panic value as the cause of the error a recovery boundary fabricates in its place — the error itself when the panic was error-shaped, and nothing when it was a typed nil whose `Error()` would dereference a nil receiver at the first render.
@@ -150,9 +148,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - bag: `*ParameterBag.AppendString` appends inside one critical section.
 - cache: `NewManagerOwningBackend` builds a manager that closes its backend when it is closed itself, for the caller that builds both by hand and wants one Close to end both.
 - cache: `DeserializationError` marks a read that found a payload the serializer cannot decode, with `NewDeserializationError` and `IsDeserializationError` beside it.
-- example: the development stack serves all three example applications at once, each under a name that says which it is — `v1-example.`, `v2-example.` and `example.melody.localhost.precision-soft.com`.
-- example: the example application is a working nomenclature rather than a set of routes that exist to be driven.
-- example: every redis key and every table the example writes carries its major.
 - config: `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`) names the path prefixes the built-in file server declines without touching the disk, comma separated. **Breaking**
 - http: `SimpleRateLimitWithResolver`, `IpRateLimitWithResolver` and `UserRateLimitWithResolver` take the client-ip resolver the convenience helpers could not reach.
 - http: `static.FileServerConfig.SetAllowedDotPrefixList` names the dot-prefixed first path elements the file server may retrieve.
@@ -179,15 +174,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- example: each major's example application holds its schema in a database of its own rather than the one all three shared.
 - cli, logging: text of unknown origin reaching a terminal or a plain-text log line is escaped rather than obeyed. **Behavioural change**
-- example: the catalog migration set holds four migrations — the journal's `20260814000005` moves, with its name, into the postgres-dialect `JournalMigrations` set (see the Added entry), so `db:migrate` over an emptied catalog database reports `applied 4 migrations`. **Behavioural change**. **Operational note**
-- example: the static cache is armed in the shipped `.env` — `MELODY_STATIC_ENABLE_CACHE=true`, `MELODY_STATIC_CACHE_MAX_AGE=3600` — where every example previously opted out of the framework's own default.
-- example: the seeded passwords are bcrypt. **Operational note**
-- example: a validation refusal answers one `errors` entry per violated field — `presenter.ApiValidationError`, which both product write handlers now answer through — instead of the single semicolon-joined, alphabetically sorted string the presenter used to receive from `ValidationErrors.Error()`. **Behavioural change**
-- example: the four example commands — `app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh` — render through the framework's `cli/output` envelope instead of `fmt`, so each accepts the standard flag set and answers one machine-readable json document under `--format=json`. **Behavioural change**
-- example: the cron wiring moves onto the module facade — `configure.go` registers `cron.NewModule` with the configuration factory and the three scheduled commands, instantiated, as its runner commands, and the hand-wired registration of the generate command is gone.
-- example: the database schema is owned by a migration set, `migration/` — five DDL migrations whose column definitions were captured from the tables the repositories used to create — and the repository-owned `EnsureSchema` is gone from the five bun repositories and from the journal repository's public interface.
 - cli: `--format=json` writes one document on one line, terminated by a newline, instead of an indented block. **Behavioural change**
 - cache: `InMemoryBackend.Get` and `Many` take the exclusive lock only when an entry's place in the recency list has actually gone stale, where they used to take it on every hit just to move the entry to the front. **Behavioural change**
 - container: the teardown breaks a tie the dependency graph leaves open on **creation order, latest first**, not on the node key descending. **Behavioural change**
@@ -304,8 +291,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: `NewApiKeyHeaderRule` rejects a nil matcher at construction, the way the other firewall dependencies are validated, so a configuration mistake fails at boot rather than panicking in `Applies` on the request path, outside any recovery
 - security: a role hierarchy or decision manager that neither the firewall nor the global configuration declares is reported as `SourceNone` rather than `SourceFirewall`, so a debug panel no longer claims a manager that does not exist at the point the runtime answers that it is missing
 - security: `NewAccessControlRawPrefixRule` refuses `PUBLIC_ACCESS`. **Breaking**
-- example: the catalogue reading is served at `/catalog/report/` under the name `example.catalog.report`.
-- example: the welcome text on the static index says what the application is — a product nomenclature of products, categories, currencies and users — instead of calling itself a small demo, and the api token shipped in `.env` is named for the example rather than for a demonstration.
 - logging: `LogOnRecover` only logs.
 - config: `Resolve()` reports an error once the application is serving.
 - config: a positive session ttl below one second fails the boot.
@@ -347,7 +332,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - serializer: `NewSerializerManager` refuses two mime keys that collapse into one normalized key, naming the normalized key and both spellings. **Behavioural change**
 - serializer: a member of the accept header whose `q` parameter falls outside the RFC 7231 qvalue grammar — a zero with up to three decimal digits, or a one with up to three zero decimals — is dropped whole instead of being scored by guesswork. **Behavioural change**
 - serializer: a manager deliberately configured without `application/json` answers an empty accept header — and one that matches nothing it has — with its first configured serializer in lexical mime order, instead of refusing every such request while a serializer sits configured beside the refusal. **Behavioural change**
-- example: the api presenter answers `406 Not Acceptable` when the accept header refuses every available media type, exactly as the framework result handler answers the same header on the success path. **Behavioural change**
 - event: a dispatch aborted by a failing listener scans the listeners behind it for one marked required, exactly as a stop of propagation does, and refuses the dispatch when it finds one. **Behavioural change**
 - http: the kernel publishes the response `writeResponse` actually wrote — the function returns it, and every call site assigns it back before the terminate event fires. **Behavioural change**
 - application, http: the framework exception listener is registered only when the application installed no error handler by boot, which makes `SetErrorHandler` reachable for the first time in a framework-booted application. **Behavioural change**
@@ -380,11 +364,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   error names the call it came from, which the function raising it cannot know; and the time-codec entry drops the false parenthesis about every sibling memo
 - documentation: two claims of this major's documents are brought back to what the code does. `.documentation/UPGRADE.md` pointed [`Register`](../container/container_registrar.go) at `container/container.go`, which declares the two symbols the same sentence names and not that one, so a reader following the link found the neighbours of what they were sent to read.
 - session: the file storage's atomic save fsyncs the directory after the rename, the way the cron generator's atomic writer always has — without it a power loss after a save could resurface the previous snapshot, silently logging out the user whose session had just been written; and the construction sweeps the `<name>.*.tmp` orphans a hard kill leaves between `CreateTemp` and the rename, each of which is a complete snapshot of every live session and its tokens that nothing ever opened again.
-- the example catches up with the identities its own cache promises, on the doors a divergence was measured through: the bun user lookup compares on the binary collation (`LOWER(username) = (? COLLATE utf8mb4_bin)`), because the column's accent-insensitive default (`'café' = 'cafe'` is true under `utf8mb4_0900_ai_ci`) admitted spellings the cache keys and the invalidation listeners — which fold with `NormalizedUsername` alone — could never address, so a deleted user kept authenticating from the ttl-less cache under the collation-only spelling; `UserUpdatedEvent` carries the username the row held before the update and the listener drops both spellings, since a rename left the entry behind under the old one; caller-supplied identifiers are answered as absent by every finder when the cache-key grammar refuses them (a space, a newline, over 255 bytes) instead of surfacing the backend's refusal as a 500 on a read, and the write doors refuse the same spellings as a 400 that names the field —
-  a product id with an interior space used to land in the database and then fail every later cache write, with the created row invisible to the ttl-less list forever; the invalidation listeners run every delete and join the failures instead of returning on the first, which used to skip the list entry behind it; the login door no longer concatenates the failure's internals into the client response; the password doors refuse the bcrypt 72-byte ceiling as a 400 instead of a 500, a role carrying a comma is refused before the comma-joined storage would split it into roles nobody granted on the next read, and the embedded-env build embeds the committed `.env` alone — the `.env*` glob also baked the gitignored `.env.local`, the machine-local file that holds real credentials precisely because it never enters git, into the shipped binary, where the loader's precedence let it override the committed configuration.
 - http: a multipart upload past `MaxRequestBodyBytes` is answered `413`, the status its urlencoded and json siblings already carry.
 - http/cors: cross-origin headers reach a streamed response and a rate-limited preflight.
-- example: the login flow rotates the session id before writing the authenticated identity, the framework's own defence against session fixation (`http.RegenerateRequestSession`) that the showcase demonstrated unused — the identity was written onto the pre-login session, so an id an attacker seeded and planted in the victim's browser stayed authenticated as the victim.
 - container: a scoped parent writes no edge into the container's dependency graph.
 - application: the embedded-static boot guard reads through the interface, so a typed-nil `fs.FS` handed to `NewApplication` under `melody_static_embedded` is refused by the panic that names the argument instead of passing the plain nil comparison and dying later as an anonymous nil dereference inside `fs.Stat` — the exact hazard the environment sibling's guard already documented and closed
 - application: two closes racing each other report the one teardown failure once.
@@ -398,21 +379,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - documentation: the config document states the bool grammar the typed accessor reads — the string spellings, the whitespace trim, and the refusal of the empty string — which until now was written only in the cron integration's readme; and the container quick-start stops passing `WithTypeRegistration(true)`, a restatement of the default that taught the option must be passed by an example that never resolves by type
 - documentation: the application document's logging usage example compiles — `LevelLabels` maps to `LevelLabel` values built through `LevelLabelFromInt`, and the example handed it bare string literals the type cannot hold
 - session: the tombstone's boundary is stated where the guarantee is promised — a session another request deleted cannot be saved again *within one process*: the record lives in the manager's own memory, not in the storage it guards, so a shared storage does not carry it between instances and a logout served by one node does not stop a peer instance's in-flight request from writing the entry back.
-- example: the login entry point and the access denied handler read the client's preference through `melodyhttp.PrefersHtml`, which is what the rest of the example already used.
-- example: `CacheKeyUserByUsername` folds the username itself instead of trusting its callers to have folded it.
-- example: an administrator may not modify or delete a peer, and both doors ask the same question.
-- example: the seeded password digest is compared in constant time with `crypto/subtle.ConstantTimeCompare` rather than with `!=`.
-- example: `/health` stamps its answer with the injected clock rather than with `time.Now`.
-- example: the README's structure overview lists `assets/`, the frontend bundle source that produces `public/assets/app.js` and is tracked in git, and no longer describes `repository/` as carrying only in-memory implementations or `service/` as carrying four of its six services.
 - application: a shutdown no longer reports a clean stop it did not obtain. **Behavioural change**
 - event: a dispatch builds no debug record the journal would discard.
 - config: the refusal of an empty `MELODY_ENV` names the key, the parameter and the files the emptiness already selected.
 - config: `Parameter.Bool` reads through the shared parser its sibling accessors use, so a refusal carries the cause that names the parameter, the target type and the value.
 - validation: `NewMinLength` and `NewMaxLength` refuse a negative bound, which the tag door beside them has always refused with the reason written in a comment. **Behavioural change**
-- example: `/health` answers a monitoring probe in all three examples, where v1 and v2 left it to the `ROLE_USER` catch-all and v3 alone had made it public.
-- example: `/index.html` carries the same public policy as the `/` it serves.
-- example: the README of every major describes the cron wiring that exists.
-- example: `url/url_generator.go` is deleted from all three examples.
 - http: the rate-limit middleware and the rate-limit request listener honour the already-logged mark before writing their record, the way the exception listener and the five sites in the http kernel already do.
 - cache: a `Remember` waiter can be given the request's context and leaves when the request does.
 - session: `NewFileStorageFromFile` refuses a handle opened with `O_APPEND`, and the in-place write names offset zero rather than seeking to it.
@@ -428,8 +399,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - container: a resolution performed after the teardown finished is refused instead of being answered out of the maps.
 - container: the panic a service's `Close` raises is recorded with its cause and its stack.
 - application: the normal return of `Run` tears the container down under the same ten-second shield the panic path uses, and exits non-zero when it has to abandon it.
-- example: the shared icons every page links — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — are produced by the same `npm run build` that produces the frontend bundle, so the one command a fresh clone needs for the browser interface delivers everything a browser asks for.
-- example: the comment in `.env` no longer claims that an already-set process or host environment variable overrides the value beside it.
 - container: the teardown closes a service before what it resolved through a resolver it kept, not only before what it resolved during construction.
 - container: a resolution with nothing to write takes the container's read lock instead of its exclusive one — no scope layered over it, no dependency edge to record, and the instance already built.
 - session: burying a tombstone prunes only the burials that have lapsed, walking them in the order they happened, instead of sweeping the whole record on every call.
@@ -712,12 +681,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - logging: `EnsureLogger` replaces a typed nil logger with the no-op logger instead of returning it unchanged and letting the first call panic — the case the function exists to guard
 - container: two distinct services of one type that carries no fields are each closed at teardown instead of one of them being silently skipped.
 - cache: the in-memory backend no longer holds its exclusive lock across the whole map.
-- example: the route manifest is escaped for the javascript string literal it is spliced into, so a route name or pattern containing a backslash or an apostrophe no longer breaks every page's scripting (the escaping v3 already carried); the firewall session login handler stores the token roles alongside the user identifier, and the logout handler clears them, so a session written by that handler resolves back to an authenticated token rather than an anonymous one; the embedded static build embeds dot-prefixed and underscore-prefixed paths (`all:public`), so it serves the same file set as the filesystem build
 - cors: an `OPTIONS` request carrying an `Origin` but no `Access-Control-Request-Method` is no longer treated as a preflight.
 - cors: `Vary: Origin` is emitted on every response, not only on one whose origin was allowed.
 - cors: `NewService` no longer panics on a credentialed configuration that decides origins through `AllowOriginFunc`.
-- example: the in-memory repositories guard their slice with a read-write mutex, and `All` hands back a copy of it.
-- example: the api error presenter emits the raw error message, the concrete Go type and the unwrap chain only when the kernel environment is the development one, the same gate the framework exception listener applies, and stays closed when that environment cannot be resolved at all.
 - documentation: `CACHE.md` records that a cancelable `Remember` call abandoned by all its waiters is not inherited by a late joiner, which the package has always done and only one major documented.
 - tooling: a validation lane whose script is missing or not executable fails the run instead of reporting success.
 - tooling: the race lane covers `session`, `http` and `internal` in every major, in `.dev/validate/all.sh` and in the continuous integration job alike.

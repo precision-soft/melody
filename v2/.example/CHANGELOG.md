@@ -1,0 +1,67 @@
+# Changelog
+
+All notable changes to the example application of `precision-soft/melody/v2` will be documented in this file.
+
+The example application is not a published module — `go get` never resolves `precision-soft/melody/v2/.example` — so it carries no version of its own. It ships inside the major it demonstrates and is released on THAT major's tags: every block below names the same version, date and title as the block of the same release in [`../CHANGELOG.md`](../CHANGELOG.md), and the compare links point at the same two tags.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Security
+
+- example: logging out ends the session instead of emptying it. Both doors — the page redirect and the firewall's logout handler — deleted the two identity keys, which leaves the entry MODIFIED, so the response path saved it back under the same id and re-issued the live cookie: measured, the storage still held the record after the response ran, and the browser carried a session id across its own logout, for the whole session lifetime. `Clear()` is what marks a session cleared, and a cleared session is what routes the response path to `DeleteSession` and to the expired cookie
+- example: an admin update that names no `roles` keeps the ones the target holds, instead of stripping it to the base role. An omitted username and an omitted password were already kept; roles were the one field an omission REMOVED, an administrator editing their own account included, and this door is the only one that can grant them back. A list sent explicitly empty still falls back to the base role, which is the rule `normalizeRoles` carries — the decoder separates "absent" from "empty", so the two readings never had to be fused
+
+## [v2.13.0] - 2026-08-18 - Stabilization Sweep, Hardened Failure Paths and Feature Freeze
+
+### Added
+
+- example: `melody:cron:run` boots from the schedule the example already declared.
+- example: the schema is owned by a migration set of its own, in `v2/.example/migration/` — five mysql migrations, one per table, the journal among them, because this major keeps the journal on the same connection as the catalogue.
+- example: a stateless api-key firewall on `/products/api`, which is the door `APP_API_TOKEN` always promised — the key shipped in `.env`, was marked secret, and nothing read it.
+- example: the cors LISTENERS, armed by `APP_CORS_ALLOW_ORIGINS` (comma separated; empty keeps cors unwired): a preflight aimed at an access-controlled path is answered 204 before routing and before the security chain can refuse it, and the refusals the security listeners produce carry the cors headers — responses the middleware chain never sees, which is why the listeners are the door the example demonstrates rather than the middleware.
+- example: file-backed session storage as a configuration choice — `APP_SESSION_FILE` names the snapshot (a relative path is anchored to the project directory) and the example registers `session.NewFileStorageFromPath` under the framework's storage service id, which wins over the has-guarded in-memory default; empty keeps the default.
+- example: the example carries the source of its own frontend bundle, in `v2/.example/assets/` — `app.ts`, the `melody-routes.ts` URL generator, and the `package.json` that bundles them into `public/assets/app.js` with esbuild.
+- example: the development stack serves all three example applications at once, each under a name that says which it is — `v1-example.`, `v2-example.` and `example.melody.localhost.precision-soft.com`.
+- example: the example application is a working nomenclature rather than a set of routes that exist to be driven.
+- example: every redis key and every table the example writes carries its major.
+
+### Changed
+
+- example: the seeded passwords are bcrypt. **Operational note**
+- example: a validation refusal answers one `errors` entry per violated field — `presenter.ApiValidationError`, which both product write handlers now answer through — instead of the single semicolon-joined, alphabetically sorted string the presenter used to receive from `ValidationErrors.Error()`. **Behavioural change**
+- example: `BunCatalogJournalRepository.Latest` reads the whole journal when the caller asks for no bound, where it used to substitute a floor of ten.
+- example: each major's example application holds its schema in a database of its own rather than the one all three shared.
+- example: the four commands the example ships — `app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh` — render through the framework's `cli/output` envelope instead of printing with `fmt`.
+- example: the catalogue reading is served at `/catalog/report/` under the name `example.catalog.report`.
+- example: the welcome text on the static index says what the application is — a product nomenclature of products, categories, currencies and users — instead of calling itself a small demo, and the api token shipped in `.env` is named for the example rather than for a demonstration.
+
+### Fixed
+
+- example: a role list restored from a session that round-trips through json is read again.
+- example: the login doors rotate the session id before they write the authenticated identity.
+- example: the login submit is behind the same per-address budget the catalogue writes are behind.
+- example: the api error presenter reads every `Accept` line and answers a header that refuses every available media type with 406.
+- example: the login door keeps the authentication failure out of the response body.
+- example: the entry point and the access denied handler decide html through `melodyhttp.PrefersHtml` instead of a substring search over the first `Accept` line.
+- example: the cache invalidation listeners drop every key of a change before they answer.
+- example: a rename invalidates the cache entry the user was served under before it.
+- example: the username is folded in the cache key constructor rather than at each call site.
+- example: the user lookup and the uniqueness check compare on the binary collation.
+- example: a role carrying a comma is refused with 400 on both user doors.
+- example: the health handler stamps its answer from the injected clock.
+- example: the admin-protects-admin rule is one predicate both user doors ask.
+- example: the shared icons every page links — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — are produced by the same `npm run build` that produces the frontend bundle, so the one command a fresh clone needs for the browser interface delivers everything a browser asks for.
+- example: the comment in `.env` no longer claims that an already-set process or host environment variable overrides the value beside it.
+- example: the route manifest is escaped for the javascript string literal it is spliced into, so a route name or pattern containing a backslash or an apostrophe no longer breaks every page's scripting (the escaping v3 already carried); the firewall session login handler stores the token roles alongside the user identifier, and the logout handler clears them, so a session written by that handler resolves back to an authenticated token rather than an anonymous one; the embedded static build embeds dot-prefixed and underscore-prefixed paths (`all:public`), so it serves the same file set as the filesystem build
+- example: the in-memory repositories guard their slice with a read-write mutex, and `All` hands back a copy of it.
+- example: the api error presenter emits the raw error message, the concrete Go type and the unwrap chain only when the kernel environment is the development one, the same gate the framework exception listener applies, and stays closed when that environment cannot be resolved at all.
+
+### Security
+
+- example: the embedded-env build embeds the committed `.env` alone.
+
+[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.0...HEAD
+
+[v2.13.0]: https://github.com/precision-soft/melody/compare/v2.12.1...v2.13.0

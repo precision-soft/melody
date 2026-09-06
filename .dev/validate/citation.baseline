@@ -79,17 +79,26 @@ v3 ~ symbol ~ websocket.MessageBinary  ~ github.com/coder/websocket MessageBinar
 # the note to be usable, and it has to be absent for the note to be true, so these are the one class where
 # a citation resolving to nothing is the document being correct. The reason names the successor, so that a
 # line here dies if the removal is ever reverted.
+#
+# The same shape covers a document that names a symbol to say the design never had one. The example's
+# readme tells a reader who arrives from another scheduler that a melody command implements no interface
+# to be scheduled — the sentence is only usable if it names the interface it is denying, and it is only
+# true while nothing declares it. These three rows were the first thing this band saw when it began
+# reading the example's own documents, which nothing had ever read.
 # ------------------------------------------------------------------------------------------------------
 
 v1 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
+v1 ~ symbol ~ cron.Metadata            ~ never declared; the example readme names it to say a scheduled command implements no interface
 v1 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
 
 v2 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
+v2 ~ symbol ~ cron.Metadata            ~ never declared; the example readme names it to say a scheduled command implements no interface
 v2 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
 
 v3 ~ symbol ~ cli.NewCommandContext    ~ replaced by cli.NewRoot when the flag and context layer became melody's own; the upgrade note names it to say so
 v3 ~ symbol ~ debug.MiddlewareProvider ~ removed when NewMiddlewareCommand moved to a description provider and a build provider; the changelog Removed entry names it to say so
 v3 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
+v3 ~ symbol ~ cron.Metadata            ~ never declared; the example readme names it to say a scheduled command implements no interface
 v3 ~ symbol ~ security.Sha256Hex      ~ removed when the example moved its passwords to bcrypt; the changelog Security entry names it to say what it replaced
 
 # ------------------------------------------------------------------------------------------------------

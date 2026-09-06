@@ -65,3 +65,32 @@ func TestHasRoleAnswersTheExactRole(t *testing.T) {
         t.Fatalf("an account with no roles was granted one")
     }
 }
+
+/* An update names the fields it changes: an omitted username and an omitted password are kept, and roles were the one field an omission REMOVED — the target came back holding the base role alone, an administrator editing their own account included. */
+func TestRolesForUpdateKeepsWhatTheBodyDoesNotName(t *testing.T) {
+    current := []string{entity.RoleUser, entity.RoleEditor}
+
+    kept := rolesForUpdate(nil, current)
+
+    if 2 != len(kept) || entity.RoleUser != kept[0] || entity.RoleEditor != kept[1] {
+        t.Fatalf("the roles the body never named were rewritten to %v", kept)
+    }
+}
+
+/* the other half of the same rule: roles the body DOES name replace what the target held */
+func TestRolesForUpdateReplacesWhatTheBodyNames(t *testing.T) {
+    replaced := rolesForUpdate([]string{entity.RoleUser}, []string{entity.RoleUser, entity.RoleEditor})
+
+    if 1 != len(replaced) || entity.RoleUser != replaced[0] {
+        t.Fatalf("the roles the body named were not stored, got %v", replaced)
+    }
+}
+
+/* a list sent EXPLICITLY empty is an opinion, and the base role is what normalizeRoles answers for it: an account is never left with none */
+func TestRolesForUpdateFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *testing.T) {
+    answered := rolesForUpdate([]string{}, []string{entity.RoleUser, entity.RoleEditor})
+
+    if 1 != len(answered) || entity.RoleUser != answered[0] {
+        t.Fatalf("an explicitly empty list answered %v", answered)
+    }
+}

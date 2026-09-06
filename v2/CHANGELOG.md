@@ -4,6 +4,8 @@ All notable changes to `precision-soft/melody/v2` will be documented in this fil
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+The example application inside this major keeps its own changelog, released on these same tags: [`.example/CHANGELOG.md`](.example/CHANGELOG.md).
+
 **v2 is feature-frozen.** The major is stabilized: no new feature lands here, while patch-level defect fixes and security fixes still do, through 2027-09-08. New development continues on [v3](../v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
 
 ## [Unreleased]
@@ -98,14 +100,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v2.13.0] - 2026-08-18 - Stabilization Sweep, Hardened Failure Paths and Feature Freeze
 
+The example application's entries for this release are filed in [`.example/CHANGELOG.md`](.example/CHANGELOG.md), under the block of the same version. They stood in this block when the release was published, so the body published on GitHub carries them until the next release-notes sync brings that body in line with this file, which is the intent: the release notes of a major describe the framework, and the example's own changelog is where its application-level changes are read.
+
 ### Added
 
 - documentation: `README.md` carries one version table — when each line was first released, its latest tag, its status and the event that ends its fixes — and `SECURITY.md` links to it instead of repeating a second, differently shaped one. The two had already drifted: the security table named no release and no boundary, while the readme named the boundary and no release. v4 appears there as planned for Q4 2026, and v3's own boundary is written for the first time
-- example: `melody:cron:run` boots from the schedule the example already declared.
-- example: the schema is owned by a migration set of its own, in `v2/.example/migration/` — five mysql migrations, one per table, the journal among them, because this major keeps the journal on the same connection as the catalogue.
-- example: a stateless api-key firewall on `/products/api`, which is the door `APP_API_TOKEN` always promised — the key shipped in `.env`, was marked secret, and nothing read it.
-- example: the cors LISTENERS, armed by `APP_CORS_ALLOW_ORIGINS` (comma separated; empty keeps cors unwired): a preflight aimed at an access-controlled path is answered 204 before routing and before the security chain can refuse it, and the refusals the security listeners produce carry the cors headers — responses the middleware chain never sees, which is why the listeners are the door the example demonstrates rather than the middleware.
-- example: file-backed session storage as a configuration choice — `APP_SESSION_FILE` names the snapshot (a relative path is anchored to the project directory) and the example registers `session.NewFileStorageFromPath` under the framework's storage service id, which wins over the has-guarded in-memory default; empty keeps the default.
 - tooling: `.dev/validate/changelog.sh` and `.dev/validate/changelog.baseline` read the SHAPE of every changelog block, which nothing here had ever read.
 - tooling: `.dev/validate/documentation.sh` reads the integration readmes, which nothing had ever compared.
 - tooling: `.dev/validate/documentation.sh` reads the entries its own check is built on.
@@ -153,10 +152,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - container: `ServiceDescriptions` on the built container answers what it can say WITHOUT running a provider — every name either lifetime knows, with the type read from the built instance when one exists and from the provider's declared return type otherwise, which the container now records at registration.
 - http: `pipeline.Builder.Describe` answers what `Build` would run without running it — the same selection, gating and ordering, refused for the same cycles and missing references, but no factory invoked — and `HttpMiddlewareDefinition.SetFunctionName` records at registration the function a description names, so listing a pipeline never has to build one.
 - debug: `debug:events` renders a `SERVING-PROCESS LISTENERS` block for the listeners only the serving process wires, fed by the composition root through `debug.NewEventCommand` and `debug.DeferredListenerProvider`: with security configured, a console process declares the security resolution and access control listeners with their real event and priorities instead of rendering an absence that reads as "not wired".
-- example: the example carries the source of its own frontend bundle, in `v2/.example/assets/` — `app.ts`, the `melody-routes.ts` URL generator, and the `package.json` that bundles them into `public/assets/app.js` with esbuild.
-- example: the development stack serves all three example applications at once, each under a name that says which it is — `v1-example.`, `v2-example.` and `example.melody.localhost.precision-soft.com`.
-- example: the example application is a working nomenclature rather than a set of routes that exist to be driven.
-- example: every redis key and every table the example writes carries its major.
 - config: `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`) names the path prefixes the built-in file server declines without touching the disk, comma separated. **Breaking**
 - http: `SimpleRateLimitWithResolver`, `IpRateLimitWithResolver` and `UserRateLimitWithResolver` take the client-ip resolver the convenience helpers could not reach.
 - http: `static.FileServerConfig.SetAllowedDotPrefixList` names the dot-prefixed first path elements the file server may retrieve.
@@ -172,11 +167,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- example: the seeded passwords are bcrypt. **Operational note**
-- example: a validation refusal answers one `errors` entry per violated field — `presenter.ApiValidationError`, which both product write handlers now answer through — instead of the single semicolon-joined, alphabetically sorted string the presenter used to receive from `ValidationErrors.Error()`. **Behavioural change**
-- example: `BunCatalogJournalRepository.Latest` reads the whole journal when the caller asks for no bound, where it used to substitute a floor of ten.
-- example: each major's example application holds its schema in a database of its own rather than the one all three shared.
-- example: the four commands the example ships — `app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh` — render through the framework's `cli/output` envelope instead of printing with `fmt`.
 - documentation: the package documents catch up with the code they describe.
 - cli, logging: text of unknown origin reaching a terminal or a plain-text log line is escaped rather than obeyed. **Behavioural change**
 - cli: `--format=json` writes one document on one line, terminated by a newline, instead of an indented block. **Behavioural change**
@@ -332,8 +322,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - debug: `debug:router` renders the two discriminators the dispatch actually uses — `priority` and `order`, the registration rank that breaks a priority tie — on every row, in the table and the json document; `--verbose` adds the requirements, defaults and attributes as compact cells, and the json items carry the three maps always.
 - debug: the trace/stack noise filter of the rendered error context is a display concern and full verbosity turns it off: `debug:container ... -vvv` shows the context whole, stack keys included, where the drop used to be unconditional at every verbosity.
 - config: a late `MarkSecret` covers the whole derivation chain.
-- example: the catalogue reading is served at `/catalog/report/` under the name `example.catalog.report`.
-- example: the welcome text on the static index says what the application is — a product nomenclature of products, categories, currencies and users — instead of calling itself a small demo, and the api token shipped in `.env` is named for the example rather than for a demonstration.
 - logging: `LogOnRecover` only logs.
 - config: `Resolve()` reports an error once the application is serving.
 - config: a positive session ttl below one second fails the boot.
@@ -359,19 +347,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- example: a role list restored from a session that round-trips through json is read again.
-- example: the login doors rotate the session id before they write the authenticated identity.
-- example: the login submit is behind the same per-address budget the catalogue writes are behind.
-- example: the api error presenter reads every `Accept` line and answers a header that refuses every available media type with 406.
-- example: the login door keeps the authentication failure out of the response body.
-- example: the entry point and the access denied handler decide html through `melodyhttp.PrefersHtml` instead of a substring search over the first `Accept` line.
-- example: the cache invalidation listeners drop every key of a change before they answer.
-- example: a rename invalidates the cache entry the user was served under before it.
-- example: the username is folded in the cache key constructor rather than at each call site.
-- example: the user lookup and the uniqueness check compare on the binary collation.
-- example: a role carrying a comma is refused with 400 on both user doors.
-- example: the health handler stamps its answer from the injected clock.
-- example: the admin-protects-admin rule is one predicate both user doors ask.
 - documentation: the integration readmes list the doors their modules ship.
 - documentation: four counts in this block are corrected against the code they describe, and nine entries the first major records and this one omitted are written down — seven documentation corrections its package documents carry too, and the two validation-lane entries that govern every major.
 - documentation: the logging document states the file journal's rotation constraint — the default destination is a file, its descriptor is opened exactly once for the life of the process, no reopen door or rotation signal exists, so rename-based rotation moves the journal out from under the process silently (records landing in the rotated file or an unlinked inode) and `copytruncate` is the rotation mode that works with the `O_APPEND` descriptor
@@ -659,8 +634,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: the response the middleware chain had in flight is closed when an outer middleware panics after its `next()` returned.
 - http: `NormalizeResultToResponse` asserts against the `httpcontract.Response` contract, the same question the controller registration door asks, with the typed nil read through the interface.
 - http: `Router.Match` hands out a deep copy of the winning route's attributes.
-- example: the shared icons every page links — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — are produced by the same `npm run build` that produces the frontend bundle, so the one command a fresh clone needs for the browser interface delivers everything a browser asks for.
-- example: the comment in `.env` no longer claims that an already-set process or host environment variable overrides the value beside it.
 - container: `HasType` canonicalises the type it is asked about, so it can no longer answer "no" for a service `GetByType` resolves happily.
 - container: a provider that panics no longer leaves the resolution around it blind to its scope.
 - http: a scope-close failure is reported through the emergency logger when the request never got a logger of its own, instead of being dropped.
@@ -713,12 +686,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - logging: `EnsureLogger` replaces a typed nil logger with the no-op logger instead of returning it unchanged and letting the first call panic — the case the function exists to guard
 - container: two distinct services of one type that carries no fields are each closed at teardown instead of one of them being silently skipped.
 - cache: the in-memory backend no longer holds its exclusive lock across the whole map.
-- example: the route manifest is escaped for the javascript string literal it is spliced into, so a route name or pattern containing a backslash or an apostrophe no longer breaks every page's scripting (the escaping v3 already carried); the firewall session login handler stores the token roles alongside the user identifier, and the logout handler clears them, so a session written by that handler resolves back to an authenticated token rather than an anonymous one; the embedded static build embeds dot-prefixed and underscore-prefixed paths (`all:public`), so it serves the same file set as the filesystem build
 - cors: an `OPTIONS` request carrying an `Origin` but no `Access-Control-Request-Method` is no longer treated as a preflight.
 - cors: `Vary: Origin` is emitted on every response, not only on one whose origin was allowed.
 - cors: `NewService` no longer panics on a credentialed configuration that decides origins through `AllowOriginFunc`.
-- example: the in-memory repositories guard their slice with a read-write mutex, and `All` hands back a copy of it.
-- example: the api error presenter emits the raw error message, the concrete Go type and the unwrap chain only when the kernel environment is the development one, the same gate the framework exception listener applies, and stays closed when that environment cannot be resolved at all.
 - documentation: eighteen exported symbols this major has always carried are documented at last — `cache.Item` and `cache.NewItem`, `logging.LoggerFromResolver` and `LoggerMustFromResolver`, `output.NewTablePrinter`, `NewMeta`, `NewWarning`, `NewError`, `NewErrorCause`, `security.NewFirewall`, `NewFirewallManager`, `NewFirewallRegistry`, `NewResolverTokenSource`, `NewRoleHierarchyVoter`, `NewAccessDecisionManagerWithVoters`, and `application.MiddlewareFactory`, `RouteRegistrar` and `SecurityModule` — along with three caveats only one major carried: that `InMemoryBackend` owns a cleanup goroutine which stops on `Close`, that `NewJsonLogger` serializes writes through an internal mutex, and that `ApiKeyHeaderAuthenticator` compares with `crypto/subtle.ConstantTimeCompare` so timing does not leak the expected key.
 - http/static: an embedded file server proves its public directory against the embedded filesystem at construction and refuses by name when it is absent.
 - config: a dollar in an `.env` value opens a reference only where godotenv says it does — upper case, digits and underscore.
@@ -731,7 +701,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
-- example: the embedded-env build embeds the committed `.env` alone.
 - http, session: a live session id no longer reaches the log verbatim.
 - http: a response carrying the session cookie is kept out of a shared cache.
 - http: the Accept-family header parsers cut a value into at most a fixed number of members, so an unauthenticated header cannot convert its byte budget straight into live heap.

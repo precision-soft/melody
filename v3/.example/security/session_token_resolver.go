@@ -83,6 +83,7 @@ func getStringFromSession(sessionInstance melodysessioncontract.Session, key str
     return typed, true
 }
 
+/* getStringSliceFromSession accepts the two spellings a role list has in a session: the []string the login handler writes, and the []any a file-backed storage answers after a restart — its snapshot round-trips through json, which keeps no element type. The second form is accepted only when EVERY element is a string; anything else stays a refusal. */
 func getStringSliceFromSession(sessionInstance melodysessioncontract.Session, key string) ([]string, bool) {
     if false == sessionInstance.Has(key) {
         return nil, false
@@ -91,9 +92,24 @@ func getStringSliceFromSession(sessionInstance melodysessioncontract.Session, ke
     value := sessionInstance.Get(key)
 
     typed, ok := value.([]string)
+    if true == ok {
+        return typed, true
+    }
+
+    untyped, ok := value.([]any)
     if false == ok {
         return nil, false
     }
 
-    return typed, true
+    restored := make([]string, 0, len(untyped))
+    for _, element := range untyped {
+        elementString, elementOk := element.(string)
+        if false == elementOk {
+            return nil, false
+        }
+
+        restored = append(restored, elementString)
+    }
+
+    return restored, true
 }
