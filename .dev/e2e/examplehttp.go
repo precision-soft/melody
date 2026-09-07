@@ -48,6 +48,19 @@ func newLiveExampleClient(baseUrl string) *liveExampleClient {
 }
 
 /* liveExampleRequest describes one call. The header map is what this client adds over exampleClient.call; a contentType of "" leaves the header unset, which matters for the GET probes (a Content-Type on a body-less GET would change the request the framework sees). */
+/* newSignedInLiveExampleClient is the same client with a cookie jar and a session already established. A section needs it once a route it drives stops being public: the jar is what carries the session id onto the following calls, exactly as newExampleHttpClient does for the sections that write. */
+func newSignedInLiveExampleClient(baseUrl string, username string, password string) *liveExampleClient {
+    client := newExampleHttpClient()
+    client.Timeout = 15 * time.Second
+
+    signInExampleHttp(client, baseUrl, "", username, password)
+
+    return &liveExampleClient{
+        baseUrl: strings.TrimRight(baseUrl, "/"),
+        client:  client,
+    }
+}
+
 type liveExampleRequest struct {
     method      string
     path        string

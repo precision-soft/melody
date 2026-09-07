@@ -93,6 +93,10 @@ func isTwoFactorCreateTable(query string) bool {
     return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "melody_example_v3_two_factor")
 }
 
+func isCatalogueCountSelect(query string) bool {
+    return strings.Contains(query, "information_schema")
+}
+
 /* appliedStatusRows answers the status select as if every registered migration had already been applied, which is how a process that lost the lock race observes a finished competitor. */
 func appliedStatusRows() ([]string, [][]driver.Value) {
     columns := []string{"id", "name", "group_id"}
@@ -150,7 +154,18 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
             return nil, hookErr
         }
 
-        return &fakeRows{columns: columns, rows: rows}, nil
+        if 0 < len(columns) {
+            return &fakeRows{columns: columns, rows: rows}, nil
+        }
+    }
+
+    /* a COUNT select always answers a row on a real server, so a double that answers none turns a step
+       that asks the catalogue a question into "sql: no rows in result set". The steps that ask one are
+       the tolerant ones — they check whether the object they are about to add is already there — and a
+       fixture that could not answer them would make every whole-set run fail on the double. Zero is the
+       answer that means "not there yet", which is what a fresh volume holds. */
+    if true == isCatalogueCountSelect(query) {
+        return &fakeRows{columns: []string{"count"}, rows: [][]driver.Value{{int64(0)}}}, nil
     }
 
     return &fakeRows{columns: []string{}, rows: nil}, nil

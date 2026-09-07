@@ -186,6 +186,20 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         user.Id = nextUserId(identifierList)
     }
 
+    /* the same guard the product, category and currency repositories carry, and the one the identifier
+       ceiling's own rationale promises: without it an occupied id reaches the insert, where the primary
+       key answers the driver's raw duplicate-key text through a 500, and two callers that mint the same
+       id concurrently — the ordinary case, since the mint reads a list that neither has committed to
+       yet — see that instead of "id already exists". */
+    _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
+    if nil != occupiedErr {
+        return occupiedErr
+    }
+
+    if true == occupied {
+        return fmt.Errorf("id already exists")
+    }
+
     _, insertErr := instance.database.
         NewInsert().
         Model(newUserRow(user)).

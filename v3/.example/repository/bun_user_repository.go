@@ -9,6 +9,7 @@ import (
 
     melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/uptrace/bun"
 )
@@ -183,12 +184,7 @@ func (instance *bunUserRepository) FindByUsername(ctx context.Context, username 
 
     row := &userRow{}
 
-    selectErr := instance.database.
-        NewSelect().
-        Model(row).
-        Where("LOWER(username) = ?", wanted).
-        Limit(1).
-        Scan(ctx)
+    selectErr := instance.userByUsernameQuery(row, wanted).Scan(ctx)
     if nil != selectErr {
         if true == errors.Is(selectErr, sql.ErrNoRows) {
             return nil, false, nil
@@ -245,7 +241,23 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         user.Id = nextUserId(identifierList)
     }
 
-    return instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityUser, user.Id, newUserRow(user))
+    /* the same guard the product, category and currency repositories carry, and the one the identifier
+       ceiling's own rationale promises: without it an occupied id reaches the insert, where the primary
+       key answers the driver's raw duplicate-key text through a 500, and two callers that mint the same
+       id concurrently — the ordinary case, since the mint reads a list that neither has committed to
+       yet — see that instead of "id already exists". */
+    _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
+    if nil != occupiedErr {
+        return occupiedErr
+    }
+
+    if true == occupied {
+        return fmt.Errorf("id already exists")
+    }
+
+    insertErr := instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityUser, user.Id, newUserRow(user))
+
+    return asUsernameAlreadyExists(insertErr)
 }
 
 func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
@@ -279,7 +291,7 @@ func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User
 
     updateErr := instance.tracker.Update(auditContext(ctx), persistence.AuditEntityUser, id, newUserRow(user))
     if nil != updateErr {
-        return false, updateErr
+        return false, asUsernameAlreadyExists(updateErr)
     }
 
     return true, nil
@@ -314,23 +326,57 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
     return true, nil
 }
 
+/* the check that precedes the write is a read, so two callers can both pass it before either has written;
+   the unique index the migration set adds is what actually holds the name, and this is where its refusal
+   is given the message the door already answers when the check catches the name in time. The match is on
+   the index's own name — this application's identifier, not the driver's wording — because the driver
+   spells the refusal as `Duplicate entry '<value>' for key '<table>.<index>'`, measured on the running
+   server; any other failure is handed back untouched, so a duplicate on the primary key stays the
+   diagnosis it is rather than being reported as a name that is taken. */
+func asUsernameAlreadyExists(writeErr error) error {
+    if nil == writeErr {
+        return nil
+    }
+
+    if false == strings.Contains(writeErr.Error(), migration.UserUsernameIndexName) {
+        return writeErr
+    }
+
+    return fmt.Errorf("username already exists")
+}
+
 func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {
     wanted := NormalizedUsername(username)
     if "" == wanted {
         return false, nil
     }
 
-    count, countErr := instance.database.
-        NewSelect().
-        Model((*userRow)(nil)).
-        Where("LOWER(username) = ?", wanted).
-        Where("id != ?", excludedId).
-        Count(ctx)
+    count, countErr := instance.usernameTakenByAnotherQuery(wanted, excludedId).Count(ctx)
     if nil != countErr {
         return false, countErr
     }
 
     return 0 < count, nil
+}
+
+/* the comparison is forced onto the binary collation because the column's own (utf8mb4_0900_ai_ci) folds accents — 'café' = 'cafe' is true under it — while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone; left to the column, this door matched users the invalidation could never address, and a deleted user kept authenticating from the ttl-less cache under the collation-only spelling.
+
+   Both doors are kept as queries, the way legacyPasswordUpdate is, so the clause that decides which rows they may match is readable — and provable — on its own. */
+func (instance *bunUserRepository) userByUsernameQuery(row *userRow, wanted string) *bun.SelectQuery {
+    return instance.database.
+        NewSelect().
+        Model(row).
+        Where("LOWER(username) = (? COLLATE utf8mb4_bin)", wanted).
+        Limit(1)
+}
+
+/* the same binary collation as userByUsernameQuery, so the uniqueness door and the lookup door refuse and admit the exact same spellings */
+func (instance *bunUserRepository) usernameTakenByAnotherQuery(wanted string, excludedId string) *bun.SelectQuery {
+    return instance.database.
+        NewSelect().
+        Model((*userRow)(nil)).
+        Where("LOWER(username) = (? COLLATE utf8mb4_bin)", wanted).
+        Where("id != ?", excludedId)
 }
 
 func (instance *bunUserRepository) identifierList(ctx context.Context) ([]string, error) {

@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - example: a refusal keeps the status it earned when the `Accept` header refuses every media type, instead of being answered `406 Not Acceptable` with an empty body. The success path still answers 406 — there a representation is all there is to send — but on the error path the status IS the answer, and masking a 401 or a 404 behind it left a client no way to tell why it was turned away: measured, a login with wrong credentials and an unreadable `Accept` answered 406 with zero bytes where the same request answered 401 with its message. The framework's own error renderer states that asymmetry beside its fallback and takes it for every resolution failure alike. **Behavioural change**
 
+### Fixed
+
+- example: creating an account with an identifier that is already taken is refused, the way the product, category and currency repositories refuse it. Users refused it in neither implementation: measured, the in-memory one appended a SECOND row under that identifier, after which the reading and the deleting doors reached only the first and the account behind the second could be addressed by no door that goes through the id; the bun one surfaced the driver's raw duplicate-key text through a 500 instead of the message the three sibling repositories answer
+
 ### Security
 
 - example: a lookup that found NOTHING is remembered for a bounded window instead of for ever. `Remember` stores whatever its loader answered, so an absence went into the cache under a key its caller spelled, with no expiry: the unauthenticated login door writes one for every name anyone invents, and this application's own request budget allows a hundred thousand of them per client per hour — measured on the running stack, three refused logins left three permanent entries, and the namespace held ten such names left by earlier probing. The absence now lapses after a minute, while an entity that was found keeps the unbounded entry the event listeners clear by name; a burst on one name still answers from memory, which is what remembering an absence was for

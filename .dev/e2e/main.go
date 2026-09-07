@@ -243,7 +243,7 @@ func main() {
         sections++
 
         section("TWO-FACTOR (live example application)")
-        runTwoFactorCheck(baseUrl)
+        runTwoFactorCheck(baseUrl, redisAddress)
         sections++
 
         /* the mint workspace is shared by the sections above, so it cannot be torn down by whichever of them finishes first */

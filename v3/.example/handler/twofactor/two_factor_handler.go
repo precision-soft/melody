@@ -13,25 +13,21 @@ import (
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* queryString reads a query parameter as a string, handling the bag's []string storage (query values are kept as string slices) as well as a plain string, returning "" when absent. */
-func queryString(request melodyhttpcontract.Request, name string) string {
-    value, exists := request.Query().Get(name)
+/* enrolledIdentifier answers the account both doors act on: the identifier of the authenticated token, never a name the request chose.
+
+   The two doors used to read a `user` query parameter, and the route was public. That pair let anyone bind a second factor they held to any identifier they liked and read back whether a code satisfied it, and — the insert being a plain one — left the named account unable to enroll ever after. Taken from the token, the enrollment door writes the caller's own row and the verification door reads it, so replacing an enrollment is the account's own doing. */
+func enrolledIdentifier(runtimeInstance melodyruntimecontract.Runtime) (string, bool) {
+    securityContext, exists := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
     if false == exists {
-        return ""
+        return "", false
     }
 
-    switch typed := value.(type) {
-    case string:
-        return typed
-    case []string:
-        if 0 == len(typed) {
-            return ""
-        }
-
-        return typed[0]
-    default:
-        return ""
+    identifier := securityContext.Token().UserIdentifier()
+    if "" == identifier {
+        return "", false
     }
+
+    return identifier, true
 }
 
 type enrollPayload struct {
@@ -41,12 +37,12 @@ type enrollPayload struct {
     RecoveryCodes  []string `json:"recoveryCodes"`
 }
 
-/* EnrollHandler enrolls a user's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and returns the secret + otpauth URI (the QR payload) and the recovery codes to show once. An endpoint kept deliberately simple — a production application returns the secret only during enrollment and behind the user's authenticated session. */
+/* EnrollHandler enrolls the CALLER's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and returns the secret + otpauth URI (the QR payload) and the recovery codes to show once. The secret is returned only here, and only to the account it belongs to — which is what the authenticated route buys. Enrolling again replaces the previous secret and its unused recovery codes, so an account whose authenticator is lost has a way back. */
 func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        user := queryString(request, "user")
-        if "" == user {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "user query parameter is required"), nil
+        user, authenticated := enrolledIdentifier(runtimeInstance)
+        if false == authenticated {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
         }
 
         secret, uri, recoveryCodes, enrollErr := store.Enroll(runtimeInstance.Context(), user, "Melody Example")
@@ -63,16 +59,16 @@ func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     }
 }
 
-/* VerifyHandler verifies a submitted second factor for a user: a TOTP code on the X-2FA-Code header is checked against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code is atomically redeemed. It reports 200 on success and 401 on a wrong/replayed factor, exercising the same store the TotpSecondFactorAuthenticator uses.
+/* VerifyHandler verifies a second factor submitted for the CALLER's own enrollment: a TOTP code on the X-2FA-Code header is checked against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code is atomically redeemed. It reports 200 on success and 401 on a wrong/replayed factor, over the same store the framework's TOTP authenticator would read if this example registered one — it does not; the two routes are how the store is exercised here.
 
    An accepted TOTP code stays valid for its whole window, so — exactly as the framework's authenticator does — it is burned in a replay guard the moment it is accepted. The nonce is keyed on the NORMALIZED code, because Verify normalizes before comparing: keying on the raw code would let "409 643" replay a code already spent as "409643". */
 func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     replayGuard := melodysecurity.NewMemoryNonceGuard()
 
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        user := queryString(request, "user")
-        if "" == user {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "user query parameter is required"), nil
+        user, authenticated := enrolledIdentifier(runtimeInstance)
+        if false == authenticated {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
         }
 
         if recoveryCode := request.Header(melodysecurity.DefaultTotpRecoveryHeaderName); "" != recoveryCode {

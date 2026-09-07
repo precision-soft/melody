@@ -57,8 +57,9 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewRegexRule("^/encrypt/roundtrip", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
+        /* the enrollment door binds a second factor to an account and hands back the secret that satisfies it, and the verification door reads that secret's answer back; public, both of them named the account in a query parameter, so anyone could bind a factor they held to any identifier they liked — the administrator's included — and the account was then stuck with it, because the insert refused a second enrollment. Behind an authenticated role, the identifier is the caller's own token and there is nothing left to name. */
         melodyaccesscontrol.NewRegexRule("^/twofactor", melodyaccesscontrol.RuleConfig{
-            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+            Attributes: []string{entity.RoleUser},
         }),
         melodyaccesscontrol.NewRegexRule("^/outbox", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},

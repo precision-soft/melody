@@ -7,7 +7,9 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/.example/subscriber"
     melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -61,10 +63,39 @@ func (instance *recordingResponseWriter) CommittedStatusCode() int {
     return instance.status
 }
 
+/* the hub is registered on the container the request carries, because the handler RESOLVES it: a fixture
+   that skipped the registration would drive the handler down its unavailable branch and every assertion
+   below it would be about that branch instead of about the stream. streamRequestWithoutHub is the sister
+   that drives it deliberately. */
 func streamRequest(t *testing.T, target string, cancelled bool) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
     t.Helper()
 
+    return streamRequestOnContainer(t, target, cancelled, true)
+}
+
+func streamRequestWithoutHub(t *testing.T, target string) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+    t.Helper()
+
+    return streamRequestOnContainer(t, target, false, false)
+}
+
+func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withHub bool) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+    t.Helper()
+
     containerInstance := melodycontainer.NewContainer()
+
+    if true == withHub {
+        hub := melodyhttp.NewServerSentEventHub()
+
+        melodycontainer.MustRegister(
+            containerInstance,
+            subscriber.ServiceCatalogNotificationHub,
+            func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+                return hub, nil
+            },
+        )
+    }
+
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, target, nil)
@@ -95,7 +126,7 @@ func TestStreamHandler_RefusesAPrivilegedTopicWithoutCommittingTheResponse(t *te
     request, runtimeInstance := streamRequest(t, "/events/stream/", false)
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(melodyhttp.NewServerSentEventHub())(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler()(runtimeInstance, writer, request)
     if nil != handlerErr {
         t.Fatalf("expected the handler to answer the refusal itself, got %v", handlerErr)
     }
@@ -128,7 +159,7 @@ func TestStreamHandler_OpensTheStreamForATopicThatNeedsNoRole(t *testing.T) {
     request, runtimeInstance := streamRequest(t, "/events/stream/?topic=visitor", true)
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(melodyhttp.NewServerSentEventHub())(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler()(runtimeInstance, writer, request)
     if nil != handlerErr {
         t.Fatalf("expected the stream to end on the cancelled request context, got %v", handlerErr)
     }
@@ -147,5 +178,38 @@ func TestStreamHandler_OpensTheStreamForATopicThatNeedsNoRole(t *testing.T) {
 
     if "text/event-stream" != writer.Header().Get("Content-Type") {
         t.Fatalf("expected the opened stream to carry the event-stream content type, got %q", writer.Header().Get("Content-Type"))
+    }
+}
+
+/* the hub is RESOLVED here rather than handed in at registration, and the refusal that comes with resolving
+   has to be decided while the response is still writable, for the same reason the topic gate is: past
+   NewServerSentEventWriter the kernel discards whatever the handler returns.
+
+   Handed in, this door — the one an http process serving nothing but reads passes through, and the one that
+   most needs the hub to be reporting — resolved the service ZERO times. Measured on a running process:
+   after a login, a product read and an event stream that answered 200 with a live subscriber, the provider
+   had not run, so the logger swap it performs had not happened and the container had no instance to close. */
+func TestStreamHandler_RefusesWithoutCommittingWhenTheHubIsNotRegistered(t *testing.T) {
+    request, runtimeInstance := streamRequestWithoutHub(t, "/events/stream/?topic=visitor")
+    writer := &recordingResponseWriter{}
+
+    response, handlerErr := StreamHandler()(runtimeInstance, writer, request)
+    if nil != handlerErr {
+        t.Fatalf("expected the handler to answer the refusal itself, got %v", handlerErr)
+    }
+
+    if nil == response {
+        t.Fatalf("expected a refusal when the hub cannot be resolved")
+    }
+
+    if nethttp.StatusInternalServerError != response.StatusCode() {
+        t.Fatalf("expected an unresolvable hub to answer 500, got %d", response.StatusCode())
+    }
+
+    if true == writer.HeadersWritten() {
+        t.Fatalf(
+            "expected the refusal to leave the response uncommitted, but the handler had already written status %d",
+            writer.CommittedStatusCode(),
+        )
     }
 }

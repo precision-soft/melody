@@ -26,6 +26,10 @@ const (
 
     exampleHttpAdminUsername = "admin"
     exampleHttpAdminPassword = "admin"
+
+    /* the seeded account that holds ROLE_USER and nothing else: what a section needs when it has to drive an authenticated route as somebody who is NOT the one under test. */
+    exampleHttpUserUsername = "user"
+    exampleHttpUserPassword = "user"
 )
 
 /* runExampleHttpCheck drives the running .example application over real HTTP — the only place the whole

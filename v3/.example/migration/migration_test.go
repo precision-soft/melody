@@ -4,10 +4,12 @@ import (
     "testing"
 )
 
-func TestMigrationsRegisterTheSixTablesInOrder(t *testing.T) {
+/* the set is six tables and one constraint: the unique key on the folded username, which is what actually
+   holds a name against two callers that pass the read-then-write check at the same moment. */
+func TestMigrationsRegisterTheSixTablesAndTheUsernameConstraintInOrder(t *testing.T) {
     sorted := Migrations.Sorted()
-    if 6 != len(sorted) {
-        t.Fatalf("expected the set to hold six migrations, got %d", len(sorted))
+    if 7 != len(sorted) {
+        t.Fatalf("expected the set to hold seven migrations, got %d", len(sorted))
     }
 
     expectedNames := []string{
@@ -17,6 +19,7 @@ func TestMigrationsRegisterTheSixTablesInOrder(t *testing.T) {
         "20260819000004",
         "20260819000005",
         "20260819000006",
+        "20260906000007",
     }
     for index, migrationInstance := range sorted {
         if expectedNames[index] != migrationInstance.Name {

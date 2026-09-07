@@ -44,6 +44,13 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
         user.Id = nextUserId(instance.identifierListLocked())
     }
 
+    /* the same guard the three sibling repositories carry: without it an occupied id is appended as a
+       second row, FindById and DeleteById reach only the first, and the account behind it can be neither
+       read nor removed by id. */
+    if _, occupied := instance.findByIdLocked(user.Id); true == occupied {
+        return fmt.Errorf("id already exists")
+    }
+
     instance.users = append(instance.users, user)
 
     return nil

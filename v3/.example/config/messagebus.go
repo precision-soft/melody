@@ -4,6 +4,7 @@ import (
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     "github.com/precision-soft/melody/v3/.example/message"
     "github.com/precision-soft/melody/v3/.example/messagehandler"
+    "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
@@ -22,7 +23,13 @@ func (instance *Module) buildMessageBus() {
     locator := melodymessagebus.NewHandlerLocator()
     melodymessagebus.RegisterHandler(locator, messagehandler.HandleWelcomeEmail)
     melodymessagebus.RegisterHandler(locator, func(runtimeInstance melodyruntimecontract.Runtime, notification message.Notification) error {
-        instance.serverSentEventHub.Broadcast(notification.Topic, melodyhttp.ServerSentEvent{
+        /* resolved rather than captured, for the reason written at CatalogNotificationHubFromRuntime: a consumer that holds the hub the composition root built leaves the provider — and with it the logger swap and the container's teardown edge — unrun. */
+        hub, hubErr := subscriber.CatalogNotificationHubFromRuntime(runtimeInstance)
+        if nil != hubErr {
+            return hubErr
+        }
+
+        hub.Broadcast(notification.Topic, melodyhttp.ServerSentEvent{
             Event: "notification",
             Data:  notification.Text,
         })

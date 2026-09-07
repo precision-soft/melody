@@ -33,7 +33,9 @@ type Store struct {
     database *bun.DB
 }
 
-/* Enroll generates a fresh secret and recovery codes for a user, persists them encrypted, and returns the secret, the otpauth URI to render as a QR code, and the plaintext recovery codes to show the user once. */
+/* Enroll generates a fresh secret and recovery codes for a user, persists them encrypted, and returns the secret, the otpauth URI to render as a QR code, and the plaintext recovery codes to show the user once.
+
+   It REPLACES an enrollment that is already there rather than colliding with it, because an authenticator that is lost is the ordinary reason to enroll again: a plain insert left such an account bound to its first secret for good, with the second attempt surfacing the primary key as an opaque 500, and left no door at all for the person who had lost the device. Replacing is only safe because the caller no longer names the account — the handler takes the identifier from the authenticated token — so the row this overwrites is always the caller's own. The previous secret and the unused recovery codes are gone the moment this returns, which is the point: what is re-enrolled must not still be verifiable by whoever held the old device. */
 func (instance *Store) Enroll(
     ctx context.Context,
     userIdentifier string,
@@ -61,13 +63,27 @@ func (instance *Store) Enroll(
         CreatedAt:      time.Now(),
     }
 
-    if _, insertErr := instance.database.NewInsert().Model(enrollment).Exec(ctx); nil != insertErr {
+    if _, insertErr := instance.enrollmentUpsert(enrollment).Exec(ctx); nil != insertErr {
         return "", "", nil, insertErr
     }
 
     uri := totp.OtpauthUri(issuer, userIdentifier, secret, totp.Config{})
 
     return secret, uri, recoveryCodes, nil
+}
+
+/* enrollmentUpsert is the write kept as a query, so the clause that makes a second enrollment a REPLACEMENT
+   rather than a collision is readable on its own. All three columns are written, not merely the secret: the
+   recovery codes belong to the secret they were minted beside, and a set left from the previous enrollment
+   would keep opening an account whose second factor was just replaced. */
+func (instance *Store) enrollmentUpsert(enrollment *Enrollment) *bun.InsertQuery {
+    return instance.database.
+        NewInsert().
+        Model(enrollment).
+        On("DUPLICATE KEY UPDATE").
+        Set("secret = VALUES(secret)").
+        Set("recovery_codes = VALUES(recovery_codes)").
+        Set("created_at = VALUES(created_at)")
 }
 
 /* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the stored secret transparently through EncryptedString. */

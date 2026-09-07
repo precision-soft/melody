@@ -409,10 +409,14 @@ check_section_end "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
 check_section_start "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
 
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+# the value is one the command REFUSES, and the refusal quotes it back: that is what shows the flag reached
+# this command rather than the runtime's process-role parser, and it leaves the directory untouched. The
+# command grants for real now, so an assertion built on a successful grant would have to give the role back,
+# and there is no door that revokes one.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role 'ROLE_X,ADMIN' --user ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
-if printf '%s' "${GRANT_OUTPUT_STRING}" | grep -q 'granted role "admin" to user "ada"'; then
+if printf '%s' "${GRANT_OUTPUT_STRING}" | grep -q 'role "ROLE_X,ADMIN" must not contain commas'; then
     check_pass "a command's own --role after the command name reaches the command (not the runtime role parser)"
 else
     check_fail "the command-owned --role flag did not reach the command (${GRANT_OUTPUT_STRING:-<empty>})"
@@ -428,7 +432,7 @@ check_section_start "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 # one invocation on purpose: the lazy-resolution marker and the grant line must come from the SAME run,
 # proving the handle resolved inside the command body and the command still completed its work afterwards
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role admin --user ada 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role admin --user ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 LAZY_GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${LAZY_GRANT_OUTPUT_STRING}" | grep -q 'user service resolved lazily: user "ada" known=false'; then
@@ -437,10 +441,13 @@ else
     check_fail "the lazy-resolution marker did not print (${LAZY_GRANT_OUTPUT_STRING:-<empty>})"
 fi
 
-if printf '%s' "${LAZY_GRANT_OUTPUT_STRING}" | grep -q 'granted role "admin" to user "ada"'; then
-    check_pass "the same invocation still completed the grant after the lazy resolve"
+# the command used to announce the grant here too, for an account it had just reported unknown. It refuses
+# now, and the refusal is the second half of the same proof: the lookup that answered known=false is the one
+# the lazily resolved service performed.
+if printf '%s' "${LAZY_GRANT_OUTPUT_STRING}" | grep -q 'user "ada" does not exist'; then
+    check_pass "the same invocation refused the unknown account the lazy resolve had just reported"
 else
-    check_fail "the grant line did not print from the lazy-resolution invocation (${LAZY_GRANT_OUTPUT_STRING:-<empty>})"
+    check_fail "the refusal did not follow the lazy resolution (${LAZY_GRANT_OUTPUT_STRING:-<empty>})"
 fi
 
 check_section_end "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
@@ -1144,7 +1151,10 @@ fi
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:status --format=json 2>/dev/null | tail -1"
 V3_STATUS_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
 
-if printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"migrations":{"applied":\["20260819000006"' \
+# both ends of the set are named rather than only its head: the head moves every time a step is added, and
+# a check pinned to it says nothing about whether the rest of the set is in the document at all.
+if printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"migrations":{"applied":\["20260906000007"' \
+    && printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"20260819000001"' \
     && printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"database":"melody_example_v3"' \
     && printf '%s' "${V3_STATUS_JSON_STRING}" | grep -q '"error":null'; then
     check_pass "v3 db:status --format=json renders one document naming the set, the database and no error"
@@ -1161,16 +1171,26 @@ fi
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:rollback 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qi 'rolled back'; then
-    check_pass "v3 db:rollback reverted the last group (the six live tables are dropped until the next boot)"
+    check_pass "v3 db:rollback reverted the last group (the live tables are dropped until the next boot)"
 else
     check_fail "v3 db:rollback did not report the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
 
 # read out of band, between the rollback and the next boot: this is the one window in which the drop is
-# observable, because the very next application process applies the set again on its way up
+# observable, because the very next application process applies the set again on its way up.
+#
+# One rollback clears the whole set only while the set sits in ONE bun group, which is what a volume
+# provisioned in a single run holds — a fresh one, and the one CI builds. A development volume that was
+# already carrying the tables when a later step was added holds that step in a group of its own, and then
+# no number of rollbacks reaches the older group: every invocation boots first, the composition root
+# re-applies the pending step as a NEW group on its way up, and the rollback reverts that one. Measured
+# rather than reasoned — three invocations in a row left group 1 exactly where it was. The remedy is on
+# the volume, not here: put the set back in one group
+# (`UPDATE bun_migrations SET group_id = 1`) or drop the example tables and let the next boot apply the
+# set whole.
 V3_TABLE_COUNT_AFTER_ROLLBACK_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING}")"
 if [[ "0" = "${V3_TABLE_COUNT_AFTER_ROLLBACK_STRING}" ]]; then
-    check_pass "the six v3 example tables are gone from mysql after the rollback (read out of band; the audit table, which the set does not own, stands)"
+    check_pass "the v3 example tables are gone from mysql after the rollback (read out of band; the audit table, which the set does not own, stands)"
 else
     check_fail "the rollback left ${V3_TABLE_COUNT_AFTER_ROLLBACK_STRING:-<no answer>} v3 example tables standing"
 fi

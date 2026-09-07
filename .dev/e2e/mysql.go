@@ -66,9 +66,10 @@ func runMysqlCheck(baseUrl string, redisAddress string) {
         _ = database.Close()
     }()
 
-    assertMysqlEncryptedAtRest(baseUrl, database)
-
+    /* the budget has to be given back before anything here signs in: the sign-in goes through the same throttled login door the EXAMPLE OVER HTTP section deliberately exhausts. */
     resetExampleRateLimitCounters(mysqlLabel, redisAddress, mysqlRateLimitKey)
+
+    assertMysqlEncryptedAtRest(baseUrl, database)
 
     client := newExampleHttpClient()
     signInExampleHttpAdmin(client, baseUrl)
@@ -89,21 +90,23 @@ func mysqlDsnOrSkip() string {
     return dsn
 }
 
-/* assertMysqlEncryptedAtRest enrolls a throwaway second factor, then reads the stored secret the harness's own way. The enrollment is the section's own rather than borrowed from TWO-FACTOR, which removes the row it created when it is done; a section that depended on another's leftovers would pass or fail on running order. */
+/* assertMysqlEncryptedAtRest enrolls a second factor, then reads the stored secret the harness's own way. The enrollment is the section's own rather than borrowed from TWO-FACTOR, which removes the row it created when it is done; a section that depended on another's leftovers would pass or fail on running order. It signs in as the ADMINISTRATOR for the same reason: the identifier is the token's now, so the account it enrolls is the one it signs in as, and TWO-FACTOR — which enrolls the editor and asserts the plain user is NOT enrolled — must not be able to meet this row whichever order the two run in. */
 func assertMysqlEncryptedAtRest(baseUrl string, database *bun.DB) {
-    user := liveExampleUnique("e2e-encrypted-at-rest")
+    client := newSignedInLiveExampleClient(baseUrl, exampleHttpAdminUsername, exampleHttpAdminPassword)
 
-    client := newLiveExampleClient(baseUrl)
-    path := twoFactorEnrollRoute + "?user=" + user
-
-    response := client.call(mysqlLabel, liveExampleRequest{method: "POST", path: path})
-    requireLiveExampleStatus(mysqlLabel, path, response, http.StatusOK)
+    response := client.call(mysqlLabel, liveExampleRequest{method: "POST", path: twoFactorEnrollRoute})
+    requireLiveExampleStatus(mysqlLabel, twoFactorEnrollRoute, response, http.StatusOK)
 
     enrollment := twoFactorEnrollPayload{}
     decodeLiveExamplePayload(mysqlLabel, response, &enrollment)
 
     if "" == enrollment.Secret {
         fail("%s: the enrollment returned an empty secret, so there is nothing to look for in the column", mysqlLabel)
+    }
+
+    user := enrollment.UserIdentifier
+    if "" == user {
+        fail("%s: the enrollment echoed no identifier, so the harness cannot find the row it wrote", mysqlLabel)
     }
 
     defer removeMysqlEnrollment(database, user)
@@ -130,7 +133,7 @@ func assertMysqlEncryptedAtRest(baseUrl string, database *bun.DB) {
     }
 
     /* the application must still be able to read what it wrote, or the encryption would have cost the feature rather than protected it: a code computed from the enrolled secret has to verify */
-    code := assertTwoFactorCodeAccepted(client, user, enrollment.Secret)
+    code := assertTwoFactorCodeAccepted(client, enrollment.Secret)
     if "" == code {
         fail("%s: the enrolled second factor produced no code", mysqlLabel)
     }
