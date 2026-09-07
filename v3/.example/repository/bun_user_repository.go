@@ -59,61 +59,6 @@ type bunUserRepository struct {
     tracker  *melodyaudit.Tracker
 }
 
-/* bcryptDigestPattern matches a stored password that bcrypt can read: every digest it writes opens with the
-   version marker. A value that does not is one this application stored before it moved to bcrypt. */
-const bcryptDigestPattern = "$%"
-
-/* repairLegacySeedPasswords rewrites the opening directory's passwords when a database provisioned before
-   this application moved to bcrypt still holds them in the digest it used then.
-
-   Without it the switch locks those accounts out for good: bcrypt refuses a value that is not one of its
-   digests, seedIfEmpty writes nothing into a table that already has rows, and the only doors that could set
-   a new password are behind the administrator account that is itself locked out — so the readme's
-   `admin` / `admin` would be a promise no volume older than this change could keep.
-
-   Only the three accounts this application seeded are rewritten, and only while they hold a value bcrypt
-   cannot read: an account an operator created carries a password this application never knew and cannot
-   reproduce, so it keeps its row and is reset through the administrator door, which works again. The write
-   goes to the column directly rather than through the audit tracker: the trail answers who changed what,
-   and this is the application repairing its own opening data, not a person changing a credential. */
-func (instance *bunUserRepository) repairLegacySeedPasswords(ctx context.Context) error {
-    legacyCount, countErr := instance.database.
-        NewSelect().
-        Model((*userRow)(nil)).
-        Where("password NOT LIKE ?", bcryptDigestPattern).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
-    }
-
-    /* the ordinary case, on every boot after the first: nothing to read and nothing to write */
-    if 0 == legacyCount {
-        return nil
-    }
-
-    for _, user := range seedUserList() {
-        _, updateErr := instance.legacyPasswordUpdate(user).Exec(ctx)
-        if nil != updateErr {
-            return updateErr
-        }
-    }
-
-    return nil
-}
-
-/* legacyPasswordUpdate is the one statement the repair issues per seeded account, kept as a query so the
-   guard that decides which rows it may touch is readable on its own: the row is this account's, and its
-   stored password is one bcrypt cannot read. Without the second clause the repair would reset a password an
-   administrator had already changed, every time a process booted. */
-func (instance *bunUserRepository) legacyPasswordUpdate(user *entity.User) *bun.UpdateQuery {
-    return instance.database.
-        NewUpdate().
-        Model((*userRow)(nil)).
-        Set("password = ?", user.Password).
-        Where("id = ?", user.Id).
-        Where("password NOT LIKE ?", bcryptDigestPattern)
-}
-
 /* seedIfEmpty writes the opening directory into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
 func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
     count, countErr := instance.database.
@@ -361,7 +306,7 @@ func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, u
 
 /* the comparison is forced onto the binary collation because the column's own (utf8mb4_0900_ai_ci) folds accents — 'café' = 'cafe' is true under it — while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone; left to the column, this door matched users the invalidation could never address, and a deleted user kept authenticating from the ttl-less cache under the collation-only spelling.
 
-   Both doors are kept as queries, the way legacyPasswordUpdate is, so the clause that decides which rows they may match is readable — and provable — on its own. */
+   Both doors are kept as queries so the clause that decides which rows they may match is readable — and provable — on its own. */
 func (instance *bunUserRepository) userByUsernameQuery(row *userRow, wanted string) *bun.SelectQuery {
     return instance.database.
         NewSelect().

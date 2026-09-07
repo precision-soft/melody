@@ -30,9 +30,9 @@ func MustHashPassword(plaintextPassword string) string {
     return passwordHash
 }
 
-/* PasswordMatches reports whether the plaintext password produced the stored hash. bcrypt compares in constant time internally, so this is the whole credential comparison a caller needs — a digest compared with != leaks its answer through the comparison's own early return.
+/* PasswordMatches reports whether the plaintext password produced the stored hash. bcrypt compares in constant time internally, so this is the whole credential comparison a caller needs.
 
-   A stored value that is not a bcrypt digest at all is refused before any key is derived, and that refusal is four orders of magnitude cheaper than a real comparison: measured here, 308ns against 40ms. A row written before this application moved to bcrypt would therefore answer FASTER than a username that does not exist — the existence oracle DummyPasswordMatch closes, inverted, and pointing at exactly the accounts an attacker most wants to find. So a refusal bcrypt reached without working spends the comparison it skipped. */
+   A stored value that is not a bcrypt digest at all is refused before any key is derived, and that refusal is orders of magnitude cheaper than a real comparison: measured here, 228ns against 52ms. Response time would therefore name every account whose column holds such a value — truncated, edited by hand, written by something that is not this application — and those are exactly the accounts this door will refuse whatever is typed, which is the existence oracle DummyPasswordMatch exists to close, inverted. So a refusal bcrypt reached without working spends the comparison it skipped. */
 func PasswordMatches(passwordHash string, plaintextPassword string) bool {
     compareErr := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(plaintextPassword))
     if nil == compareErr {

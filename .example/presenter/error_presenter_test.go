@@ -100,6 +100,43 @@ func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime,
     return runtimeInstance, request
 }
 
+/* requestAcceptingLines builds a request whose Accept field is spelled over several lines, the way a client that adds the header rather than replacing it sends it. */
+func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, acceptLineList ...string) melodyhttpcontract.Request {
+    t.Helper()
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
+    for _, acceptLine := range acceptLineList {
+        httpRequest.Header.Add("Accept", acceptLine)
+    }
+
+    return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+}
+
+/* the Accept field is list-typed and a client may spell it over several lines; Header.Get answers only the first, so a blanket refusal sent on line one used to hide an available type named on line two. The probe drives the SUCCESS path deliberately: it is the only path where a refused negotiation still shows, because a refusal keeps the status it earned whatever the header says, and therefore cannot tell the two readings apart. The first line has to REFUSE rather than merely miss — an unmatched type falls back to the default serializer, so a pair like "application/xml" then "application/json" would pass under either reading. */
+func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
+    runtimeInstance, _ := runtimeRefusingEveryMediaType(t)
+
+    request := requestAcceptingLines(t, runtimeInstance, "*/*;q=0", "application/json")
+
+    response := buildApiResponse(
+        runtimeInstance,
+        request,
+        nethttp.StatusOK,
+        apiResponse{Success: true, Payload: "payload", Errors: []string{}},
+    )
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    if nethttp.StatusNotAcceptable == response.StatusCode() {
+        t.Fatalf("a client that named an available type on its second Accept line was answered 406")
+    }
+
+    if nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the success path to serve the type named on the second line, got %d", response.StatusCode())
+    }
+}
+
 func responseBodyOf(t *testing.T, response melodyhttpcontract.Response) string {
     t.Helper()
 

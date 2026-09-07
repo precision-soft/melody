@@ -7,9 +7,8 @@ import (
     "time"
 )
 
-/* the digest this application stored before it moved to bcrypt: an unsalted sha256, rendered as 64 hex
-   characters, which is what a database provisioned by an older build still holds. */
-func legacyPasswordDigest(plaintextPassword string) string {
+/* a value bcrypt cannot read at all: an unsalted sha256 rendered as 64 hex characters stands in for any column this application did not write — truncated, edited by hand, or filled by another tool. What matters is only that bcrypt refuses it on the prefix, before deriving a key. */
+func storedValueBcryptCannotRead(plaintextPassword string) string {
     digest := sha256.Sum256([]byte(plaintextPassword))
 
     return hex.EncodeToString(digest[:])
@@ -24,13 +23,13 @@ const equalizedRefusalFloor = 5 * time.Millisecond
 
 /* a refusal bcrypt reaches without deriving a key — a stored value that is not one of its digests — must
    still cost what a real comparison costs. Unequalized it answered 131.184 times faster than the dummy
-   comparison an absent username pays, so response time told an attacker which accounts predate the move to
-   bcrypt: not merely that a username exists, but that its credential is one this application will refuse
-   whatever is typed. The assertion is on the TIME, because the returned value was already correct while the
+   comparison an absent username pays, so response time told an attacker which accounts hold a value this
+   door cannot use: not merely that a username exists, but that its credential is one this application will
+   refuse whatever is typed. The assertion is on the TIME, because the returned value was already correct while the
    oracle was open. */
 func TestPasswordMatches_SpendsTheComparisonOnAStoredValueBcryptCannotRead(t *testing.T) {
     startedAt := time.Now()
-    matched := PasswordMatches(legacyPasswordDigest("admin"), "admin")
+    matched := PasswordMatches(storedValueBcryptCannotRead("admin"), "admin")
     refusalCost := time.Since(startedAt)
 
     if true == matched {

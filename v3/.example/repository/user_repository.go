@@ -61,13 +61,6 @@ func NewUserRepository(storage *persistence.CatalogStorage) (UserRepository, err
         return nil, seedErr
     }
 
-    /* a table that already had rows was not seeded, so the opening accounts in it are whatever an older
-       build of this application wrote — and a password it wrote before bcrypt is one bcrypt refuses */
-    repairErr := repositoryInstance.repairLegacySeedPasswords(context.Background())
-    if nil != repairErr {
-        return nil, repairErr
-    }
-
     return repositoryInstance, nil
 }
 
