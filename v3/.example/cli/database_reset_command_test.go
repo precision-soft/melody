@@ -38,7 +38,25 @@ func (instance *refusingResetConnector) Driver() driver.Driver {
 func newResetRuntime(t *testing.T, storage *persistence.CatalogStorage) melodyruntimecontract.Runtime {
     t.Helper()
 
+    return newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))
+}
+
+func newResetRuntimeWithArchive(
+    t *testing.T,
+    storage *persistence.CatalogStorage,
+    archiveStorage *persistence.ArchiveStorage,
+) melodyruntimecontract.Runtime {
+    t.Helper()
+
     serviceContainer := melodycontainer.NewContainer()
+
+    melodycontainer.MustRegister(
+        serviceContainer,
+        persistence.ServiceArchiveStorage,
+        func(resolver melodycontainercontract.Resolver) (*persistence.ArchiveStorage, error) {
+            return archiveStorage, nil
+        },
+    )
 
     melodycontainer.MustRegister(
         serviceContainer,
@@ -118,5 +136,52 @@ func TestDatabaseResetCommandWithForceReachesTheDatabase(t *testing.T) {
     )
     if nil == runErr {
         t.Fatalf("expected --force to reach the undialed database and fail")
+    }
+}
+
+/* the plan names the archive's tables when there is an archive, and does not when there is not. Both arms
+   matter and for different reasons: a plan silent about a database it is about to drop is the failure this
+   refusal exists to prevent, and a plan promising to drop a table on a database this environment never
+   wired is a lie in the direction an operator would act on. */
+func TestDatabaseResetPlanNamesTheArchiveOnlyWhenThereIsOne(t *testing.T) {
+    withArchive := strings.Join(databaseResetPlanLineList(true), "\n")
+    withoutArchive := strings.Join(databaseResetPlanLineList(false), "\n")
+
+    for _, table := range migration.ArchiveTableNameList() {
+        if false == strings.Contains(withArchive, table) {
+            t.Fatalf("expected the plan to name %s when an archive is wired, got %q", table, withArchive)
+        }
+
+        if true == strings.Contains(withoutArchive, table) {
+            t.Fatalf("expected the plan to stay silent about %s when no archive is wired, got %q", table, withoutArchive)
+        }
+    }
+
+    /* the catalogue's own tables are named on BOTH arms, which is what says the archive half was added
+       rather than swapped in */
+    for _, table := range migration.SchemaTableNameList() {
+        if false == strings.Contains(withoutArchive, table) {
+            t.Fatalf("expected the plan to name the catalogue table %s on either arm, got %q", table, withoutArchive)
+        }
+    }
+}
+
+/* the command prints the archive's tables through the same door, over a runtime that carries a wired
+   archive: the list reaching the plan is what a mutant can cut, and this is what sees it cut. */
+func TestDatabaseResetCommandWithoutForceNamesTheArchiveWhenOneIsWired(t *testing.T) {
+    buffer := &bytes.Buffer{}
+
+    runErr := NewDatabaseResetCommand().Run(
+        newResetRuntimeWithArchive(t, newUndialedResetStorage(), persistence.NewArchiveStorage(newUndialedResetStorage().Database())),
+        newBoolFlagContext(databaseResetFlagForce, false, buffer),
+    )
+    if nil != runErr {
+        t.Fatalf("expected the command to touch nothing without --force, got %v", runErr)
+    }
+
+    for _, table := range migration.ArchiveTableNameList() {
+        if false == strings.Contains(buffer.String(), table) {
+            t.Fatalf("expected the plan to name %s, got %q", table, buffer.String())
+        }
     }
 }

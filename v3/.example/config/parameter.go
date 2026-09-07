@@ -38,6 +38,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
 
     /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them. AMQP_DSN is on the list because it carries its credentials INLINE: unlike the database dsn, assembled from the marked password so the mark propagates to it, the amqp credentials sit whole in this one key and no marked source exists to propagate from. */
     registrar.MarkParameterSecret("MYSQL_PASSWORD")
+    registrar.MarkParameterSecret(environmentKeyPgsqlPassword)
     registrar.MarkParameterSecret("S3_SECRET_KEY")
     registrar.MarkParameterSecret(environmentKeyAmqpDsn)
 

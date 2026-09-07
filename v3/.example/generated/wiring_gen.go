@@ -37,6 +37,23 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
 
     melodycontainer.MustRegister(
         registrar,
+        repository.ServiceCatalogReadingRepository,
+        func(resolver containercontract.Resolver) (repository.CatalogReadingRepository, error) {
+            var zeroValue repository.CatalogReadingRepository
+
+            storage, storageErr := melodycontainer.FromResolverByType[*persistence.ArchiveStorage](resolver)
+            if nil != storageErr {
+                return zeroValue, storageErr
+            }
+
+            return repository.NewCatalogReadingRepository(
+                storage,
+            )
+        },
+    )
+
+    melodycontainer.MustRegister(
+        registrar,
         repository.ServiceCategoryRepository,
         func(resolver containercontract.Resolver) (repository.CategoryRepository, error) {
             var zeroValue repository.CategoryRepository
@@ -309,6 +326,11 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, journalRepositoryErr
             }
 
+            readingRepository, readingRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogReadingRepository](resolver)
+            if nil != readingRepositoryErr {
+                return nil, readingRepositoryErr
+            }
+
             cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
             if nil != cacheInstanceErr {
                 return nil, cacheInstanceErr
@@ -335,6 +357,7 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 formatter,
                 productService,
                 journalRepository,
+                readingRepository,
                 cacheInstance,
                 clockInstance,
                 catalogTitle,

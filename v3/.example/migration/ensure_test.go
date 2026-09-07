@@ -2,6 +2,7 @@ package migration
 
 import (
     "context"
+    "strings"
     "database/sql/driver"
     "errors"
     "sync"
@@ -414,10 +415,11 @@ func TestResetDropsTheSchemaAndTheBookkeepingThenAppliesTheSchemaAgain(t *testin
    the same process reads "already migrated" and finds no tables. */
 func TestResetClearsTheMemoForTheHandle(t *testing.T) {
     database, _ := newFakeBunDatabase()
+    memoizationKey := migratedSetKey{database: database, migrationSet: Migrations}
 
     ensureMutex.Lock()
-    migratedDatabaseList[database] = struct{}{}
-    refusedDatabaseList[database] = refusedMigrationAttempt{refusal: context.Canceled, refusedAt: time.Now()}
+    migratedDatabaseList[memoizationKey] = struct{}{}
+    refusedDatabaseList[memoizationKey] = refusedMigrationAttempt{refusal: context.Canceled, refusedAt: time.Now()}
     ensureMutex.Unlock()
 
     if resetErr := Reset(context.Background(), database); nil != resetErr {
@@ -425,8 +427,8 @@ func TestResetClearsTheMemoForTheHandle(t *testing.T) {
     }
 
     ensureMutex.Lock()
-    _, stillMigrated := migratedDatabaseList[database]
-    _, stillRefused := refusedDatabaseList[database]
+    _, stillMigrated := migratedDatabaseList[memoizationKey]
+    _, stillRefused := refusedDatabaseList[memoizationKey]
     ensureMutex.Unlock()
 
     if true == stillMigrated {
@@ -434,5 +436,48 @@ func TestResetClearsTheMemoForTheHandle(t *testing.T) {
     }
     if true == stillRefused {
         t.Fatalf("expected the reset to clear the refusal memo for the handle")
+    }
+}
+
+/* the memo key is the handle AND the set together, and this is what that buys: one handle asked for both
+   sets must run BOTH. Keyed by the handle alone — the shape this package carried while it had a single
+   set — the first set applied would answer for the second, and the archive's table would never be created
+   on an application that keeps both on one connection.
+
+   It is driven through the funnel rather than by writing the map directly, because the key is computed
+   INSIDE the funnel: a test that built the key itself would asserting its own arithmetic, and a mutant on
+   the line that computes it would survive untouched.
+
+   The two sets are driven over ONE handle deliberately: over two handles the memo separates them under
+   either key, so the pair is only observable where the handle is shared. */
+func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    defer func() {
+        ensureMutex.Lock()
+        delete(migratedDatabaseList, migratedSetKey{database: database, migrationSet: Migrations})
+        delete(migratedDatabaseList, migratedSetKey{database: database, migrationSet: ArchiveMigrations})
+        ensureMutex.Unlock()
+    }()
+
+    if catalogErr := EnsureMigrated(context.Background(), database); nil != catalogErr {
+        t.Fatalf("catalogue set: %v", catalogErr)
+    }
+
+    recorder.reset()
+
+    if archiveErr := EnsureArchiveMigrated(context.Background(), database); nil != archiveErr {
+        t.Fatalf("archive set: %v", archiveErr)
+    }
+
+    /* the archive's own table is what says the second set RAN. With the memo keyed on the handle alone the
+       catalogue's entry answers for the archive, EnsureArchiveMigrated returns nil having done nothing,
+       and this statement never reaches the recorder. */
+    sawArchiveTable := 0 < recorder.countMatching(func(query string) bool {
+        return strings.Contains(query, CatalogReadingTableName)
+    })
+
+    if false == sawArchiveTable {
+        t.Fatalf("the archive set did not run over a handle the catalogue set had already migrated: the memo let one set answer for the other")
     }
 }

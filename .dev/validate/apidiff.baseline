@@ -78,6 +78,11 @@ integrations/bunorm/pgsql/v3 ~ compatible ~ (*Provider).OpenForMigration ~ added
 integrations/bunorm/pgsql/v3 ~ compatible ~ (*Provider).OpenForMigrationContext ~ added ~ unclassified ~
 integrations/bunorm/pgsql/v3 ~ compatible ~ TimeoutConfig.ReadTimeout ~ added ~ unclassified ~
 integrations/bunorm/pgsql/v3 ~ compatible ~ TimeoutConfig.WriteTimeout ~ added ~ unclassified ~
+integrations/bunorm/pgsql/v3 ~ compatible ~ RegisterLockerService ~ added ~ keep ~ the plug-and-play registration helper the mysql sibling has carried since the registration pass; this module shipped the advisory-lock Locker at v3.2.0 with no door to publish it, so every consumer named the framework's locker service itself
+integrations/bunorm/pgsql/v3 ~ compatible ~ ServiceRegistrar ~ added ~ keep ~ the narrow registrar the helper above takes, declared here rather than imported so the helper can be called with any registrar shape; byte-identical to the mysql sibling's
+integrations/bunorm/pgsql/v3 ~ compatible ~ Module ~ added ~ keep ~ the self-registering application module wrapping the helper, the shape the mysql sibling already publishes
+integrations/bunorm/pgsql/v3 ~ compatible ~ ModuleConfig ~ added ~ keep ~ the module's configuration: the database to lock on and the AsLocker opt-in, both refused when absent rather than defaulted
+integrations/bunorm/pgsql/v3 ~ compatible ~ NewModule ~ added ~ keep ~ the module constructor, the shape the mysql sibling already publishes
 integrations/bunorm/pgsql/v3 ~ incompatible ~ NewTimeoutConfig ~ changed from func(time.Duration) *TimeoutConfig to func(time.Duration, time.Duration, time.Duration) *TimeoutConfig ~ unclassified ~
 integrations/bunorm/pgsql/v3 ~ incompatible ~ (*Provider).Open ~ changed from func(github.com/precision-soft/melody/integrations/bunorm/v3.ConnectionParams, github.com/precision-soft/melody/v3/logging/contract.Logger) (*github.com/uptrace/bun.DB, error) to func(github.com/precision-soft/melody/integrations/bunorm/v3.ConnectionParameters, github.com/precision-soft/melody/v3/logging/contract.Logger) (*github.com/uptrace/bun.DB, error) ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ ./audit.Change.MarshalJSON ~ added ~ unclassified ~

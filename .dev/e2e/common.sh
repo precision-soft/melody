@@ -27,6 +27,7 @@ REPOSITORY_ROOT_DIRECTORY_STRING="$(cd -P "${E2E_DIRECTORY_STRING}/../.." && pwd
 
 E2E_SERVICE_NAME_STRING="dev"
 E2E_MYSQL_SERVICE_NAME_STRING="mysql"
+E2E_POSTGRES_SERVICE_NAME_STRING="postgres"
 
 # every major's database is provisioned whatever MELODY_E2E_MAJORS narrows the RUN to: the variable picks
 # which majors are exercised, not which ones are allowed to exist, and a database missing because a previous
@@ -37,6 +38,13 @@ E2E_MYSQL_SERVICE_NAME_STRING="mysql"
 # identifier containing spaces, so the run would report success having created one junk database and none of
 # the three real ones
 E2E_EXAMPLE_MAJOR_NUMBER_LIST=(1 2 3)
+
+# the majors that keep a set on POSTGRES, which is not the same list: v1 holds its catalogue journal there
+# and v3 holds its reading archive there, while v2 keeps everything it has on mysql. The list is written
+# rather than derived because it is a fact about what each example wires, and an example that grows a
+# postgres set later adds itself here — a database created for a major that has no set is harmless, but a
+# major whose set has no database fails at the first migrate.
+E2E_EXAMPLE_POSTGRES_MAJOR_NUMBER_LIST=(1 3)
 
 E2E_MYSQL_PROVISION_ATTEMPT_LIMIT_INTEGER=15
 
@@ -125,6 +133,7 @@ e2e_require_dev_service() {
     ensure_service_running "${E2E_SERVICE_NAME_STRING}"
 
     e2e_ensure_example_databases
+    e2e_ensure_example_postgres_databases
 }
 
 # each .example application holds its schema in a database of its own, all three in the one mysql container:
@@ -191,6 +200,72 @@ e2e_mysql_scalar() {
 
     docker_compose_no_log --profile all exec -T "${E2E_MYSQL_SERVICE_NAME_STRING}" \
         mysql -uroot -proot --batch --skip-column-names -D "${DATABASE_STRING}" -e "${STATEMENT_STRING}" \
+        </dev/null 2>/dev/null | tr -d '\r\n' || true
+}
+
+# The postgres half of the door above, and the reason it is a function of its own rather than a second loop
+# inside it: postgres has NO CREATE DATABASE IF NOT EXISTS, so the statement cannot simply be repeated. The
+# create is guarded by a read of pg_database through \gexec, which executes the rows a SELECT produced — so
+# the SELECT yields the CREATE statement only for a database that is not there yet, and yields nothing at
+# all for one that is.
+#
+# It is fed on STDIN rather than through -c, and that is not a style choice: psql documents -c as taking
+# either a string the server can parse whole or a single backslash command, never both, so the -c form
+# answers `syntax error at or near "\"` — measured, before this was written. \gexec is a meta-command and
+# has to begin its own line, which is what the newline between the two halves is for.
+#
+# Clearing POSTGRES_DSN opts out, the way clearing MYSQL_DSN opts the mysql half out: a run told there is no
+# postgres to reach is not asked to provision one.
+e2e_ensure_example_postgres_databases() {
+    if [[ "" = "${POSTGRES_DSN}" ]]; then
+        info "POSTGRES_DSN is cleared, so the per-major example postgres databases were not provisioned"
+
+        return 0
+    fi
+
+    # the same profile-blindness the mysql sibling documents: the postgres service sits behind the 'all'
+    # profile, so the profile-blind helpers answer empty for it and the profile is named here instead
+    if [[ "" = "$(docker_compose_no_log --profile all ps -q "${E2E_POSTGRES_SERVICE_NAME_STRING}" 2>/dev/null || true)" ]]; then
+        info "service ${E2E_POSTGRES_SERVICE_NAME_STRING} is not running [starting]"
+        docker_compose --profile all up -d "${E2E_POSTGRES_SERVICE_NAME_STRING}"
+    fi
+
+    local STATEMENT_STRING=""
+    local MAJOR_STRING
+    for MAJOR_STRING in "${E2E_EXAMPLE_POSTGRES_MAJOR_NUMBER_LIST[@]}"; do
+        STATEMENT_STRING="${STATEMENT_STRING}SELECT 'CREATE DATABASE melody_example_v${MAJOR_STRING} OWNER melody' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'melody_example_v${MAJOR_STRING}');"$'\n'"\\gexec"$'\n'
+    done
+
+    # retried for the same reason the mysql sibling is retried: pg_isready can answer while the server is
+    # still finishing its own initialisation, and a create that lands then fails on the connection rather
+    # than on anything about the statement
+    local ATTEMPT_INTEGER=0
+    while true; do
+        if printf '%s' "${STATEMENT_STRING}" | docker_compose_no_log --profile all exec -T "${E2E_POSTGRES_SERVICE_NAME_STRING}" \
+            psql -U melody -d postgres -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+            return 0
+        fi
+
+        ATTEMPT_INTEGER=$((ATTEMPT_INTEGER + 1))
+        if [[ "${ATTEMPT_INTEGER}" -ge "${E2E_MYSQL_PROVISION_ATTEMPT_LIMIT_INTEGER}" ]]; then
+            fail "could not create the per-major example databases on the ${E2E_POSTGRES_SERVICE_NAME_STRING} service after ${ATTEMPT_INTEGER} attempts"
+        fi
+
+        sleep 2
+    done
+}
+
+# e2e_pgsql_scalar <database> <statement> is the postgres sibling of e2e_mysql_scalar: the single value a
+# statement answers, read straight from the postgres service rather than through an application. Until this
+# existed the harness had no postgres reader at all, so a postgres set could only be asserted through the
+# application's own db:<context>:status — the application's word for the state rather than the state itself.
+# An unreachable server prints nothing, which every caller reads as a mismatch rather than as agreement.
+e2e_pgsql_scalar() {
+    local DATABASE_STRING="${1:?}"
+    local STATEMENT_STRING="${2:?}"
+
+    docker_compose_no_log --profile all exec -T "${E2E_POSTGRES_SERVICE_NAME_STRING}" \
+        psql -U melody -d "${DATABASE_STRING}" --tuples-only --no-align -c "${STATEMENT_STRING}" \
         </dev/null 2>/dev/null | tr -d '\r\n' || true
 }
 

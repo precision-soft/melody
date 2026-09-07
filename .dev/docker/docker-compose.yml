@@ -177,6 +177,8 @@ services:
             POSTGRES_DB: melody_test
         ports:
             - "${POSTGRES_HOST_PORT:-5433}:5432"
+        volumes:
+            - ${RELATIVE_PATH_TO_ROOT}/${DOCKER_PATH}/postgres/init.sql:/docker-entrypoint-initdb.d/10-example-databases.sql:ro
         healthcheck:
             test: [ 'CMD-SHELL', 'pg_isready -U melody' ]
             interval: 5s

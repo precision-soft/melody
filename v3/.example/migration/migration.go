@@ -19,3 +19,25 @@ var Migrations = migrate.NewMigrations()
 func SchemaTableNameList() []string {
     return append([]string{}, schemaTableNameList...)
 }
+
+/* ArchiveMigrations is the single source of the reading archive's schema, on postgres. The archive
+   repository provider runs it at first resolution through EnsureArchiveMigrated, and the db:archive:*
+   command family the bunorm/migrate module registers as a CONTEXT runs the same set from the operator's
+   side, so neither door can drift from the other.
+
+   It is a set of its own rather than a second step of the one above, and the reason is bun's bookkeeping
+   rather than taste: bun_migrations is per database and bun matches an applied migration BY NAME, so two
+   databases need two sets and one set could never span them. Its identifier is deliberately not the
+   number the day would have given it — the frozen major's journal set already carries 20260907000002 —
+   because two identifiers that collide are only harmless while the two sets never meet in one database,
+   and the archive's whole reason for existing is that this example now has two.
+
+   The dialect is postgres and it is written as postgres: TIMESTAMPTZ(6) where the mysql schema writes
+   DATETIME(6), an unquoted identifier where it writes a backticked one. */
+var ArchiveMigrations = migrate.NewMigrations()
+
+/* ArchiveTableNameList names the tables the archive set owns, the way SchemaTableNameList names the
+   catalogue's: one list, read by the down that drops them and by the plan the reset command prints. */
+func ArchiveTableNameList() []string {
+    return append([]string{}, archiveTableNameList...)
+}

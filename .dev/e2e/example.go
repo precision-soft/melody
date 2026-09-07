@@ -81,6 +81,36 @@ func exampleMysqlDatabase(major exampleMajor) string {
     return "melody_example_v" + strconv.Itoa(major.number)
 }
 
+/* examplePostgresDsn is the postgres sibling of exampleMysqlDsn, and it exists for the same reason: an
+   example that keeps a set on postgres holds it in a database of that major's own, so a section reading
+   what an application wrote has to ask the database that application writes to. POSTGRES_DSN carries
+   melody_test, the scratch database the live integration suites create their own tables in, and this
+   swaps its database segment for the major being driven.
+
+   The database segment of a postgres url is the path, and it may be followed by a query — sslmode=disable
+   is on the shipped value — so the parameters are carried across the swap the way the mysql sibling
+   carries them. An empty dsn stays empty, and a dsn with no path segment is answered unchanged rather
+   than repaired, for the reasons written on that sibling. */
+func examplePostgresDsn(major exampleMajor, postgresDsn string) string {
+    if "" == postgresDsn {
+        return ""
+    }
+
+    parameters := ""
+    remainder := postgresDsn
+    if parameterIndex := strings.Index(remainder, "?"); 0 <= parameterIndex {
+        parameters = remainder[parameterIndex:]
+        remainder = remainder[:parameterIndex]
+    }
+
+    separatorIndex := strings.LastIndex(remainder, "/")
+    if 0 > separatorIndex {
+        return postgresDsn
+    }
+
+    return remainder[:separatorIndex+1] + exampleMysqlDatabase(major) + parameters
+}
+
 /* exampleMajorList resolves the majors to exercise from MELODY_E2E_MAJORS, which accepts space or comma separated major numbers ("1 2 3", "1,3", "v2"). An UNSET variable means all three, so a default run drives every major; an empty value opts out of the per-major sections the same way clearing a backend variable opts out of the sections that backend gates. An unknown entry is a hard error rather than a silent narrowing of coverage. */
 func exampleMajorList() []exampleMajor {
     raw, isSet := os.LookupEnv(exampleMajorListVariable)

@@ -31,6 +31,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     }
 
     instance.registerCatalogStorageService(registrar)
+    instance.registerArchiveStorageService(registrar)
 
     /* the two outbound clients, each env-gated on the endpoint it points at: an application configured
        with neither registers no client and opens no pool */
@@ -126,6 +127,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerStorageService(registrar)
     instance.registerLockerService(registrar)
+    instance.registerArchiveLockerService(registrar)
     instance.registerDatabaseServices(registrar)
 
     /* the repositories, the domain services and the reporting services are not registered here: melody:wiring:generate scans the packages declared in NewWiringBindSet, resolves every constructor argument that is a service from the container and every scalar from the parameter it is bound to, and renders the registrations below. Adding one is a matter of writing the constructor and regenerating. Regenerate with `go run . melody:wiring:generate --package generated --function RegisterGeneratedServices --out generated/wiring_gen.go`. */
@@ -153,6 +155,29 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
             }
 
             return persistence.NewCatalogStorage(database), nil
+        },
+    )
+}
+
+/* registerArchiveStorageService publishes the handle the reading archive is kept on, for the same reason and in the same shape as the catalogue handle above: the generated wiring fills the archive repository's constructor by resolving its argument by type, so the storage is registered whether or not there is a connection behind it and answers for itself.
+
+   The handle it resolves is opened HERE, at this first resolution, because serviceArchiveDatabase's own provider is what opens it — which is what keeps a process that never takes a reading from paying a postgres handshake. */
+func (instance *Module) registerArchiveStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    hasArchive := instance.archiveWired
+
+    registrar.RegisterService(
+        persistence.ServiceArchiveStorage,
+        func(resolver melodycontainercontract.Resolver) (*persistence.ArchiveStorage, error) {
+            if false == hasArchive {
+                return persistence.NewArchiveStorage(nil), nil
+            }
+
+            database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceArchiveDatabase)
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return persistence.NewArchiveStorage(database), nil
         },
     )
 }

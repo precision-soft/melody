@@ -66,9 +66,14 @@ type Module struct {
     storageBucket string
     storage       *melodyawss3.Storage
 
-    /* the registry is the one door onto the connection: the db:* command family resolves it by name, and the handle below is its default manager rather than a second pool opened beside it. */
+    /* the registry is the one door onto BOTH connections: the db:* command family resolves it by name for the catalogue and the db:archive:* family for the archive, and the catalogue handle below is its default manager rather than a second pool opened beside it.
+
+       There is no archive handle beside it on purpose. The catalogue is opened eagerly here because everything in this application reads it; the archive is opened at its first resolution instead, because a process that never takes a reading — every db:* invocation, every debug command, every --help — would otherwise pay a second handshake for a connection it never uses. */
     databaseRegistry *melodybunorm.ManagerRegistry
     database         *bun.DB
+
+    /* archiveWired is what the environment armed, kept as an answer rather than re-derived: the services, the migration context and the reset command each ask it, and asking the registry instead would open the connection to find out. */
+    archiveWired bool
     cipher           melodyencrypt.Cipher
 }
 
@@ -100,6 +105,16 @@ const (
     environmentKeyMysqlUser     = "MYSQL_USER"
     environmentKeyMysqlPassword = "MYSQL_PASSWORD"
     environmentKeyMysqlInsecure = "MYSQL_INSECURE"
+
+    /* the archive connection is the example's SECOND database, on postgres, and it carries a switch of
+       its own: the catalogue on mysql and the reading archive on postgres are independently wired, so
+       every combination boots — both live, either one alone, or neither. */
+    environmentKeyPgsqlHost     = "PGSQL_HOST"
+    environmentKeyPgsqlPort     = "PGSQL_PORT"
+    environmentKeyPgsqlDatabase = "PGSQL_DATABASE"
+    environmentKeyPgsqlUser     = "PGSQL_USER"
+    environmentKeyPgsqlPassword = "PGSQL_PASSWORD"
+    environmentKeyPgsqlInsecure = "PGSQL_INSECURE"
 
     environmentKeyRedisAddress = "REDIS_ADDRESS"
 

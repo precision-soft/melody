@@ -57,8 +57,8 @@ func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
 func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
     _, report := generateWiring(t)
 
-    if 14 != report.ConstructorCount {
-        t.Fatalf("the scan found %d constructors, wanted 14 — add or remove one and update this number with it", report.ConstructorCount)
+    if 15 != report.ConstructorCount {
+        t.Fatalf("the scan found %d constructors, wanted 15 — add or remove one and update this number with it", report.ConstructorCount)
     }
 
     if 0 != len(report.Skipped) {

@@ -73,7 +73,16 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         writer = os.Stdout
     }
 
-    printDatabaseResetPlan(writer)
+    /* the archive is resolved BEFORE the plan is printed, not before it is used: the plan has to name the archive's tables when there is an archive, and a plan that named what it would not touch — or stayed silent about what it would — is the one thing this refusal exists to prevent. */
+    archiveStorage, archiveResolveErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](
+        runtimeInstance.Container(),
+        persistence.ServiceArchiveStorage,
+    )
+    if nil != archiveResolveErr {
+        return archiveResolveErr
+    }
+
+    printDatabaseResetPlan(writer, archiveStorage.IsPersistent())
 
     if false == commandContext.Bool(databaseResetFlagForce) {
         fmt.Fprintln(writer, "nothing was touched; pass --force to perform the reset")
@@ -87,6 +96,13 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         return resetErr
     }
 
+    /* the archive is a set of its own on a database of its own, so it is reset through its own door — and it is SKIPPED rather than refused when this environment wired no archive, the way the catalogue half would be if the two switches were the other way round. An operator who never configured postgres is not told their reset failed over a database they never asked for. */
+    if true == archiveStorage.IsPersistent() {
+        if archiveResetErr := migration.ResetArchive(ctx, archiveStorage.Database()); nil != archiveResetErr {
+            return archiveResetErr
+        }
+    }
+
     if trailErr := clearAuditTrail(ctx, storage); nil != trailErr {
         return trailErr
     }
@@ -97,15 +113,26 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
 
     fmt.Fprintln(writer, "database reset: the schema was recreated, the audit trail emptied and the nomenclature reseeded")
 
+    if true == archiveStorage.IsPersistent() {
+        fmt.Fprintln(writer, "archive reset: the reading archive was dropped and recreated")
+    }
+
     return nil
 }
 
 /* databaseResetPlanLineList names what the reset reaches. It is a list rather than a series of prints so that what the command SAYS it will destroy is readable by a test without capturing a stream, and it is printed on both paths on purpose: the refusal has to say what the flag would have unleashed, and the run has to leave the same lines in the log of whoever ran it. */
-func databaseResetPlanLineList() []string {
+func databaseResetPlanLineList(archiveWired bool) []string {
     lineList := []string{"example:db:reset would drop and recreate the tables the migration set owns:"}
 
     for _, table := range migration.SchemaTableNameList() {
         lineList = append(lineList, "  - "+table)
+    }
+
+    /* the archive's tables are read from the archive set's own list, the way the catalogue's are read from the catalogue's: a table added to either schema cannot be left out of the plan by a second copy nobody updated. They are named only when there is an archive, because a plan that promised to drop a table on a database this environment never wired would be a lie in the one direction that matters. */
+    if true == archiveWired {
+        for _, table := range migration.ArchiveTableNameList() {
+            lineList = append(lineList, "  - "+table+" (on the archive database)")
+        }
     }
 
     return append(
@@ -116,8 +143,8 @@ func databaseResetPlanLineList() []string {
     )
 }
 
-func printDatabaseResetPlan(writer io.Writer) {
-    for _, line := range databaseResetPlanLineList() {
+func printDatabaseResetPlan(writer io.Writer, archiveWired bool) {
+    for _, line := range databaseResetPlanLineList(archiveWired) {
         fmt.Fprintln(writer, line)
     }
 }

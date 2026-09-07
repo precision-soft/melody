@@ -90,6 +90,10 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewSegmentPrefixRule(route.CurrenciesPrefix, melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleUser},
         }),
+        /* the archive of catalogue readings carries the same requirement the catalogue listings do: a reading is the catalogue counted, so anyone who may not read the nomenclature may not read its history either. It is stated rather than left to the catch-all below, because a rule inherited by accident is one nobody re-reads when the catch-all moves. */
+        melodyaccesscontrol.NewSegmentPrefixRule(route.ReportsPrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
         melodyaccesscontrol.NewSegmentPrefixRule(route.UsersPrefix, melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleAdmin},
         }),

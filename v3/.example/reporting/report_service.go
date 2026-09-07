@@ -38,6 +38,7 @@ func NewCatalogReportService(
     formatter *ReportFormatter,
     productService *service.ProductService,
     journalRepository repository.CatalogJournalRepository,
+    readingRepository repository.CatalogReadingRepository,
     cacheInstance melodycachecontract.Cache,
     clockInstance melodyclockcontract.Clock,
     catalogTitle string,
@@ -48,6 +49,7 @@ func NewCatalogReportService(
         formatter:         formatter,
         productService:    productService,
         journalRepository: journalRepository,
+        readingRepository: readingRepository,
         cache:             cacheInstance,
         clock:             clockInstance,
         catalogTitle:      catalogTitle,
@@ -60,6 +62,7 @@ type CatalogReportService struct {
     formatter         *ReportFormatter
     productService    *service.ProductService
     journalRepository repository.CatalogJournalRepository
+    readingRepository repository.CatalogReadingRepository
     cache             melodycachecontract.Cache
     clock             melodyclockcontract.Clock
     catalogTitle      string
@@ -135,6 +138,61 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
         Payload:    payload,
         FromCache:  false,
     }, nil
+}
+
+/* Archive records a reading in the archive and answers whether this call is the one that wrote it.
+
+   It is a door of its own rather than a step inside Refresh, and the split is the decision: a reading is taken on the REQUEST path too, whenever a caller finds a cold cache, and archiving there would put a write to a second database on a read, make a read door fail when postgres is down, and fill the archive with rows nobody scheduled. What belongs in the archive is the reading the SCHEDULE took, so the command is what calls this — under an advisory lock, so several processes running the same schedule record one reading between them rather than one each.
+
+   A reading already recorded at that instant is not a failure: the instant is the identity of a reading, so the archive already holds exactly what this call would have written. The caller is told it did not write, and that is the whole difference. Every other failure is handed back. */
+func (instance *CatalogReportService) Archive(ctx context.Context, reading *CatalogReading) (bool, error) {
+    if nil == reading {
+        return false, fmt.Errorf("reading is required")
+    }
+
+    products, listErr := instance.productService.List()
+    if nil != listErr {
+        return false, listErr
+    }
+
+    journalCount, countErr := instance.journalRepository.Count(ctx)
+    if nil != countErr {
+        return false, countErr
+    }
+
+    appendErr := instance.readingRepository.Append(ctx, &repository.CatalogReadingRecord{
+        TakenAt:      ArchivedInstantOf(reading.RecordedAt),
+        Headline:     reading.Headline,
+        Payload:      reading.Payload,
+        ProductCount: len(products),
+        JournalCount: journalCount,
+    })
+    if nil == appendErr {
+        return true, nil
+    }
+
+    if readingAlreadyRecordedMessage == appendErr.Error() {
+        return false, nil
+    }
+
+    return false, appendErr
+}
+
+/* ArchivedInstantOf is the instant a reading is archived under: the instant it was taken at, in UTC, truncated to the second.
+
+   The truncation is the archive's IDENTITY rather than a rounding convenience, and it has to be stated because the alternative is silently broken in two ways. The reading already carries its instant to the second — the payload writes recorded_at as RFC3339, which has no fractional part — so a key kept to the microsecond would disagree with the very value it keys: one row saying 13:13:10.79995 and carrying a payload that says 13:13:10. And a microsecond key has no duplicate a real caller can reach, which would make the primary key a constraint with no producer and the refusal below unreachable code.
+
+   To the second, the identity is the one the reading states about itself: the catalogue as it stood at that second. Two refreshes inside one second are the same reading, which is exactly what the second one is told. */
+func ArchivedInstantOf(recordedAt time.Time) time.Time {
+    return recordedAt.UTC().Truncate(time.Second)
+}
+
+/* readingAlreadyRecordedMessage is the sentence both archive implementations answer a duplicate instant with. It is compared rather than wrapped because the two implementations reach it through different mechanisms — a postgres SQLSTATE on one side, a map lookup on the other — and the message is the contract they share. */
+const readingAlreadyRecordedMessage = "reading already recorded"
+
+/* RecentReadings lists the archive, newest first. */
+func (instance *CatalogReportService) RecentReadings(ctx context.Context, limit int) ([]*repository.CatalogReadingRecord, error) {
+    return instance.readingRepository.Recent(ctx, limit)
 }
 
 /* recordedAtOf reads back the instant Refresh wrote into the payload, and says whether it found one. The stamp is the last field and carries no spaces, so it is read to the end of the value or to the next field, whichever comes first — a payload written by an older shape of this service, or by nothing at all, simply answers false. */

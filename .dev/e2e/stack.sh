@@ -48,6 +48,10 @@
 #   - V3 EXCHANGE RATES  the seeded quote, the refresh that replaces it with the provider's, the quote read
 #                        back out of band, the report export, and the two configurations that gate the door:
 #                        a provider that refuses exits non-zero and moves nothing, an absent one is a no-op
+#   - V3 READING ARCHIVE the example's SECOND database, on postgres: its own command family pinned to its own
+#                        manager, the reading a refresh appends read back out of band, the archived instant
+#                        agreeing with the payload that carries it, two concurrent refreshes recording one
+#                        reading between them, and the listing refused to an anonymous caller
 #   - V1 CRON RUNNER     the v1 example registers the cron module: melody:cron:run boots from the shared
 #                        Configuration, reports its user-carrying entries and answers the json envelope
 #   - V1 MIGRATIONS      the bunorm/migrate command family runs the same migration set the v1 providers
@@ -103,7 +107,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=135
+EXPECTED_CHECK_COUNT_INTEGER=143
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1427,6 +1431,113 @@ restore_example_env_local
 check_section_end "V3 EXCHANGE RATES" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# V3 READING ARCHIVE — the second database, on postgres, and the command family pinned to it
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 READING ARCHIVE" "${TAG_VALIDATE}" "e2e"
+
+# The v3 example holds two databases: the catalogue on mysql and the archive of catalogue readings on
+# postgres. This section is the only thing that drives the pgsql PROVIDER anywhere in the repository —
+# the harness's own postgres connection is a bare pgdriver connector, and the advisory-lock check beside
+# it builds its locker over that, so before this the provider had compilation and its package tests.
+#
+# The out-of-band reads go through e2e_pgsql_scalar, which did not exist until this section needed it:
+# until now a postgres set could only be asserted through the application's own db:<context>:status,
+# which is the application's word for the state rather than the state itself.
+
+V3_ARCHIVE_DATABASE_STRING="melody_example_v3"
+V3_ARCHIVE_COUNT_STATEMENT_STRING="SELECT COUNT(*) FROM melody_example_v3_catalog_reading"
+
+# the archive's own command family, pinned to its manager: it reaches postgres and only postgres. Run over
+# a set the boot has already applied, so success here is idempotence rather than a first migration.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:archive:migrate >/dev/null 2>&1; echo status=\$?"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
+    check_pass "v3 db:archive:migrate answers success over the set the archive provider already applied"
+else
+    check_fail "v3 db:archive:migrate failed (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# the two families are pinned to two managers, so each names its own database. This is what a context
+# buys over a second module registration, and the document each command prints is where it shows.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:archive:status --format=json 2>/dev/null"
+V3_ARCHIVE_STATUS_JSON_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_ARCHIVE_STATUS_JSON_STRING}" | grep -q '"20260907100001'; then
+    check_pass "v3 db:archive:status names the archive's own set"
+else
+    check_fail "v3 db:archive:status did not name the archive set (${V3_ARCHIVE_STATUS_JSON_STRING:-<empty>})"
+fi
+
+# the catalogue family is unmoved by the archive's arrival: it still reaches mysql, and its own set is
+# what it reports. A pin that had gone to the wrong manager would show here first.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:status --format=json 2>/dev/null"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q '"database":"melody_example_v3"'; then
+    check_pass "v3 db:status still names the catalogue database, so the base family kept its manager"
+else
+    check_fail "v3 db:status no longer names the catalogue database (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# what the refresh SAYS it did is not the evidence; the archive is. The count is read out of band, before
+# and after, so the assertion is a difference rather than a total — the archive carries whatever earlier
+# runs left, and a total would be an assertion about the order the sections happen to run in.
+V3_ARCHIVE_COUNT_BEFORE_STRING="$(e2e_pgsql_scalar "${V3_ARCHIVE_DATABASE_STRING}" "${V3_ARCHIVE_COUNT_STATEMENT_STRING}")"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . catalog:report:refresh 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_ARCHIVE_REFRESH_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+V3_ARCHIVE_COUNT_AFTER_STRING="$(e2e_pgsql_scalar "${V3_ARCHIVE_DATABASE_STRING}" "${V3_ARCHIVE_COUNT_STATEMENT_STRING}")"
+
+if [[ "$(( ${V3_ARCHIVE_COUNT_BEFORE_STRING:-0} + 1 ))" = "${V3_ARCHIVE_COUNT_AFTER_STRING:-0}" ]]; then
+    check_pass "catalog:report:refresh added exactly one reading to the archive (${V3_ARCHIVE_COUNT_BEFORE_STRING} -> ${V3_ARCHIVE_COUNT_AFTER_STRING})"
+else
+    check_fail "the refresh took the archive from ${V3_ARCHIVE_COUNT_BEFORE_STRING:-<no answer>} to ${V3_ARCHIVE_COUNT_AFTER_STRING:-<no answer>}, wanted exactly one more"
+fi
+
+if printf '%s' "${V3_ARCHIVE_REFRESH_OUTPUT_STRING}" | grep -qE 'ARCHIVED'; then
+    check_pass "catalog:report:refresh reports what it did with the archive"
+else
+    check_fail "the refresh did not report an archive column (${V3_ARCHIVE_REFRESH_OUTPUT_STRING:-<empty>})"
+fi
+
+# the row the archive holds and the payload it carries agree on the instant, which is the property the
+# truncation to the second exists for: the payload writes recorded_at as RFC3339, so a key kept finer
+# would disagree with the value it keys. Asserted as an EQUALITY between the two halves of one row rather
+# than against a clock, so it holds whatever second the run lands in.
+V3_ARCHIVE_AGREEMENT_STRING="$(e2e_pgsql_scalar "${V3_ARCHIVE_DATABASE_STRING}" "SELECT CASE WHEN payload LIKE '%recorded_at=' || to_char(taken_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') THEN 'agree' ELSE 'differ' END FROM melody_example_v3_catalog_reading ORDER BY taken_at DESC LIMIT 1")"
+if [[ "agree" = "${V3_ARCHIVE_AGREEMENT_STRING}" ]]; then
+    check_pass "the archived row and the payload it carries name the same instant"
+else
+    check_fail "the archived row and its payload disagree on the instant (${V3_ARCHIVE_AGREEMENT_STRING:-<no answer>})"
+fi
+
+# two processes running the same schedule record ONE reading between them rather than one each. That is
+# the advisory lock doing the only thing it is there for, and it cannot be proved by mutation (a guard
+# against a race is not), so it is driven here. The assertion is a difference of one over two runs.
+V3_ARCHIVE_CONCURRENT_BEFORE_STRING="$(e2e_pgsql_scalar "${V3_ARCHIVE_DATABASE_STRING}" "${V3_ARCHIVE_COUNT_STATEMENT_STRING}")"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go build -o melody-example-e2e . && ( ./melody-example-e2e catalog:report:refresh >/dev/null 2>&1 & ./melody-example-e2e catalog:report:refresh >/dev/null 2>&1 & wait ); rm -f melody-example-e2e; echo done"
+
+V3_ARCHIVE_CONCURRENT_AFTER_STRING="$(e2e_pgsql_scalar "${V3_ARCHIVE_DATABASE_STRING}" "${V3_ARCHIVE_COUNT_STATEMENT_STRING}")"
+V3_ARCHIVE_CONCURRENT_DELTA_INTEGER="$(( ${V3_ARCHIVE_CONCURRENT_AFTER_STRING:-0} - ${V3_ARCHIVE_CONCURRENT_BEFORE_STRING:-0} ))"
+if [[ "1" = "${V3_ARCHIVE_CONCURRENT_DELTA_INTEGER}" ]]; then
+    check_pass "two concurrent refreshes recorded one reading between them, not one each"
+else
+    check_fail "two concurrent refreshes added ${V3_ARCHIVE_CONCURRENT_DELTA_INTEGER} readings, wanted exactly 1"
+fi
+
+# the read half. Only the anonymous arm is driven here: this script's http client is wget with no cookie
+# jar, and an authenticated flow belongs where the sign-in helpers live — the Go harness drives the
+# listing itself, its limit and its refusals. What this arm states is the one thing a section of this
+# script can state on its own, and it is worth stating: the archive carries the catalogue's history, so a
+# door onto it that answered an anonymous caller would publish what the listings are gated for.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -S -O /dev/null \"\${EXAMPLE_BASE_URL}/reports/api/history/\" 2>&1 | grep -m1 'HTTP/' || true"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q '401'; then
+    check_pass "an anonymous caller is refused the archive listing"
+else
+    check_fail "the archive listing answered ${RUN_IN_DEV_OUTPUT_STRING:-<no answer>} to an anonymous caller, wanted 401"
+fi
+
+check_section_end "V3 READING ARCHIVE" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
 # The V1 sections: the wiring only the v1 example carries today. They address the v1 example explicitly
 # instead of reassigning EXAMPLE_DIRECTORY_STRING, so every invocation states which major it drives.
 # ---------------------------------------------------------------------------------------------------
@@ -1555,8 +1666,9 @@ check_section_start "V1 JOURNAL DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 
 # the journal is the v1 example's second live database: one process, the catalogue on mysql and the journal
 # on postgres, each with its own migration set and its own command family. The rollback here drops the live
-# journal table of the shared melody_test database; the migrate after it puts the schema back, and the
-# journal is append-only with no seeds, so an empty journal IS the restored state.
+# journal table of melody_example_v1 on postgres — this major's own database, not the shared development
+# one; the migrate after it puts the schema back, and the journal is append-only with no seeds, so an empty
+# journal IS the restored state.
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:journal:init >/dev/null 2>&1; echo status=\$?"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
     check_pass "v1 db:journal:init is idempotent over the journal database's bookkeeping tables"

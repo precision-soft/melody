@@ -159,3 +159,37 @@ func TestPushFailureCleanup_RunsRegisteredTeardownAndSkipsPopped(t *testing.T) {
         t.Fatalf("the cleanup list must be emptied after it ran, holds %d", len(failureCleanupList))
     }
 }
+
+/* the journal reader has to ask the database the application writes to, and the v1 example's journal moved
+   from the shared scratch database into one of its own. The swap is what carries that, and it is pinned on
+   values rather than only through the reader, because the shipped dsn carries a query the swap must not
+   drop and a caller may hand it shapes the reader would answer wrongly without saying so. */
+func TestExamplePostgresDsnSwapsTheDatabaseForTheMajorBeingDriven(t *testing.T) {
+    v1, _ := exampleMajorByNumber(1)
+
+    swapped := examplePostgresDsn(v1, "postgres://melody:melody@postgres:5432/melody_test?sslmode=disable")
+    if "postgres://melody:melody@postgres:5432/melody_example_v1?sslmode=disable" != swapped {
+        t.Fatalf("expected the database swapped and the query kept, got %q", swapped)
+    }
+
+    withoutQuery := examplePostgresDsn(v1, "postgres://melody:melody@postgres:5432/melody_test")
+    if "postgres://melody:melody@postgres:5432/melody_example_v1" != withoutQuery {
+        t.Fatalf("expected the database swapped with no query, got %q", withoutQuery)
+    }
+}
+
+/* an empty dsn is how a caller says there is no database to reach, and the sections that receive it
+   announce their out-of-band half as skipped; a dsn with no path is answered unchanged rather than
+   repaired, because pointing a caller's configuration somewhere else silently is what hides a mistake. */
+func TestExamplePostgresDsnLeavesWhatItCannotSwapAlone(t *testing.T) {
+    v1, _ := exampleMajorByNumber(1)
+
+    if "" != examplePostgresDsn(v1, "") {
+        t.Fatal("expected an empty dsn to stay empty")
+    }
+
+    pathless := "postgres:melody"
+    if pathless != examplePostgresDsn(v1, pathless) {
+        t.Fatalf("expected a dsn with no path segment to be answered unchanged, got %q", examplePostgresDsn(v1, pathless))
+    }
+}

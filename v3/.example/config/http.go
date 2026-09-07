@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/handler"
     "github.com/precision-soft/melody/v3/.example/handler/accesstoken"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
+    handlerreport "github.com/precision-soft/melody/v3/.example/handler/report"
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
     handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
     handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
@@ -110,6 +111,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */
     router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
+    router.HandleWithOptions(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
 
     router.HandleWithOptions(route.CurrenciesApiReadAllPattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllName, "GET"))
 

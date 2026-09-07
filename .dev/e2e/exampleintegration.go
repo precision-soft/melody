@@ -75,7 +75,11 @@ func exampleJournalTable(major exampleMajor) string {
 /* exampleJournalDsn answers the DSN of the database one major keeps its journal in, together with the environment variable that carries it — the name is what a skip message must say when the value is cleared. The v1 example runs its journal on postgres beside a mysql catalogue; the later majors keep both in mysql. */
 func exampleJournalDsn(major exampleMajor, mysqlDsn string, postgresDsn string) (string, string) {
     if true == major.journalOnPostgres {
-        return postgresDsn, "POSTGRES_DSN"
+        /* the database segment is swapped for this major's own, the way the mysql reads swap theirs: the
+           journal used to live in the shared scratch database and now lives in melody_example_v<major> on
+           postgres, so a reader still pointed at POSTGRES_DSN as it stands would find no rows and report
+           a change that was recorded as one that was not */
+        return examplePostgresDsn(major, postgresDsn), "POSTGRES_DSN"
     }
 
     return mysqlDsn, "MYSQL_DSN"

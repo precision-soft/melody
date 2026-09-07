@@ -15,7 +15,7 @@ var Migrations = migrate.NewMigrations()
 
 /* JournalMigrations is the single source of the journal schema on postgres. The journal repository provider runs it at first resolution through EnsureJournalMigrated, and the db:journal:* command family runs the same set from the operator's side.
 
-   The journal database is the shared development one (melody_test), which other harness probes also write — each with tables of its own. The bun bookkeeping tables keep their default names there too: bookkeeping is per database, and within melody_test only this set uses bun's migrator, so nothing else touches its rows. */
+   The journal database is this major's own, melody_example_v1 on postgres, the way the catalogue database is this major's own on mysql. It used to be the shared development database, and moving it is what makes the bookkeeping honest: the bun tables keep their default names, bookkeeping is per database, and bun matches an applied migration by NAME — so a set sharing a database with another major's would find that major's identifier already applied and skip its own step with no error, no line in db:status and no effect. The shared database stays behind for the live integration suites, which point POSTGRES_DSN at it and create tables of their own there. */
 var JournalMigrations = migrate.NewMigrations()
 
 /* SchemaTableNameList names every table this example's two sets own, catalog first and the journal last.

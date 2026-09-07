@@ -6,8 +6,8 @@ import (
     "testing"
     "time"
 
-    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
@@ -295,10 +295,22 @@ var _ repository.ProductRepository = (*emptyProductRepository)(nil)
 func newReportServiceUnderTest(t *testing.T, clockInstance *melodyclock.FrozenClock, cacheInstance melodycachecontract.Cache) *CatalogReportService {
     t.Helper()
 
+    return newReportServiceWithArchive(t, clockInstance, cacheInstance, newRecordingReadingRepository())
+}
+
+func newReportServiceWithArchive(
+    t *testing.T,
+    clockInstance *melodyclock.FrozenClock,
+    cacheInstance melodycachecontract.Cache,
+    readingRepository repository.CatalogReadingRepository,
+) *CatalogReportService {
+    t.Helper()
+
     reportService, buildErr := NewCatalogReportService(
         NewReportFormatter(),
         service.NewProductService(&emptyProductRepository{}, nil, nil, cacheInstance, nil, clockInstance),
         &stubJournalRepository{},
+        readingRepository,
         cacheInstance,
         clockInstance,
         "catalog",
@@ -311,6 +323,64 @@ func newReportServiceUnderTest(t *testing.T, clockInstance *melodyclock.FrozenCl
 
     return reportService
 }
+
+/* recordingReadingRepository is the archive as a test can inspect it: what it was handed, in order, and a
+   refusal it can be told to answer. It keeps the identity rule the two real implementations keep — one
+   reading per instant — because a double that accepted what they refuse would let the service's handling
+   of that refusal go unproven. */
+func newRecordingReadingRepository() *recordingReadingRepository {
+    return &recordingReadingRepository{}
+}
+
+type recordingReadingRepository struct {
+    appended  []*repository.CatalogReadingRecord
+    failWith  error
+    countFail error
+}
+
+func (instance *recordingReadingRepository) Append(ctx context.Context, reading *repository.CatalogReadingRecord) error {
+    if nil != instance.failWith {
+        return instance.failWith
+    }
+
+    for _, existing := range instance.appended {
+        if true == existing.TakenAt.Equal(reading.TakenAt) {
+            return fmt.Errorf("reading already recorded")
+        }
+    }
+
+    stored := *reading
+    instance.appended = append(instance.appended, &stored)
+
+    return nil
+}
+
+func (instance *recordingReadingRepository) Recent(ctx context.Context, limit int) ([]*repository.CatalogReadingRecord, error) {
+    if 0 >= limit {
+        return []*repository.CatalogReadingRecord{}, nil
+    }
+
+    reversed := make([]*repository.CatalogReadingRecord, 0, len(instance.appended))
+    for index := len(instance.appended) - 1; 0 <= index; index-- {
+        reversed = append(reversed, instance.appended[index])
+    }
+
+    if limit < len(reversed) {
+        reversed = reversed[:limit]
+    }
+
+    return reversed, nil
+}
+
+func (instance *recordingReadingRepository) Count(ctx context.Context) (int, error) {
+    if nil != instance.countFail {
+        return 0, instance.countFail
+    }
+
+    return len(instance.appended), nil
+}
+
+var _ repository.CatalogReadingRepository = (*recordingReadingRepository)(nil)
 
 /* the stamp is what a caller reads to find out how old the answer is, so a cached reading must carry the instant the reading was TAKEN — stamping the moment of service made a reading a whole refresh interval old say "now". */
 func TestCatalogReadingFromTheCacheKeepsTheInstantItWasTakenAt(t *testing.T) {
@@ -359,5 +429,148 @@ func TestCatalogReadingTakesAFreshReadingWhenTheCachedPayloadCarriesNoInstant(t 
 
     if false == reading.RecordedAt.Equal(servedAt) {
         t.Fatalf("expected the fresh reading to carry the current instant, got %s", reading.RecordedAt.Format(time.RFC3339))
+    }
+}
+
+/* the archive records what the reading SAYS, and the instant it is keyed on is the one the reading states about itself — truncated to the second, which is the resolution the payload's own recorded_at carries. A key kept finer would disagree with the value it keys. */
+func TestArchiveRecordsTheReadingUnderTheInstantItStatesAboutItself(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 987654321, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+
+    reportService := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    reading, refreshErr := reportService.Refresh(context.Background())
+    if nil != refreshErr {
+        t.Fatalf("refresh: %v", refreshErr)
+    }
+
+    recorded, archiveErr := reportService.Archive(context.Background(), reading)
+    if nil != archiveErr {
+        t.Fatalf("archive: %v", archiveErr)
+    }
+
+    if false == recorded {
+        t.Fatal("expected the first archive of a reading to report that it wrote")
+    }
+
+    if 1 != len(archive.appended) {
+        t.Fatalf("expected exactly one row, got %d", len(archive.appended))
+    }
+
+    wanted := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
+    if false == archive.appended[0].TakenAt.Equal(wanted) {
+        t.Fatalf("expected the instant truncated to the second (%s), got %s", wanted, archive.appended[0].TakenAt)
+    }
+
+    if archive.appended[0].Payload != reading.Payload {
+        t.Fatalf("the archived payload is not the reading's: %q against %q", archive.appended[0].Payload, reading.Payload)
+    }
+}
+
+/* the truncation is what makes the duplicate reachable at all, so this is the pair that proves it: two archives of readings taken 300ms apart are the SAME reading, and the second is told it did not write rather than failing. */
+func TestArchiveTreatsAReadingAlreadyRecordedAsNotWrittenRatherThanAsAFailure(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 100000000, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+
+    reportService := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    first, _ := reportService.Refresh(context.Background())
+    if recorded, _ := reportService.Archive(context.Background(), first); false == recorded {
+        t.Fatal("expected the first archive to write")
+    }
+
+    second := &CatalogReading{
+        RecordedAt: takenAt.Add(300 * time.Millisecond),
+        Headline:   first.Headline,
+        Payload:    first.Payload,
+    }
+
+    recorded, archiveErr := reportService.Archive(context.Background(), second)
+    if nil != archiveErr {
+        t.Fatalf("expected a reading already recorded to be tolerated, got %v", archiveErr)
+    }
+
+    if true == recorded {
+        t.Fatal("expected the second archive inside the same second to report that it did not write")
+    }
+
+    if 1 != len(archive.appended) {
+        t.Fatalf("expected the archive to still hold one row, got %d", len(archive.appended))
+    }
+}
+
+/* every other failure of the archive IS a failure: an archive that could not be reached must not be reported as a reading that was already there. */
+func TestArchiveHandsBackAFailureThatIsNotADuplicate(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+    archive.failWith = fmt.Errorf("dial postgres: connection refused")
+
+    reportService := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    reading, _ := reportService.Refresh(context.Background())
+
+    recorded, archiveErr := reportService.Archive(context.Background(), reading)
+    if nil == archiveErr {
+        t.Fatal("expected an unreachable archive to be reported")
+    }
+
+    if true == recorded {
+        t.Fatal("expected a failed archive to report that it did not write")
+    }
+}
+
+/* ArchivedInstantOf is the identity itself, so it is pinned on values rather than only through the door: a fractional instant loses its fraction, a zone becomes UTC, and an instant already on the second is unchanged. */
+func TestArchivedInstantOfTruncatesToTheSecondInUtc(t *testing.T) {
+    eastern := time.FixedZone("east", 3*60*60)
+
+    fractional := time.Date(2026, time.September, 7, 13, 0, 0, 999999999, eastern)
+    archived := ArchivedInstantOf(fractional)
+
+    if 0 != archived.Nanosecond() {
+        t.Fatalf("expected the fraction to be dropped, got %s", archived)
+    }
+
+    if time.UTC != archived.Location() {
+        t.Fatalf("expected UTC, got %s", archived.Location())
+    }
+
+    if false == archived.Equal(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)) {
+        t.Fatalf("expected the same instant in UTC, got %s", archived)
+    }
+}
+
+/* the listing is the read half, and it hands back what the archive holds newest first. */
+func TestRecentReadingsAnswersTheArchive(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+
+    reportService := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    for index := 0; 3 > index; index++ {
+        _ = archive.Append(context.Background(), &repository.CatalogReadingRecord{
+            TakenAt:  takenAt.Add(time.Duration(index) * time.Second),
+            Headline: "catalog",
+            Payload:  "products=1",
+        })
+    }
+
+    readingList, readErr := reportService.RecentReadings(context.Background(), 2)
+    if nil != readErr {
+        t.Fatalf("recent readings: %v", readErr)
+    }
+
+    if 2 != len(readingList) {
+        t.Fatalf("expected two readings, got %d", len(readingList))
+    }
+
+    if false == readingList[0].TakenAt.Equal(takenAt.Add(2*time.Second)) {
+        t.Fatalf("expected the newest reading first, got %s", readingList[0].TakenAt)
     }
 }

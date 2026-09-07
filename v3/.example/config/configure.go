@@ -58,11 +58,22 @@ func Configure(app *melodyapplication.Application) {
         }))
     }
 
-    /* the db:* family is registered whether or not a database is configured, so the command surface does not change between environments; without one every db:* command fails at Run with the container refusal naming the registry service. No context family is declared: this major keeps the journal, the two-factor enrollment and the catalogue on one connection, so a single set covers the whole schema and the registry has a single manager for the unprefixed commands to reach. */
+    /* the db:* family is registered whether or not a database is configured, so the command surface does not change between environments; without one every db:* command fails at Run with the container refusal naming the registry service.
+
+       There are TWO families, because this application holds two databases: the unprefixed db:* over the catalogue on mysql, and db:archive:* over the reading archive on postgres. The second is declared as a CONTEXT rather than as a second module registration, which is what pins each family to one manager — a context targets the manager named after it, so db:archive:migrate can only ever reach the archive.
+
+       The base family PINS its manager too, and that is a correctness matter rather than symmetry. Without the pin it takes the registry's default, and "the default" and "the catalogue" are the same connection only while the catalogue is wired: in an environment that armed the archive alone, an unqualified db:migrate would find the archive as the only definition and aim the catalogue's mysql DDL at postgres. Pinned, it refuses by name instead. */
     app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
         Migrations: migration.Migrations,
+        Contexts: []bunormmigrate.ContextConfig{
+            {
+                Name:       databaseArchiveManagerName,
+                Migrations: migration.ArchiveMigrations,
+            },
+        },
         Options: bunormmigrate.Options{
             ManagerRegistryServiceId: serviceDatabaseRegistry,
+            ManagerName:              databaseManagerName,
         },
     }))
 

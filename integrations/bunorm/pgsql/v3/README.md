@@ -100,7 +100,21 @@ defer namedLock.Release(runtime)
 - **No TTL.** Session advisory locks do not auto-expire — the `ttl` passed to `CreateLock` is accepted only for interface compatibility. The lock is released by `Release` or when its connection drops (e.g. the process dies). For TTL-based auto-expiry, use the Redis backend in [`integrations/rueidis/v3`](../../../rueidis).
 - **`Refresh` is a liveness probe.** Because there is nothing to extend, `Refresh` instead pings the pinned connection (`PingContext`, on a fresh context bounded by the release timeout) rather than introspecting `pg_locks`: a session advisory lock is held for exactly as long as its backend session lives, so a connection that still answers still holds the lock. Only a genuinely dead session fails the refresh — its connection is then discarded and a "lock is no longer held" error returned, matching the lost-lock signal of the other backends. A transient cause such as a cancelled or expired request context can never be mistaken for a lost lock, because the probe does not use the caller's context.
 
-Unlike the MySQL package there is no `RegisterLockerService` helper or module; register the locker under the core `lock.ServiceLocker` service name yourself if handlers should resolve it via `lock.LockerMustFromResolver`.
+### Registering it
+
+Publish the locker under the core locker service name, so handlers resolve it through `lock.LockerMustFromResolver` without naming this package:
+
+```go
+pgsql.RegisterLockerService(registrar, database)
+```
+
+Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, skipped when the database is nil):
+
+```go
+app.RegisterModule(pgsql.NewModule(pgsql.ModuleConfig{Database: database, AsLocker: true}))
+```
+
+A process that wires two lock backends registers the second under a name of its own rather than calling this twice: the door claims the framework's one locker name, and the point of that name is that an application asks for "the locker" and receives whichever backend it configured.
 
 ## Advanced connector customization
 
