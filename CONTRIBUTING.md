@@ -20,7 +20,7 @@ Rules for contributions:
 When a change touches multiple version lines, keep each line's edit self-contained and update each line's
 `CHANGELOG.md`.
 
-A change to a line's **example application** is filed in that example's own `CHANGELOG.md` — `.example/CHANGELOG.md`, `v2/.example/CHANGELOG.md`, `v3/.example/CHANGELOG.md` — and not in the framework's. The example is not a published module and carries no version of its own, so its blocks name the tags of the major it ships inside; a release therefore has two blocks under one version, and the release body carries both.
+A change to a line's **example application** is filed nowhere. The examples keep no changelog: an example is not a project with a past, it has one state — the present one — so what describes it is its `README.md`, which is brought to the truth by the same change. What the framework's `CHANGELOG.md` records about a change to an example is only the part a consumer of the framework can see, which is usually nothing.
 
 ## Development setup
 

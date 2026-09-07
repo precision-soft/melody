@@ -7,17 +7,22 @@ import (
 )
 
 func init() {
-    JournalMigrations.MustRegister(upCreateCatalogJournal, downCreateCatalogJournal)
+    JournalMigrations.MustRegister(upJournalSchema, downJournalSchema)
 }
 
-func upCreateCatalogJournal(ctx context.Context, database *bun.DB) error {
+/* upJournalSchema creates the journal table. It is a set of its own because the journal is a database of its own — postgres, beside the mysql catalog — and bookkeeping is per database; the same single-state rule applies to it as to its sibling. */
+func upJournalSchema(ctx context.Context, database *bun.DB) error {
     _, execErr := database.ExecContext(ctx, createCatalogJournalTableSql)
 
     return execErr
 }
 
-func downCreateCatalogJournal(ctx context.Context, database *bun.DB) error {
-    _, execErr := database.ExecContext(ctx, "DROP TABLE IF EXISTS melody_example_v1_catalog_journal")
+/* journalTableName is unquoted where its catalog siblings are backticked, because this one statement is
+   postgres dialect: the journal is a database of its own. */
+const journalTableName = "melody_example_v1_catalog_journal"
+
+func downJournalSchema(ctx context.Context, database *bun.DB) error {
+    _, execErr := database.ExecContext(ctx, "DROP TABLE IF EXISTS "+journalTableName)
 
     return execErr
 }

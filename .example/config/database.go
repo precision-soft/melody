@@ -128,6 +128,15 @@ func (instance *Module) databaseServiceName() string {
     return ServiceExampleDatabase
 }
 
+/* journalDatabaseServiceName is the same answer for the journal connection, which is a switch of its own: the catalog can be wired without it, and the reset command then leaves that set alone rather than failing over a database this environment never asked for. */
+func (instance *Module) journalDatabaseServiceName() string {
+    if false == instance.databaseWiring.journal {
+        return ""
+    }
+
+    return ServiceExampleJournalDatabase
+}
+
 func (instance *Module) registerDatabaseServices(registrar melodyapplicationcontract.ServiceRegistrar) {
     if nil == instance.databaseRegistry {
         return

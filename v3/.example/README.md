@@ -4,7 +4,7 @@ The `.example` directory contains a small **product catalog** application built 
 
 It is **not** a full production product. Its purpose is to demonstrate how Melody is intended to be used in userland, with realistic wiring and clear architectural boundaries: routing, HTTP handlers, dependency injection, structured logging, sessions and authentication, security access control, caching, events, and CLI commands.
 
-Changes to this application are filed in its own [`CHANGELOG.md`](./CHANGELOG.md) rather than in the framework's: the example is not a published module and carries no version of its own, so its blocks name the tags of the major it ships inside.
+This README is the whole of the application's documentation. It keeps no changelog, because it has no history to keep: an example is not a project with a past, it has one state — the present one — and this document describes that state. A database left in an older shape is brought to it by `example:db:reset` rather than by a record of how it got there.
 
 ---
 
@@ -37,7 +37,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ```
 .example/
 ├── cache/            # cache serializer for the example container
-├── cli/              # the application's own CLI commands (app:info, product:list, catalog:report:refresh, messagebus:dispatch, auth:token, internal:sign, totp:code, mail:send, example:grant:role, example:exclusive:tick)
+├── cli/              # the application's own CLI commands (app:info, product:list, catalog:report:refresh, messagebus:dispatch, auth:token, internal:sign, totp:code, mail:send, example:grant:role, example:exclusive:tick, example:db:reset)
 ├── config/           # application wiring; one file per module hook
 ├── entity/           # domain entities (Category, Currency, Product, User)
 ├── event/            # domain event types
@@ -223,10 +223,12 @@ Several wirings deliberately defer their resolution to first use instead of the 
 
 ### The migration set
 
-The schema is owned by one migration set in [`migration/`](./migration/) — seven MySQL DDL migrations: one per table for the four catalogue tables, the journal and the two-factor enrollment table neither frozen major carries, plus the unique key on the folded spelling of a username, which is what holds a name against two callers that pass the repository's read-then-write check at the same moment. This major keeps them all on one connection, so one set covers the whole schema and no migration context is declared. Two doors run the set, so neither can drift from the other:
+The schema is owned by one migration set in [`migration/`](./migration/) — a single MySQL DDL migration holding the six tables this example owns and the one constraint it declares: the four catalogue tables, the journal, the two-factor enrollment table neither frozen major carries, and the unique key on the folded spelling of a username, which is what holds a name against two callers that pass the repository's read-then-write check at the same moment. The set is one migration because this application has no history — an example has one state, the present one, so its schema is the statement of that state rather than the record of how it got there, and a database left in an older shape is answered by `example:db:reset` rather than by a step that repairs its past. This major keeps the whole schema on one connection, so one set covers it and no migration context is declared. Two doors run the set, so neither can drift from the other:
 
 - the **composition root and the repository constructors** call `migration.EnsureMigrated`. `buildTwoFactor` calls it at boot — this example dials eagerly, so the schema is in place before the first request rather than at the first resolution the way v1 and v2 do it — and each repository constructor calls it again before seeding, which is what keeps a freshly recreated volume usable with no operator step. It is also why every `CREATE TABLE` carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry that names `db:unlock` when it gives up;
 - the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`) runs the same set from the operator's side. It comes from the [`integrations/bunorm/migrate`](../../integrations/bunorm/migrate/v3/) module facade registered in [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service.
+
+`example:db:reset` is the third door, and the only one that goes backwards. It drops the tables the set owns, drops and recreates the bun bookkeeping with them, applies the schema again and reseeds every nomenclature in one pass. It exists because this application has no history: a database left in an older shape — carrying bookkeeping rows that name migrations this schema no longer has — is brought to the present state here, by a command an operator runs deliberately, rather than by code every process pays for at boot. It refuses to act without `--force`, printing what it would drop and exiting zero, and it is a command of the application rather than of the migration module: dropping an application's whole schema is not an operator door a published module should grow. The audit trail is emptied with the rest, though its table is not dropped: the schema belongs to the module that opens it, the rows belong to this application, and a trail carried across a reset would name entities that no longer exist over identifiers this example recycles.
 
 The connection itself is declared in a `bunorm.ManagerRegistry` ([`config/database.go`](./config/database.go)) rather than opened directly: the registry is the one door the commands resolve, and the `*bun.DB` the rest of the application holds is its default manager. Closing the registry is what closes the pool — and what puts it in reach of the ordered teardown is that the catalogue storage RESOLVES the handle rather than holding the one the composition root built, because the container records a dependency at the moment one provider resolves another. That same resolution is what installs the application's journal on the registry, so the pool's reporting and bun's diagnostics leave the emergency logger at the first repository resolution instead of never.
 

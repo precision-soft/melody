@@ -4,7 +4,7 @@ All notable changes to `precision-soft/melody` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The example application inside this major keeps its own changelog, released on these same tags: [`.example/CHANGELOG.md`](.example/CHANGELOG.md).
+The example application inside this major keeps no changelog: it is not a project with a past, it has one state — the present one — and [`.example/README.md`](.example/README.md) is the whole of its documentation.
 
 **v1 is feature-frozen.** The major is stabilized: no new feature lands here, while patch-level defect fixes and security fixes still do, through 2027-08-17. New development continues on [v3](v3/CHANGELOG.md); the move to v3 is described in [`.documentation/UPGRADE.md`](.documentation/UPGRADE.md).
 
@@ -18,6 +18,7 @@ The example application inside this major keeps its own changelog, released on t
 
 ### Changed
 
+- documentation: the example application inside this major keeps no changelog. An example is not a project with a past — it has one state, the present one — so `.example/README.md` is the whole of its documentation, and a database left in an older shape is answered by the example's own `example:db:reset` command rather than by a record of how it got there. `CONTRIBUTING.md` says where a change to an example is filed, which is nowhere, and the citation band's corpus follows the document that went
 - documentation: the version table names the date each line is supported until, and the rule those dates come from, where it named an event nobody can schedule. The current line receives new features, security fixes and deprecations; the day a new major ships, the line it replaces stops receiving features and receives security and patch-level defect fixes for eighteen more months, counted from the successor's release. v1 was replaced by v2 on 2026-02-17 and is therefore supported **through 2027-08-17**, where the previous wording promised fixes "until v4 is released" — an extension of the commitment, and one an application can plan an upgrade against. `README.md`, `SECURITY.md`, `CONTRIBUTING.md`, `.documentation/UPGRADE.md` and this changelog's banner all carry the date; the rule itself lives in one place, beside the table
 
 ### Fixed
@@ -107,8 +108,6 @@ The example application inside this major keeps its own changelog, released on t
 - tooling: the e2e harness requires `golang.org/x/net` at v0.55.0, the fix for [GO-2026-5026](https://pkg.go.dev/vuln/GO-2026-5026), which govulncheck reports as reachable from the harness; the indirect `golang.org/x/*` set moves with it
 
 ## [v1.19.0] - 2026-08-18 - Stabilization Sweep, Hardened Failure Paths and Feature Freeze
-
-The example application's entries for this release are filed in [`.example/CHANGELOG.md`](.example/CHANGELOG.md), under the block of the same version. They stood in this block when the release was published, so the body published on GitHub carries them until the next release-notes sync brings that body in line with this file, which is the intent: the release notes of a major describe the framework, and the example's own changelog is where its application-level changes are read.
 
 ### Added
 

@@ -10,6 +10,7 @@ import (
     "io"
     "strings"
     "sync"
+    "testing"
 
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
@@ -260,3 +261,39 @@ var (
     _ driver.Connector      = (*fakeConnector)(nil)
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
+
+/* assertQueryOrder pins the SEQUENCE a migration emits, not just its membership: the recorded list must
+   hold exactly as many statements as the expectation, each containing the fragment at the same position.
+   A schema folded into one migration has no step boundaries left to carry the order, so the order is what
+   the test has to say — and the count it replaced could not have seen a set emitted backwards. */
+func assertQueryOrder(t *testing.T, recorded []string, expectedFragmentList []string) {
+    t.Helper()
+
+    if len(expectedFragmentList) != len(recorded) {
+        t.Fatalf(
+            "expected %d statements, got %d: %v",
+            len(expectedFragmentList),
+            len(recorded),
+            recorded,
+        )
+    }
+
+    for index, fragment := range expectedFragmentList {
+        if false == strings.Contains(recorded[index], fragment) {
+            t.Fatalf("expected statement %d to contain %q, got %q", index, fragment, recorded[index])
+        }
+    }
+}
+
+/* indexOfQueryContaining answers where a statement carrying the fragment was recorded, or -1. The order of
+   the recorded statements is the property the reset tests assert, so they need positions rather than
+   presence. */
+func indexOfQueryContaining(recorded []string, fragment string) int {
+    for index, query := range recorded {
+        if true == strings.Contains(query, fragment) {
+            return index
+        }
+    }
+
+    return -1
+}

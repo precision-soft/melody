@@ -202,12 +202,11 @@ list_major_source_file() {
 # at them. The shared repository documents — CONTRIBUTING, SECURITY, the issue templates — belong to no
 # major and are left out, so that a single copy is not judged three times against three different trees.
 #
-# The example application's own README and CHANGELOG are read here, and only here among the bands: the
-# example is excluded from parity, documentation, apidiff and compatibility, so nothing else would look at
-# them. They were reached indirectly until the example's changelog entries were moved out of the major's
-# own file into `.example/CHANGELOG.md` — a hundred and twenty-three entries naming the example's types and
-# the framework symbols they use, which would otherwise have left this band's reach in one commit and gone
-# on naming symbols nobody checks. The source side already includes the example for the mirror reason.
+# The example application's own README is read here, and only here among the bands: the example is excluded
+# from parity, documentation, apidiff and compatibility, so nothing else would look at it. It is also the
+# WHOLE of that application's documentation — an example is not a project with a past, so it keeps no
+# changelog — which makes this band the only thing standing between that document and the symbols it names.
+# The source side already includes the example for the mirror reason.
 list_major_document() {
     local MAJOR_STRING="${1:?}"
     local MAJOR_DIRECTORY_STRING
@@ -215,7 +214,7 @@ list_major_document() {
 
     if [[ "." = "${MAJOR_DIRECTORY_STRING}" ]]; then
         list_repository_path '.documentation/*.md' 'README.md' 'CHANGELOG.md' \
-            '.example/README.md' '.example/CHANGELOG.md'
+            '.example/README.md'
         list_repository_path 'integrations/*.md' \
             | grep -v '^integrations/[^/]*/v[0-9]\+/' \
             | grep -v '^integrations/[^/]*/[^/]*/v[0-9]\+/' \
@@ -226,7 +225,7 @@ list_major_document() {
 
     list_repository_path "${MAJOR_DIRECTORY_STRING}/.documentation/*.md" \
         "${MAJOR_DIRECTORY_STRING}/README.md" "${MAJOR_DIRECTORY_STRING}/CHANGELOG.md" \
-        "${MAJOR_DIRECTORY_STRING}/.example/README.md" "${MAJOR_DIRECTORY_STRING}/.example/CHANGELOG.md"
+        "${MAJOR_DIRECTORY_STRING}/.example/README.md"
     list_repository_path 'integrations/*.md' | grep -E "/${MAJOR_STRING}/"
 }
 

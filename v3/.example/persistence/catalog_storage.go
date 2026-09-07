@@ -10,8 +10,8 @@ import (
 const (
     ServiceCatalogStorage = "service.example.catalog.storage"
 
-    /* the audit trail of the nomenclature. It is per major, like every other table the example owns, so three applications sharing one database do not write into each other's history. */
-    auditTable = "melody_example_v3_audit"
+    /* AuditTable is the audit trail of the nomenclature. It is per major, like every other table the example owns, so three applications sharing one database do not write into each other's history. It is named here rather than inline because two doors read it: the registry that opens it, and the reset command that empties it. */
+    AuditTable = "melody_example_v3_audit"
 
     /* the entities whose field-level history is kept, named once so the repositories that write them and anyone reading the trail agree. */
     AuditEntityProduct = "product"
@@ -53,7 +53,7 @@ func NewCatalogStorage(database *bun.DB) *CatalogStorage {
     }
 
     /* updated_at moves on every write of a product and says nothing a trail entry does not already carry through its own timestamp, so it is not recorded as a change */
-    registry := melodyaudit.NewRegistry(auditTable, "updated_at").
+    registry := melodyaudit.NewRegistry(AuditTable, "updated_at").
         Register(AuditEntityProduct, melodyaudit.EntityOptions{}).
         /* a deleted account has to stay answerable for — which roles it held when it was removed is the question a directory is asked after the fact, and the identifier alone cannot answer it */
         Register(AuditEntityUser, melodyaudit.EntityOptions{CaptureDeleteBeforeImage: true})

@@ -159,10 +159,13 @@ list_repository_path() {
 # cut.
 #
 # The version segment is read wherever it stands rather than at the end alone, because a module can sit
-# INSIDE a major: `.../melody/v2/.example` is the v2 example application, and reading only a trailing `/vN`
+# INSIDE a major: `.../melody/v2/<module>` is a module of the v2 line, and reading only a trailing `/vN`
 # called it v1 — which is worse than not classifying it, since the cross-major dimension would then compare
-# a v3 example entry against a v1 one and could report a divergence between two majors that never met. The
-# first segment wins, which is the outer major for a nested module and the only one for every other.
+# an entry of one major against an entry of another and could report a divergence between two majors that
+# never met. The first segment wins, which is the outer major for a nested module and the only one for
+# every other. The example applications were the nested modules this rule was written for; they keep no
+# changelog any more, so nothing exercises it today and it stays for the next module that sits inside a
+# major.
 major_of_changelog() {
     local CHANGELOG_PATH_STRING="${1:?}"
 
@@ -220,9 +223,11 @@ family_of_changelog() {
     # the two layouts a version segment appears in are mirror images, and both have to fold onto one family
     # or the dimension goes quiet exactly where it is needed. An integration carries its major at the END
     # (`integrations/bunorm/v3`), handled above; a module nested inside a major carries it at the FRONT
-    # (`v2/.example`), and without this the example of v1 and the example of v2 sat in two families of one
-    # member each — the pairing that asks whether the two published majors file the same sentence alike
-    # simply had nothing to pair, and said so with the same silence as a clean tree.
+    # (`v2/<module>`), and without this the nested module of v1 and the nested module of v2 sit in two
+    # families of one member each — the pairing that asks whether the two published majors file the same
+    # sentence alike then has nothing to pair, and says so with the same silence as a clean tree. The
+    # example applications were the pair this was written for, and they keep no changelog any more; the
+    # fold stays for the next module that sits inside a major.
     if [[ "${DIRECTORY_STRING}" =~ ^v[0-9]+/(.*)$ ]]; then
         printf '%s' "${BASH_REMATCH[1]}"
 

@@ -372,3 +372,67 @@ func TestEnsureMigratedForgetsTheRefusalOnceItsWindowHasPassed(t *testing.T) {
         t.Fatalf("expected the healed resolution to migrate, got %d creates", createCount)
     }
 }
+
+/* Reset is the door an operator reaches for when a volume was provisioned by an older build, so what it
+   has to do is more than re-run the set: it drops the schema, drops the BOOKKEEPING with it — which is
+   where an older set's rows live — and applies the schema again. The order is the assertion, because a
+   reset that dropped the bookkeeping before the schema would leave the tables standing with no record of
+   them. */
+func TestResetDropsTheSchemaAndTheBookkeepingThenAppliesTheSchemaAgain(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    if resetErr := Reset(context.Background(), database); nil != resetErr {
+        t.Fatalf("expected the reset to succeed, got %v", resetErr)
+    }
+
+    queries := recorder.recordedQueries()
+
+    schemaDropIndex := indexOfQueryContaining(queries, "DROP TABLE IF EXISTS `melody_example_v3_category`")
+    bookkeepingDropIndex := indexOfQueryContaining(queries, "DROP TABLE IF EXISTS bun_migrations")
+    schemaCreateIndex := indexOfQueryContaining(queries, "CREATE TABLE IF NOT EXISTS `melody_example_v3_category`")
+
+    if 0 > schemaDropIndex || 0 > bookkeepingDropIndex || 0 > schemaCreateIndex {
+        t.Fatalf(
+            "expected the reset to drop the schema (%d), drop the bookkeeping (%d) and create the schema again (%d), recorded: %v",
+            schemaDropIndex,
+            bookkeepingDropIndex,
+            schemaCreateIndex,
+            queries,
+        )
+    }
+
+    if schemaDropIndex > bookkeepingDropIndex {
+        t.Fatalf("expected the schema to be dropped before the bookkeeping, recorded: %v", queries)
+    }
+
+    if bookkeepingDropIndex > schemaCreateIndex {
+        t.Fatalf("expected the schema to be created after the bookkeeping went, recorded: %v", queries)
+    }
+}
+
+/* the memo is what would otherwise answer for a state the reset has just taken away: a resolution later in
+   the same process reads "already migrated" and finds no tables. */
+func TestResetClearsTheMemoForTheHandle(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+
+    ensureMutex.Lock()
+    migratedDatabaseList[database] = struct{}{}
+    refusedDatabaseList[database] = refusedMigrationAttempt{refusal: context.Canceled, refusedAt: time.Now()}
+    ensureMutex.Unlock()
+
+    if resetErr := Reset(context.Background(), database); nil != resetErr {
+        t.Fatalf("expected the reset to succeed, got %v", resetErr)
+    }
+
+    ensureMutex.Lock()
+    _, stillMigrated := migratedDatabaseList[database]
+    _, stillRefused := refusedDatabaseList[database]
+    ensureMutex.Unlock()
+
+    if true == stillMigrated {
+        t.Fatalf("expected the reset to clear the migrated memo for the handle")
+    }
+    if true == stillRefused {
+        t.Fatalf("expected the reset to clear the refusal memo for the handle")
+    }
+}

@@ -97,10 +97,18 @@ func (instance *commandFixture) lazyUserService() *melodycontainer.LazyService[*
    they read what the directory holds afterwards. */
 type flagContext struct {
     stringByName map[string]string
+    boolByName   map[string]bool
+    writer       io.Writer
 }
 
 func newFlagContext(role string, user string) *flagContext {
     return &flagContext{stringByName: map[string]string{"role": role, "user": user}}
+}
+
+/* newBoolFlagContext is the arm the reset command needs: its only flag is a bool, and what a test of that
+   command reads is what the command wrote, so this one carries a writer of its own. */
+func newBoolFlagContext(flagName string, value bool, writer io.Writer) *flagContext {
+    return &flagContext{boolByName: map[string]bool{flagName: value}, writer: writer}
 }
 
 func (instance *flagContext) String(flagName string) string {
@@ -108,7 +116,7 @@ func (instance *flagContext) String(flagName string) string {
 }
 
 func (instance *flagContext) Bool(flagName string) bool {
-    return false
+    return instance.boolByName[flagName]
 }
 
 func (instance *flagContext) Int(flagName string) int {
@@ -120,7 +128,11 @@ func (instance *flagContext) StringSlice(flagName string) []string {
 }
 
 func (instance *flagContext) IsSet(flagName string) bool {
-    _, exists := instance.stringByName[flagName]
+    if _, exists := instance.stringByName[flagName]; true == exists {
+        return true
+    }
+
+    _, exists := instance.boolByName[flagName]
 
     return exists
 }
@@ -130,7 +142,11 @@ func (instance *flagContext) Arguments() []string {
 }
 
 func (instance *flagContext) Writer() io.Writer {
-    return io.Discard
+    if nil == instance.writer {
+        return io.Discard
+    }
+
+    return instance.writer
 }
 
 var _ melodyclicontract.Context = (*flagContext)(nil)

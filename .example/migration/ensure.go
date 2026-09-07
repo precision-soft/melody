@@ -159,3 +159,67 @@ func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockC
 
     return migrateErr
 }
+
+/* Reset brings a database back to the schema this application declares, whatever shape it was left in:
+   the tables the set owns are dropped, the bookkeeping is dropped and recreated with them, the single
+   migration is applied again, and the memo this package keeps for the handle is cleared so a resolution
+   later in the same process does not answer from a state that no longer exists.
+
+   It is the answer this example gives to a volume provisioned by an older build. An example is not a
+   project with a past: it has one state, the present one, so it carries no migration that repairs its
+   history — the reset is where a database in an older shape is brought to the present one, and dropping
+   the bookkeeping is the half that matters there, because a volume migrated by an older set still holds
+   the rows of steps this schema no longer has.
+
+   No migration lock is taken, and that is not an omission: the reset drops the very table the lock lives
+   in, so no lock could span it. It is an operator command over a development volume, run deliberately,
+   and the caller is what serializes it. */
+func Reset(ctx context.Context, database *bun.DB) error {
+    return resetSet(ctx, database, Migrations)
+}
+
+/* ResetJournal is Reset for the journal database, which is a set and a database of its own. */
+func ResetJournal(ctx context.Context, database *bun.DB) error {
+    return resetSet(ctx, database, JournalMigrations)
+}
+
+func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migrations) error {
+    if nil == database {
+        return melodyexception.NewError("migration: bun database is nil", nil, nil)
+    }
+
+    ensureMutex.Lock()
+    defer ensureMutex.Unlock()
+
+    migrator := migrate.NewMigrator(database, migrationSet, migrate.WithMarkAppliedOnSuccess(true))
+
+    if initErr := migrator.Init(ctx); nil != initErr {
+        return initErr
+    }
+
+    /* the down of the set is run before the bookkeeping goes, rather than through the migrator's own
+       rollback: a rollback reverts the last GROUP, so a volume whose rows name steps this schema no
+       longer has would leave its tables standing. The set is one migration, so its down is the whole
+       schema. */
+    for _, migrationInstance := range migrationSet.Sorted() {
+        if nil == migrationInstance.Down {
+            continue
+        }
+
+        if downErr := migrationInstance.Down(ctx, migrator, &migrationInstance); nil != downErr {
+            return downErr
+        }
+    }
+
+    if resetErr := migrator.Reset(ctx); nil != resetErr {
+        return resetErr
+    }
+
+    if _, migrateErr := migrator.Migrate(ctx); nil != migrateErr {
+        return migrateErr
+    }
+
+    delete(migratedDatabaseList, migratedSetKey{database: database, migrationSet: migrationSet})
+
+    return nil
+}
