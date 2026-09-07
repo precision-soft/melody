@@ -59,7 +59,6 @@ func (instance *commandOutput) wantsDetail() bool {
     return instance.option.Verbose
 }
 
-/* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded. */
 /* finishRun renders the command's document from the outcome the run ACTUALLY had, a panic included, and is the single door every command in this family defers to.
 
    The document is the machine contract a deploy pipeline reads, and rendered from the named return alone it reported SUCCESS for a run that died: a panic leaves the linear path that assigns runErr, so the deferred render saw nil, skipped the error branch, and wrote a complete envelope carrying `"error":null` together with every message the run had accumulated before it fell over — indistinguishable, to anything parsing stdout, from a clean run that applied them. The framework's own cli boundary makes exactly this repair for exactly this reason, and says so in as many words, but it sits OUTSIDE this defer: by the time it recovers, the success document has already been written.
@@ -89,6 +88,7 @@ func (instance *commandOutput) finishRun(commandName string, startedAt time.Time
     panic(recovered)
 }
 
+/* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded. */
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
         return runErr

@@ -41,7 +41,15 @@
 # recognise is reported as an error of the run rather than skipped: an unknown line is a row the band did
 # not read, and a band that skips what it does not understand has stopped asking its question. The one
 # thing the tool prints that is not a row is a note about an object it reported twice, `! second,
-# different message ...` with indented detail; those are forwarded verbatim as notes.
+# different message ...` with the two messages indented under it, and that note carries a MEASURED FACT
+# rather than a diagnostic: apidiff keeps one message per object and its add() overwrites the earlier one
+# (`messageset.go`, `s[part] = msg`), so the row it prints is the SECOND message and the first reaches the
+# report never. Measured on this tree the surviving row said `./debug.MiddlewareProvider` changed
+# signature, while the destroyed message said `removed` — and the type has no declaration left in the
+# module at all, so the row a release manager would have decided on was fabricated. The note is therefore
+# parsed, not forwarded, and both messages are joined onto that object's row, sorted so the row reads the
+# same whichever way a run resolves the two add() calls; a note whose object reaches no row at all fails
+# the run.
 #
 # Every difference is filed in `apidiff.baseline`, as module, class, object, change, disposition and
 # reason, and the file is bidirectional like the compatibility, vulncheck and citation baselines: a
@@ -514,7 +522,70 @@ for INPUT_LINE in "$@"; do
             print module "\tCHANGE\t" section "\t" object "\t" change
             next
         }
-        /^! / || /^  / { print module "\tNOTE\t" $0; next }
+        # apidiff throws a measured fact away here, and says so on stdout rather than in the report.
+        # messageset.go keeps at most one message per object and part, and its add() OVERWRITES a
+        # previous one -- s[part] = msg, under a comment calling the state one that should not happen
+        # -- so the surviving row carries the SECOND message and the first reaches collect() never.
+        # Both are facts a release manager decides on, and the destroyed one can be the true one:
+        # measured on this tree, ./debug.MiddlewareProvider was reported removed AND changed, the type
+        # has no declaration left in the module at all, and the row that survived was the change. So
+        # the note is parsed rather than forwarded, and its two messages are joined onto the row below.
+        /^! second, different message for obj / {
+            detail = substr($0, length("! second, different message for obj ") + 1)
+            marker = index(detail, ", isNew ")
+            if (0 == marker) { print module "\tUNPARSED\t" $0; next }
+            objectDescription = substr(detail, 1, marker - 1)
+            rest = substr(detail, marker + 8)
+            isNew = (index(rest, "true") == 1)
+            partMarker = index(rest, ", part \"")
+            if (0 == partMarker) { print module "\tUNPARSED\t" $0; next }
+            part = substr(rest, partMarker + 8)
+            sub(/"$/, "", part)
+            # a part names an interface method or a struct field, whose row object is spelled Type.part;
+            # no such note has occurred on this tree, so rather than guess the spelling the reader
+            # refuses it -- the same rule the band applies to every form it has not learned
+            if ("" != part) { print module "\tUNPARSED\t" $0; next }
+            # types.Object.String() writes <kind> <qualified name> <type>, so the qualified name is the
+            # second field; a method reads func (T).M(...) and does not match the module prefix, which
+            # is what sends it to the refusal below
+            split(objectDescription, descriptionField, " ")
+            qualified = descriptionField[2]
+            # isNew false means the object is the OLD side, which is the root apidiff spells it
+            # against -- the same choice messageSet.collect makes
+            noteBase = oldpath
+            if (1 == isNew) { noteBase = newpath }
+            if (qualified == noteBase) {
+                noteObject = "package ."
+            } else if (index(qualified, noteBase "/") == 1) {
+                noteObject = "./" substr(qualified, length(noteBase) + 2)
+            } else if (index(qualified, noteBase ".") == 1) {
+                noteObject = substr(qualified, length(noteBase) + 2)
+            } else {
+                print module "\tUNPARSED\t" $0
+                next
+            }
+            noteState = "open"
+            next
+        }
+        /^  first:  / {
+            if ("open" != noteState) { print module "\tUNPARSED\t" $0; next }
+            noteFirst = substr($0, length("  first:  ") + 1)
+            next
+        }
+        /^  second: / {
+            if ("open" != noteState) { print module "\tUNPARSED\t" $0; next }
+            noteSecond = substr($0, length("  second: ") + 1)
+            if (newpath != oldpath) {
+                noteFirst = replace_all(noteFirst, newpath, oldpath)
+                noteSecond = replace_all(noteSecond, newpath, oldpath)
+            }
+            print module "\tDOUBLE\t" noteObject "\t" noteFirst "\t" noteSecond
+            noteState = ""
+            noteFirst = ""
+            noteSecond = ""
+            next
+        }
+        /^! / || /^  / { print module "\tUNPARSED\t" $0; next }
         NF { print module "\tUNPARSED\t" $0 }
     '
     printf '%s\tCOMPARED\n' "${MODULE_PATH}"
@@ -522,9 +593,44 @@ done
 CONTAINER_SCRIPT
 }
 
-# the facts of a run, one per line: module ~ class ~ object ~ change, tab separated, from the protocol
+# the facts of a run, one per line: module ~ class ~ object ~ change, tab separated, from the protocol.
+#
+# An object apidiff reported TWICE carries both messages, joined. apidiff keeps one message per object
+# and overwrites the earlier one (`messageset.go`, `s[part] = msg`), so the row it prints is the second
+# and the first survives only in the `!` note the reader parses into a DOUBLE record. Filing the row
+# alone files whichever message happened to be added last: measured on this tree that was `changed from
+# ... to ...` for a type whose declaration the module no longer has at all, while the destroyed message
+# was `removed` — a fabricated fact in the one file a release manager decides from. The two are joined
+# rather than one being preferred, because nothing in apidiff orders the two add() calls: sorting them
+# makes the row identical whichever way a run resolves them, so the baseline cannot go stale on an
+# ordering nobody controls. A DOUBLE with no row of its own is an error of the run, not a silent drop.
 read_measured_fact_list() {
-    printf '%s\n' "${1}" | awk -F'\t' '$2 == "CHANGE" && NF >= 5 { print $1 "\t" $3 "\t" $4 "\t" $5 }' | sort -u
+    printf '%s\n' "${1}" | awk -F'\t' '
+        $2 == "DOUBLE" && NF >= 5 {
+            first = $4
+            second = $5
+            joined = (first < second) ? first " || " second : second " || " first
+            doubled[$1 "\t" $3] = joined
+            next
+        }
+        $2 == "CHANGE" && NF >= 5 { line[++count] = $1 "\t" $3 "\t" $4 "\t" $5 }
+        END {
+            for (index_number = 1; index_number <= count; index_number++) {
+                split(line[index_number], field, "\t")
+                key = field[1] "\t" field[3]
+                if (key in doubled) {
+                    print field[1] "\t" field[2] "\t" field[3] "\t" doubled[key]
+                } else {
+                    print line[index_number]
+                }
+            }
+        }
+    ' | sort -u
+}
+
+# every object the run saw two messages for, so the caller can check each one reached a row
+read_doubled_key_list() {
+    printf '%s\n' "${1}" | awk -F'\t' '$2 == "DOUBLE" && NF >= 5 { print $1 "\t" $3 }' | sort -u
 }
 
 verify_protocol() {
@@ -567,12 +673,27 @@ verify_protocol() {
             println "    ${RETRIED_MODULE_STRING}: apidiff needed ${ATTEMPT_COUNT_STRING} runs to resolve a contested type correspondence by name" >&2
         done
 
-    while IFS= read -r NOTE_LINE_STRING; do
-        if [[ "" = "${NOTE_LINE_STRING}" ]]; then
-            continue
+    # every object apidiff reported twice has to have reached a row of its own: the joined change text is
+    # written onto that row, so a DOUBLE with no row would silently lose both messages instead of one
+    local DOUBLED_KEY_LIST_STRING
+    DOUBLED_KEY_LIST_STRING="$(read_doubled_key_list "${OUTPUT_STRING}")"
+    if [[ "" != "${DOUBLED_KEY_LIST_STRING}" ]]; then
+        local CHANGE_KEY_LIST_STRING
+        CHANGE_KEY_LIST_STRING="$(printf '%s\n' "${OUTPUT_STRING}" | awk -F'\t' '$2 == "CHANGE" && NF >= 5 { print $1 "\t" $4 }' | sort -u)"
+        local ORPHAN_KEY_LIST_STRING
+        ORPHAN_KEY_LIST_STRING="$(comm -23 <(printf '%s\n' "${DOUBLED_KEY_LIST_STRING}") <(printf '%s\n' "${CHANGE_KEY_LIST_STRING}") || true)"
+        if [[ "" != "${ORPHAN_KEY_LIST_STRING}" ]]; then
+            printf '%s\n' "${ORPHAN_KEY_LIST_STRING}" | sed 's/^/    /'
+            fail "apidiff reported two messages for the object(s) above and no row for them at all — both facts would be lost, so the reader has to learn how that object reaches the report before the run can pass"
         fi
-        println "    apidiff note on $(printf '%s' "${NOTE_LINE_STRING}" | cut -f1): $(printf '%s' "${NOTE_LINE_STRING}" | cut -f3-)" >&2
-    done <<<"$(printf '%s\n' "${OUTPUT_STRING}" | grep $'\tNOTE\t' || true)"
+
+        while IFS=$'\t' read -r DOUBLED_MODULE_STRING DOUBLED_OBJECT_STRING; do
+            if [[ "" = "${DOUBLED_MODULE_STRING}" ]]; then
+                continue
+            fi
+            println "    ${DOUBLED_MODULE_STRING}: apidiff reported two different messages for ${DOUBLED_OBJECT_STRING} and kept only the second; the row carries both" >&2
+        done <<<"${DOUBLED_KEY_LIST_STRING}"
+    fi
 }
 
 get_old_spec_of_module() {

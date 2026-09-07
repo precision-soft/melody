@@ -1239,7 +1239,7 @@ func normalizeScheduledRunError(err error) error {
     return err
 }
 
-/* panicCause reads a recovered panic value as the cause of the error the recovery boundary fabricates in its place. It mirrors exception.PanicCause rather than calling it, because this module's go.mod pins a framework version that predates that door. A typed nil answers no cause: its Error() would dereference a nil receiver at the first render. */
+/* panicCause reads a recovered panic value as the cause of the error the recovery boundary fabricates in its place. It mirrors exception.PanicCause rather than calling it, and the mirror is kept rather than defended: the door IS reachable at the version this module pins — the sibling recovery a few hundred lines up calls exception.PanicCause directly, and the module builds against its declared pin — so the reason the copy is still here is that this major is sealed, and replacing a body with an identical one is a change of source no caller can observe. The reason first written here, that the pin predated the door, was true when it was written and stopped being true when the pin moved. A typed nil answers no cause: its Error() would dereference a nil receiver at the first render. */
 func panicCause(recovered any) error {
     recoveredErr, isRecoveredError := recovered.(error)
     if false == isRecoveredError || true == isNilInterface(recoveredErr) {
