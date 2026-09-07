@@ -90,6 +90,11 @@ func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress st
     }
     pass("example rate limit left the reads alone while the writes were refused")
 
+    /* the conversion door rides the same signed-in client and the same spent budget on purpose: it is a
+       READ, so the limiter that closed the writes has to leave it open, and driving it here says so without
+       a section of its own */
+    runExampleCurrencyConversionCheck(client, baseUrl)
+
     runExampleLoadBalancerCheck(client, loadBalancerUrl, redisAddress)
 }
 

@@ -170,10 +170,16 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, eventDispatcherErr
             }
 
+            clockInstance, clockInstanceErr := melodycontainer.FromResolverByType[contract.Clock](resolver)
+            if nil != clockInstanceErr {
+                return nil, clockInstanceErr
+            }
+
             return service.NewCurrencyService(
                 currencyRepository,
                 cacheInstance,
                 eventDispatcher,
+                clockInstance,
             ), nil
         },
     )
@@ -225,6 +231,26 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
 
     melodycontainer.MustRegister(
         registrar,
+        service.ServiceRateRefreshService,
+        func(resolver containercontract.Resolver) (*service.RateRefreshService, error) {
+            configuration := melodyconfig.ConfigMustFromResolver(resolver)
+
+            currencyService, currencyServiceErr := melodycontainer.FromResolverByType[*service.CurrencyService](resolver)
+            if nil != currencyServiceErr {
+                return nil, currencyServiceErr
+            }
+
+            ratesBaseUrl := configuration.MustGet("app.rates.base_url").MustString()
+
+            return service.NewRateRefreshService(
+                currencyService,
+                ratesBaseUrl,
+            ), nil
+        },
+    )
+
+    melodycontainer.MustRegister(
+        registrar,
         service.ServiceUserService,
         func(resolver containercontract.Resolver) (*service.UserService, error) {
             userRepository, userRepositoryErr := melodycontainer.FromResolverByType[repository.UserRepository](resolver)
@@ -246,6 +272,19 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 userRepository,
                 cacheInstance,
                 eventDispatcher,
+            ), nil
+        },
+    )
+
+    melodycontainer.MustRegisterType(
+        registrar,
+        func(resolver containercontract.Resolver) (*reporting.CatalogReportExporter, error) {
+            configuration := melodyconfig.ConfigMustFromResolver(resolver)
+
+            exportEndpoint := configuration.MustGet("app.reporting.export_endpoint").MustString()
+
+            return reporting.NewCatalogReportExporter(
+                exportEndpoint,
             ), nil
         },
     )

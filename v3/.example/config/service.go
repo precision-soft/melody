@@ -32,6 +32,11 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerCatalogStorageService(registrar)
 
+    /* the two outbound clients, each env-gated on the endpoint it points at: an application configured
+       with neither registers no client and opens no pool */
+    instance.registerRatesHttpClientService(registrar)
+    instance.registerReportExportHttpClientService(registrar)
+
     /* the hub is registered so the event listeners can reach it. They follow every change to the nomenclature and are where the notification belongs, beside the cache invalidation and the journal entry — but a listener is handed a runtime rather than this module, and the container is what the two have in common. */
     serverSentEventHub := instance.serverSentEventHub
 

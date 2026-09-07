@@ -80,11 +80,20 @@ func seedCategoryList() []*entity.Category {
     }
 }
 
+/* seedRateAsOf is the instant the opening rates were taken. It is a fixed past moment rather than the boot
+   instant on purpose: the rates below are the state the application SHIPS with, not a reading it took, and
+   a refresh has to be visible as a change. Seeded and refreshed values therefore differ in both the number
+   and the instant, which is what makes "the refresh landed" a measurement rather than a hope. */
+var seedRateAsOf = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+/* the rates are quoted against the euro, one euro costing this many units of the currency, which is the
+   base the provider the refresh reads also quotes against. A conversion cancels the base, so the catalogue
+   never has to name it. */
 func seedCurrencyList() []*entity.Currency {
     return []*entity.Currency{
-        entity.NewCurrency("cur-eur", "EUR", "Euro"),
-        entity.NewCurrency("cur-usd", "USD", "US Dollar"),
-        entity.NewCurrency("cur-ron", "RON", "Romanian Leu"),
+        entity.NewCurrency("cur-eur", "EUR", "Euro", 1, seedRateAsOf),
+        entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.1, seedRateAsOf),
+        entity.NewCurrency("cur-ron", "RON", "Romanian Leu", 5.05, seedRateAsOf),
     }
 }
 

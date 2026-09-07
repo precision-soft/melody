@@ -118,6 +118,18 @@ const (
 
     environmentKeyCorsAllowOrigins     = "APP_CORS_ALLOW_ORIGINS"
     environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
+
+)
+
+/* the two outbound endpoints are read through PARAMETERS rather than through the raw .env keys above,
+   because a constructor argument bound to one is read with MustGet: an auto-registered key vanishes with
+   its line in .env and takes the boot down with it, while a parameter declared in RegisterParameters with
+   an empty-string fallback survives the line being removed and answers "" — which is what "this door is
+   unwired" means everywhere else in this application. Both spellings name one value: the parameter reads
+   the key. */
+const (
+    parameterRatesBaseUrl        = "app.rates.base_url"
+    parameterReportExportEndpoint = "app.reporting.export_endpoint"
 )
 
 /* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a same-named parameter). The values are already fully resolved here — NewConfiguration (called in NewApplication, before this composition root runs) applies applyEnvironmentOverrides + resolvePlaceholders, which expand %env(X)%/%name% indirection and unescape %% — so a plain String() read is correct. Returns "" when the key is absent so the eager build steps keep their "unset means skip this integration" behaviour. */

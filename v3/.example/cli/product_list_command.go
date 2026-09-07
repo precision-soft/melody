@@ -2,6 +2,8 @@ package cli
 
 import (
     "fmt"
+    "io"
+    "os"
     "strings"
     "time"
     "unicode/utf8"
@@ -110,8 +112,16 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
     return nil
 }
 
-/* the widths are measured in RUNES, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the whole table — the frozen majors' examples left this class behind when they moved onto the framework's table builder */
+/* printTable renders to standard output, which is where the commands that only ever print a table want it.
+   A command whose output a test reads passes its own writer through fprintTable instead: the command
+   context carries one for exactly that reason, and capturing a process stream to assert a table is a test
+   about plumbing rather than about the command. */
 func printTable(headers []string, rows [][]string) {
+    fprintTable(os.Stdout, headers, rows)
+}
+
+/* the widths are measured in RUNES, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the whole table — the frozen majors' examples left this class behind when they moved onto the framework's table builder */
+func fprintTable(writer io.Writer, headers []string, rows [][]string) {
     widths := make([]int, len(headers))
     for i, header := range headers {
         widths[i] = utf8.RuneCountInString(header)
@@ -125,31 +135,31 @@ func printTable(headers []string, rows [][]string) {
         }
     }
 
-    printRow(headers, widths)
-    printSeparator(widths)
+    printRow(writer, headers, widths)
+    printSeparator(writer, widths)
 
     for _, row := range rows {
-        printRow(row, widths)
+        printRow(writer, row, widths)
     }
 }
 
-func printRow(columns []string, widths []int) {
+func printRow(writer io.Writer, columns []string, widths []int) {
     parts := make([]string, 0, len(columns))
     for i, column := range columns {
         padding := widths[i] - utf8.RuneCountInString(column)
         parts = append(parts, column+strings.Repeat(" ", padding))
     }
 
-    fmt.Println(strings.Join(parts, "  |  "))
+    _, _ = fmt.Fprintln(writer, strings.Join(parts, "  |  "))
 }
 
-func printSeparator(widths []int) {
+func printSeparator(writer io.Writer, widths []int) {
     parts := make([]string, 0, len(widths))
     for _, width := range widths {
         parts = append(parts, strings.Repeat("-", width))
     }
 
-    fmt.Println(strings.Join(parts, "--+--"))
+    _, _ = fmt.Fprintln(writer, strings.Join(parts, "--+--"))
 }
 
 var _ melodyclicontract.Command = (*ProductListCommand)(nil)

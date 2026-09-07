@@ -22,6 +22,15 @@ func newCronConfiguration(kernelInstance melodykernelcontract.Kernel) *melodycro
             User:      productUser,
             Arguments: []string{"--limit=2"},
         }).
+        /* the rates move all day and the catalogue quotes prices with them, so the refresh runs on the half
+           hour: often enough that a converted price is never a day old, rarely enough that a provider
+           refusing for a few minutes is answered by the next run rather than by a retry loop that waits. It
+           runs unattended, which is why the command exits non-zero when it could not read the provider —
+           a schedule that swallowed the failure would leave the catalogue quoting stale rates in silence. */
+        Schedule(melodycron.CommandName(cli.NewCurrencyRefreshRatesCommand), &melodycron.EntryConfig{
+            Schedule: &melodycron.Schedule{Minute: "*/30", Hour: "*"},
+            User:     productUser,
+        }).
         Schedule(melodycron.CommandName(cli.NewAppInfoCommand), &melodycron.EntryConfig{
             Schedule: &melodycron.Schedule{Minute: "0", Hour: "12"},
         })
@@ -31,6 +40,7 @@ func newCronConfiguration(kernelInstance melodykernelcontract.Kernel) *melodycro
 func cronRunnerCommands() []clicontract.Command {
     return []clicontract.Command{
         cli.NewCatalogReportRefreshCommand(),
+        cli.NewCurrencyRefreshRatesCommand(),
         cli.NewProductListCommand(),
         cli.NewAppInfoCommand(),
     }

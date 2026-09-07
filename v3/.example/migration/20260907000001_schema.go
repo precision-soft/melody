@@ -49,10 +49,16 @@ const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_ca
     "`name` VARCHAR(255) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
+/* the rate is a DOUBLE beside the code, and rate_as_of is DATETIME(6) for the reason the product timestamps
+   are: two readings taken inside the same second are ordered by the microseconds, and a refresh that lands
+   twice in one second would otherwise collapse into one instant. The instant stored is the PROVIDER's, so
+   the column says how old the reading is rather than how long ago this application happened to write it. */
 const createCurrencyTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_currency` (" +
     "`id` VARCHAR(255) NOT NULL, " +
     "`code` VARCHAR(255) NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
+    "`rate` DOUBLE NOT NULL, " +
+    "`rate_as_of` DATETIME(6) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
 /* the two instants are DATETIME(6) because the model declares them so: a product created and updated inside the same second is ordered by the microseconds, and a DATETIME without them would collapse the pair */

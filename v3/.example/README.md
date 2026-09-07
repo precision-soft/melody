@@ -17,6 +17,7 @@ Conceptually, the example models a minimal admin-style catalog application:
 - A simple role system (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`)
 - HTML pages backed by JSON endpoints (consumed via jQuery)
 - CLI commands that demonstrate Melody’s CLI conventions and container/runtime usage
+- Prices quoted in one currency and readable in another, against exchange rates fetched from an outside provider
 
 ---
 
@@ -220,6 +221,39 @@ Several wirings deliberately defer their resolution to first use instead of the 
 - The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered in the `StoreFactory`/`RelayFactory` shape: the store (which ensures the `melody_outbox` schema) and the relay (which opens the transport) are built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. Endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
 - The encrypt module resolves the shared `*bun.DB` through a `DatabaseFactory` evaluated at the first `melody:encrypt:database` run, so http- and worker-mode processes register the command without touching the database.
 - The message-bus transport ([`config/messagebus.go`](./config/messagebus.go)) is handed a dialer and nothing else, the rule its outbox twin states in the same words: the transport closes only a connection it dialed itself, so one opened in the composition root would be owned by nobody. Nothing dials at boot — a process that never publishes never opens a connection, and `db:migrate --help` no longer pays a full amqp handshake before printing its usage. An `AMQP_DSN` this application cannot reach therefore does not stop the boot: it surfaces at the first publish, through the transport's own retry loop, which is where a broker that is merely down already surfaced.
+
+### Exchange rates — the outbound half
+
+The catalogue quotes every product in one currency, so a reader who wants another one needs a rate. That is
+what the currency nomenclature carries beside the code, and it is the only thing in this repository that
+calls [`httpclient`](../httpclient): the package has no other consumer on any major, so before this the whole
+of it was proven by compilation.
+
+- `example:currency:refresh-rates` reads the provider named by `RATES_BASE_URL` and writes the quotes it
+  recognises. It runs on the half hour from [`config/cron.go`](./config/cron.go) and exits **non-zero** when
+  the provider could not be read — a schedule that swallowed that would leave the catalogue quoting stale
+  rates in silence. With the key blank the command is a no-op that says so and exits zero, the same switch
+  every optional door here carries.
+- `GET /products/api/read/:id/?currency=USD` answers the product with its price restated in the currency the
+  caller named, stamped with the instant of the quote it used. Without the parameter the answer carries no
+  conversion at all; a code the catalogue does not carry is a `400`.
+- `catalog:report:refresh` pushes its reading to `APP_REPORTING_EXPORT_ENDPOINT` when one is configured, and
+  takes the command's exit code with it if the sink refuses.
+
+The two endpoints are the two SHAPES the client supports, and they are not interchangeable. `RATES_BASE_URL`
+is a **base** and carries its trailing slash: the client resolves every target against it by RFC 3986, so the
+slash is what keeps `/v1` a prefix instead of a segment the merge cuts, and a base written without one is
+refused where the wiring mistake is made. A based client also refuses a target that resolves off its origin,
+which is why the export endpoint — a whole url an operator may point at any host — travels through a second
+client that carries no base at all. Both are registered by NAME and not by type: they are the same concrete
+type, so a resolution by type could only answer with whichever landed first, and the boot refuses the second
+registration outright.
+
+The rate is quoted against a base — one unit of that base costs `rate` units of the currency — so a
+conversion between two currencies cancels it and the catalogue never has to know what the base was. The
+instant stored is the PROVIDER's rather than the moment the refresh ran, because a reader deciding whether a
+price is stale needs the age of the reading. In development the provider is a vhost of the compose load
+balancer at `rates.melody.localhost.precision-soft.com`, which also serves the failure arms the bands drive.
 
 ### The migration set
 

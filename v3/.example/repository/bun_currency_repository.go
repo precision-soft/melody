@@ -6,6 +6,7 @@ import (
     "errors"
     "fmt"
     "strings"
+    "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/uptrace/bun"
@@ -15,21 +16,25 @@ import (
 type currencyRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_currency,alias:currency"`
 
-    Id   string `bun:"id,pk"`
-    Code string `bun:"code,notnull"`
-    Name string `bun:"name,notnull"`
+    Id       string    `bun:"id,pk"`
+    Code     string    `bun:"code,notnull"`
+    Name     string    `bun:"name,notnull"`
+    Rate     float64   `bun:"rate,notnull"`
+    RateAsOf time.Time `bun:"rate_as_of,notnull"`
 }
 
 func newCurrencyRow(currency *entity.Currency) *currencyRow {
     return &currencyRow{
-        Id:   currency.Id,
-        Code: currency.Code,
-        Name: currency.Name,
+        Id:       currency.Id,
+        Code:     currency.Code,
+        Name:     currency.Name,
+        Rate:     currency.Rate,
+        RateAsOf: currency.RateAsOf,
     }
 }
 
 func (instance *currencyRow) toEntity() *entity.Currency {
-    return entity.NewCurrency(instance.Id, instance.Code, instance.Name)
+    return entity.NewCurrency(instance.Id, instance.Code, instance.Name, instance.Rate, instance.RateAsOf)
 }
 
 func newBunCurrencyRepository(database *bun.DB) *bunCurrencyRepository {

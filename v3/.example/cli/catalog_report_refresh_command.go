@@ -1,6 +1,7 @@
 package cli
 
 import (
+    "strconv"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/reporting"
@@ -41,10 +42,25 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
         return refreshErr
     }
 
+    /* the export is the second half of a refresh rather than a command of its own: the reading this run took
+       is the one a sink wants, and a separate command would either retake it or push whatever the cache
+       happened to hold. With no endpoint configured it does nothing, and a sink that refuses takes the
+       command's exit code with it — an export nobody received is not a refresh that worked. */
+    exporter, exporterErr := melodycontainer.FromResolverByType[*reporting.CatalogReportExporter](runtimeInstance.Container())
+    if nil != exporterErr {
+        return exporterErr
+    }
+
+    exported, exportErr := exporter.Export(runtimeInstance, reading)
+    if nil != exportErr {
+        return exportErr
+    }
+
     headers := []string{
         "RECORDED_AT",
         "HEADLINE",
         "PAYLOAD",
+        "EXPORTED",
     }
 
     rows := [][]string{
@@ -52,6 +68,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
             reading.RecordedAt.UTC().Format(time.RFC3339),
             reading.Headline,
             reading.Payload,
+            strconv.FormatBool(exported),
         },
     }
 

@@ -28,8 +28,13 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
         "%env(default:app.reporting.default_refresh_interval:APP_REPORTING_REFRESH_INTERVAL)%",
     )
 
-    /* the empty-string fallback: the export endpoint is genuinely absent in most environments, so the parameter resolves to "" instead of every environment having to define a key it does not use */
-    registrar.RegisterParameter("app.reporting.export_endpoint", "%env(default::APP_REPORTING_EXPORT_ENDPOINT)%")
+    /* the empty-string fallback, used by both outbound endpoints: they are genuinely absent in most
+       environments, so the parameter resolves to "" instead of every environment having to define a key it
+       does not use. The distinction matters because a constructor argument BOUND to a parameter reads it
+       through MustGet, which panics on a parameter that was never registered — an auto-registered .env key
+       disappears with its line, a parameter declared here does not. */
+    registrar.RegisterParameter(parameterReportExportEndpoint, "%env(default::APP_REPORTING_EXPORT_ENDPOINT)%")
+    registrar.RegisterParameter(parameterRatesBaseUrl, "%env(default::RATES_BASE_URL)%")
 
     /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them. AMQP_DSN is on the list because it carries its credentials INLINE: unlike the database dsn, assembled from the marked password so the mark propagates to it, the amqp credentials sit whole in this one key and no marked source exists to propagate from. */
     registrar.MarkParameterSecret("MYSQL_PASSWORD")

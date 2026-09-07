@@ -18,6 +18,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
     commands := []melodyclicontract.Command{
         cli.NewAppInfoCommand(),
         cli.NewCatalogReportRefreshCommand(),
+        cli.NewCurrencyRefreshRatesCommand(),
         cli.NewProductListCommand(),
         cli.NewMessageBusDispatchCommand(
             instance.messageBusDispatch,

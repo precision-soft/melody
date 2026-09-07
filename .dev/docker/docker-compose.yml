@@ -87,6 +87,16 @@ services:
             - ${RELATIVE_PATH_TO_ROOT}/${DOCKER_PATH}/load-balancer/vhost.conf:/etc/nginx/conf.d/default.conf:ro
         ports:
             - "${LOAD_BALANCER_HTTP_HOST_PORT:-80}:80"
+        # the vhost names resolve to 127.0.0.1 through the public *.localhost.precision-soft.com wildcard,
+        # which is what a browser on the host needs and what a container must not get: inside a container
+        # 127.0.0.1 is that container. The e2e harness works around it by dialing the service name and
+        # setting the Host header by hand, but an application cannot — httpclient takes the Host from the
+        # url it was configured with. The alias makes the name resolve to nginx on the compose network, so
+        # the example reaches the rate provider the way a deployment would, by its name.
+        networks:
+            default:
+                aliases:
+                    - rates.melody.localhost.precision-soft.com
 
     rabbitmq:
         image: rabbitmq:3.13-management

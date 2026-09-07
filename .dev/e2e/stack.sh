@@ -45,6 +45,9 @@
 #   - V3 DATABASE RESET  example:db:reset refuses without --force, and with it drops the schema, applies it
 #                        again, empties the audit trail the module's table keeps and reseeds all four
 #                        nomenclatures — the one state this application has, restored from the database side
+#   - V3 EXCHANGE RATES  the seeded quote, the refresh that replaces it with the provider's, the quote read
+#                        back out of band, the report export, and the two configurations that gate the door:
+#                        a provider that refuses exits non-zero and moves nothing, an absent one is a no-op
 #   - V1 CRON RUNNER     the v1 example registers the cron module: melody:cron:run boots from the shared
 #                        Configuration, reports its user-carrying entries and answers the json envelope
 #   - V1 MIGRATIONS      the bunorm/migrate command family runs the same migration set the v1 providers
@@ -100,7 +103,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=128
+EXPECTED_CHECK_COUNT_INTEGER=135
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -395,16 +398,18 @@ else
     check_fail "the runner did not report the user-carrying entry (${RUNNER_WARNING_BEFORE_INTEGER:-0} -> ${RUNNER_WARNING_AFTER_INTEGER:-0}), so nothing proves it parsed the Configuration"
 fi
 
-# the entry count in the envelope is deterministic whatever the wall minute: configured counts entries,
-# not dispatches, and the v3 example schedules exactly three commands — the same shape the v1 and v2
-# sections assert, which the v3 runner answered with an empty stream before it rendered the envelope
+# the entry count in the envelope is deterministic whatever the wall minute: configured counts entries, not
+# dispatches. v3 schedules FOUR commands where v1 and v2 schedule three — the fourth is the exchange-rate
+# refresh, which exists only on this major because only this example calls an outbound provider — so the
+# number is asserted per major rather than shared, and it moves in the same edit that adds or removes an
+# entry from the Configuration.
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:cron:run --once --format=json 2>/dev/null"
 RUNNER_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
 
-if printf '%s' "${RUNNER_JSON_STRING}" | grep -q '"configured":3'; then
-    check_pass "the v3 runner's json envelope counts the three configured entries"
+if printf '%s' "${RUNNER_JSON_STRING}" | grep -q '"configured":4'; then
+    check_pass "the v3 runner's json envelope counts the four configured entries"
 else
-    check_fail "the v3 runner's json envelope does not count the three configured entries: ${RUNNER_JSON_STRING:-<empty>}"
+    check_fail "the v3 runner's json envelope does not count the four configured entries: ${RUNNER_JSON_STRING:-<empty>}"
 fi
 
 check_section_end "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
@@ -971,12 +976,26 @@ else
     check_fail "the fallback did not resolve to 5m: ${REFRESH_DEFAULT_ENTRY_STRING:-<entry missing>}"
 fi
 
-EXPORT_ENDPOINT_ENTRY_STRING="$(printf '%s' "${OPTIONAL_DEFAULT_JSON_STRING}" | grep -o '"name":"app.reporting.export_endpoint"[^}]*' | head -1 || true)"
+# the empty-string fallback is asserted on a key this run BLANKS rather than on one that happened to be
+# absent from the committed .env. It used to read app.reporting.export_endpoint straight, which passed only
+# because nothing had ever configured an export endpoint — a precondition the check did not state and could
+# not defend, and which the first deployment to set the key would have broken. Blanking it here states it:
+# what is under test is that %env(default::KEY)% answers "" for a key with no value, and the parameter is
+# only the vehicle.
+docker_compose_no_log exec -T "${E2E_SERVICE_NAME_STRING}" \
+    bash -c "printf 'APP_REPORTING_EXPORT_ENDPOINT=\n' > ${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:parameters --format json 2>/dev/null"
+OPTIONAL_BLANKED_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+
+EXPORT_ENDPOINT_ENTRY_STRING="$(printf '%s' "${OPTIONAL_BLANKED_JSON_STRING}" | grep -o '"name":"app.reporting.export_endpoint"[^}]*' | head -1 || true)"
 if printf '%s' "${EXPORT_ENDPOINT_ENTRY_STRING}" | grep -q '"value":""'; then
-    check_pass "the empty-string fallback resolves to an empty value"
+    check_pass "the empty-string fallback resolves to an empty value for a blanked key"
 else
     check_fail "the empty fallback did not resolve to an empty value: ${EXPORT_ENDPOINT_ENTRY_STRING:-<entry missing>}"
 fi
+
+restore_example_env_local
 
 # melody resolves config from .env files, never the process environment, so the override lands in
 # .env.local (git-ignored, restored by the trap)
@@ -1304,6 +1323,108 @@ else
 fi
 
 check_section_end "V3 DATABASE RESET" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 EXCHANGE RATES — the outbound http client, driven through the door that needs one
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 EXCHANGE RATES" "${TAG_VALIDATE}" "e2e"
+
+# This section is the only thing in the repository that calls melody/v3/httpclient at all: nothing else
+# imports it, on any major, so compilation is all the package had before this. It runs after the reset, which
+# is what makes the opening quotes a known value rather than whatever a previous run left behind.
+#
+# The provider is a vhost of the development load balancer answering under its own name. It is not on the
+# public internet on purpose — the gate has twice spent a session diagnosing external DNS — and the failure
+# arms are BASES rather than targets, so pointing the application at one exercises a real failure through the
+# real wiring instead of a second code path written for a test.
+
+V3_RATE_QUOTE_STATEMENT_STRING="SELECT CONCAT(rate, '@', DATE_FORMAT(rate_as_of, '%Y-%m-%dT%H:%i:%sZ')) FROM melody_example_v3_currency WHERE id = 'cur-usd'"
+
+V3_SEEDED_QUOTE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_RATE_QUOTE_STATEMENT_STRING}")"
+if [[ "1.1@2026-01-01T00:00:00Z" = "${V3_SEEDED_QUOTE_STRING}" ]]; then
+    check_pass "the reset left the shipped quote in place (cur-usd ${V3_SEEDED_QUOTE_STRING})"
+else
+    check_fail "the reset left cur-usd quoted ${V3_SEEDED_QUOTE_STRING:-<no answer>}, wanted the shipped 1.1@2026-01-01T00:00:00Z"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:currency:refresh-rates 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_REFRESH_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_REFRESH_OUTPUT_STRING}" | grep -qE '2026-09-07T09:00:00Z[[:space:]]*\|[[:space:]]*1[[:space:]]*\|[[:space:]]*3[[:space:]]*\|[[:space:]]*0'; then
+    check_pass "example:currency:refresh-rates read the provider in one attempt and wrote all three quotes"
+else
+    check_fail "the refresh reported ${V3_REFRESH_OUTPUT_STRING:-<empty>}, wanted the provider's instant with attempts 1, updated 3, skipped 0"
+fi
+
+# the command's word for what it wrote is not the evidence; the database is. Both halves move: the number
+# and the instant, and the instant is the PROVIDER's rather than the moment the refresh happened to run.
+V3_REFRESHED_QUOTE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_RATE_QUOTE_STATEMENT_STRING}")"
+if [[ "1.0842@2026-09-07T09:00:00Z" = "${V3_REFRESHED_QUOTE_STRING}" ]]; then
+    check_pass "the provider's quote landed in the catalogue (cur-usd ${V3_REFRESHED_QUOTE_STRING}, read out of band)"
+else
+    check_fail "cur-usd is quoted ${V3_REFRESHED_QUOTE_STRING:-<no answer>}, wanted the provider's 1.0842@2026-09-07T09:00:00Z"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . catalog:report:refresh 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_EXPORT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_EXPORT_OUTPUT_STRING}" | grep -q 'true'; then
+    check_pass "catalog:report:refresh pushed the reading to the configured sink"
+else
+    check_fail "the report refresh reported ${V3_EXPORT_OUTPUT_STRING:-<empty>}, wanted an export the sink accepted"
+fi
+
+# melody resolves configuration from .env files and never from the process environment, so the two arms below
+# land their base in .env.local, which overrides .env and is git-ignored. The trap and the pre-clear are the
+# same hygiene the process-role section uses: a run killed before its EXIT trap would otherwise leave a base
+# behind that poisons every later section.
+restore_example_env_local
+
+trap restore_example_env_local EXIT
+
+docker_compose_no_log exec -T "${E2E_SERVICE_NAME_STRING}" \
+    bash -c "printf 'RATES_BASE_URL=http://rates.melody.localhost.precision-soft.com/unavailable/\n' > ${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null
+
+# the exit code is the property, not the message: this command runs unattended on a schedule, and a provider
+# it could not read has to reach an operator somehow. A zero here would leave the catalogue quoting stale
+# rates with a green cron log above it.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:currency:refresh-rates >/dev/null 2>&1"
+V3_REFRESH_FAILURE_STATUS_INTEGER="${RUN_IN_DEV_STATUS_INTEGER}"
+if [[ "0" != "${V3_REFRESH_FAILURE_STATUS_INTEGER}" ]]; then
+    check_pass "a provider that refuses every attempt exits the refresh non-zero (${V3_REFRESH_FAILURE_STATUS_INTEGER})"
+else
+    check_fail "the refresh exited zero over a provider that answered 503 to every attempt"
+fi
+
+# the quote must not have moved: a refresh that failed has to leave the catalogue exactly as it found it
+V3_QUOTE_AFTER_FAILURE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_RATE_QUOTE_STATEMENT_STRING}")"
+if [[ "${V3_REFRESHED_QUOTE_STRING}" = "${V3_QUOTE_AFTER_FAILURE_STRING}" ]]; then
+    check_pass "a failed refresh left the quote untouched (cur-usd still ${V3_QUOTE_AFTER_FAILURE_STRING})"
+else
+    check_fail "a failed refresh moved cur-usd from ${V3_REFRESHED_QUOTE_STRING} to ${V3_QUOTE_AFTER_FAILURE_STRING:-<no answer>}"
+fi
+
+# an absent base is how this application spells "this door is unwired", the same switch every optional
+# integration carries. It is a no-op that says so and exits zero, so a deployment without a rate provider
+# runs the schedule without failing it.
+docker_compose_no_log exec -T "${E2E_SERVICE_NAME_STRING}" \
+    bash -c "printf 'RATES_BASE_URL=\n' > ${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null
+
+# pipefail is set explicitly because the container runs this string through a fresh `bash -c`, which does
+# NOT inherit it from this script: without it the status of a pipeline is sed's, and sed always exits zero,
+# so the exit-code half of the assertion below would hold whatever the command did
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . example:currency:refresh-rates 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_UNCONFIGURED_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+V3_UNCONFIGURED_STATUS_INTEGER="${RUN_IN_DEV_STATUS_INTEGER}"
+if [[ "0" = "${V3_UNCONFIGURED_STATUS_INTEGER}" ]] \
+    && printf '%s' "${V3_UNCONFIGURED_OUTPUT_STRING}" | grep -q 'no rate provider is configured'; then
+    check_pass "with no provider configured the refresh is a no-op that says so and exits zero"
+else
+    check_fail "an unconfigured refresh exited ${V3_UNCONFIGURED_STATUS_INTEGER:-<no status>} saying ${V3_UNCONFIGURED_OUTPUT_STRING:-<empty>}"
+fi
+
+restore_example_env_local
+
+check_section_end "V3 EXCHANGE RATES" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # The V1 sections: the wiring only the v1 example carries today. They address the v1 example explicitly
