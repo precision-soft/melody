@@ -522,6 +522,11 @@ func (instance *ManagerRegistry) MustDatabase(name string) *bun.DB {
 }
 
 func (instance *ManagerRegistry) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* CloseWithContext is Close under a deadline its caller declares, which is the door the unbounded wait below was written to expect. The pools are torn down whatever the deadline says — a close travelling the wire is what the teardown is FOR — and what the deadline bounds is the wait for opens that were still in flight when the refusal was published: those end against the closed flag on their own, so a caller told the teardown is over while one is still in the air is told something true about this registry and false about the process. */
+func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) error {
     /* the refusal is published under the lock and the pools are torn down outside it. A pool close travels the wire — COM_QUIT to a peer that may be partitioned, and the migration connection deliberately lifts its write deadlines — so a teardown held inside the critical section parks every caller on the registry lock for as long as the driver waits, including the ones the closed flag above exists to refuse at once. The maps are snapshotted, never emptied: the entry refusal reads the flag rather than the map, and a manager handed out before the snapshot keeps working through its own pool's close. */
     instance.lock.Lock()
 
@@ -596,13 +601,25 @@ func (instance *ManagerRegistry) Close() error {
         }
     }
 
-    /* every open that was in flight when the refusal was published is waited out here, after the memoized pools are gone. Each one ends its own freshly opened database against the closed flag, so what is being waited for is that ending — not a value this teardown could use. The wait is unbounded by design: it is the caller's own resolution finishing, and the constructor that binds a context is the door that shortens it. A panicking open closes the same channel through the recovery defer, so an unwinding provider cannot park this loop. */
+    /* every open that was in flight when the refusal was published is waited out here, after the memoized pools are gone. Each one ends its own freshly opened database against the closed flag, so what is being waited for is that ending — not a value this teardown could use. A panicking open closes the same channel through the recovery defer, so an unwinding provider cannot park this loop.
+
+       The wait ends with the caller's deadline rather than with the open: a dial against a host that is black-holing packets ends when its own driver gives up, which is longer than any teardown may last, and a teardown that waited it out would hold the process past whatever grace its supervisor allows. What is abandoned is only the WAIT — the open still finishes on its own goroutine and still ends its database against the closed flag — so the cost of the deadline is that the answer names an outstanding session rather than having ended it. A caller that declared no deadline waits as before. */
+    abandonedOpens := 0
+
     for _, pendingOpen := range pendingOpens {
-        <-pendingOpen.done
+        select {
+        case <-pendingOpen.done:
+        case <-closeContext.Done():
+            abandonedOpens++
+        }
     }
 
     for _, migrationOpenDone := range pendingMigrationOpens {
-        <-migrationOpenDone
+        select {
+        case <-migrationOpenDone:
+        case <-closeContext.Done():
+            abandonedOpens++
+        }
     }
 
     /* bun's diagnostic channel is handed back LAST, while the logger this registry reports through is still alive: the container closes the registry before the logging service, because the registry resolves it. Everything above — a pool close that provokes a bun warning, an open finishing against the closed flag — still reaches the journal; what comes after belongs on standard error. It is handed back only when it is this registry's: a second registry in the same process, routed to its own logger, keeps its channel through this teardown. */
@@ -614,6 +631,15 @@ func (instance *ManagerRegistry) Close() error {
             "bunorm manager registry close failed for multiple databases",
             map[string]any{"names": failedNames},
             closeErr,
+        )
+    }
+
+    /* an abandoned wait is reported even when every pool closed cleanly: the pools ARE closed, and what the operator is being told is that the process is ending with a dial still outstanding, whose server-side session will be reaped by a timeout rather than ended. A pool failure keeps the report, because that is the worse of the two. */
+    if nil == closeErr && 0 < abandonedOpens {
+        return exception.NewError(
+            "bunorm manager registry stopped waiting for opens still in flight when its close deadline passed; they end on their own and leave their sessions to be reaped",
+            map[string]any{"abandonedOpens": abandonedOpens},
+            closeContext.Err(),
         )
     }
 

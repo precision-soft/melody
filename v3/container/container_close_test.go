@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "strings"
@@ -2056,5 +2057,114 @@ func TestContainer_Close_TheCycleRemainderClosesLatestFirst(t *testing.T) {
 
     if "b" != closeSequence[0] || "a" != closeSequence[1] {
         t.Fatalf("expected the cycle remainder to close latest first, got %v", closeSequence)
+    }
+}
+
+/* a service that carries the context-taking door is closed through it, with the teardown's own deadline, and its plain Close is not called at all: the two would otherwise both run, or the budget would stop at the container that has it while the component that spends the time never hears of it. */
+type contextCloseRecorder struct {
+    plainCalls   int
+    contextCalls int
+    grantedTerm  time.Duration
+    hadDeadline  bool
+}
+
+func (instance *contextCloseRecorder) Close() error {
+    instance.plainCalls = instance.plainCalls + 1
+
+    return nil
+}
+
+func (instance *contextCloseRecorder) CloseWithContext(closeContext context.Context) error {
+    instance.contextCalls = instance.contextCalls + 1
+
+    deadline, hasDeadline := closeContext.Deadline()
+    instance.hadDeadline = hasDeadline
+    if true == hasDeadline {
+        instance.grantedTerm = time.Until(deadline)
+    }
+
+    return nil
+}
+
+func TestContainer_CloseWithContext_PrefersTheContextTakingDoorAndHandsItTheDeadline(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &contextCloseRecorder{}
+
+    registerErr := serviceContainer.Register(
+        "service.context-closeable",
+        func(resolver containercontract.Resolver) (*contextCloseRecorder, error) {
+            return recorder, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.context-closeable"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Minute)
+    defer cancel()
+
+    concreteContainer, isConcrete := serviceContainer.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if false == isConcrete {
+        t.Fatal("the container does not carry the context-taking teardown")
+    }
+
+    if closeErr := concreteContainer.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != recorder.contextCalls {
+        t.Fatalf("the context-taking door was called %d times, wanted once", recorder.contextCalls)
+    }
+
+    if 0 != recorder.plainCalls {
+        t.Fatalf("the plain door was called %d times, wanted none", recorder.plainCalls)
+    }
+
+    if false == recorder.hadDeadline {
+        t.Fatal("the service was handed a context with no deadline")
+    }
+
+    if 0 >= recorder.grantedTerm || time.Minute < recorder.grantedTerm {
+        t.Fatalf("the service was handed %s of a one minute teardown deadline", recorder.grantedTerm)
+    }
+}
+
+/* Close with no context reaches the same door with no deadline, so a caller that declared no budget does not have one invented for it. */
+func TestContainer_Close_ReachesTheContextTakingDoorWithoutADeadline(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &contextCloseRecorder{}
+
+    registerErr := serviceContainer.Register(
+        "service.context-closeable",
+        func(resolver containercontract.Resolver) (*contextCloseRecorder, error) {
+            return recorder, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.context-closeable"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != recorder.contextCalls {
+        t.Fatalf("the context-taking door was called %d times, wanted once", recorder.contextCalls)
+    }
+
+    if true == recorder.hadDeadline {
+        t.Fatal("a close with no budget handed the service a deadline")
     }
 }

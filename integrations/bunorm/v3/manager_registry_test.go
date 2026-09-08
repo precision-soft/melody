@@ -2466,3 +2466,43 @@ func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *te
         t.Fatalf("the closed registry's logger still receives: %v", firstLogger.captured())
     }
 }
+
+/* the wait for opens still in flight ends with the caller's deadline instead of with the dial: a dial against a host that is black-holing packets ends when its own driver gives up, which outlives any teardown, and a teardown that waited it out would hold the process past whatever grace its supervisor allows. What is abandoned is only the wait — the open still ends its own database against the closed flag — so the answer names the outstanding session rather than having ended it. */
+func TestManagerRegistry_CloseWithContext_StopsWaitingForOpensStillInFlight(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "x", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    pendingOpen := &managerOpen{done: make(chan struct{})}
+    registry.lock.Lock()
+    registry.pendingOpenByName["x"] = pendingOpen
+    registry.lock.Unlock()
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+    defer cancel()
+
+    closed := make(chan error, 1)
+    go func() {
+        closed <- registry.CloseWithContext(closeContext)
+    }()
+
+    select {
+    case closeErr := <-closed:
+        if nil == closeErr {
+            t.Fatal("a close that abandoned an open still in flight reported success")
+        }
+
+        if false == strings.Contains(closeErr.Error(), "stopped waiting for opens still in flight") {
+            t.Fatalf("the failure does not name what happened: %v", closeErr)
+        }
+
+    case <-time.After(3 * time.Second):
+        t.Fatal("CloseWithContext never returned; the wait for the pending open is still unbounded")
+    }
+
+    close(pendingOpen.done)
+}

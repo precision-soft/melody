@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `transport.go`, `server_sent_event_backplane.go` — `Transport.CloseWithContext(ctx)` and `ServerSentEventBackplane.CloseWithContext(ctx)`, the optional door the framework container's ordered teardown prefers. Each stretch of a close then takes what is LEFT of the deadline the caller declared instead of its own constant, so the ninety seconds a single transport could spend at framework defaults — the consume join plus the publish join plus either the owned connection's deadline or the caller-owned channel closes — becomes the caller's figure however many of them wedge, and a second transport closed after the first spends what the first did not. `Close()` keeps the package constants, for a caller with no budget. The two files are written together deliberately: they carry one mechanism between them and had already drifted apart on the channel-close bound, one call timeout here against the join timeout there for the same operation on the same kind of socket
+
 ### Changed
 
 - `transport.go` — **Behavioural change**: the CONFIRMATION a publish waits for is bounded by `TransportConfig.PublishTimeout` too, not only the write. The wait ran on the caller's context, which carries no deadline on any path melody publishes from — the http kernel attaches none — and it ran while the publish mutex was HELD, so a broker that accepted a write and never acked it parked that `Send` for good and every later send behind it: measured on a live broker whose confirmation frames were held back, a send with a 200ms publish timeout had not returned after eight seconds, with the goroutine parked in the client's confirmation wait. A publish whose confirmation runs out of time now fails naming the confirmation, and it is NOT retried automatically, because the outcome is ambiguous — the message is on the wire and the broker may still accept it, so a retry would publish it twice

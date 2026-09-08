@@ -84,8 +84,20 @@ func (instance *Recorder) Registry() *Registry {
 
 /* Close closes the storage when this recorder owns it (NewRecorderOwningStorage) and the storage can be closed at all; a recorder that does not own its storage answers nil so the container can close the storage service itself without a double close. */
 func (instance *Recorder) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* CloseWithContext carries the teardown's deadline through to the storage this recorder owns. The recorder holds no budget of its own — it is a pass-through door — and the storage below it is the one that spends time, so a deadline stopping here would be a deadline the component that needs it never sees. The context-taking form of the storage is preferred exactly the way the container prefers this one. */
+func (instance *Recorder) CloseWithContext(closeContext context.Context) error {
     if false == instance.ownsStorage {
         return nil
+    }
+
+    contextCloseable, isContextCloseable := instance.storage.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if true == isContextCloseable {
+        return contextCloseable.CloseWithContext(closeContext)
     }
 
     closeable, isCloseable := instance.storage.(interface{ Close() error })

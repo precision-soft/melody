@@ -254,7 +254,7 @@ func (instance *Application) Run() {
             return
         }
 
-        logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.Close)
+        logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.teardownTimeout(), instance.closeBeforeExit)
     }()
 
     if config.ModeCli == instance.runtimeFlags.Mode() {
@@ -376,7 +376,7 @@ func (instance *Application) logOnRecoverAndExit() {
     }
 
     /* the teardown hook mirrors the one Run passes: a boot that dies after the container was built — the logger service holds the log file open from that moment — used to exit with the container never closed, because os.Exit runs no defer. The record is written first, through a logger the teardown has not touched, and the close runs between the record and the exit. That close is unconditional; the IsClosed probe it takes first only decides whether a teardown failure is reported as this call's discovery, and what makes a boot that died before the kernel existed cost nothing is the nil-kernel check close starts with. */
-    logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.Close)
+    logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.teardownTimeout(), instance.closeBeforeExit)
 }
 
 /* resolveExitLogger picks the logger the final fatal record is written through: the configured container logger while it still writes, a last-resort logger opened on the configured destination when the container cannot answer — a boot that died before the logger service existed, a teardown that already closed it — and the emergency logger when even that destination is unusable. The container keeps serving built instances after Close, so liveness has to be asked of the logger itself — a file-backed logger a teardown already closed silently drops every write, and preferring it would lose the one record that explains the exit. The kernel guard covers an Application assembled without NewApplication: the one handler that must not panic answers with the emergency logger instead of dereferencing nil. */
@@ -440,8 +440,8 @@ var shieldedCloseStep = logging.RunShieldedStepWithin
 func (instance *Application) closeAndExitOnFailure() {
     var closeErr error
 
-    completed := shieldedCloseStep(instance.teardownTimeout(), "closing the application", func() {
-        closeErr = instance.close()
+    completed := shieldedCloseStep(instance.teardownTimeout(), "closing the application", func(closeContext context.Context) {
+        closeErr = instance.close(closeContext)
     })
 
     if false == completed {
@@ -459,8 +459,18 @@ func (instance *Application) closeAndExitOnFailure() {
 
 /* teardownTimeout answers the budget the clean shutdown's teardown runs under, from the parameter an operator sets and the default the configuration carries otherwise. It is read here rather than carried on the kernel view because nothing between boot and this moment needs it, and a method on that contract is a method every application implementing it would have to grow.
 
-   Every step of the read is best-effort by construction, for the same reason exitFileLogger is: this runs inside the deferred handler that stands between a returning Run and the process exit, so a configuration that was never built, a parameter a runtime registration removed, or a value that stopped parsing must answer the package's own budget rather than raise. A boot that got this far has already had the value refused if it was not positive. */
-func (instance *Application) teardownTimeout() time.Duration {
+   Every step of the read is best-effort by construction, for the same reason exitFileLogger is, and by the same means: this is evaluated as an ARGUMENT to the exit handler, before the per-step shield begins, so a configuration that was never built, a parameter a runtime registration removed, a value that stopped parsing, or a read that panics under a configuration lock somebody else holds must answer the configured default rather than raise. Without the recover the panic would unwind past the deferred handler's own recover, which has already returned by the time this runs, and the process would abort with no record, no certificate and no teardown at all — the outcome the shield exists to prevent, reached one line before the shield can start.
+
+   A negative value was refused at boot; zero was not, because zero is the operator asking for no deadline and the shield carries that meaning through. */
+func (instance *Application) teardownTimeout() (teardownTimeout time.Duration) {
+    teardownTimeout = config.DefaultTeardownTimeout
+
+    defer func() {
+        if nil != recover() {
+            teardownTimeout = config.DefaultTeardownTimeout
+        }
+    }()
+
     if true == internal.IsNilInterface(instance.configuration) {
         return config.DefaultTeardownTimeout
     }

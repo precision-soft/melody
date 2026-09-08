@@ -74,11 +74,19 @@ type providerHandle struct {
     provider *sdktrace.TracerProvider
 }
 
+/* unbudgetedShutdownGrace bounds the shutdown of a handle closed through the plain door, where nobody said how long the flush of the pending spans may take. It is the fallback, not the figure: the container hands its teardown deadline to CloseWithContext, and an operator who needs the export finished raises the teardown budget rather than this. */
+const unbudgetedShutdownGrace = 5 * time.Second
+
+/* CloseWithContext hands the teardown's own deadline to the provider's Shutdown, which has taken a context since it was written — erasing that context is the only thing this handle ever did, and it did it because the container's teardown asks for Close() error and nothing else. An expired deadline is passed on as it stands: Shutdown answers at once, the spans it could not export are dropped, and the container's failure map names this service, which is what an operator reads. */
+func (instance *providerHandle) CloseWithContext(closeContext context.Context) error {
+    return instance.provider.Shutdown(closeContext)
+}
+
 func (instance *providerHandle) Close() error {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    closeContext, cancel := context.WithTimeout(context.Background(), unbudgetedShutdownGrace)
     defer cancel()
 
-    return instance.provider.Shutdown(ctx)
+    return instance.CloseWithContext(closeContext)
 }
 
 var (

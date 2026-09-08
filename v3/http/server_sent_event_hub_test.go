@@ -1,6 +1,8 @@
 package http
 
 import (
+    "context"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -600,4 +602,89 @@ func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *tes
     if 0 != hub.BackplaneFailures() {
         t.Fatalf("expected no backplane failure to be recorded, got %d", hub.BackplaneFailures())
     }
+}
+
+/* the wait for the publishes already past the closed check ends with the teardown's deadline, and answers whether they all finished: the backplane is closed under them only when they did, because a replicate blocked on a broker cannot be cancelled — Publish takes no context — and closing the backplane under it is the send on a closed channel the wait exists to prevent. */
+func TestAwaitPublishesInFlight_EndsWithTheDeadlineAndSaysSo(t *testing.T) {
+    var publishesInFlight sync.WaitGroup
+
+    if false == awaitPublishesInFlight(context.Background(), &publishesInFlight) {
+        t.Fatal("an empty wait answered that it did not finish")
+    }
+
+    publishesInFlight.Add(1)
+    defer publishesInFlight.Done()
+
+    boundedContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+
+    /* the call is driven on a goroutine under a timer of its own: a form that stopped observing the deadline would otherwise park this test until the suite timeout instead of failing it, and a probe on blocking has to die on its own timer */
+    answered := make(chan bool, 1)
+    go func() {
+        answered <- awaitPublishesInFlight(boundedContext, &publishesInFlight)
+    }()
+
+    select {
+    case finished := <-answered:
+        if true == finished {
+            t.Fatal("a publish still in flight was reported as finished")
+        }
+
+    case <-time.After(2 * time.Second):
+        t.Fatal("the wait did not end with its deadline; it is unbounded")
+    }
+}
+
+/* the hub closed under a deadline leaves the backplane open when the publishes did not end, and says which: a hub that reported success there would have closed a backplane a replicate is still holding. */
+func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadlinePasses(t *testing.T) {
+    hub := NewServerSentEventHub()
+
+    backplane := &countingServerSentEventBackplane{}
+    hub.SetBackplane(backplane)
+
+    hub.publishesInFlight.Add(1)
+    defer hub.publishesInFlight.Done()
+
+    boundedContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+
+    /* driven on a goroutine under its own timer, for the reason the sibling probe above carries */
+    closed := make(chan error, 1)
+    go func() {
+        closed <- hub.CloseWithContext(boundedContext)
+    }()
+
+    var closeErr error
+
+    select {
+    case closeErr = <-closed:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the hub close did not end with its deadline; the wait is unbounded")
+    }
+
+    if nil == closeErr {
+        t.Fatal("a close that abandoned the publishes in flight reported success")
+    }
+
+    if false == strings.Contains(closeErr.Error(), "stopped waiting for the publishes in flight") {
+        t.Fatalf("the failure does not name what happened: %v", closeErr)
+    }
+
+    if 0 != backplane.closeCalls {
+        t.Fatalf("the backplane was closed %d times under publishes still holding it", backplane.closeCalls)
+    }
+}
+
+type countingServerSentEventBackplane struct {
+    closeCalls int
+}
+
+func (instance *countingServerSentEventBackplane) Publish(topic string, event ServerSentEvent) error {
+    return nil
+}
+
+func (instance *countingServerSentEventBackplane) Close() error {
+    instance.closeCalls = instance.closeCalls + 1
+
+    return nil
 }

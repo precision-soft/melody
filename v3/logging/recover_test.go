@@ -2,6 +2,7 @@ package logging
 
 import (
     "bytes"
+    "context"
     "errors"
     "io"
     "os"
@@ -476,7 +477,8 @@ func TestLogOnRecoverAndExitAfter_ShieldsTheHookAndTheRecord(t *testing.T) {
             &captureLogger{},
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
             1,
-            func() {
+            exitStepBudget,
+            func(_ context.Context) {
                 panic("teardown died")
             },
         )
@@ -489,6 +491,7 @@ func TestLogOnRecoverAndExitAfter_ShieldsTheHookAndTheRecord(t *testing.T) {
             &panickingProbeLogger{},
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
             1,
+            exitStepBudget,
             nil,
         )
 
@@ -564,7 +567,7 @@ func TestLogOnRecoverAndExitAfter_WithoutAPanic_DoesNothing(t *testing.T) {
 
     hookRan := false
 
-    LogOnRecoverAndExitAfter(logger, nil, 1, func() {
+    LogOnRecoverAndExitAfter(logger, nil, 1, exitStepBudget, func(_ context.Context) {
         hookRan = true
     })
 
@@ -769,14 +772,14 @@ func TestLogOnRecoverAndExitAfter_RefusesAnOutOfRangeExitCode(t *testing.T) {
             }()
 
             /* nil recovered: the refusal must fire on the healthy pass, so a caller wired with a bad code is caught on its first run rather than on its first panic */
-            LogOnRecoverAndExitAfter(&captureLogger{}, nil, outOfRangeCode, nil)
+            LogOnRecoverAndExitAfter(&captureLogger{}, nil, outOfRangeCode, exitStepBudget, nil)
         }()
     }
 }
 
 func TestLogOnRecoverAndExitAfter_AcceptsTheRangeBoundsOnTheHealthyPass(t *testing.T) {
     for _, validCode := range []int{1, 255} {
-        LogOnRecoverAndExitAfter(&captureLogger{}, nil, validCode, nil)
+        LogOnRecoverAndExitAfter(&captureLogger{}, nil, validCode, exitStepBudget, nil)
     }
 }
 
@@ -789,6 +792,7 @@ func TestLogOnRecoverAndExitAfter_ZeroValueExitErrorExitsWithTheCallersCode(t *t
             &captureLogger{},
             &exception.ExitError{},
             1,
+            exitStepBudget,
             nil,
         )
 
@@ -840,7 +844,7 @@ func TestRunExitStepShielded_AbandonsAStepThatDoesNotReturn(t *testing.T) {
     go func() {
         defer close(helperDone)
 
-        runExitStepShielded("running the probe teardown", func() {
+        runExitStepShielded("running the probe teardown", func(_ context.Context) {
             select {}
         })
     }()
@@ -879,7 +883,7 @@ func TestRunExitStepShielded_ReportsNothingForAStepThatReturns(t *testing.T) {
     }()
 
     stepRan := false
-    runExitStepShielded("running the probe teardown", func() {
+    runExitStepShielded("running the probe teardown", func(_ context.Context) {
         stepRan = true
     })
 
@@ -1008,7 +1012,7 @@ func (instance *panickingResolveError) Error() string {
 
 /* RunShieldedStep answers whether the step finished, which is what lets the clean shutdown tell a teardown that completed from one it had to abandon: the budget exists so a process holding something it cannot release ends anyway, and a caller told nothing would have no reason to exit non-zero */
 func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
-    if false == RunShieldedStep("a step that returns", func() {}) {
+    if false == RunShieldedStep("a step that returns", func(_ context.Context) {}) {
         t.Fatalf("expected a returning step to report completion")
     }
 
@@ -1021,7 +1025,7 @@ func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
     release := make(chan struct{})
     defer close(release)
 
-    if true == RunShieldedStep("a step that hangs", func() {
+    if true == RunShieldedStep("a step that hangs", func(_ context.Context) {
         <-release
     }) {
         t.Fatalf("expected a hanging step to be abandoned and reported as unfinished")
@@ -1030,7 +1034,7 @@ func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
 
 /* a step that panicked did not finish, and answering true for it hands the caller a completion the step never had: the panic is contained on the step's own goroutine, so the shutdown that reads this answer sees neither the panic nor an error and exits as though the teardown had run to the end */
 func TestRunShieldedStep_AnswersFalseForAStepThatPanicked(t *testing.T) {
-    if true == RunShieldedStep("a step that panics", func() {
+    if true == RunShieldedStep("a step that panics", func(_ context.Context) {
         panic("the step exploded")
     }) {
         t.Fatalf("expected a panicking step to be reported as unfinished")
@@ -1118,7 +1122,7 @@ func TestRunShieldedStepWithin_AbandonsOnTheBudgetItWasGiven(t *testing.T) {
     answered := make(chan bool, 1)
 
     go func() {
-        answered <- RunShieldedStepWithin(30*time.Millisecond, "a step that hangs", func() {
+        answered <- RunShieldedStepWithin(30*time.Millisecond, "a step that hangs", func(_ context.Context) {
             <-hangingStep
         })
     }()
@@ -1143,10 +1147,109 @@ func TestRunShieldedStepWithin_ANonPositiveBudgetWaitsWithoutADeadline(t *testin
     }()
 
     for _, budget := range []time.Duration{0, -1 * time.Second} {
-        if false == RunShieldedStepWithin(budget, "a step that outlives the package budget", func() {
+        if false == RunShieldedStepWithin(budget, "a step that outlives the package budget", func(_ context.Context) {
             time.Sleep(300 * time.Millisecond)
         }) {
             t.Fatalf("expected the budget %s to install no deadline and wait the step out", budget)
         }
     }
 }
+
+/* the step is handed the deadline the shield holds it to, and that deadline is strictly EARLIER than the moment the shield gives up. A step told to finish at the very instant of the abandonment is abandoned every time — the timer is armed before the step starts — so what it produces reaches nobody, which on the teardown path is the whole diagnosis. */
+func TestRunShieldedStepWithin_HandsTheStepADeadlineBelowItsOwn(t *testing.T) {
+    const budget = 400 * time.Millisecond
+
+    var stepDeadline time.Time
+    var hasDeadline bool
+
+    started := time.Now()
+
+    if false == RunShieldedStepWithin(budget, "a step that reads its deadline", func(stepContext context.Context) {
+        stepDeadline, hasDeadline = stepContext.Deadline()
+    }) {
+        t.Fatal("the step was abandoned")
+    }
+
+    if false == hasDeadline {
+        t.Fatal("the step was handed a context with no deadline under a positive budget")
+    }
+
+    granted := stepDeadline.Sub(started)
+
+    if granted >= budget {
+        t.Fatalf("the step's deadline is not below the shield's abandonment: granted %s of a %s budget", granted, budget)
+    }
+}
+
+/* a step that honours exactly the deadline it was handed is reported as finished. Measured before the split existed: with the two moments equal the answer was false on forty runs out of forty, because the timer is armed before the step is scheduled. */
+func TestRunShieldedStepWithin_AStepThatHonoursItsDeadlineIsNotAbandoned(t *testing.T) {
+    const budget = 400 * time.Millisecond
+
+    if false == RunShieldedStepWithin(budget, "a step that honours its deadline", func(stepContext context.Context) {
+        <-stepContext.Done()
+    }) {
+        t.Fatal("a step that returned when its own deadline expired was reported as abandoned")
+    }
+}
+
+/* a non-positive budget removes the deadline from the step's context too, not only from the shield: the caller said there is no term, and a context carrying one would put back the term the caller removed. */
+func TestRunShieldedStepWithin_ANonPositiveBudgetHandsTheStepNoDeadline(t *testing.T) {
+    for _, budget := range []time.Duration{0, -time.Second} {
+        var hasDeadline bool
+
+        RunShieldedStepWithin(budget, "a step that reads its deadline", func(stepContext context.Context) {
+            _, hasDeadline = stepContext.Deadline()
+        })
+
+        if true == hasDeadline {
+            t.Fatalf("a budget of %s handed the step a deadline", budget)
+        }
+    }
+}
+
+/* the before-exit hook runs under the budget its caller declares, not under the package constant: the panic path and the clean return release the same services, and exception.Exit is a panic, so every command that exits non-zero takes this door. */
+func TestLogOnRecoverAndExitAfter_RunsTheHookUnderTheDeclaredBudget(t *testing.T) {
+    if "1" == os.Getenv(declaredBudgetProbeMarker) {
+        LogOnRecoverAndExitAfter(
+            &captureLogger{},
+            exception.NewExitError(9, exception.NewError("boom", nil, nil)),
+            1,
+            declaredHookBudget,
+            func(beforeExitContext context.Context) {
+                deadline, hasDeadline := beforeExitContext.Deadline()
+                if false == hasDeadline {
+                    _, _ = os.Stderr.WriteString("PROBE hook received no deadline\n")
+
+                    return
+                }
+
+                if time.Until(deadline) > declaredHookBudget {
+                    _, _ = os.Stderr.WriteString("PROBE hook received the package budget\n")
+
+                    return
+                }
+
+                _, _ = os.Stderr.WriteString("PROBE hook received the declared budget\n")
+            },
+        )
+
+        return
+    }
+
+    command := exec.Command(
+        os.Args[0],
+        "-test.run=^TestLogOnRecoverAndExitAfter_RunsTheHookUnderTheDeclaredBudget$",
+    )
+    command.Env = append(os.Environ(), declaredBudgetProbeMarker+"=1")
+
+    output, _ := command.CombinedOutput()
+
+    if false == strings.Contains(string(output), "PROBE hook received the declared budget") {
+        t.Fatalf("the hook did not run under the declared budget: %s", string(output))
+    }
+}
+
+const declaredBudgetProbeMarker = "MELODY_DECLARED_BUDGET_PROBE"
+
+/* the declared budget is far below the package constant, so the deadline the hook receives separates the two: under the declared one it is at most this, under the package constant it is seconds. */
+const declaredHookBudget = 200 * time.Millisecond

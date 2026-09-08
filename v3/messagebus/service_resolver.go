@@ -1,6 +1,7 @@
 package messagebus
 
 import (
+    "context"
     "errors"
     "fmt"
     "sort"
@@ -68,6 +69,11 @@ type TransportsCloser struct {
 }
 
 func (instance *TransportsCloser) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* CloseWithContext is Close under the teardown's own deadline, handed to every transport that can take one. The transports are closed SERIALLY, in sorted name order, so they share the deadline rather than each getting a copy of it: two brokers that have both stopped reading cost the caller one budget between them, not two, which is the figure a supervisor's termination grace is measured against. The one that closes first therefore spends what the second does not get, and the failure map names them both. */
+func (instance *TransportsCloser) CloseWithContext(closeContext context.Context) error {
     names := make([]string, 0, len(instance.transports))
     for name := range instance.transports {
         names = append(names, name)
@@ -87,7 +93,7 @@ func (instance *TransportsCloser) Close() error {
             continue
         }
 
-        if closeErr := instance.closeOne(name); nil != closeErr {
+        if closeErr := instance.closeOne(closeContext, name); nil != closeErr {
             closeErrs = append(
                 closeErrs,
                 exception.NewError("messagebus transport close failed", map[string]any{"transport": name}, closeErr),
@@ -104,7 +110,7 @@ func isNilTransport(transport messagebuscontract.Transport) bool {
 }
 
 /* closeOne contains a panicking transport Close as a returned failure, so the teardown of the transports that sort after it still happens. The container's own teardown makes the same decision one level up for the same reason — but its boundary is around the CLOSER, so a panic inside this loop is recorded once and the rest of the map is silently skipped. The recovered value travels as the cause, not as a stringified context slot, so an error-shaped panic keeps its own context and cause chain in the record. */
-func (instance *TransportsCloser) closeOne(name string) (closeErr error) {
+func (instance *TransportsCloser) closeOne(closeContext context.Context, name string) (closeErr error) {
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -118,7 +124,17 @@ func (instance *TransportsCloser) closeOne(name string) (closeErr error) {
         )
     }()
 
-    return instance.transports[name].Close()
+    transport := instance.transports[name]
+
+    /* the transport's own context-taking door is preferred when it carries one, which is what makes the deadline reach the amqp stretches rather than stopping at this loop */
+    contextCloseable, isContextCloseable := transport.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if true == isContextCloseable {
+        return contextCloseable.CloseWithContext(closeContext)
+    }
+
+    return transport.Close()
 }
 
 func TransportsMustFromResolver(resolver containercontract.Resolver) map[string]messagebuscontract.Transport {

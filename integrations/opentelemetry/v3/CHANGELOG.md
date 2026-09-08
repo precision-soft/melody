@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `module.go` — the OTLP tracer provider handle carries `CloseWithContext(ctx)`, the optional door the framework container's ordered teardown prefers, so the span flush runs under the deadline the operator declared for the whole shutdown. The handle exists only to adapt `TracerProvider.Shutdown(ctx)` to a `Close() error` the container could see, and erasing that context was the one thing it did: the five seconds it invented were neither configurable nor visible to the shutdown that had to fit around them. The plain `Close()` keeps them, named `unbudgetedShutdownGrace`, for a caller with no budget
+
 ### Changed
 
 - `module.go` — **Behavioural change**: a nil entry in `ModuleConfig.Middlewares` or `ModuleConfig.HandlerDecorators` is refused at boot instead of skipped. A skipped observability middleware has no later consumer to fail loudly — the typical source is a discarded constructor error (`middleware, _ := NewMetricsMiddleware(meter)`), and the app then serves traffic uninstrumented while the operator reads an empty-but-healthy dashboard with nothing to distinguish "no traffic" from "not measured"

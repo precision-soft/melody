@@ -157,6 +157,11 @@ func (instance *ServerSentEventBackplane) refusalKeepsTheChannel(publishErr erro
 
    A failed join is read together with writesInFlight rather than on its own: the publish half is equally held by a broadcast that is merely queued behind another, which is the ordinary state of a busy hub, and reading that as a wedged write left both channels open on a caller-owned connection — with the fields already set to nil in the critical section above, so nothing in the process could ever close them — and named a blocked write that did not exist. */
 func (instance *ServerSentEventBackplane) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* CloseWithContext is Close under a deadline its caller declares, written in the same pass as the transport's because the two carry one mechanism between them and have already drifted apart once inside a single window. Each stretch takes what is LEFT of the deadline instead of its own constant, which also ends an asymmetry the constants had grown: the channel closes of a caller-owned connection were bounded by one call timeout here and by the join timeout on the transport — a second apart at the defaults for the same operation on the same kind of socket. */
+func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
     instance.hub.SetBackplane(nil)
 
     instance.mutex.Lock()
@@ -173,7 +178,7 @@ func (instance *ServerSentEventBackplane) Close() error {
 
     var closeErrs []error
 
-    publishJoined := lockWithin(&instance.publishMutex, instance.resolvedCallTimeout())
+    publishJoined := lockWithin(&instance.publishMutex, teardownStretchWithin(closeContext, instance.resolvedCallTimeout()))
     if true == publishJoined {
         defer instance.publishMutex.Unlock()
     }
@@ -185,7 +190,7 @@ func (instance *ServerSentEventBackplane) Close() error {
     if true == ownsConnection && nil != connection {
         deadline := time.Now()
         if true == publishJoined || false == writeInFlight {
-            deadline = deadline.Add(instance.resolvedCallTimeout())
+            deadline = deadline.Add(teardownStretchWithin(closeContext, instance.resolvedCallTimeout()))
         }
 
         closeErrs = append(closeErrs, ignoringAlreadyClosed(connection.CloseDeadline(deadline)))
@@ -200,7 +205,7 @@ func (instance *ServerSentEventBackplane) Close() error {
             nil,
         ))
     case false == ownsConnection:
-        closeErrs = append(closeErrs, closeChannelsWithin(instance.resolvedCallTimeout(), consumeChannel, publishChannel)...)
+        closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, instance.resolvedCallTimeout()), consumeChannel, publishChannel)...)
     default:
         closeErrs = append(closeErrs, closeChannels(consumeChannel, publishChannel)...)
     }
@@ -213,7 +218,7 @@ func (instance *ServerSentEventBackplane) Close() error {
         close(joined)
     }()
 
-    timer := time.NewTimer(closeJoinTimeout)
+    timer := time.NewTimer(teardownStretchWithin(closeContext, closeJoinTimeout))
     defer timer.Stop()
 
     select {

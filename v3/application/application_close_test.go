@@ -1,6 +1,7 @@
 package application
 
 import (
+    "context"
     "errors"
     "testing"
 
@@ -14,7 +15,7 @@ func TestApplicationClose_AnApplicationWithoutAKernelHasNothingToTearDown(t *tes
         runtimeFlags: NewRuntimeFlags(config.ModeHttp),
     }
 
-    if closeErr := applicationInstance.close(); nil != closeErr {
+    if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
         t.Fatalf("expected a kernel-less application to close cleanly, got %v", closeErr)
     }
 
@@ -36,7 +37,7 @@ func TestApplicationClose_ClosesTheContainerAndStaysIdempotent(t *testing.T) {
         t.Fatalf("expected the container to start open")
     }
 
-    if closeErr := applicationInstance.close(); nil != closeErr {
+    if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -44,7 +45,7 @@ func TestApplicationClose_ClosesTheContainerAndStaysIdempotent(t *testing.T) {
         t.Fatalf("expected the teardown to close the container")
     }
 
-    if closeErr := applicationInstance.close(); nil != closeErr {
+    if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
         t.Fatalf("expected a second close to stay quiet, got %v", closeErr)
     }
 }
@@ -76,7 +77,7 @@ func TestApplicationClose_AFailureSomebodyElseAlreadyCarriedAwayIsNotReportedAga
         t.Fatalf("expected the failing service to fail the first close")
     }
 
-    if closeErr := applicationInstance.close(); nil != closeErr {
+    if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
         t.Fatalf("expected the teardown to leave a failure it did not discover to its discoverer, got %v", closeErr)
     }
 }
@@ -102,7 +103,7 @@ func TestApplicationClose_AFailureItDiscoversItselfTravelsOut(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := applicationInstance.close()
+    closeErr := applicationInstance.close(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the teardown to report the failure it discovered")
     }
@@ -123,7 +124,7 @@ func TestApplicationClose_ATypedNilKernelHasNothingToTearDown(t *testing.T) {
         runtimeFlags: NewRuntimeFlags(config.ModeHttp),
     }
 
-    if closeErr := applicationInstance.close(); nil != closeErr {
+    if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
         t.Fatalf("expected a typed-nil kernel to close cleanly, got %v", closeErr)
     }
 }
@@ -155,7 +156,7 @@ func TestApplicationClose_ConcurrentClosesReportOneFailureOnce(t *testing.T) {
     for index := 0; 2 > index; index++ {
         go func() {
             <-startLine
-            results <- applicationInstance.close()
+            results <- applicationInstance.close(context.Background())
         }()
     }
 

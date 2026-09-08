@@ -617,3 +617,37 @@ func TestAsyncStorage_CloseAbandonsAFileStorageParkedOnAFifo(t *testing.T) {
         t.Fatalf("expected the report to say the worker was abandoned, got: %v", closeErr)
     }
 }
+
+/* the two stretches of a close are halves of what the caller's deadline leaves, so neither can be sized without the other: a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them. With no deadline the package grace stands in for both. */
+func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing.T) {
+    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    defer func() { _ = storage.Close() }()
+
+    drainGrace, cancellationGrace := storage.closeGracesWithin(context.Background())
+    if asyncStorageCloseGrace != drainGrace || asyncStorageCloseGrace != cancellationGrace {
+        t.Fatalf("a context with no deadline answered %s/%s, wanted the package grace twice", drainGrace, cancellationGrace)
+    }
+
+    boundedContext, cancelBounded := context.WithTimeout(context.Background(), 400*time.Millisecond)
+    defer cancelBounded()
+
+    drainGrace, cancellationGrace = storage.closeGracesWithin(boundedContext)
+
+    if drainGrace != cancellationGrace {
+        t.Fatalf("the two stretches differ: %s and %s", drainGrace, cancellationGrace)
+    }
+
+    if 0 >= drainGrace || 250*time.Millisecond < drainGrace {
+        t.Fatalf("a 400ms deadline gave each stretch %s, wanted about half of it", drainGrace)
+    }
+
+    spentContext, cancelSpent := context.WithTimeout(context.Background(), time.Nanosecond)
+    defer cancelSpent()
+
+    time.Sleep(5 * time.Millisecond)
+
+    drainGrace, cancellationGrace = storage.closeGracesWithin(spentContext)
+    if 0 != drainGrace || 0 != cancellationGrace {
+        t.Fatalf("a spent deadline answered %s/%s, wanted zero twice", drainGrace, cancellationGrace)
+    }
+}

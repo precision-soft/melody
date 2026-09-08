@@ -162,7 +162,7 @@ func TestClose_DoesNotRereportAFailureSomebodyElseDiscovered(t *testing.T) {
         t.Fatalf("expected the discovering close to report the failure")
     }
 
-    if closeErr := applicationInstance.close(); nil != closeErr {
+    if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
         t.Fatalf("expected the repeated close not to re-report the memoized failure, got: %v", closeErr)
     }
 }
@@ -170,7 +170,7 @@ func TestClose_DoesNotRereportAFailureSomebodyElseDiscovered(t *testing.T) {
 func TestClose_ReportsTheFailureItDiscoveredItself(t *testing.T) {
     applicationInstance := newFailingCloseApplication(t)
 
-    closeErr := applicationInstance.close()
+    closeErr := applicationInstance.close(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the discovering close to report the teardown failure")
     }
@@ -814,7 +814,7 @@ func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
     }()
 
     stepRan := false
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func()) bool {
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
         stepRan = true
 
         return false
@@ -846,8 +846,8 @@ func TestCloseAndExitOnFailure_ACompletedTeardownExitsZero(t *testing.T) {
         applicationExit = originalExit
     }()
 
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func()) bool {
-        step()
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
+        step(context.Background())
 
         return true
     }
@@ -875,7 +875,7 @@ func TestCloseAndExitOnFailure_HandsTheShieldTheDeclaredTeardownBudget(t *testin
     }()
 
     receivedBudget := time.Duration(0)
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func()) bool {
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
         receivedBudget = budget
 
         return true
@@ -901,7 +901,7 @@ func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudge
     }()
 
     receivedBudget := time.Duration(0)
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func()) bool {
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
         receivedBudget = budget
 
         return true

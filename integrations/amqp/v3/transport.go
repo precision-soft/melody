@@ -259,10 +259,15 @@ const closeJoinTimeout = 30 * time.Second
 
    A failed join is read together with writesInFlight rather than on its own: the publish half is equally held by a healthy confirmation inside its budget, and reading that as a wedged write left both channels open on a caller-owned connection and named a blocked write that did not exist.
 
-   The stretches are serial, so the worst case an operator budgets for is their sum: the consume join (closeJoinTimeout) plus the publish join (one publish timeout) plus either the owned connection's deadline (one publish timeout) or the caller-owned channel closes (closeJoinTimeout) — ninety seconds at the defaults, per transport.
-
    The signature promises an error and the old body could never produce one: every underlying close was discarded and teardown reporting read success whatever happened. A channel or connection already torn down by the broker answers amqp091.ErrClosed, which is the state Close exists to reach — not a failure. */
 func (instance *Transport) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* CloseWithContext is Close under a deadline its caller declares, and it is the door that makes the sum below an answer instead of a warning. The stretches are serial, so a caller with no deadline budgets for their sum: the consume join (closeJoinTimeout) plus the publish join (one publish timeout) plus either the owned connection's deadline (one publish timeout) or the caller-owned channel closes (closeJoinTimeout) — ninety seconds at the defaults, per transport, which is what an operator had to size a supervisor's termination grace against with no way to change it.
+
+   Under a deadline each stretch takes what is LEFT of it instead of its own constant, so the sum is the caller's figure however many stretches wedge, and a second transport closed after this one spends what this one did not. Measured against a broker that stopped reading, one wedged transport costs one stretch — thirty seconds — not the four-stretch sum, so the ninety is a ceiling rather than a bill. */
+func (instance *Transport) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closing = true
     instance.closeOnce.Do(func() {
@@ -270,9 +275,9 @@ func (instance *Transport) Close() error {
     })
     instance.mutex.Unlock()
 
-    instance.awaitConsumeLoop()
+    instance.awaitConsumeLoopWithin(teardownStretchWithin(closeContext, closeJoinTimeout))
 
-    publishJoined := lockWithin(&instance.publishMutex, instance.resolvedPublishTimeout())
+    publishJoined := lockWithin(&instance.publishMutex, teardownStretchWithin(closeContext, instance.resolvedPublishTimeout()))
     if true == publishJoined {
         defer instance.publishMutex.Unlock()
     }
@@ -297,7 +302,7 @@ func (instance *Transport) Close() error {
     if true == ownsConnection && nil != connection {
         deadline := time.Now()
         if true == publishJoined || false == writeInFlight {
-            deadline = deadline.Add(instance.resolvedPublishTimeout())
+            deadline = deadline.Add(teardownStretchWithin(closeContext, instance.resolvedPublishTimeout()))
         }
 
         closeErrs = append(closeErrs, ignoringAlreadyClosed(connection.CloseDeadline(deadline)))
@@ -312,7 +317,7 @@ func (instance *Transport) Close() error {
             nil,
         ))
     case false == ownsConnection:
-        closeErrs = append(closeErrs, closeChannelsWithin(closeJoinTimeout, consumeChannel, publishChannel)...)
+        closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
     default:
         closeErrs = append(closeErrs, closeChannels(consumeChannel, publishChannel)...)
     }
@@ -395,7 +400,7 @@ func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []er
 }
 
 /* the consume goroutine's own helpers (isClosing, resetConsumeChannel, ensureConsumeChannel on the reopen path) take instance.mutex, so the join must run with that mutex released or Close deadlocks against the goroutine it is waiting for. */
-func (instance *Transport) awaitConsumeLoop() {
+func (instance *Transport) awaitConsumeLoopWithin(bound time.Duration) {
     joined := make(chan struct{})
 
     go func() {
@@ -404,7 +409,14 @@ func (instance *Transport) awaitConsumeLoop() {
         close(joined)
     }()
 
-    timer := time.NewTimer(closeJoinTimeout)
+    /* a join that is already done is answered before the timer is consulted: a spent deadline arms a timer that is ready at once, and a select between two ready cases picks at random — which would leave a loop that had already ended reported as abandoned */
+    select {
+    case <-joined:
+        return
+    default:
+    }
+
+    timer := time.NewTimer(bound)
     defer timer.Stop()
 
     select {
@@ -1755,6 +1767,23 @@ func (instance *Transport) logError(runtimeInstance runtimecontract.Runtime, mes
     }
 
     logger.Error(message, exception.LogContext(err))
+}
+
+/* teardownStretchWithin answers how long one stretch of a close may take: what is LEFT of the caller's deadline, or the package's own bound when the caller declared none. Each stretch asks again rather than dividing the budget up front, because the stretches are serial and the ones that end in microseconds — a healthy consume join, a channel close over a live socket — must not have spent a share they never needed on behalf of the one that wedges.
+
+   A deadline already spent answers zero, which every waiter below reads as "do not wait": the connection is still cut and the channels are still closed, because those are the operations the teardown exists to perform, and only the WAITING is what the budget was about. */
+func teardownStretchWithin(closeContext context.Context, packageBound time.Duration) time.Duration {
+    deadline, hasDeadline := closeContext.Deadline()
+    if false == hasDeadline {
+        return packageBound
+    }
+
+    remaining := time.Until(deadline)
+    if 0 >= remaining {
+        return 0
+    }
+
+    return remaining
 }
 
 var _ messagebuscontract.Transport = (*Transport)(nil)

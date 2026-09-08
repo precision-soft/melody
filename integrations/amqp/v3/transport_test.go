@@ -2836,3 +2836,27 @@ func TestTransport_ResolveExpiredWriteAnswersAWriteThatAlreadyReturned(t *testin
         t.Fatalf("a write that had already returned was abandoned: the connection was cut under a publish that was done")
     }
 }
+
+/* every stretch of a close asks what is LEFT of the caller's deadline rather than dividing the budget up front, so the stretches that end in microseconds do not spend a share on behalf of the one that wedges; with no deadline the package bound stands in, and with a spent one the answer is zero, which every waiter reads as "do not wait". */
+func TestTeardownStretchWithin_AnswersTheRemainderOrThePackageBound(t *testing.T) {
+    if answered := teardownStretchWithin(context.Background(), closeJoinTimeout); closeJoinTimeout != answered {
+        t.Fatalf("a context with no deadline answered %s, wanted the package bound %s", answered, closeJoinTimeout)
+    }
+
+    boundedContext, cancelBounded := context.WithTimeout(context.Background(), 250*time.Millisecond)
+    defer cancelBounded()
+
+    answered := teardownStretchWithin(boundedContext, closeJoinTimeout)
+    if 0 >= answered || 250*time.Millisecond < answered {
+        t.Fatalf("a 250ms deadline answered %s", answered)
+    }
+
+    spentContext, cancelSpent := context.WithTimeout(context.Background(), time.Nanosecond)
+    defer cancelSpent()
+
+    time.Sleep(5 * time.Millisecond)
+
+    if answered := teardownStretchWithin(spentContext, closeJoinTimeout); 0 != answered {
+        t.Fatalf("a spent deadline answered %s, wanted zero", answered)
+    }
+}

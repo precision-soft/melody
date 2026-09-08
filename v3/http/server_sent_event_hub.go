@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     "sync"
     "sync/atomic"
 
@@ -258,12 +259,21 @@ func (instance *ServerSentEventHub) IsClosed() bool {
 
 /* Shutdown closes every subscriber channel and the backplane the hub owns. The backplane half was missing: the interface declares Close for a reason — the shipped implementations hold a goroutine, a cancel func and a live subscription — and nothing else in the process holds the reference, so a hub that shut down without it left them running for the life of the process while its own replicate had already stopped publishing through them. */
 func (instance *ServerSentEventHub) Shutdown() {
+    _ = instance.shutdownWithin(context.Background())
+}
+
+/* CloseWithContext is Close under a deadline the teardown declares. What the deadline bounds is the WAIT for the publishes already past the closed check, not the publishes themselves: ServerSentEventBackplane.Publish takes no context, so a replicate blocked on a broker that stopped reading cannot be cancelled from here, and closing the backplane under it is the very send-on-a-closed-channel the wait exists to prevent. So an expired budget is answered by leaving the backplane open and saying so, which is a diagnosis; the alternative is a panic on somebody else's goroutine. */
+func (instance *ServerSentEventHub) CloseWithContext(closeContext context.Context) error {
+    return instance.shutdownWithin(closeContext)
+}
+
+func (instance *ServerSentEventHub) shutdownWithin(closeContext context.Context) error {
     instance.mutex.Lock()
 
     if true == instance.closed {
         instance.mutex.Unlock()
 
-        return
+        return nil
     }
 
     instance.closed = true
@@ -283,24 +293,58 @@ func (instance *ServerSentEventHub) Shutdown() {
     instance.mutex.Unlock()
 
     if nil == backplane {
-        return
+        return nil
     }
 
     /* the publishes that were already past the closed check finish before the backplane they hold is closed under them */
-    instance.publishesInFlight.Wait()
+    if false == awaitPublishesInFlight(closeContext, &instance.publishesInFlight) {
+        return exception.NewError(
+            "server sent event hub stopped waiting for the publishes in flight when its close deadline passed; the backplane was left open under them",
+            exceptioncontract.Context{
+                "reason": "hub shutdown",
+            },
+            closeContext.Err(),
+        )
+    }
 
-    closeServerSentEventBackplane(backplane, logger, "hub shutdown")
-}
-
-/* Close is Shutdown under the one name the framework's teardown recognises. The container closes a service by asserting Close() error on it, so a hub named only Shutdown was the single component in the framework its own ordered teardown could not see: it was skipped in silence, and the only thing that stopped it was a composition root remembering to register an http shutdown hook by hand — which an application running as a worker or a cli command never reaches at all. */
-func (instance *ServerSentEventHub) Close() error {
-    instance.Shutdown()
+    closeServerSentEventBackplane(closeContext, backplane, logger, "hub shutdown")
 
     return nil
 }
 
-func closeServerSentEventBackplane(backplane ServerSentEventBackplane, logger loggingcontract.Logger, reason string) {
-    closeErr := recoverServerSentEventBackplaneClose(backplane)
+/* awaitPublishesInFlight waits for the replicates already past the closed check, up to the deadline the teardown carries, and answers whether they all ended. The wait runs on a goroutine because a WaitGroup cannot be selected on; the goroutine ends with the last publish whether anybody is still listening or not. */
+func awaitPublishesInFlight(closeContext context.Context, publishesInFlight *sync.WaitGroup) bool {
+    waited := make(chan struct{})
+
+    go func() {
+        publishesInFlight.Wait()
+
+        close(waited)
+    }()
+
+    select {
+    case <-waited:
+        return true
+    case <-closeContext.Done():
+    }
+
+    /* a wait that ended in the same instant the deadline did ended: both channels are then ready and a select between them picks at random, which would report publishes that had finished as publishes still in flight */
+    select {
+    case <-waited:
+        return true
+    default:
+    }
+
+    return false
+}
+
+/* Close is Shutdown under the one name the framework's teardown recognises. The container closes a service by asserting Close() error on it, so a hub named only Shutdown was the single component in the framework its own ordered teardown could not see: it was skipped in silence, and the only thing that stopped it was a composition root remembering to register an http shutdown hook by hand — which an application running as a worker or a cli command never reaches at all. */
+func (instance *ServerSentEventHub) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+func closeServerSentEventBackplane(closeContext context.Context, backplane ServerSentEventBackplane, logger loggingcontract.Logger, reason string) {
+    closeErr := recoverServerSentEventBackplaneClose(closeContext, backplane)
     if nil == closeErr {
         return
     }
@@ -315,7 +359,7 @@ func closeServerSentEventBackplane(backplane ServerSentEventBackplane, logger lo
     )
 }
 
-func recoverServerSentEventBackplaneClose(backplane ServerSentEventBackplane) (closeErr error) {
+func recoverServerSentEventBackplaneClose(closeContext context.Context, backplane ServerSentEventBackplane) (closeErr error) {
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -324,6 +368,14 @@ func recoverServerSentEventBackplaneClose(backplane ServerSentEventBackplane) (c
 
         closeErr = RecoverToError(recoveredValue)
     }()
+
+    /* the backplane's own context-taking door is preferred when it carries one, so the teardown's deadline reaches the amqp and redis stretches underneath instead of stopping at the hub that owns them */
+    contextCloseable, isContextCloseable := backplane.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if true == isContextCloseable {
+        return contextCloseable.CloseWithContext(closeContext)
+    }
 
     return backplane.Close()
 }

@@ -2,6 +2,7 @@ package container
 
 import (
     "container/heap"
+    "context"
     "fmt"
     "reflect"
     "runtime/debug"
@@ -43,14 +44,23 @@ func (instance *container) resolutionsRefused() bool {
 
    That blocking makes Close re-entrant-unsafe by construction: a service whose own Close calls back into container.Close re-enters the teardown that is waiting on it and deadlocks the whole shutdown. A service that closes defensively asks IsClosed first — the flag is set before the first service Close runs, so during the teardown it already answers true and the defensive caller skips. The scope resolves the same re-entrance by reading a closed scope instead of blocking, but its second caller may also return while services are still closing; this container keeps the stronger contract for its concurrent callers and leaves re-entrance to the IsClosed protocol. */
 func (instance *container) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* CloseWithContext is Close under a deadline the caller declares, handed to every service that can observe one. It is declared on the container rather than on the Container contract because a method added there is a method every application carrying its own implementation would have to grow, and because the caller that has a budget already reaches this value through a type assertion for IsClosed; WithTeardownDependency is declared the same way, for the same reason.
+
+   The deadline is shared, not copied: it bounds the teardown as a whole, which is the figure a supervisor's termination grace is measured against, so each service sees what is LEFT of it rather than a fresh window of its own. A component that spends the whole budget therefore starves the ones the graph puts after it — measured on the example, seven of eight closes cost under two milliseconds together and one costs thirty seconds — and that is the intended reading of a whole-teardown budget: what the operator learns is which service ate it, which is what the failure map names.
+
+   A context with no deadline is the caller saying there is no term, and every service that reads it is told the same. */
+func (instance *container) CloseWithContext(closeContext context.Context) error {
     instance.closeOnce.Do(func() {
-        instance.closeErr = instance.closeInternal()
+        instance.closeErr = instance.closeInternal(closeContext)
     })
 
     return instance.closeErr
 }
 
-func (instance *container) closeInternal() error {
+func (instance *container) closeInternal(closeContext context.Context) error {
     type closer interface {
         Close() error
     }
@@ -355,7 +365,7 @@ func (instance *container) closeInternal() error {
             continue
         }
 
-        closeErr := closeServiceValue(closeable)
+        closeErr := closeServiceValueWithin(closeContext, candidate.value, closeable)
         if nil != closeErr {
             failures[candidate.nodeKey] = errorText(closeErr)
         }
@@ -400,6 +410,47 @@ func (instance *container) closeInternal() error {
     instance.mutex.Unlock()
 
     return resultErr
+}
+
+/* closeServiceValueWithin runs one service's close under the teardown's deadline when the service can take one, and under its own terms otherwise. The preference is asked of the VALUE rather than declared on any contract, the way bunorm's registry prefers a provider's OpenContext over its Open: a service that grows the door does not have to be re-registered, and one that never grows it is not broken by the door existing.
+
+   The context-taking form is preferred whole rather than being given the plain form as a fallback for an expired deadline: a service told its deadline has already passed can still say what it did not manage to release, which is the half of a teardown an operator actually reads, and calling the unbounded form instead would spend a budget that is already gone. */
+func closeServiceValueWithin(closeContext context.Context, value any, closeable interface{ Close() error }) error {
+    contextCloseable, isContextCloseable := value.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if true == isContextCloseable {
+        return closeServiceValueWithContext(closeContext, contextCloseable)
+    }
+
+    return closeServiceValue(closeable)
+}
+
+/* closeServiceValueWithContext is closeServiceValue's twin for the context-taking door, containing a panicking close the same way and for the same reasons. */
+func closeServiceValueWithContext(
+    closeContext context.Context,
+    closeable interface {
+        CloseWithContext(closeContext context.Context) error
+    },
+) (closeErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        closeErr = exception.NewError(
+            "service close panicked",
+            exceptioncontract.Context{
+                "recoveredType":  fmt.Sprintf("%T", recoveredValue),
+                "recoveredValue": fmt.Sprintf("%v", recoveredValue),
+                "panicStack":     string(debug.Stack()),
+            },
+            exception.PanicCause(recoveredValue),
+        )
+    }()
+
+    return closeable.CloseWithContext(closeContext)
 }
 
 /* contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned.

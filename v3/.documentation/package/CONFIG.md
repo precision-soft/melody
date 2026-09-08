@@ -57,6 +57,7 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_HTTP_SESSION_TTL`                 | `kernel.http.session_ttl`                 | `0s`                                         |
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                         |
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                         |
+| `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `10s`                                        |
 | `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                   |
 | `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                         |
 | `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_dir%/%kernel.environment%.log` |
@@ -147,9 +148,17 @@ How long a process shutting down cleanly may spend releasing what it holds — c
 |---------------------------|---------------------------|---------|
 | `MELODY_TEARDOWN_TIMEOUT` | `kernel.teardown_timeout` | `10s`   |
 
-The value is a Go duration string. The default is [`DefaultTeardownTimeout`](../../config/kernel.go), ten seconds, which is what the commonest supervisor grants before it escalates to `SIGKILL` — raising the default past that would trade an abandoned teardown for a killed one. **Zero means no deadline**: the teardown is waited out for as long as its slowest component needs, which is the honest answer for a deployment whose supervisor grants an open-ended stop, and it trades the guarantee that the process ends for the guarantee that nothing is left unreleased. A negative value fails the boot, since it means neither.
+The value is a Go duration string. The default is [`DefaultTeardownTimeout`](../../config/kernel.go), ten seconds, which is what the commonest supervisor grants before it escalates to `SIGKILL` — raising the default past that would trade an abandoned teardown for a killed one. A negative value fails the boot.
 
-What raising it buys is measurable: with a budget too small the teardown is abandoned before the step that reports failures reaches them, so the only trace is one line on standard error naming the whole shutdown; with a budget the teardown fits inside, the journal names the service that failed. One amqp transport whose broker has stopped reading costs about thirty seconds to close at framework defaults, and a second transport doubles that.
+The budget is spent in two halves. The first is the deadline handed to the services being released, and every component the container closes that can take one is given it — pools, transports, backplanes, tracer providers — so what they spend is bounded by the figure declared here rather than by a constant each of them invented. The second is the headroom in which a service that honoured its deadline is allowed to say what it could not release: a service told to finish at the very instant the shutdown gives up is abandoned every time, and its report reaches nobody. So the deadline the services see is half of what is set here, and the whole of it is what a supervisor's termination grace is measured against.
+
+The deadline is shared, not handed out afresh to each service: it bounds the teardown as a whole, so a component that spends it starves the ones the teardown graph puts after it. That is deliberate, and it is what makes the answer readable — the journal names both the service that ate the budget and the ones that were left with none.
+
+What setting it buys is measurable. On the example application, with an amqp broker that has stopped reading: at the default the process exits non-zero in about five seconds and the journal names both the transport that failed and the tracer provider that was left no time to flush; before the budget reached the services, the same shutdown was abandoned at ten seconds with a single line on standard error naming nothing, and the named diagnosis needed a budget of ten minutes to appear at all.
+
+**Zero means no deadline**: the teardown is waited out for as long as its slowest component needs, and nothing is abandoned. On the same measurement it finishes in about thirty seconds with every service closed and the failure named. It is the honest answer for a deployment whose supervisor grants an open-ended stop, and only for that one — melody cannot see what grace it is running under, so under a supervisor that escalates to `SIGKILL` first, zero means the process is killed before it can report anything at all, which is strictly less than the default would have given.
+
+The http half of a clean stop is budgeted separately, by `MELODY_HTTP_SHUTDOWN_TIMEOUT`: the server drains its in-flight requests before `Run` returns, and only then does this budget start. A supervisor's grace has to cover both, so the figure to compare against a ten-second termination grace is the sum of the two, not this one alone.
 
 ### Static file cache
 
@@ -309,11 +318,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpShutdownTimeoutKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpShutdownTimeoutKey`, `TeardownTimeoutKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpShutdownTimeout`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpShutdownTimeout`, `KernelTeardownTimeout`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

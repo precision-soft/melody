@@ -13,7 +13,7 @@ import (
 
 const defaultAsyncBufferSize = 1024
 
-/* asyncStorageCloseGrace bounds each stretch of Close: the drain first, then the wait for the cancelled save. A backend wedged on a deadline-less write would otherwise hold the whole ordered teardown hostage — the container closes services one at a time, so one full queue over a dead database was the entire process refusing to exit. After the first grace the worker's context is cancelled: a delegate that reads it aborts the in-flight save and the entries still queued are dead-lettered one by one; a delegate that does not read it — a write parked in a syscall, a custom Storage that ignores its context — cannot be interrupted from here, so after a second grace the worker is abandoned with whatever it still holds and Close returns saying so. Losing those entries to a backend that stopped answering is the trade this storage already made when it chose not to block the request path. A variable rather than a constant so its test can build the wedged state without holding the suite for the real grace. */
+/* asyncStorageCloseGrace bounds each stretch of a close whose caller declared no deadline: the drain first, then the wait for the cancelled save. Under a declared one the two stretches are halves of what it leaves, and this figure is what stands in for it when there is none. A backend wedged on a deadline-less write would otherwise hold the whole ordered teardown hostage — the container closes services one at a time, so one full queue over a dead database was the entire process refusing to exit. After the first grace the worker's context is cancelled: a delegate that reads it aborts the in-flight save and the entries still queued are dead-lettered one by one; a delegate that does not read it — a write parked in a syscall, a custom Storage that ignores its context — cannot be interrupted from here, so after a second grace the worker is abandoned with whatever it still holds and Close returns saying so. Losing those entries to a backend that stopped answering is the trade this storage already made when it chose not to block the request path. A variable rather than a constant so its test can build the wedged state without holding the suite for the real grace. */
 var asyncStorageCloseGrace = 5 * time.Second
 
 /* defaultAsyncStorageLogger is where a dead-letter goes when nothing installed a logger through WithLogger. The queue swallows the outcome of every write it takes — a failed save, a panicking delegate, an entry the worker never saw — so a nil default made each of those exits silent in every assembly that did not know to wire a logger, which measured as all of them: the counters were the only signal, and nothing read them. The emergency logger is the process's journal of last resort, the same fallback the rate limiter and the database providers take. A variable so the test can capture what would otherwise go to standard error. */
@@ -129,8 +129,30 @@ func (instance *AsyncStorage) Failed() uint64 {
     return instance.failed.Load()
 }
 
-/* Close drains the queue and joins the worker, bounded by asyncStorageCloseGrace on each stretch: past the first grace the worker's context is cancelled, so a delegate that reads it aborts the in-flight save and the remaining entries are dead-lettered instead of holding the teardown; past a second grace a delegate that ignored the cancellation is abandoned together with the entries still queued behind it, and Close returns naming how many, since nothing in this process can end a write the delegate will not give up. Both forced forms are reported as errors so the teardown's record names what was cut short. The abandoned entries are not counted as dropped: the worker still holds them and writes them if the delegate ever answers. */
+/* Close drains the queue and joins the worker under the package grace on each stretch, which is what CloseWithContext spends when its caller declared no deadline: past the first grace the worker's context is cancelled, so a delegate that reads it aborts the in-flight save and the remaining entries are dead-lettered instead of holding the teardown; past a second grace a delegate that ignored the cancellation is abandoned together with the entries still queued behind it, and Close returns naming how many, since nothing in this process can end a write the delegate will not give up. Both forced forms are reported as errors so the teardown's record names what was cut short. The abandoned entries are not counted as dropped: the worker still holds them and writes them if the delegate ever answers. */
 func (instance *AsyncStorage) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* closeGracesWithin splits the time the caller's deadline leaves into the two stretches Close spends: one draining the queue, one waiting for the delegate to react to the cancellation it is then sent. They are equal because neither can be sized without the other — a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them. A caller with no deadline gets the package grace on both, which is what this storage did before anybody could declare one. */
+func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (drainGrace time.Duration, cancellationGrace time.Duration) {
+    deadline, hasDeadline := closeContext.Deadline()
+    if false == hasDeadline {
+        return asyncStorageCloseGrace, asyncStorageCloseGrace
+    }
+
+    remaining := time.Until(deadline)
+    if 0 >= remaining {
+        return 0, 0
+    }
+
+    return remaining / 2, remaining / 2
+}
+
+/* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A deadline already passed leaves both at zero: the queue is closed, the worker cancelled, and the answer names what was still queued — which is the whole of what the operator can still be told once the budget is gone. */
+func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) error {
+    drainGrace, cancellationGrace := instance.closeGracesWithin(closeContext)
+
     instance.mutex.Lock()
     alreadyClosed := instance.closed
     if false == alreadyClosed {
@@ -145,24 +167,31 @@ func (instance *AsyncStorage) Close() error {
         close(drained)
     }()
 
+    /* a drain that is already done is answered as done before any timer is consulted: with a deadline that has already passed both graces are zero and both channels are ready at once, and a select between two ready cases picks at random — which would report a queue that emptied as a queue that was abandoned. */
     select {
     case <-drained:
         return nil
-    case <-time.After(asyncStorageCloseGrace):
+    default:
+    }
+
+    select {
+    case <-drained:
+        return nil
+    case <-time.After(drainGrace):
     }
 
     instance.workerCancel()
 
     select {
     case <-drained:
-    case <-time.After(asyncStorageCloseGrace):
+    case <-time.After(cancellationGrace):
         if true == alreadyClosed {
             return nil
         }
 
         return exception.NewError(
             "async audit storage abandoned a save that ignored its cancellation after a second drain grace; the entries still queued behind it were not stored",
-            map[string]any{"grace": asyncStorageCloseGrace.String(), "queued": len(instance.queue)},
+            map[string]any{"grace": cancellationGrace.String(), "queued": len(instance.queue)},
             nil,
         )
     }
@@ -173,7 +202,7 @@ func (instance *AsyncStorage) Close() error {
 
     return exception.NewError(
         "async audit storage cancelled a wedged save after the drain grace; the remaining entries were dead-lettered",
-        map[string]any{"grace": asyncStorageCloseGrace.String()},
+        map[string]any{"grace": drainGrace.String()},
         nil,
     )
 }
