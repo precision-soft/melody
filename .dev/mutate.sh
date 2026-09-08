@@ -63,16 +63,28 @@ while IFS='~' read -r file line occurrence anchor replacement package runpattern
     [ -z "${file}" ] && continue
     case "${file}" in \#*) continue ;; esac
     echo "${package} ${tags}"
-done < "${TABLE}" | sort -u | while read -r package tags; do
+# the package and its optional tags are separated by a SPACE, so this read must name that separator: the
+# batch runner this harness is invoked through sets IFS to newline+tab, and an inherited IFS put the whole
+# line — package plus a trailing space — into ${package}, so every control ran `go test "<path> "` and
+# answered "directory not found". The harness abandoned correctly, but for a reason that was its own.
+done < "${TABLE}" | sort -u | while IFS=' ' read -r package tags; do
+    # the control's output is KEPT and shown when it fails: discarded, a red control says only that the
+    # package is red, which sends the reader to reproduce it by hand — and a control that fails for a
+    # reason of the harness's own (an inherited IFS, a missing environment) then looks exactly like one
+    # that fails for a reason of the code's
+    CONTROL_LOG="${COPY}.control.log"
+
     if [ -n "${tags}" ]; then
-        if ! go test -tags "${tags}" "${package}" >/dev/null 2>&1; then
+        if ! go test -tags "${tags}" "${package}" >"${CONTROL_LOG}" 2>&1; then
             echo "CONTROL FAILED for ${package} under -tags ${tags} — abandoning, nothing can be concluded"
+            tail -30 "${CONTROL_LOG}"
             exit 1
         fi
         echo "control green: ${package} (-tags ${tags})"
     else
-        if ! go test "${package}" >/dev/null 2>&1; then
+        if ! go test "${package}" >"${CONTROL_LOG}" 2>&1; then
             echo "CONTROL FAILED for ${package} — abandoning, nothing can be concluded"
+            tail -30 "${CONTROL_LOG}"
             exit 1
         fi
         echo "control green: ${package}"

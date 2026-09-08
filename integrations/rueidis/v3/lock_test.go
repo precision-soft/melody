@@ -267,3 +267,46 @@ func TestLocker_CreateLockHandsTheCallTimeoutToTheLock(t *testing.T) {
         t.Fatalf("expected the lock to carry the locker's call timeout, got %v", lock.callTimeout)
     }
 }
+
+/* an acquire that ends in an error ends AMBIGUOUSLY: the compare-and-set may have run on the store while the reply was lost, and every later campaign mints a fresh token — leader_gate.go does so deliberately — so a lease left behind that way refuses every one of them until its ttl lapses, with nobody holding the lock. */
+func TestRedisLock_AnAcquireThatLostItsReplyDoesNotStrandTheLease(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := "melody:lock:test:ambiguous:" + t.Name()
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLockerWithOptions(client, WithLockerCallTimeout(50*time.Millisecond))
+    lock := locker.CreateLock(name, 10*time.Second)
+
+    /* the store runs both scripts and answers neither: an integer reply is what a lua script answers here */
+    lockGate.WedgeIntegerReplies()
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil == acquireErr {
+        t.Fatalf("expected the acquire to fail while its reply is swallowed")
+    }
+
+    if true == acquired {
+        t.Fatalf("an acquire that never read its answer must not report the lock as held")
+    }
+
+    /* the give-back runs detached, so the caller's own deadline is not charged for it; what is asserted is that the lease does not outlive the acquire that may have taken it */
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(name).Build()).ToString()
+        if nil != storedErr {
+            return
+        }
+
+        if time.Now().Add(50 * time.Millisecond).After(deadline) {
+            t.Fatalf("the lease was stranded: the key still holds %q, and every fresh campaign is refused until it lapses", stored)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    t.Fatalf("the lease was stranded")
+}

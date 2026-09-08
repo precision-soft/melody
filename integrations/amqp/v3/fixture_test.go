@@ -35,6 +35,11 @@ type gatedConn struct {
     closeOnce       sync.Once
     deadlineChanged chan struct{}
     blockedWrites   atomic.Int64
+
+    /* the reply half of the gate: a frame the socket already delivered is HELD instead of being handed to the client, which is how a broker that accepts a publish and never acks it looks from inside the process. Writes keep passing, so the stretch under test is the confirmation and nothing else. */
+    heldReplies atomic.Bool
+    releaseOnce sync.Once
+    released    chan struct{}
 }
 
 func newGatedConn(conn net.Conn) *gatedConn {
@@ -42,7 +47,32 @@ func newGatedConn(conn net.Conn) *gatedConn {
         Conn:            conn,
         closed:          make(chan struct{}),
         deadlineChanged: make(chan struct{}, 1),
+        released:        make(chan struct{}),
     }
+}
+
+/* HoldReplies stops handing the client the frames the socket delivers, so a publish is written and its confirmation never arrives. */
+func (instance *gatedConn) HoldReplies() {
+    instance.heldReplies.Store(true)
+}
+
+func (instance *gatedConn) ReleaseReplies() {
+    instance.heldReplies.Store(false)
+    instance.releaseOnce.Do(func() { close(instance.released) })
+}
+
+func (instance *gatedConn) Read(buffer []byte) (int, error) {
+    count, readErr := instance.Conn.Read(buffer)
+
+    if true == instance.heldReplies.Load() {
+        select {
+        case <-instance.released:
+        case <-instance.closed:
+            return 0, net.ErrClosed
+        }
+    }
+
+    return count, readErr
 }
 
 func (instance *gatedConn) Wedge() {

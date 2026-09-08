@@ -121,7 +121,7 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
 
     usedChannel, publishErr := instance.publishOnce(payload)
     if nil != publishErr {
-        if true == instance.isClosing() || true == errors.Is(publishErr, errServerSentEventBackplanePublishTimedOut) {
+        if true == instance.refusalKeepsTheChannel(publishErr) {
             return exception.NewError("amqp sse backplane publish failed", map[string]any{"topic": topic}, publishErr)
         }
 
@@ -129,13 +129,24 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
 
         retryChannel, retryErr := instance.publishOnce(payload)
         if nil != retryErr {
-            instance.resetPublishChannel(retryChannel)
+            if false == instance.refusalKeepsTheChannel(retryErr) {
+                instance.resetPublishChannel(retryChannel)
+            }
 
             return exception.NewError("amqp sse backplane publish failed", map[string]any{"topic": topic}, retryErr)
         }
     }
 
     return nil
+}
+
+/* refusalKeepsTheChannel reports whether a publish failure must leave the cached channel where it is. A backplane that is closing has nothing to reopen; a write that ran out of time is still HOLDING the channel, so closing it here would join that blocked write over the same socket — the reset is the blocked write spelled a second time. It is one door read by both attempts because the two used to disagree: the first was guarded, the retry reset unconditionally, and a retry is exactly the attempt that meets a socket already known to be blocked. */
+func (instance *ServerSentEventBackplane) refusalKeepsTheChannel(publishErr error) bool {
+    if true == instance.isClosing() {
+        return true
+    }
+
+    return errors.Is(publishErr, errServerSentEventBackplanePublishTimedOut)
 }
 
 /* Close is bounded on every stretch, because none of the amqp client's RPCs observe a context and all of them share the send locks a blocked write holds: it joins the publish half under the call timeout, cuts an owned connection with a deadline — at once when the join failed, since the write is then known to be wedged, and one call timeout ahead otherwise, so a clean close handshake still gets its round trip — closes the channels only where that cannot block, and joins the listen goroutine under the same bound the transport keeps. No amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while teardown waits. */
@@ -462,21 +473,25 @@ func (instance *ServerSentEventBackplane) ensurePublishChannel() (*amqp091.Chann
     }
 
     instance.mutex.Lock()
-    defer instance.mutex.Unlock()
 
     if true == instance.closing {
+        instance.mutex.Unlock()
         channel.Close()
 
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }
 
     if nil != instance.publishChannel && false == instance.publishChannel.IsClosed() {
+        cached := instance.publishChannel
+        instance.mutex.Unlock()
+
         channel.Close()
 
-        return instance.publishChannel, nil
+        return cached, nil
     }
 
     instance.publishChannel = channel
+    instance.mutex.Unlock()
 
     return channel, nil
 }
@@ -586,18 +601,19 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
 /* closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down; a nil failed channel identifies no specific channel and is a no-op, mirroring the transport's resetPublishChannel. */
 func (instance *ServerSentEventBackplane) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
-    defer instance.mutex.Unlock()
 
-    if nil == instance.publishChannel {
+    if nil == instance.publishChannel || nil == failed || instance.publishChannel != failed {
+        instance.mutex.Unlock()
+
         return
     }
 
-    if nil == failed || instance.publishChannel != failed {
-        return
-    }
-
-    instance.publishChannel.Close()
+    detached := instance.publishChannel
     instance.publishChannel = nil
+    instance.mutex.Unlock()
+
+    /* the close is an RPC over the socket and runs with the mutex RELEASED, which is what the Close doc above promises: held across it, a peer that stopped reading would park isClosing and the whole publish path behind one write */
+    detached.Close()
 }
 
 func (instance *ServerSentEventBackplane) isClosing() bool {

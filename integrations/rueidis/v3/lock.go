@@ -109,10 +109,27 @@ func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
 
     acquired, resultErr := result.AsInt64()
     if nil != resultErr {
+        instance.releaseAmbiguousAcquire()
+
         return false, exception.NewError("redis lock acquire failed", map[string]any{"name": instance.name}, resultErr)
     }
 
     return 1 == acquired, nil
+}
+
+/* releaseAmbiguousAcquire gives back a lease this acquire may have taken without ever learning that it did. An acquire that ends in an error ends AMBIGUOUSLY: the call is bounded, so a store that answers late — or a connection that drops after the server ran the script — leaves the compare-and-set executed and the key holding THIS lock's token for its whole ttl, while the caller is told it did not get the lock. Nothing else can clear it: every later campaign mints a fresh token, deliberately, so the compare-and-set refuses all of them until the ttl lapses with nobody holding the lock — measured on a live store, a one-second budget bought a twenty-nine-second lockout.
+
+   It runs DETACHED, on a goroutine and on a context of its own, for two reasons that pull the same way: the caller's context is often the very thing that ended the acquire, and a caller that carries a deadline TIGHTER than the call timeout must keep it — charging it a second round trip would take an acquire refused in ten milliseconds to a full budget. The compare-and-delete can only ever remove a key carrying this lock's own token, so it can never take a lease from a holder that legitimately owns one; a failure is silent, and a process that exits before it lands leaves exactly the lease a crash would leave, which is what the ttl is documented to cover. */
+func (instance *redisLock) releaseAmbiguousAcquire() {
+    go func() {
+        /* a panic on a bare goroutine takes the process down with it, and this one runs for a caller that has already been answered */
+        defer func() { _ = recover() }()
+
+        releaseContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
+        defer cancel()
+
+        _ = lockReleaseScript.Exec(releaseContext, instance.client, []string{instance.name}, []string{instance.token}).Error()
+    }()
 }
 
 func (instance *redisLock) Release(runtimeInstance runtimecontract.Runtime) error {

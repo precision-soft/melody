@@ -2519,3 +2519,211 @@ func TestTransport_CloseReturnsWhenTheSocketWedgedWhileIdle(t *testing.T) {
 
     awaitOutcome(t, "close on a socket that wedged while idle", closeOutcome, 3*time.Second)
 }
+
+/* the confirmation is the third stretch a publish spends time in, and the caller's context bounds none of it on the paths melody publishes from: a broker that accepts the write and never acks used to park Send for good, holding the publish mutex with it. */
+func TestTransport_SendIsBoundedWhenTheBrokerNeverConfirms(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+    defer gated.ReleaseReplies()
+
+    gated.HoldReplies()
+
+    outcome := make(chan error, 1)
+    go func() {
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "unconfirmed"}))
+    }()
+
+    sendErr := awaitOutcome(t, "send whose confirmation never arrives", outcome, 3*time.Second)
+    if nil == sendErr {
+        t.Fatalf("expected the unconfirmed send to fail")
+    }
+
+    if false == strings.Contains(sendErr.Error(), "confirmation wait failed") {
+        t.Fatalf("expected the refusal to name the confirmation wait, got: %v", sendErr)
+    }
+
+    if 0 != gated.BlockedWrites() {
+        t.Fatalf("expected the socket never to have been wedged, got %d blocked writes", gated.BlockedWrites())
+    }
+}
+
+/* a send that ran out of time waiting for its TURN never touched the socket, so it may not report a blocked write and may not mark the transport wedged — which took every later send out of service for as long as another send's confirmation ran. */
+func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    transport.publishMutex.Lock()
+
+    outcome := make(chan error, 1)
+    go func() {
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "queued"}))
+    }()
+
+    sendErr := awaitOutcome(t, "send queued behind the publish mutex", outcome, 3*time.Second)
+
+    transport.publishMutex.Unlock()
+
+    if nil == sendErr || false == strings.Contains(sendErr.Error(), "did not reach the socket within the publish timeout") {
+        t.Fatalf("expected the refusal to name the queue rather than a blocked write, got: %v", sendErr)
+    }
+
+    if false == errors.Is(sendErr, errPublishTimedOut) {
+        t.Fatalf("expected the publish-timeout sentinel, got: %v", sendErr)
+    }
+
+    transport.mutex.Lock()
+    wedged := transport.wedged
+    transport.mutex.Unlock()
+
+    if true == wedged {
+        t.Fatalf("a send that never reached the socket marked the transport wedged")
+    }
+
+    if 0 != gated.BlockedWrites() {
+        t.Fatalf("expected the queued send never to have reached the socket, got %d blocked writes", gated.BlockedWrites())
+    }
+}
+
+/* the publish a caller was told did not go out must not go out a moment later: the goroutine takes its turn, finds the caller gone, and returns without writing. */
+func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    before := publishedFrameCount(t, connection)
+
+    transport.publishMutex.Lock()
+
+    outcome := make(chan error, 1)
+    go func() {
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "abandoned"}))
+    }()
+
+    if sendErr := awaitOutcome(t, "abandoned send", outcome, 3*time.Second); nil == sendErr {
+        t.Fatalf("expected the queued send to fail")
+    }
+
+    transport.publishMutex.Unlock()
+
+    /* give the goroutine every chance to publish: what is asserted is that it does not */
+    time.Sleep(500 * time.Millisecond)
+
+    if 0 != gated.BlockedWrites() {
+        t.Fatalf("expected no write at all, got %d blocked writes", gated.BlockedWrites())
+    }
+
+    after := publishedFrameCount(t, connection)
+    if before != after {
+        t.Fatalf("the abandoned publish reached the broker: the queue went from %d to %d", before, after)
+    }
+}
+
+func publishedFrameCount(t *testing.T, connection *amqp091.Connection) int {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("inspect channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    queue, inspectErr := channel.QueueInspect("melody.amqp.test.wedge")
+    if nil != inspectErr {
+        t.Fatalf("inspect: %v", inspectErr)
+    }
+
+    return queue.Messages
+}
+
+/* every reader of instance.mutex — isClosing among them, which the consume loop asks at each blocking point — must stay answerable while a channel close is on the socket. */
+func TestTransport_IsClosingAnswersWhileAChannelCloseIsOnAWedgedSocket(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, _ := newWedgeTestTransport(t, connection, nil)
+
+    channel, _, channelErr := transport.ensurePublishChannel()
+    if nil != channelErr {
+        t.Fatalf("ensurePublishChannel: %v", channelErr)
+    }
+
+    gated.Wedge()
+
+    go transport.resetPublishChannel(channel)
+
+    awaitBlockedWrites(t, gated, 1)
+
+    answered := make(chan bool, 1)
+    go func() { answered <- transport.isClosing() }()
+
+    select {
+    case <-answered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("isClosing did not answer while a channel close was on the wedged socket")
+    }
+}
+
+/* a refusal that names an earlier blocked write is not a channel fault: the one retry meets the same refusal, and the reset before it tears down a channel this publish never used. */
+func TestTransport_AWedgedRefusalIsNotReportedAsRetryable(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    gated.Wedge()
+
+    outcome := make(chan error, 1)
+    go func() {
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedging"}))
+    }()
+
+    if firstErr := awaitOutcome(t, "wedging send", outcome, 3*time.Second); nil == firstErr {
+        t.Fatalf("expected the wedging send to fail")
+    }
+
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "refused"}), "")
+    if nil != buildErr {
+        t.Fatalf("buildPublishing: %v", buildErr)
+    }
+
+    exchange, routingKey := transport.mainTarget()
+
+    recoverable, refusalErr := transport.publishRecoverable(runtimeInstance.Context(), exchange, routingKey, publishing)
+    if nil == refusalErr {
+        t.Fatalf("expected the send to be refused while the earlier write is blocked")
+    }
+
+    if true == recoverable {
+        t.Fatalf("the refusal was reported as recoverable, so a caller that keeps trying would spend its attempts on it")
+    }
+}
+
+/* a publish half a join could not take is BUSY, which a healthy confirmation inside its budget produces just as well as a wedged write: teardown must not read that as a blocked write, leave both channels open and name a write that does not exist. */
+func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, _ := newWedgeTestTransport(t, connection, nil)
+
+    channel, _, channelErr := transport.ensurePublishChannel()
+    if nil != channelErr {
+        t.Fatalf("ensurePublishChannel: %v", channelErr)
+    }
+
+    /* the publish half is held with nothing on the socket, which is what a confirmation inside its own budget looks like to the join */
+    transport.publishMutex.Lock()
+    defer transport.publishMutex.Unlock()
+
+    closeErr := transport.Close()
+
+    if nil != closeErr && true == strings.Contains(closeErr.Error(), "left a publish write blocked") {
+        t.Fatalf("close named a blocked write over a socket that was never wedged: %v", closeErr)
+    }
+
+    if false == channel.IsClosed() {
+        t.Fatalf("close left the publish channel open on a caller-owned connection with nothing in flight")
+    }
+
+    if 0 != gated.BlockedWrites() {
+        t.Fatalf("expected the socket never to have been wedged, got %d blocked writes", gated.BlockedWrites())
+    }
+}

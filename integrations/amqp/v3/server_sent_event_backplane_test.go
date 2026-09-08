@@ -3,6 +3,7 @@ package amqp
 import (
     "context"
     "errors"
+    "fmt"
     "os"
     "strings"
     "sync"
@@ -646,5 +647,60 @@ func TestServerSentEventBackplane_CloseNamesTheBlockedWriteOnAWedgedCallerOwnedC
     closeErr := awaitOutcome(t, "close on a wedged caller-owned connection", closeOutcome, 3*time.Second)
     if false == errorChainContains(closeErr, "left a publish write blocked on a caller-owned connection") {
         t.Fatalf("expected close to name the write it could not end, got: %v", closeErr)
+    }
+}
+
+func TestServerSentEventBackplane_RefusalKeepsTheChannelForATimedOutWriteAndForAClosingBackplane(t *testing.T) {
+    instance := &ServerSentEventBackplane{}
+
+    if true == instance.refusalKeepsTheChannel(errors.New("channel is closed")) {
+        t.Fatalf("an ordinary failure must let the caller reset the channel it failed on")
+    }
+
+    if false == instance.refusalKeepsTheChannel(fmt.Errorf("wrapped: %w", errServerSentEventBackplanePublishTimedOut)) {
+        t.Fatalf("a write that ran out of time is still holding the channel; resetting it joins that write")
+    }
+
+    instance.mutex.Lock()
+    instance.closing = true
+    instance.mutex.Unlock()
+
+    if false == instance.refusalKeepsTheChannel(errors.New("channel is closed")) {
+        t.Fatalf("a closing backplane has nothing to reopen, so it keeps the channel it has")
+    }
+}
+
+/* the sister of the transport's guard: the Close doc promises that no amqp call runs under instance.mutex so isClosing and the publish path stay answerable while teardown waits, and a channel close held under it made that false for as long as the socket was blocked. */
+func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedSocket(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Connection:  connection,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.mutex",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    channel, channelErr := backplane.ensurePublishChannel()
+    if nil != channelErr {
+        t.Fatalf("ensurePublishChannel: %v", channelErr)
+    }
+
+    gated.Wedge()
+
+    go backplane.resetPublishChannel(channel)
+
+    awaitBlockedWrites(t, gated, 1)
+
+    answered := make(chan bool, 1)
+    go func() { answered <- backplane.isClosing() }()
+
+    select {
+    case <-answered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("isClosing did not answer while a channel close was on the wedged socket")
     }
 }
