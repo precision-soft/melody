@@ -5,6 +5,7 @@ import (
     "crypto/rand"
     "encoding/hex"
     "strconv"
+    "sync/atomic"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -83,6 +84,9 @@ type redisLock struct {
     ttl         time.Duration
     token       string
     callTimeout time.Duration
+
+    /* held records whether this handle believes it currently owns the lease, so the give-back of an AMBIGUOUS acquire can tell a lease this acquire may have taken from one this handle already legitimately owned. Acquire is reentrant on this lock's own token by contract, and the token is minted once per handle, so without this the two are indistinguishable at the store: both are the key carrying this token. It is atomic because the framework's helpers drive one lock from more than one goroutine — RunExclusive and LeaderGate renew and release off the path that acquired. */
+    held atomic.Bool
 }
 
 /* callContext caps the runtime context with the call timeout: context.WithTimeout keeps whichever deadline is earlier, so a caller that already carries a tighter deadline — the framework's lock helpers renew and release under one of their own — still wins, while a request whose context has no deadline, as melody's http kernel leaves it, is bounded here rather than held for the client's own connection timeout. */
@@ -114,13 +118,23 @@ func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
         return false, exception.NewError("redis lock acquire failed", map[string]any{"name": instance.name}, resultErr)
     }
 
+    if 1 == acquired {
+        instance.held.Store(true)
+    }
+
     return 1 == acquired, nil
 }
 
 /* releaseAmbiguousAcquire gives back a lease this acquire may have taken without ever learning that it did. An acquire that ends in an error ends AMBIGUOUSLY: the call is bounded, so a store that answers late — or a connection that drops after the server ran the script — leaves the compare-and-set executed and the key holding THIS lock's token for its whole ttl, while the caller is told it did not get the lock. Nothing else can clear it: every later campaign mints a fresh token, deliberately, so the compare-and-set refuses all of them until the ttl lapses with nobody holding the lock — measured on a live store, a one-second budget bought a twenty-nine-second lockout.
 
-   It runs DETACHED, on a goroutine and on a context of its own, for two reasons that pull the same way: the caller's context is often the very thing that ended the acquire, and a caller that carries a deadline TIGHTER than the call timeout must keep it — charging it a second round trip would take an acquire refused in ten milliseconds to a full budget. The compare-and-delete can only ever remove a key carrying this lock's own token, so it can never take a lease from a holder that legitimately owns one; a failure is silent, and a process that exits before it lands leaves exactly the lease a crash would leave, which is what the ttl is documented to cover. */
+   It runs DETACHED, on a goroutine and on a context of its own, for two reasons that pull the same way: the caller's context is often the very thing that ended the acquire, and a caller that carries a deadline TIGHTER than the call timeout must keep it — charging it a second round trip would take an acquire refused in ten milliseconds to a full budget. A failure is silent, and a process that exits before it lands leaves exactly the lease a crash would leave, which is what the ttl is documented to cover.
+
+   It is refused outright when this handle ALREADY holds the lease. The compare-and-delete removes a key carrying this lock's own token, and the holder of such a key can be this very handle: acquire is reentrant on its own token — LOCK.md states it as contract and both backends are pinned to it — so a caller that holds the lock and re-acquires it, as a renewal loop does, meets a give-back that would delete the lease it is still inside. At the store the two cases are one and the same key, and only the handle knows which; the flag is what it knows. The direction of the remaining error matters and is chosen: a stale true skips a give-back and leaves the lease to lapse on its ttl, which is the lockout this door was built to shorten, while a stale false takes a live lease and lets two callers into one critical section. */
 func (instance *redisLock) releaseAmbiguousAcquire() {
+    if true == instance.held.Load() {
+        return
+    }
+
     go func() {
         /* a panic on a bare goroutine takes the process down with it, and this one runs for a caller that has already been answered */
         defer func() { _ = recover() }()
@@ -132,7 +146,10 @@ func (instance *redisLock) releaseAmbiguousAcquire() {
     }()
 }
 
+/* Release gives up this handle's claim BEFORE the round trip rather than after it, so an ambiguous release cannot leave the handle claiming a lease it may no longer hold: the caller is done with the lock either way, and a claim kept past that point would silence the give-back of a later ambiguous acquire and strand exactly the lease that door exists to reclaim. */
 func (instance *redisLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    instance.held.Store(false)
+
     callContext, cancel := instance.callContext(runtimeInstance)
     defer cancel()
 
@@ -162,6 +179,9 @@ func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     }
 
     if 0 == refreshed {
+        /* the store has answered that the key is gone or carries another token, which is the one reading that settles the question this handle cannot settle on its own; a refresh that merely ENDED AMBIGUOUSLY leaves the claim standing, because there the safe reading is that the lease is still ours */
+        instance.held.Store(false)
+
         return exception.NewError("redis lock is no longer held", map[string]any{"name": instance.name}, nil)
     }
 

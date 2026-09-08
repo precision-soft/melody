@@ -704,3 +704,236 @@ func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedS
         t.Fatalf("isClosing did not answer while a channel close was on the wedged socket")
     }
 }
+
+
+/* backplaneWatchQueue binds a queue of its own to the backplane's fanout exchange, so what a goroutine writes AFTER its caller was told the broadcast failed is countable out of band. */
+func backplaneWatchQueue(t *testing.T, connection *amqp091.Connection, exchange string) func() int {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("watch channel: %v", channelErr)
+    }
+    t.Cleanup(func() { _ = channel.Close() })
+
+    queue, declareErr := channel.QueueDeclare("", false, true, true, false, nil)
+    if nil != declareErr {
+        t.Fatalf("watch queue: %v", declareErr)
+    }
+
+    if bindErr := channel.QueueBind(queue.Name, "", exchange, false, nil); nil != bindErr {
+        t.Fatalf("watch bind: %v", bindErr)
+    }
+
+    return func() int {
+        inspected, inspectErr := channel.QueueInspect(queue.Name)
+        if nil != inspectErr {
+            t.Fatalf("watch inspect: %v", inspectErr)
+        }
+
+        return inspected.Messages
+    }
+}
+
+/* a publish half a join could not take is BUSY, and on a hub that fans out at any rate that is the ordinary state: the mutex is taken inside the write goroutine, so broadcasts queue behind one another over a perfectly healthy socket. Teardown must not read that as a wedged write, leave both channels open on a caller-owned connection — with the fields already nil, so nothing in the process can ever close them — and name a write that does not exist. */
+func TestServerSentEventBackplane_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Connection:  connection,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.wedge",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+        t.Fatalf("healthy publish: %v", publishErr)
+    }
+
+    backplane.mutex.Lock()
+    publishChannel := backplane.publishChannel
+    consumeChannel := backplane.consumeChannel
+    backplane.mutex.Unlock()
+
+    /* the mutex is held with nothing at all on the socket, which is what a queue of broadcasts produces */
+    backplane.publishMutex.Lock()
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- backplane.Close() }()
+
+    closeErr := awaitOutcome(t, "close with the publish half merely busy", closeOutcome, 5*time.Second)
+
+    backplane.publishMutex.Unlock()
+
+    if true == errorChainContains(closeErr, "left a publish write blocked on a caller-owned connection") {
+        t.Fatalf("teardown named a blocked write over a socket nothing was ever written to: %v", closeErr)
+    }
+
+    if nil == publishChannel || false == publishChannel.IsClosed() {
+        t.Fatalf("the publish channel was left open, and the field it lived in is already nil")
+    }
+
+    if nil == consumeChannel || false == consumeChannel.IsClosed() {
+        t.Fatalf("the consume channel was left open, and the field it lived in is already nil")
+    }
+}
+
+/* a broadcast that only STOOD IN THE QUEUE says nothing about the socket: it must be told so, and it must not take the whole backplane out of service on its way out. */
+func TestServerSentEventBackplane_ABroadcastQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Connection:  connection,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.wedge",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+        t.Fatalf("healthy publish: %v", publishErr)
+    }
+
+    backplane.publishMutex.Lock()
+
+    publishOutcome := make(chan error, 1)
+    go func() { publishOutcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "queued"}) }()
+
+    publishErr := awaitOutcome(t, "broadcast queued behind the publish mutex", publishOutcome, 3*time.Second)
+
+    backplane.publishMutex.Unlock()
+
+    if nil == publishErr || false == errorChainContains(publishErr, "did not reach the socket within the call timeout") {
+        t.Fatalf("expected the refusal to name the queue rather than a blocked write, got: %v", publishErr)
+    }
+
+    backplane.mutex.Lock()
+    wedged := backplane.wedged
+    backplane.mutex.Unlock()
+
+    if true == wedged {
+        t.Fatalf("a broadcast that never reached the socket marked the whole backplane wedged, so every later broadcast is refused at once")
+    }
+
+    if 0 != gated.BlockedWrites() {
+        t.Fatalf("expected the queued broadcast never to have reached the socket, got %d blocked writes", gated.BlockedWrites())
+    }
+}
+
+/* the broadcast a caller was told did not go out must not go out a moment later: the goroutine takes its turn, finds the caller gone, and returns without writing — otherwise an event already counted as a hub failure lands on every other instance. */
+func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Connection:  connection,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.wedge",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+        t.Fatalf("healthy publish: %v", publishErr)
+    }
+
+    watched := backplaneWatchQueue(t, connection, "melody.sse.test.wedge")
+    before := watched()
+
+    backplane.publishMutex.Lock()
+
+    publishOutcome := make(chan error, 1)
+    go func() { publishOutcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "abandoned"}) }()
+
+    if publishErr := awaitOutcome(t, "broadcast abandoned while queued", publishOutcome, 3*time.Second); nil == publishErr {
+        t.Fatalf("expected the queued broadcast to be refused")
+    }
+
+    /* the goroutine now gets its turn: it must find the caller gone and write nothing */
+    backplane.publishMutex.Unlock()
+    time.Sleep(700 * time.Millisecond)
+
+    if after := watched(); before != after {
+        t.Fatalf("the broadcast the caller was told had failed was published anyway: the watched queue went %d -> %d", before, after)
+    }
+}
+
+/* the sibling of the transport's door, for the same reason: a write that finished in the same instant the budget expired must be answered with its own outcome, not abandoned. */
+func TestServerSentEventBackplane_ResolveExpiredWriteAnswersAWriteThatAlreadyReturned(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Dialer:      dialer.Dial,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.wedge",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+        t.Fatalf("healthy publish: %v", publishErr)
+    }
+
+    backplane.mutex.Lock()
+    connection := backplane.connection
+    backplane.mutex.Unlock()
+
+    if nil == connection || true == connection.IsClosed() {
+        t.Fatalf("the backplane must own a live connection for this to mean anything")
+    }
+
+    written := make(chan struct{})
+    close(written)
+
+    finished := errors.New("the outcome the write itself produced")
+    outcome := make(chan error, 1)
+    outcome <- finished
+
+    if resolvedErr := backplane.resolveExpiredWrite(written, outcome); false == errors.Is(resolvedErr, finished) {
+        t.Fatalf("expected the write's own outcome, got: %v", resolvedErr)
+    }
+
+    if true == connection.IsClosed() {
+        t.Fatalf("a write that had already returned was abandoned: the owned connection was cut under a broadcast that was done")
+    }
+}
+
+/* an owned connection whose publish half is merely BUSY still gets its close handshake: the deadline is moved a call timeout ahead unless a write is genuinely in flight, so a clean shutdown behind a queue of broadcasts is not cut off mid-handshake. */
+func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNothingIsInFlight(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Dialer:      dialer.Dial,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.wedge",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+        t.Fatalf("healthy publish: %v", publishErr)
+    }
+
+    backplane.publishMutex.Lock()
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- backplane.Close() }()
+
+    closeErr := awaitOutcome(t, "close of an owned connection with the publish half busy", closeOutcome, 5*time.Second)
+
+    backplane.publishMutex.Unlock()
+
+    if nil != closeErr {
+        t.Fatalf("the close handshake was cut off over a socket nothing was written to: %v", closeErr)
+    }
+}

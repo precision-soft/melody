@@ -596,6 +596,24 @@ func (instance *Transport) publish(
     return publishErr
 }
 
+/* publishDisposition says what a failed publish attempt allows. It carries TWO answers rather than the one bool it replaces, because the two sites that read it ask different questions and one publish answers them differently.
+
+   channelFaulted says the CHANNEL is what failed, so the cached channel is torn down and one immediate attempt is made on a fresh one. A broker-semantic verdict — an unroutable return, a nack — must never take that path, or the retry would silently re-drop the message.
+
+   furtherAttemptMayRecover says a caller that keeps trying has something to gain. That caller is publishRequeue, whose advanced retry counters exist only on this publishing, so an attempt abandoned abandons the accounting with it.
+
+   The publish that separated them is the one that ran out of budget waiting for its TURN behind the publishes ahead of it: it never touched the socket, so there is no channel to blame and tearing one down would demolish a channel this publish never reached — while the very condition that stopped it, the queue in front of it, is exactly what a later attempt can find gone. Under the single bool it answered NO to both, and a requeue spent one of its three attempts and dead-lettered a message nothing was wrong with. */
+type publishDisposition struct {
+    channelFaulted           bool
+    furtherAttemptMayRecover bool
+}
+
+/* publishOutcome is what the write goroutine hands back: the failure, if any, and what it allows. It is a package type rather than one declared inside publishOnce so the branch that resolves an EXPIRED write can be a door of its own — a branch reachable only when two events land in the same instant cannot be driven from outside, but it can be handed the state that instant produces. */
+type publishOutcome struct {
+    disposition publishDisposition
+    err         error
+}
+
 /* publishRecoverable is publish, additionally reporting whether a failure it returns is one a further attempt could still recover from. A caller that keeps trying (a requeue whose retry counters only exist on this publishing) needs that answer: retrying a channel fault is how the counters get through, while retrying a broker verdict only produces the same verdict on a fresh channel. */
 func (instance *Transport) publishRecoverable(
     ctx context.Context,
@@ -603,28 +621,33 @@ func (instance *Transport) publishRecoverable(
     routingKey string,
     publishing amqp091.Publishing,
 ) (bool, error) {
-    usedChannel, retryable, publishErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+    usedChannel, disposition, publishErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
     if nil == publishErr {
         return false, nil
     }
 
-    /* only a channel-level failure is worth a second attempt on a fresh channel; a broker-semantic rejection (an unroutable return or a nack) is a permanent condition that a retry would only silently re-drop. A failure the CALLER's context explains is neither: the channel other publishers share did nothing wrong, so it is not torn down, and a retry against the same dead context could only fail the same way. */
+    /* a failure the CALLER's context explains is recoverable by nothing: the channel other publishers share did nothing wrong, so it is not torn down, and a retry against the same dead context could only fail the same way. */
     if nil != ctx.Err() {
         return false, publishErr
     }
 
-    if false == retryable || false == instance.publishRetryable() {
+    if false == instance.publishRetryable() {
         return false, publishErr
+    }
+
+    /* a failure that is not the channel's gets no fresh channel and no immediate second attempt — but it still reports what it knows about a LATER one, which is where the turn timeout parts company with a broker verdict */
+    if false == disposition.channelFaulted {
+        return disposition.furtherAttemptMayRecover, publishErr
     }
 
     instance.resetPublishChannel(usedChannel)
 
-    _, retryRetryable, retryErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
+    _, retryDisposition, retryErr := instance.publishOnce(ctx, exchange, routingKey, publishing)
     if nil == retryErr {
         return false, nil
     }
 
-    return true == retryRetryable && true == instance.publishRetryable(), retryErr
+    return true == retryDisposition.furtherAttemptMayRecover && true == instance.publishRetryable(), retryErr
 }
 
 /* the channel runs in publisher-confirm mode and the publish is serialized with its confirmation wait: a message is reported sent only after the broker acked it and no basic.return arrived, so republish-then-ack cannot drop a message the broker silently discarded (reject-publish policy, deleted queue).
@@ -637,25 +660,18 @@ func (instance *Transport) publishOnce(
     exchange string,
     routingKey string,
     publishing amqp091.Publishing,
-) (*amqp091.Channel, bool, error) {
+) (*amqp091.Channel, publishDisposition, error) {
     channel, returns, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
-        /* a refusal that names an earlier blocked write is not a channel fault: the one retry would meet the same refusal, and the reset before it would tear down a channel this publish never reached */
-        return nil, false == errors.Is(channelErr, errPublishTimedOut), channelErr
-    }
+        /* a refusal that names an earlier blocked write is not a channel fault: the one retry would meet the same refusal, and the reset before it would tear down a channel this publish never reached. It is not worth a later attempt either, which is what separates it from the turn timeout below: the write it names is blocked on a connection this transport cannot cut, so every attempt until that write returns meets this same refusal. */
+        recoverable := false == errors.Is(channelErr, errPublishTimedOut)
 
-    type publishOutcome struct {
-        retryable bool
-        err       error
+        return nil, publishDisposition{channelFaulted: recoverable, furtherAttemptMayRecover: recoverable}, channelErr
     }
 
     budget := instance.resolvedPublishTimeout()
 
-    var turn sync.Mutex
-    writeStarted := false
-    callerGaveUp := false
-
-    writing := make(chan struct{})
+    turn := newPublishTurn()
     written := make(chan struct{})
     outcome := make(chan publishOutcome, 1)
 
@@ -663,17 +679,9 @@ func (instance *Transport) publishOnce(
         instance.publishMutex.Lock()
         defer instance.publishMutex.Unlock()
 
-        turn.Lock()
-        if true == callerGaveUp {
-            turn.Unlock()
-
+        if false == turn.begin() {
             return
         }
-
-        writeStarted = true
-        turn.Unlock()
-
-        close(writing)
 
         _, _ = drainPublishReturn(returns)
 
@@ -682,7 +690,7 @@ func (instance *Transport) publishOnce(
         instance.writesInFlight.Add(-1)
         close(written)
         if nil != publishErr {
-            outcome <- publishOutcome{retryable: true, err: exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, publishErr)}
+            outcome <- publishOutcome{disposition: publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, err: exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, publishErr)}
 
             return
         }
@@ -698,14 +706,14 @@ func (instance *Transport) publishOnce(
                 confirmationRetryable = false
             }
 
-            outcome <- publishOutcome{retryable: confirmationRetryable, err: exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "publishTimeout": budget.String()}, waitErr)}
+            outcome <- publishOutcome{disposition: publishDisposition{channelFaulted: confirmationRetryable, furtherAttemptMayRecover: confirmationRetryable}, err: exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "publishTimeout": budget.String()}, waitErr)}
 
             return
         }
 
         /* an unroutable return and a nack are the broker's verdict on the message, not a channel fault: they must never be retried, or the retry would silently re-drop the message on a fresh channel */
         if returned, wasReturned := drainPublishReturn(returns); true == wasReturned {
-            outcome <- publishOutcome{retryable: false, err: exception.NewError(
+            outcome <- publishOutcome{err: exception.NewError(
                 "amqp publish was returned as unroutable",
                 map[string]any{
                     "queue":      instance.queue,
@@ -721,7 +729,7 @@ func (instance *Transport) publishOnce(
         }
 
         if false == acked {
-            outcome <- publishOutcome{retryable: false, err: exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": instance.queue}, nil)}
+            outcome <- publishOutcome{err: exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": instance.queue}, nil)}
 
             return
         }
@@ -733,25 +741,18 @@ func (instance *Transport) publishOnce(
     defer turnTimer.Stop()
 
     select {
-    case <-writing:
+    case <-turn.started():
     case <-turnTimer.C:
-        turn.Lock()
-        started := writeStarted
-        if false == started {
-            callerGaveUp = true
-        }
-        turn.Unlock()
-
-        if false == started {
-            /* the socket was never touched by this publish, so nothing here may mark the transport wedged or name a blocked write: what ran out was this send's wait for its turn behind the publishes ahead of it */
-            return channel, false, exception.NewError(
+        if true == turn.abandon() {
+            /* the socket was never touched by this publish, so nothing here may mark the transport wedged or name a blocked write: what ran out was this send's wait for its turn behind the publishes ahead of it. Nothing is faulted and nothing is torn down — and a further attempt is exactly what this failure is worth, because the queue it waited behind is the one condition a later attempt can find gone. */
+            return channel, publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
                 "amqp publish did not reach the socket within the publish timeout while earlier publishes on this transport still held it",
                 map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "publishTimeout": budget.String()},
                 errPublishTimedOut,
             )
         }
 
-        <-writing
+        <-turn.started()
     }
 
     writeTimer := time.NewTimer(budget)
@@ -761,16 +762,38 @@ func (instance *Transport) publishOnce(
     case <-written:
         result := <-outcome
 
-        return channel, result.retryable, result.err
+        return channel, result.disposition, result.err
     case <-writeTimer.C:
-        retryable, abandonErr := instance.abandonWedgedPublish(exchange, routingKey, written)
+        disposition, expiredErr := instance.resolveExpiredWrite(exchange, routingKey, written, outcome)
 
-        return channel, retryable, abandonErr
+        return channel, disposition, expiredErr
     }
 }
 
+/* resolveExpiredWrite is the branch the write budget expiring leads to, and its first act is to ask whether the write has ALREADY returned.
+
+   The budget expiring and the write ending are two events with no order between them, so this branch is reached for a write that finished a moment earlier as readily as for one that is blocked — and the abandon below is wrong for a publish that is done: it cuts a healthy connection, reports a fault to a caller whose message the broker has, and names a write nobody is waiting on. The sister branch at the top of publishOnce has always re-read writeStarted under the turn lock for exactly this reason; this half went without one, so the window was not the instant of a tie but the whole stretch from the timer firing to the abandon reaching the socket.
+
+   The check cannot make the window vanish — a write that returns one instruction later is genuinely still in flight when it is read — and it is not meant to: what it removes is the stretch, which is the part a caller can lose a message to. It is a door rather than two inline lines because a branch reached only when two events land in the same instant cannot be driven from outside, while a door can be handed the state that instant produces (§5.34). */
+func (instance *Transport) resolveExpiredWrite(
+    exchange string,
+    routingKey string,
+    written <-chan struct{},
+    outcome <-chan publishOutcome,
+) (publishDisposition, error) {
+    select {
+    case <-written:
+        result := <-outcome
+
+        return result.disposition, result.err
+    default:
+    }
+
+    return instance.abandonWedgedPublish(exchange, routingKey, written)
+}
+
 /* abandonWedgedPublish is the timed-out branch of publishOnce. On a connection this transport dialed itself the socket is cut with a deadline already passed, which is the one door the amqp client leaves open once its send locks are held: the blocked write returns, the client's shutdown completes, and the one retry redials through connect — the fault is retryable, exactly like any other channel fault. On a caller-owned connection nothing here may cut the socket, so the transport marks itself wedged until the write returns — by the owner's hand, or never — and refuses every send in between at once rather than parking one goroutine per send behind the held mutex; that fault is not retryable, since the retry would meet the same refusal. */
-func (instance *Transport) abandonWedgedPublish(exchange string, routingKey string, written <-chan struct{}) (bool, error) {
+func (instance *Transport) abandonWedgedPublish(exchange string, routingKey string, written <-chan struct{}) (publishDisposition, error) {
     instance.mutex.Lock()
     closing := instance.closing
     ownsConnection := instance.ownsConnection
@@ -789,7 +812,7 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
 
     /* a write still blocked while Close runs is Close's to end — it cuts an owned connection itself and cannot cut another's — so nothing is marked here and nothing is retried */
     if true == closing {
-        return false, exception.NewError(
+        return publishDisposition{}, exception.NewError(
             "amqp publish did not return within the publish timeout while the transport was closing",
             errorContext,
             errPublishTimedOut,
@@ -808,7 +831,7 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
         case <-timer.C:
         }
 
-        return true, exception.NewError(
+        return publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, exception.NewError(
             "amqp publish did not return within the publish timeout; the owned connection was closed and is redialed on retry",
             errorContext,
             errPublishTimedOut,
@@ -823,7 +846,7 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
         instance.mutex.Unlock()
     }()
 
-    return false, exception.NewError(
+    return publishDisposition{}, exception.NewError(
         "amqp publish did not return within the publish timeout on a caller-owned connection; sends are refused until that write returns",
         errorContext,
         errPublishTimedOut,

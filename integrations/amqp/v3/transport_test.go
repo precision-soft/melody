@@ -2727,3 +2727,112 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
         t.Fatalf("expected the socket never to have been wedged, got %d blocked writes", gated.BlockedWrites())
     }
 }
+
+
+/* a send that ran out of budget waiting for its TURN is worth a further attempt: it never touched the socket, so there is nothing to blame and nothing to tear down, while the queue it waited behind is the one condition a later attempt can find gone. Under the single retryable bool it answered no to both questions, and publishRequeue spent one of its three attempts and dead-lettered a message nothing was wrong with. */
+func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "queued"}), "")
+    if nil != buildErr {
+        t.Fatalf("buildPublishing: %v", buildErr)
+    }
+
+    exchange, routingKey := transport.mainTarget()
+
+    transport.mutex.Lock()
+    channelBefore := transport.publishChannel
+    transport.mutex.Unlock()
+
+    transport.publishMutex.Lock()
+
+    outcome := make(chan error, 1)
+    var disposition publishDisposition
+    go func() {
+        _, once, onceErr := transport.publishOnce(runtimeInstance.Context(), exchange, routingKey, publishing)
+        disposition = once
+        outcome <- onceErr
+    }()
+
+    onceErr := awaitOutcome(t, "publish that only stood in the queue", outcome, 3*time.Second)
+
+    recoverableOutcome := make(chan error, 1)
+    var recoverable bool
+    go func() {
+        answer, recoverableErr := transport.publishRecoverable(runtimeInstance.Context(), exchange, routingKey, publishing)
+        recoverable = answer
+        recoverableOutcome <- recoverableErr
+    }()
+
+    awaitOutcome(t, "publishRecoverable on a turn timeout", recoverableOutcome, 3*time.Second)
+
+    transport.publishMutex.Unlock()
+
+    if nil == onceErr || false == errors.Is(onceErr, errPublishTimedOut) {
+        t.Fatalf("expected the queued send to be refused with the publish-timeout sentinel, got: %v", onceErr)
+    }
+
+    if true == disposition.channelFaulted {
+        t.Fatalf("a publish that never reached the socket blamed the channel, so the retry would tear down a channel it never used")
+    }
+
+    if false == disposition.furtherAttemptMayRecover {
+        t.Fatalf("a publish that only waited for its turn was reported as unrecoverable, so a requeue gives up its remaining attempts on it")
+    }
+
+    if false == recoverable {
+        t.Fatalf("publishRecoverable did not pass the turn timeout on as recoverable, which is the answer publishRequeue reads")
+    }
+
+    transport.mutex.Lock()
+    channelAfter := transport.publishChannel
+    transport.mutex.Unlock()
+
+    if channelBefore != channelAfter {
+        t.Fatalf("the cached publish channel was torn down over a publish that never reached the socket")
+    }
+
+    if 0 != gated.BlockedWrites() {
+        t.Fatalf("expected the queued send never to have reached the socket, got %d blocked writes", gated.BlockedWrites())
+    }
+}
+
+/* the write budget expiring and the write ending are two events with no order between them, so the timed-out branch is reached for a write that finished a moment earlier just as readily as for one that is blocked — and abandoning that publish cuts a healthy connection and reports a fault to a caller whose message the broker already has. The branch is a door precisely so it can be handed the state that instant produces. */
+func TestTransport_ResolveExpiredWriteAnswersAWriteThatAlreadyReturned(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+    transport, _ := newWedgeTestTransport(t, nil, dialer.Dial)
+
+    transport.mutex.Lock()
+    connection := transport.connection
+    transport.mutex.Unlock()
+
+    if nil == connection || true == connection.IsClosed() {
+        t.Fatalf("the transport must own a live connection for this probe to mean anything")
+    }
+
+    written := make(chan struct{})
+    close(written)
+
+    finished := errors.New("the outcome the write itself produced")
+    outcome := make(chan publishOutcome, 1)
+    outcome <- publishOutcome{disposition: publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, err: finished}
+
+    exchange, routingKey := transport.mainTarget()
+
+    disposition, resolvedErr := transport.resolveExpiredWrite(exchange, routingKey, written, outcome)
+
+    if false == errors.Is(resolvedErr, finished) {
+        t.Fatalf("expected the publish's own outcome, got: %v", resolvedErr)
+    }
+
+    if false == disposition.channelFaulted || false == disposition.furtherAttemptMayRecover {
+        t.Fatalf("the publish's own disposition was replaced by the abandon's, got %+v", disposition)
+    }
+
+    if true == connection.IsClosed() {
+        t.Fatalf("a write that had already returned was abandoned: the connection was cut under a publish that was done")
+    }
+}

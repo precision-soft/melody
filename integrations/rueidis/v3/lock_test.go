@@ -310,3 +310,143 @@ func TestRedisLock_AnAcquireThatLostItsReplyDoesNotStrandTheLease(t *testing.T) 
 
     t.Fatalf("the lease was stranded")
 }
+
+
+/* an acquire that ends ambiguously while this handle ALREADY holds the lease must not give the lease back: re-acquiring with the same Lock is reentrant by published contract, the token is minted once per handle, so the key the give-back would delete is the one the caller is still inside. Measured on a live store before the guard existed, the key was gone. */
+func TestRedisLock_AnAmbiguousReacquireKeepsTheLeaseItAlreadyHolds(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := "melody:lock:test:reentrant-ambiguous:" + t.Name()
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLockerWithOptions(client, WithLockerCallTimeout(50*time.Millisecond))
+    lock := locker.CreateLock(name, 10*time.Second)
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    held, heldErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(name).Build()).ToString()
+    if nil != heldErr {
+        t.Fatalf("reading the lease this handle owns: %v", heldErr)
+    }
+
+    lockGate.WedgeIntegerReplies()
+
+    if _, reacquireErr := lock.Acquire(newLockRuntime()); nil == reacquireErr {
+        t.Fatalf("expected the re-acquire to fail while its reply is swallowed")
+    }
+
+    /* the give-back is detached, so the window it would act in is given time to pass rather than assumed away */
+    time.Sleep(500 * time.Millisecond)
+
+    still, stillErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(name).Build()).ToString()
+    if nil != stillErr {
+        t.Fatalf("the ambiguous re-acquire took the lease this handle legitimately owns: %v", stillErr)
+    }
+
+    if held != still {
+        t.Fatalf("the lease changed hands under its own holder: had %q, now %q", held, still)
+    }
+}
+
+/* after Release the handle no longer claims the lease, so the give-back of a LATER ambiguous acquire is free to run — without that, the claim left standing would silence the door that exists to keep an ambiguous acquire from stranding a lease nobody holds. */
+func TestRedisLock_AReleasedHandleGivesBackAnAmbiguousAcquireAgain(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := "melody:lock:test:released-then-ambiguous:" + t.Name()
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLockerWithOptions(client, WithLockerCallTimeout(50*time.Millisecond))
+    lock := locker.CreateLock(name, 10*time.Second)
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
+    }
+
+    lockGate.WedgeIntegerReplies()
+
+    if _, reacquireErr := lock.Acquire(newLockRuntime()); nil == reacquireErr {
+        t.Fatalf("expected the acquire to fail while its reply is swallowed")
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(name).Build()).ToString()
+        if nil != storedErr {
+            return
+        }
+
+        if time.Now().Add(50 * time.Millisecond).After(deadline) {
+            t.Fatalf("a released handle kept its claim, so the lease was stranded: the key still holds %q", stored)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    t.Fatalf("the lease was stranded")
+}
+
+/* a Refresh the store answers with "no longer held" is the one reading that settles what this handle cannot settle on its own, so the claim is dropped there too — otherwise a handle whose lease was taken by another client keeps silencing its own give-back. */
+func TestRedisLock_ARefreshThatLostTheLeaseDropsTheClaim(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := "melody:lock:test:lost-then-ambiguous:" + t.Name()
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLockerWithOptions(client, WithLockerCallTimeout(50*time.Millisecond))
+    lock := locker.CreateLock(name, 10*time.Second)
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    /* another holder takes the key out from under this handle, which is what Refresh is the authoritative probe for */
+    if stealErr := outOfBand.Do(context.Background(), outOfBand.B().Set().Key(name).Value("someone-else").Build()).Error(); nil != stealErr {
+        t.Fatalf("stealing the key: %v", stealErr)
+    }
+
+    if refreshErr := lock.Refresh(newLockRuntime(), 10*time.Second); nil == refreshErr {
+        t.Fatalf("expected the refresh to report the lease lost")
+    }
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the stolen key: %v", deleteErr)
+    }
+
+    lockGate.WedgeIntegerReplies()
+
+    if _, reacquireErr := lock.Acquire(newLockRuntime()); nil == reacquireErr {
+        t.Fatalf("expected the acquire to fail while its reply is swallowed")
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(name).Build()).ToString()
+        if nil != storedErr {
+            return
+        }
+
+        if time.Now().Add(50 * time.Millisecond).After(deadline) {
+            t.Fatalf("a handle told its lease was lost kept its claim, so the lease was stranded: the key still holds %q", stored)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    t.Fatalf("the lease was stranded")
+}
