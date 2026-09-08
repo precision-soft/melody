@@ -19,6 +19,7 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         HttpMaxRequestBodyBytesKey: 1048576,
         HttpSessionTtlKey:          DefaultSessionTtl.String(),
         HttpShutdownTimeoutKey:     DefaultHttpShutdownTimeout.String(),
+        TeardownTimeoutKey:         DefaultTeardownTimeout.String(),
         CliNameKey:                 "melody",
         CliDescriptionKey:          "",
         LogLevelKey:                string(loggingcontract.LevelDebug),

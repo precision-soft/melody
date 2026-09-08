@@ -202,6 +202,7 @@ Implemented in:
 - [`LogOnRecoverAndExit(logger loggingcontract.Logger, recovered any, exitCode int)`](../../logging/recover.go)
 - [`LogOnRecoverAndExitAfter(logger loggingcontract.Logger, recovered any, exitCode int, beforeExit func())`](../../logging/recover.go)
 - [`RunShieldedStep(stepName string, step func()) bool`](../../logging/recover.go) — the exit handler's own shield, offered to the one other caller that stands between a process and its end: it contains a panic inside the step and bounds how long the step may take, answering whether it finished. An abandoned step keeps running on its goroutine, so nothing it writes may be read by a caller that was told it did not finish
+- [`RunShieldedStepWithin(budget time.Duration, stepName string, step func()) bool`](../../logging/recover.go) — the same shield under a budget the caller declares, for the process shutting down cleanly, whose services carry close budgets this package cannot see. A non-positive budget installs no deadline at all and the step is waited out; the exit handler keeps the package's own figure, because it cannot read the configuration — the logger it builds is what the configuration is loaded through
 
 #### Emergency logger
 

@@ -195,8 +195,19 @@ func RunShieldedStep(stepName string, step func()) bool {
     return runExitStepShielded(stepName, step)
 }
 
-/* runExitStepShielded contains a panic inside one step of the exit handler and echoes it to stderr best-effort, and abandons a step that does not return within the budget: the steps stand between a fatal failure and os.Exit, so a teardown blocked on a close that never returns — a drain on an unbuffered channel, a lock somebody died holding — would otherwise turn a dying process into a hung one, with the record written and the exit never taken. The step keeps running on its goroutine after abandonment; os.Exit ends it with the process. It answers whether the step ran to its end: a step abandoned on the budget and a step whose panic was contained here both left work undone, and a caller that is told otherwise records a teardown that never happened. */
+/* RunShieldedStepWithin is RunShieldedStep under a budget its caller declares, for the one caller that knows what its own teardown costs: the process that is shutting down cleanly, whose services carry close budgets of their own that this package cannot see. A non-positive budget is not a missing one — it is the caller saying there is to be NO deadline, and the step is then waited out however long it takes, which is what an operator asks for when the answer to "how long may this take" is "as long as the slowest component needs".
+
+   The two budgets are deliberately different and stay that way. The panic path keeps the package constant because it cannot read the configuration — the logger it builds is what the configuration is loaded through — and because it is the last resort, where waiting longer buys a dying process nothing. The clean path takes what its caller declares, because a caller that has a configuration knows whether ten seconds is longer than everything it must release or shorter than one of them. Sizing them to each other would answer one of those two questions with the other's answer. */
+func RunShieldedStepWithin(budget time.Duration, stepName string, step func()) bool {
+    return runExitStepShieldedWithin(budget, stepName, step)
+}
+
 func runExitStepShielded(stepName string, step func()) bool {
+    return runExitStepShieldedWithin(exitStepBudget, stepName, step)
+}
+
+/* runExitStepShieldedWithin contains a panic inside one step of the exit handler and echoes it to stderr best-effort, and abandons a step that does not return within the budget it is given: the steps stand between a fatal failure and os.Exit, so a teardown blocked on a close that never returns — a drain on an unbuffered channel, a lock somebody died holding — would otherwise turn a dying process into a hung one, with the record written and the exit never taken. The budget is a parameter rather than the package constant because the two callers know different things about how long a step may legitimately take: the exit handler knows only that it is the last resort, while a process shutting down cleanly can be told by its configuration what its own services cost to release. The step keeps running on its goroutine after abandonment; os.Exit ends it with the process. It answers whether the step ran to its end: a step abandoned on the budget and a step whose panic was contained here both left work undone, and a caller that is told otherwise records a teardown that never happened. */
+func runExitStepShieldedWithin(budget time.Duration, stepName string, step func()) bool {
     /* the channel carries the outcome rather than only the fact that the goroutine ended, because closing it alone reported a recovered panic as a completed step; it is buffered so the send cannot park forever once the budget has abandoned the step and nobody is left to receive */
     stepDone := make(chan bool, 1)
 
@@ -218,12 +229,18 @@ func runExitStepShielded(stepName string, step func()) bool {
         stepCompleted = true
     }()
 
+    /* a non-positive budget leaves this channel nil, and a receive on a nil channel blocks for ever, so the select has only one case that can ever fire: the step is waited out to its end. It is written as an absent case rather than as a very large duration because "no deadline" is what the caller said, and a figure large enough to stand in for it is still a figure somebody has to defend. */
+    var budgetExpired <-chan time.Time
+    if 0 < budget {
+        budgetExpired = time.After(budget)
+    }
+
     select {
     case stepCompleted := <-stepDone:
         return stepCompleted
 
-    case <-time.After(exitStepBudget):
-        _, _ = fmt.Fprintf(os.Stderr, "melody: %s did not return within %s during the exit handler; abandoning it\n", stepName, exitStepBudget)
+    case <-budgetExpired:
+        _, _ = fmt.Fprintf(os.Stderr, "melody: %s did not return within %s during the exit handler; abandoning it\n", stepName, budget)
 
         return false
     }

@@ -1103,3 +1103,50 @@ func TestLogOnRecoverAndExit_AStalledStderrDoesNotHoldTheExit(t *testing.T) {
         t.Fatalf("the process never took its exit: the stderr echo held it")
     }
 }
+
+/* RunShieldedStepWithin abandons on the budget its caller declared, not on the package one: the package budget is deliberately left LONG here, so a door that ignored its argument would hold this test for it instead of answering. */
+func TestRunShieldedStepWithin_AbandonsOnTheBudgetItWasGiven(t *testing.T) {
+    originalBudget := exitStepBudget
+    exitStepBudget = 10 * time.Second
+    defer func() {
+        exitStepBudget = originalBudget
+    }()
+
+    hangingStep := make(chan struct{})
+    defer close(hangingStep)
+
+    answered := make(chan bool, 1)
+
+    go func() {
+        answered <- RunShieldedStepWithin(30*time.Millisecond, "a step that hangs", func() {
+            <-hangingStep
+        })
+    }()
+
+    select {
+    case completed := <-answered:
+        if true == completed {
+            t.Fatalf("expected the abandoned step to answer false")
+        }
+
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the declared budget of 30ms to abandon the step, not the package budget of 10s")
+    }
+}
+
+/* a non-positive budget means NO deadline, not the package's own. The package budget is set far BELOW the step's own duration here, so a door that fell back to it would abandon the step and answer false; only a door that installs no deadline at all can answer true. */
+func TestRunShieldedStepWithin_ANonPositiveBudgetWaitsWithoutADeadline(t *testing.T) {
+    originalBudget := exitStepBudget
+    exitStepBudget = 30 * time.Millisecond
+    defer func() {
+        exitStepBudget = originalBudget
+    }()
+
+    for _, budget := range []time.Duration{0, -1 * time.Second} {
+        if false == RunShieldedStepWithin(budget, "a step that outlives the package budget", func() {
+            time.Sleep(300 * time.Millisecond)
+        }) {
+            t.Fatalf("expected the budget %s to install no deadline and wait the step out", budget)
+        }
+    }
+}

@@ -139,6 +139,18 @@ How long a stopping http server waits for the requests it has already admitted b
 
 The value is a Go duration string and must be positive: zero and negative values fail the boot. The default is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
 
+### Teardown timeout
+
+How long a process shutting down cleanly may spend releasing what it holds — closing pools, transports, tracer providers — before the teardown is abandoned and the process exits non-zero. Read by the exit path through [`Get`](../../config/configuration.go) rather than through a kernel accessor, because nothing between boot and teardown needs it.
+
+| Environment key           | Parameter name            | Default |
+|---------------------------|---------------------------|---------|
+| `MELODY_TEARDOWN_TIMEOUT` | `kernel.teardown_timeout` | `10s`   |
+
+The value is a Go duration string. The default is [`DefaultTeardownTimeout`](../../config/kernel.go), ten seconds, which is what the commonest supervisor grants before it escalates to `SIGKILL` — raising the default past that would trade an abandoned teardown for a killed one. **Zero means no deadline**: the teardown is waited out for as long as its slowest component needs, which is the honest answer for a deployment whose supervisor grants an open-ended stop, and it trades the guarantee that the process ends for the guarantee that nothing is left unreleased. A negative value fails the boot, since it means neither.
+
+What raising it buys is measurable: with a budget too small the teardown is abandoned before the step that reports failures reaches them, so the only trace is one line on standard error naming the whole shutdown; with a budget the teardown fits inside, the journal names the service that failed. One amqp transport whose broker has stopped reading costs about thirty seconds to close at framework defaults, and a second transport doubles that.
+
 ### Static file cache
 
 Whether a static response carries cache headers, and for how long. Read through [`Http().StaticEnableCache()`](../../config/http.go) and [`Http().StaticCacheMaxAge()`](../../config/http.go).

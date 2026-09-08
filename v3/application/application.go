@@ -7,6 +7,7 @@ import (
     "os"
     "sync"
     "sync/atomic"
+    "time"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -431,7 +432,7 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
 var applicationExit = os.Exit
 
 /* shieldedCloseStep is the door the clean-shutdown teardown runs through; tests replace it to drive the abandoned branch without waiting out the real budget, the way they replace applicationExit to observe an exit code */
-var shieldedCloseStep = logging.RunShieldedStep
+var shieldedCloseStep = logging.RunShieldedStepWithin
 
 /* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call itself discovered turns into a non-zero exit, so a supervisor sees a shutdown that lost something — a failed flush, a close that errored — instead of recording a clean exit 0 whose only trace was one stderr line. A close somebody else already performed reported its failure through its own channel and keeps its own exit code.
 
@@ -439,7 +440,7 @@ var shieldedCloseStep = logging.RunShieldedStep
 func (instance *Application) closeAndExitOnFailure() {
     var closeErr error
 
-    completed := shieldedCloseStep("closing the application", func() {
+    completed := shieldedCloseStep(instance.teardownTimeout(), "closing the application", func() {
         closeErr = instance.close()
     })
 
@@ -454,6 +455,28 @@ func (instance *Application) closeAndExitOnFailure() {
     }
 
     applicationExit(1)
+}
+
+/* teardownTimeout answers the budget the clean shutdown's teardown runs under, from the parameter an operator sets and the default the configuration carries otherwise. It is read here rather than carried on the kernel view because nothing between boot and this moment needs it, and a method on that contract is a method every application implementing it would have to grow.
+
+   Every step of the read is best-effort by construction, for the same reason exitFileLogger is: this runs inside the deferred handler that stands between a returning Run and the process exit, so a configuration that was never built, a parameter a runtime registration removed, or a value that stopped parsing must answer the package's own budget rather than raise. A boot that got this far has already had the value refused if it was not positive. */
+func (instance *Application) teardownTimeout() time.Duration {
+    if true == internal.IsNilInterface(instance.configuration) {
+        return config.DefaultTeardownTimeout
+    }
+
+    parameter := instance.configuration.Get(config.KernelTeardownTimeout)
+    if true == internal.IsNilInterface(parameter) {
+        return config.DefaultTeardownTimeout
+    }
+
+    teardownTimeout, teardownTimeoutErr := parameter.Duration()
+    if nil != teardownTimeoutErr || 0 > teardownTimeout {
+        return config.DefaultTeardownTimeout
+    }
+
+    /* zero is returned as it stands: it is the operator asking for no deadline, and folding it into the default here would answer a question they had already answered */
+    return teardownTimeout
 }
 
 /* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys at all. Every built-in parameter has a development default — environment dev, debug tooling, debug commands, debug log level — so a production binary run from a directory without its .env files would otherwise serve on all of them, announced by nothing louder than one warning; refusing is the same direction the empty CORS allow list took, because booting the wrong environment is the widening. A cli process stays permissive: development commands legitimately run without any environment file, and a command takes its configuration with it when it exits. */

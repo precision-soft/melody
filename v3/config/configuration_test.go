@@ -10,6 +10,7 @@ import (
     "strings"
     "sync"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -802,4 +803,90 @@ func TestMarkSecret_PropagatesThroughAParameterReference(t *testing.T) {
     if true == configuration.MustGet("app.endpoint").IsSecret() {
         t.Fatalf("expected the reader of an unrelated parameter to stay unmarked")
     }
+}
+
+/* the teardown budget is read through the same alias pair every kernel parameter is read through, so an operator writes MELODY_TEARDOWN_TIMEOUT and the exit path reads kernel.teardown_timeout */
+func TestConfigurationTeardownTimeoutDefaultsToTenSeconds(t *testing.T) {
+    configuration := newTeardownTimeoutConfiguration(t, map[string]string{})
+
+    teardownTimeout, teardownTimeoutErr := configuration.MustGet(KernelTeardownTimeout).Duration()
+    if nil != teardownTimeoutErr {
+        t.Fatalf("unexpected duration error: %v", teardownTimeoutErr)
+    }
+
+    if DefaultTeardownTimeout != teardownTimeout {
+        t.Fatalf("expected the default teardown timeout, got %v", teardownTimeout)
+    }
+}
+
+func TestConfigurationTeardownTimeoutIsReadFromTheEnvironment(t *testing.T) {
+    configuration := newTeardownTimeoutConfiguration(t, map[string]string{TeardownTimeoutKey: "45s"})
+
+    teardownTimeout, teardownTimeoutErr := configuration.MustGet(KernelTeardownTimeout).Duration()
+    if nil != teardownTimeoutErr {
+        t.Fatalf("unexpected duration error: %v", teardownTimeoutErr)
+    }
+
+    if 45*time.Second != teardownTimeout {
+        t.Fatalf("expected the configured teardown timeout, got %v", teardownTimeout)
+    }
+}
+
+/* a negative duration means nothing in either reading, so it fails the boot rather than quietly becoming one of the two behaviours */
+func TestConfigurationTeardownTimeoutRejectsANegativeValue(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{TeardownTimeoutKey: "-1s"}}
+
+    environment, environmentErr := NewEnvironment(source)
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    if nil == configurationErr {
+        t.Fatalf("expected a negative teardown timeout to fail the boot")
+    }
+}
+
+/* zero is the operator asking for NO deadline, and the sister of the refusal above: it boots, and it reads back as zero rather than as the default, because folding it into the default would answer a question the operator had already answered */
+func TestConfigurationTeardownTimeoutAcceptsZeroAsNoDeadline(t *testing.T) {
+    configuration := newTeardownTimeoutConfiguration(t, map[string]string{TeardownTimeoutKey: "0"})
+
+    teardownTimeout, teardownTimeoutErr := configuration.MustGet(KernelTeardownTimeout).Duration()
+    if nil != teardownTimeoutErr {
+        t.Fatalf("unexpected duration error: %v", teardownTimeoutErr)
+    }
+
+    if 0 != teardownTimeout {
+        t.Fatalf("expected zero to survive as zero, got %v", teardownTimeout)
+    }
+}
+
+func TestConfigurationTeardownTimeoutRejectsAnUnparsableValue(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{TeardownTimeoutKey: "soon"}}
+
+    environment, environmentErr := NewEnvironment(source)
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    if nil == configurationErr {
+        t.Fatalf("expected an unparsable teardown timeout to fail the boot")
+    }
+}
+
+func newTeardownTimeoutConfiguration(t *testing.T, values map[string]string) *Configuration {
+    t.Helper()
+
+    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: values})
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    if nil != configurationErr {
+        t.Fatalf("new configuration error: %v", configurationErr)
+    }
+
+    return configuration
 }

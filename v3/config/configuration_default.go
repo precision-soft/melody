@@ -28,6 +28,8 @@ func (instance *Configuration) registerDefaultParameters(
 
     instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
 
+    instance.setDefaultParameter(TeardownTimeoutKey, DefaultTeardownTimeout.String())
+
     instance.setDefaultParameter(CliNameKey, "melody")
 
     instance.setDefaultParameter(CliDescriptionKey, "")

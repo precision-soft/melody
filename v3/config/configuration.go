@@ -421,6 +421,30 @@ func (instance *Configuration) buildCliConfiguration() error {
 }
 
 func (instance *Configuration) buildKernelConfiguration() error {
+    teardownTimeout, teardownTimeoutErr := instance.MustGet(KernelTeardownTimeout).Duration()
+    if nil != teardownTimeoutErr {
+        return exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": TeardownTimeoutKey,
+            },
+            teardownTimeoutErr,
+        )
+    }
+
+    /* zero is a VALUE here, not an absence, and that is the difference from the http shutdown timeout beside it, which refuses zero because nothing is left over for it to mean. Here something is: no deadline at all, the teardown waited out for as long as its slowest component needs. An operator whose supervisor grants an open-ended stop asks for it that way, and gets a shutdown that always runs to its end and always names what failed, at the price of a process that can hang on a dependency that never answers. A negative duration means nothing in either reading and is refused, so a mistyped value fails the boot instead of quietly becoming one of the two behaviours. The value is read again where it is spent, by the exit path, because nothing between boot and teardown needs it and threading it through the kernel view would put a method on a contract an application may implement. */
+    if 0 > teardownTimeout {
+        return exception.NewError(
+            "teardown timeout may not be negative",
+            exceptioncontract.Context{
+                "teardownTimeout": teardownTimeout.String(),
+                "default":         DefaultTeardownTimeout.String(),
+                "environmentKey":  TeardownTimeoutKey,
+            },
+            nil,
+        )
+    }
+
     kernelConfigurationInstance, newKernelConfigurationErr := newKernelConfiguration(
         instance.MustGet(KernelDefaultMode).MustString(),
         instance.MustGet(KernelProcessRole).MustString(),

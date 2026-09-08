@@ -8,6 +8,7 @@ import (
     "path/filepath"
     "strings"
     "testing"
+    "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/config"
@@ -813,7 +814,7 @@ func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
     }()
 
     stepRan := false
-    shieldedCloseStep = func(stepName string, step func()) bool {
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func()) bool {
         stepRan = true
 
         return false
@@ -845,7 +846,7 @@ func TestCloseAndExitOnFailure_ACompletedTeardownExitsZero(t *testing.T) {
         applicationExit = originalExit
     }()
 
-    shieldedCloseStep = func(stepName string, step func()) bool {
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func()) bool {
         step()
 
         return true
@@ -861,5 +862,83 @@ func TestCloseAndExitOnFailure_ACompletedTeardownExitsZero(t *testing.T) {
 
     if true == exited {
         t.Fatalf("expected a clean teardown to leave the exit code alone")
+    }
+}
+
+/* the teardown budget an operator declares is the one the clean shutdown's shield runs under. Pinned on the VALUE that reaches the shield rather than on the shutdown finishing, because every wrong wiring — the package default passed instead of the resolved value, the argument dropped, the parameter read under the wrong name — produces a shutdown that finishes exactly the same way and differs only in the figure it was given. */
+func TestCloseAndExitOnFailure_HandsTheShieldTheDeclaredTeardownBudget(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    receivedBudget := time.Duration(0)
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func()) bool {
+        receivedBudget = budget
+
+        return true
+    }
+
+    applicationExit = func(code int) {}
+
+    instance := newTeardownTimeoutTestApplication(t, "42s")
+    instance.closeAndExitOnFailure()
+
+    if 42*time.Second != receivedBudget {
+        t.Fatalf("expected the declared teardown budget to reach the shield, got %s", receivedBudget)
+    }
+}
+
+/* the sister of the test above, and the one that says the default is a default rather than the only value: an application with no configuration at all — the shape the exit handler can reach when a boot died before one was built — still runs its teardown under a budget, and it is the package's own. */
+func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudget(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    receivedBudget := time.Duration(0)
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func()) bool {
+        receivedBudget = budget
+
+        return true
+    }
+
+    applicationExit = func(code int) {}
+
+    instance := &Application{}
+    instance.closeAndExitOnFailure()
+
+    if config.DefaultTeardownTimeout != receivedBudget {
+        t.Fatalf("expected the default teardown budget without a configuration, got %s", receivedBudget)
+    }
+}
+
+func newTeardownTimeoutTestApplication(t *testing.T, teardownTimeout string) *Application {
+    t.Helper()
+
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.TeardownTimeoutKey: teardownTimeout,
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    return &Application{
+        ctx:           context.Background(),
+        configuration: configuration,
+        runtimeFlags:  NewRuntimeFlags(config.ModeHttp),
     }
 }

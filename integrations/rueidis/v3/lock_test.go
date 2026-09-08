@@ -312,7 +312,7 @@ func TestRedisLock_AnAcquireThatLostItsReplyDoesNotStrandTheLease(t *testing.T) 
 }
 
 
-/* an acquire that ends ambiguously while this handle ALREADY holds the lease must not give the lease back: re-acquiring with the same Lock is reentrant by published contract, the token is minted once per handle, so the key the give-back would delete is the one the caller is still inside. Measured on a live store before the guard existed, the key was gone. */
+/* an acquire that ends ambiguously while this handle ALREADY holds the lease must not give the lease back: re-acquiring with the same Lock is reentrant by published contract, and the lease the give-back would reclaim is the one the caller is still inside. Measured on a live store before anything guarded it, the key was gone. What keeps it now is that a re-acquisition never writes its own token — the script extends the stored value instead of replacing it — so the give-back of that attempt matches nothing. */
 func TestRedisLock_AnAmbiguousReacquireKeepsTheLeaseItAlreadyHolds(t *testing.T) {
     outOfBand := newTokenStoreClient(t)
     name := "melody:lock:test:reentrant-ambiguous:" + t.Name()
@@ -449,4 +449,50 @@ func TestRedisLock_ARefreshThatLostTheLeaseDropsTheClaim(t *testing.T) {
     }
 
     t.Fatalf("the lease was stranded")
+}
+
+/* the input that separates the per-acquisition token from the flag it replaced: a lease that ENDED without Release. The flag was set by the acquire that took the lease and cleared only by Release or by a Refresh the store answered with a lost lease — never by the lease simply ending — so it stayed true over a handle that held nothing, and the next ambiguous acquire read it and skipped the give-back, stranding exactly the lease that door exists to reclaim. Measured against the previous form: the key still held the acquisition's token two seconds on. With the token minted per acquisition there is no flag to go stale — the give-back names the attempt, and the attempt's token is what is on the key. */
+func TestRedisLock_AnAmbiguousAcquireAfterTheLeaseEndedStillGivesItBack(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := "melody:lock:test:lapsed-then-ambiguous:" + t.Name()
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLockerWithOptions(client, WithLockerCallTimeout(50*time.Millisecond))
+    lock := locker.CreateLock(name, 10*time.Second)
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    /* the lease ends WITHOUT Release, which is the state the whole probe is about: Release was one of the two paths that cleared the claim, and a lease that simply ends was neither. It is ended out of band rather than by a short ttl on purpose — with a short ttl the lease a stranded give-back leaves behind expires on its own inside the window below, so "given back" and "lapsed again" become the same observation and the probe stops separating anything. */
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("ending the lease out of band: %v", deleteErr)
+    }
+
+    lockGate.WedgeIntegerReplies()
+
+    if _, reacquireErr := lock.Acquire(newLockRuntime()); nil == reacquireErr {
+        t.Fatalf("expected the acquire to fail while its reply is swallowed")
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(name).Build()).ToString()
+        if nil != storedErr {
+            return
+        }
+
+        if time.Now().Add(50 * time.Millisecond).After(deadline) {
+            t.Fatalf("the lease was stranded over a handle whose own lease had lapsed: the key still holds %q", stored)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    t.Fatalf("the lease was stranded over a handle whose own lease had lapsed")
 }

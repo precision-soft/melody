@@ -73,6 +73,10 @@ var environmentKeyAliasMap = map[string][]string{
         HttpShutdownTimeoutKey,
         KernelHttpShutdownTimeout,
     },
+    TeardownTimeoutKey: {
+        TeardownTimeoutKey,
+        KernelTeardownTimeout,
+    },
 }
 
 func (instance *Configuration) addAliasedParameterFromEnvironment(
