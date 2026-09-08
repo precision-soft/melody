@@ -70,6 +70,15 @@ func (instance *gate) Wedge() {
     instance.mutex.Unlock()
 }
 
+/* Lift lets replies through again, for a probe whose second half needs the store to answer: the wedged conn ends at its own read deadline and the client dials a fresh one, which this gate no longer swallows. */
+func (instance *gate) Lift() {
+    instance.mutex.Lock()
+    instance.wedged = false
+    instance.replyType = 0
+    instance.passArrays = 0
+    instance.mutex.Unlock()
+}
+
 /* WedgeIntegerReplies swallows only the replies that open with ':', the shape of a Lua script answering a count, and lets every array — a SCAN or SSCAN step — through. */
 func (instance *gate) WedgeIntegerReplies() {
     instance.mutex.Lock()
