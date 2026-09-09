@@ -2,6 +2,8 @@ package rueidis
 
 import (
     "context"
+    "strconv"
+    "strings"
     "crypto/tls"
     "errors"
     "fmt"
@@ -70,14 +72,6 @@ func (instance *gate) Wedge() {
     instance.mutex.Unlock()
 }
 
-/* Lift lets replies through again, for a probe whose second half needs the store to answer: the wedged conn ends at its own read deadline and the client dials a fresh one, which this gate no longer swallows. */
-func (instance *gate) Lift() {
-    instance.mutex.Lock()
-    instance.wedged = false
-    instance.replyType = 0
-    instance.passArrays = 0
-    instance.mutex.Unlock()
-}
 
 /* WedgeIntegerReplies swallows only the replies that open with ':', the shape of a Lua script answering a count, and lets every array — a SCAN or SSCAN step — through. */
 func (instance *gate) WedgeIntegerReplies() {
@@ -267,4 +261,48 @@ func requireDeadlineExceeded(t *testing.T, err error) {
     if false == errors.Is(err, context.DeadlineExceeded) {
         t.Fatalf("expected context.DeadlineExceeded in the chain, got %v", err)
     }
+}
+
+/* commandCallCount reads the store's own tally for one command family. It is process-global: every client
+   of this redis counts into it, so an assertion built on it compares a MEASURED window against a control
+   window rather than against zero. */
+func commandCallCount(t *testing.T, client redisclient.Client, prefixes ...string) int64 {
+    t.Helper()
+
+    info, infoErr := client.Do(context.Background(), client.B().Info().Section("commandstats").Build()).ToString()
+    if nil != infoErr {
+        t.Fatalf("info commandstats: %v", infoErr)
+    }
+
+    total := int64(0)
+
+    for _, line := range strings.Split(info, "\n") {
+        matches := false
+        for _, prefix := range prefixes {
+            if true == strings.HasPrefix(line, prefix) {
+                matches = true
+
+                break
+            }
+        }
+
+        if false == matches {
+            continue
+        }
+
+        for _, field := range strings.Split(strings.TrimSpace(line), ",") {
+            if false == strings.Contains(field, "calls=") {
+                continue
+            }
+
+            calls, parseErr := strconv.ParseInt(strings.TrimPrefix(field[strings.Index(field, "calls="):], "calls="), 10, 64)
+            if nil != parseErr {
+                t.Fatalf("parse %q: %v", field, parseErr)
+            }
+
+            total += calls
+        }
+    }
+
+    return total
 }

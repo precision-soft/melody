@@ -4,7 +4,6 @@ import (
     "context"
     "os"
     "strconv"
-    "strings"
     "sync"
     "sync/atomic"
     "testing"
@@ -14,7 +13,6 @@ import (
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    redisclient "github.com/redis/rueidis"
 )
 
 func newLockRuntime() runtimecontract.Runtime {
@@ -199,7 +197,16 @@ func newWedgedLock(t *testing.T, options ...LockerOption) (lockcontract.Lock, *g
     client, lockGate := dialGated(t)
     locker := NewLockerWithOptions(client, append([]LockerOption{WithLockerCallTimeout(50 * time.Millisecond)}, options...)...)
 
-    lock := locker.CreateLock(lockTestName(t, "wedge"), 10*time.Second)
+    /* the sequence restarts at 1 in every new process, so a name alone is not unique across runs — and this
+       warm-up lease is deliberately never released, so a re-run inside its ttl would meet its own leftover */
+    name := lockTestName(t, "wedge")
+
+    outOfBand := newTokenStoreClient(t)
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    lock := locker.CreateLock(name, 10*time.Second)
 
     acquired, acquireErr := lock.Acquire(newLockRuntime())
     if nil != acquireErr || false == acquired {
@@ -419,8 +426,8 @@ func TestRedisLock_AReleasedHandleGivesBackAnAmbiguousAcquireAgain(t *testing.T)
 
     /* the drop is the write this test exists for, and it is asserted where it happens: read through the
        give-back alone it is invisible, because that door names the attempt rather than the handle */
-    if released := lock.(*redisLock).currentClaim(); "" != released.held || 0 != len(released.pending) {
-        t.Fatalf("expected a released handle to claim nothing, it claims %+v", released)
+    if released := lock.(*redisLock).heldToken(); "" != released {
+        t.Fatalf("expected a released handle to claim nothing, it claims %q", released)
     }
 
     lockGate.WedgeIntegerReplies()
@@ -582,69 +589,6 @@ func TestRedisLock_AReleaseThatNeverReachedTheStoreKeepsTheLeaseNameable(t *test
     }
 }
 
-/* an acquire that ended without learning its outcome may have taken a lease under a token nothing else can name, and the detached give-back is one silent attempt. The claim keeps that token, so a later acquire EXTENDS the lease instead of being refused by it for the whole ttl. */
-func TestRedisLock_ALaterAcquireReclaimsAnAmbiguousLease(t *testing.T) {
-    name := lockTestName(t, "ambiguous-reclaimed")
-
-    outOfBand := newTokenStoreClient(t)
-    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
-        t.Fatalf("clearing the key: %v", deleteErr)
-    }
-
-    client, lockGate := dialGated(t)
-
-    /* a budget wide enough that the acquire AFTER the wedge is lifted is not answering for the redial the
-       wedge forced: the swallowed acquire below pays it once, the reclaim it sets up must not */
-    locker := NewLockerWithOptions(client, WithLockerCallTimeout(2*time.Second))
-    lock := locker.CreateLock(name, 30*time.Second)
-
-    lockGate.WedgeIntegerReplies()
-
-    if _, acquireErr := lock.Acquire(newLockRuntime()); nil == acquireErr {
-        t.Fatalf("expected the acquire to fail while its reply is swallowed")
-    }
-
-    claimed := lock.(*redisLock).currentClaim()
-    if 0 == len(claimed.pending) {
-        t.Fatalf("expected the attempt that lost its reply to be recorded, the claim holds %+v", claimed)
-    }
-
-    /* the gate swallows REPLIES, so the store executes every command it receives and the detached give-back
-       does land here. The lease is put back once it has, which is the run this test is about: the one silent
-       attempt did not reach the store, and the token is on the key with nothing else able to name it. */
-    strandedToken := claimed.pending[0]
-
-    giveBackDeadline := time.Now().Add(5 * time.Second)
-    for {
-        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(name).Build()).ToString()
-        if nil != storedErr || "" == stored {
-            break
-        }
-
-        if time.Now().After(giveBackDeadline) {
-            t.Fatalf("the give-back never landed, so the run this test stands for cannot be built")
-        }
-
-        time.Sleep(20 * time.Millisecond)
-    }
-
-    if setErr := outOfBand.Do(context.Background(), outOfBand.B().Set().Key(name).Value(strandedToken).Px(30*time.Second).Build()).Error(); nil != setErr {
-        t.Fatalf("planting the stranded lease: %v", setErr)
-    }
-
-    lockGate.Lift()
-    awaitAnsweringClient(t, client)
-
-    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
-        t.Fatalf("expected the later acquire to reclaim the stranded lease: %v %v", acquired, acquireErr)
-    }
-
-    requireStoredToken(t, name, strandedToken)
-
-    if strandedToken != lock.(*redisLock).heldToken() {
-        t.Fatalf("expected the reclaimed lease to become the held one, the claim holds %+v", lock.(*redisLock).currentClaim())
-    }
-}
 
 /* two acquires racing on ONE handle are both callers of a reentrant door, and the in-memory backend answers both yes. A token minted per acquisition makes the loser carry a token the store cannot match, so without the retry it is refused with the published meaning "someone else holds it" — while the someone else is its own handle. */
 func TestRedisLock_ConcurrentAcquiresOnOneHandleAreBothGranted(t *testing.T) {
@@ -733,119 +677,65 @@ func TestRedisLock_AnAcquireThatNeverReachedTheStoreCostsNoGiveBack(t *testing.T
         t.Fatalf("expected the warm-up acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    before := scriptExecutionCount(t)
+    /* the tally is process-global and this store is shared with the supervised example applications, which
+       run Lua of their own, so the measured window is compared against a CONTROL window of the same length
+       rather than against zero: a quiet store makes both nought, and a busy one moves both alike. */
+    controlMark := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:")
+    time.Sleep(300 * time.Millisecond)
+    background := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:") - controlMark
+
+    measuredMark := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:")
 
     if _, acquireErr := lock.Acquire(newCancelledLockRuntime()); nil == acquireErr {
         t.Fatalf("expected the acquire to fail while its context is already done")
     }
 
-    /* the give-back the previous form fired runs detached, so the count is read after a window it comfortably fits in */
+    /* the give-back the guarded form skips runs detached, so the window has to be one it comfortably fits in */
     time.Sleep(300 * time.Millisecond)
 
-    if executed := scriptExecutionCount(t) - before; 0 != executed {
-        t.Fatalf("expected an acquire that never reached the store to cost no round trip, it cost %d", executed)
+    measured := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:") - measuredMark
+
+    if measured > background {
+        t.Fatalf("expected an acquire that never reached the store to cost no round trip of its own; the measured window ran %d scripts against a control window of %d", measured, background)
     }
 }
 
-/* scriptExecutionCount reads the store's own tally of the Lua scripts every door of this lock runs. The package's tests are sequential, so the delta across one call is that call's. */
-func scriptExecutionCount(t *testing.T) int {
-    t.Helper()
+
+
+
+/* a refusal is the store's own reading that the key carries a token this handle does not own, which settles what the handle could not settle alone. Dropping the claim there is what keeps Release the round-trip-free no-op its contract promises: a handle that kept a dead claim would send a token that can never match and could answer an error for a lock the caller never held. */
+func TestRedisLock_ARefusedAcquireDropsTheClaimItCouldNotKeep(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "refused-drops-claim")
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
 
     client := newTokenStoreClient(t)
+    locker := NewLocker(client)
+    lock := locker.CreateLock(name, 30*time.Second)
 
-    statistics, statisticsErr := client.Do(context.Background(), client.B().Info().Section("commandstats").Build()).ToString()
-    if nil != statisticsErr {
-        t.Fatalf("reading commandstats: %v", statisticsErr)
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    total := 0
-    for _, line := range strings.Split(statistics, "\n") {
-        if false == strings.HasPrefix(line, "cmdstat_evalsha:") && false == strings.HasPrefix(line, "cmdstat_eval:") {
-            continue
-        }
-
-        fields := strings.SplitN(line, "calls=", 2)
-        if 2 != len(fields) {
-            continue
-        }
-
-        parsed, parseErr := strconv.Atoi(strings.TrimSpace(strings.SplitN(fields[1], ",", 2)[0]))
-        if nil != parseErr {
-            continue
-        }
-
-        total += parsed
+    /* another holder takes the key out from under this handle */
+    if stealErr := outOfBand.Do(context.Background(), outOfBand.B().Set().Key(name).Value("held-by-somebody-else").Px(30*time.Second).Build()).Error(); nil != stealErr {
+        t.Fatalf("stealing the key: %v", stealErr)
     }
 
-    return total
-}
-
-/* awaitAnsweringClient waits for a client whose replies were swallowed to be answering again: the wedged
-   conn ends at its own read deadline and the client dials a fresh one, and until it has, a call under a
-   tight budget fails for the wedge rather than for what the test is about. */
-func awaitAnsweringClient(t *testing.T, subject redisclient.Client) {
-    t.Helper()
-
-    deadline := time.Now().Add(5 * time.Second)
-    for {
-        pingContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-        pingErr := subject.Do(pingContext, subject.B().Ping().Build()).Error()
-        cancel()
-
-        if nil == pingErr {
-            return
-        }
-
-        if time.Now().After(deadline) {
-            t.Fatalf("the client never started answering again: %v", pingErr)
-        }
-
-        time.Sleep(50 * time.Millisecond)
-    }
-}
-
-/* the claim is written by Acquire, Release and Refresh, and the framework's own helpers put two of them on
-   different goroutines. The window an unconditional write loses is built here rather than waited for: one
-   writer is held between its read and its write while the other completes, and what separates the two
-   forms is whether the second writer's token survives. */
-func TestRedisLock_ClaimWritesFromTwoGoroutinesOrderRatherThanOverwrite(t *testing.T) {
-    subject := &redisLock{name: "melody:lock:test:claim-ordering"}
-
-    reading := make(chan struct{})
-    release := make(chan struct{})
-    done := make(chan struct{})
-
-    go func() {
-        defer close(done)
-
-        subject.updateClaim(func(current lockClaim) lockClaim {
-            select {
-            case <-reading:
-            default:
-                close(reading)
-                <-release
-            }
-
-            return lockClaim{held: "held-by-the-slow-writer", pending: current.pending}
-        })
-    }()
-
-    <-reading
-
-    subject.updateClaim(func(current lockClaim) lockClaim {
-        return claimWithPending(current, "written-while-the-other-was-reading")
-    })
-
-    close(release)
-    <-done
-
-    settled := subject.currentClaim()
-
-    if "held-by-the-slow-writer" != settled.held {
-        t.Fatalf("expected the slow writer's value to land, the claim holds %+v", settled)
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || true == acquired {
+        t.Fatalf("expected the acquire to be refused: %v %v", acquired, acquireErr)
     }
 
-    if 1 != len(settled.pending) || "written-while-the-other-was-reading" != settled.pending[0] {
-        t.Fatalf("expected the write made between the other's read and its write to survive, the claim holds %+v", settled)
+    if held := lock.(*redisLock).heldToken(); "" != held {
+        t.Fatalf("expected a refused handle to claim nothing, it claims %q", held)
     }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("expected the release of a handle that holds nothing to be a no-op: %v", releaseErr)
+    }
+
+    requireStoredToken(t, name, "held-by-somebody-else")
 }
