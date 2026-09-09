@@ -119,7 +119,9 @@ func LogOnRecoverAndExit(
 
 /* LogOnRecoverAndExitAfter logs the recovered value like LogOnRecoverAndExit and runs beforeExit between the record and the process exit. It is the one place that is both after the record and before the exit: a teardown deferred below never runs, because os.Exit skips it, and one run before closes the logger the final record must travel through.
 
-   The hook runs under the budget its caller declares, not under this package's constant. The two are the same teardown reached by two doors — a process that returns from Run and one that panics or takes an exit error release the same brokers, pools and tracer providers — so a budget honoured on one door and ignored on the other would leave every cli command that exits non-zero closing under a figure its operator had already replaced. What this package cannot read is the CONFIGURATION; the value is not configuration by the time it arrives here, it is an argument. A non-positive budget carries the same meaning it carries everywhere else in this file: no deadline. */
+   The hook runs under the budget its caller declares, not under this package's constant. The two are the same teardown reached by two doors — a process that returns from Run and one that panics or takes an exit error release the same brokers, pools and tracer providers — so a budget honoured on one door and ignored on the other would leave every cli command that exits non-zero closing under a figure its operator had already replaced. What this package cannot read is the CONFIGURATION; the value is not configuration by the time it arrives here, it is an argument.
+
+   A non-positive budget is the one place this door parts company with the clean one. There it means there is to be no deadline, and waiting the teardown out is what the operator asked for. Here it would remove the LAST bound before os.Exit, on the one path that is already past a fatal failure: the exit record and the certificate are both written before this step and both run under the package constant, so the journal would say the process is exiting with a code for a process that then never exits. A caller that declares nothing is given that same constant, which is what this door was bounded by before any budget reached it. */
 func LogOnRecoverAndExitAfter(
     logger loggingcontract.Logger,
     recovered any,
@@ -160,7 +162,7 @@ func LogOnRecoverAndExitAfter(
     })
 
     if nil != beforeExit {
-        runExitStepShieldedWithin(beforeExitBudget, "running the before-exit hook", beforeExit)
+        runExitStepShieldedWithin(exitPathStepBudget(beforeExitBudget), "running the before-exit hook", beforeExit)
     }
 
     /* the earlier record may have gone to a file logger, leaving a container whose logs are the standard streams with no trace of a fatal exit.
@@ -190,6 +192,15 @@ func LogOnRecoverAndExitAfter(
 
 /* exitStepBudget is how long one step of the exit handler may run before it is abandoned; tests replace it to drive the timeout without real waits. Ten seconds is double the default http shutdown wait on purpose — the exit handler is the last resort, not the first — and it is a package constant rather than a tunable because this package cannot read the configuration: the logger it builds is what the configuration is loaded through. It stands in for a budget its caller did not declare; a caller that declares one is honoured on this door too. */
 var exitStepBudget = 10 * time.Second
+
+/* exitPathStepBudget answers what one step of the PANIC path is held to, from what its caller declared. A positive figure is honoured whole, because a caller that has a configuration knows what its own teardown costs and the two paths release the same brokers, pools and tracer providers. A non-positive one is not carried through: it is the caller saying there is to be no deadline, which the clean path obeys and this one cannot, since it stands between a fatal failure and os.Exit. The package constant stands in for the budget the caller did not declare, exactly as it does for the steps around this one. */
+func exitPathStepBudget(declaredBudget time.Duration) time.Duration {
+    if 0 < declaredBudget {
+        return declaredBudget
+    }
+
+    return exitStepBudget
+}
 
 /* RunShieldedStep is the exit handler's own shield, offered to the one other caller that stands between a process and its end: the normal return of Run, whose teardown is deferred with no budget at all, so the healthy shutdown was the one without an emergency exit while the panicking one had a ten-second escape. It contains a panic inside the step, echoes it to stderr best-effort, and abandons a step that does not return within the budget, answering whether the step ran to its end. A caller that gets false has a process holding something it cannot release and should end rather than wait; a contained panic answers false for the same reason, because the step stopped where it raised.
 

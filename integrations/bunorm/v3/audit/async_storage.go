@@ -134,8 +134,16 @@ func (instance *AsyncStorage) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* closeGracesWithin splits the time the caller's deadline leaves into the two stretches Close spends: one draining the queue, one waiting for the delegate to react to the cancellation it is then sent. They are equal because neither can be sized without the other — a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them. A caller with no deadline gets the package grace on both, which is what this storage did before anybody could declare one. */
+/* closeGracesWithin splits the time the caller's deadline leaves into the two stretches Close spends: one draining the queue, one waiting for the delegate to react to the cancellation it is then sent. They are equal because neither can be sized without the other — a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them. A caller with no deadline gets the package grace on both, which is what this storage did before anybody could declare one.
+
+   Neither half exceeds that package grace. A declared budget bounds the TOTAL a teardown may spend, and reading it as a per-stretch figure inverted the declaration: an operator who raised the budget to an hour so a slow component could finish made THIS storage wait thirty minutes for a drain it used to abandon after five seconds. A remainder too small to halve answers zero, which is the same "do not wait" an already spent deadline gets and the right answer for it.
+
+   A context already cancelled is read like a spent deadline, because the delegate below is handed the worker's cancellation either way and the registry this storage writes through abandons on the same signal. */
 func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (drainGrace time.Duration, cancellationGrace time.Duration) {
+    if nil != closeContext.Err() {
+        return 0, 0
+    }
+
     deadline, hasDeadline := closeContext.Deadline()
     if false == hasDeadline {
         return asyncStorageCloseGrace, asyncStorageCloseGrace
@@ -146,7 +154,9 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
         return 0, 0
     }
 
-    return remaining / 2, remaining / 2
+    grace := min(remaining/2, asyncStorageCloseGrace)
+
+    return grace, grace
 }
 
 /* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A deadline already passed leaves both at zero: the queue is closed, the worker cancelled, and the answer names what was still queued — which is the whole of what the operator can still be told once the budget is gone. */

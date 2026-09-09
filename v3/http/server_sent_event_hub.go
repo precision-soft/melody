@@ -262,7 +262,9 @@ func (instance *ServerSentEventHub) Shutdown() {
     _ = instance.shutdownWithin(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline the teardown declares. What the deadline bounds is the WAIT for the publishes already past the closed check, not the publishes themselves: ServerSentEventBackplane.Publish takes no context, so a replicate blocked on a broker that stopped reading cannot be cancelled from here, and closing the backplane under it is the very send-on-a-closed-channel the wait exists to prevent. So an expired budget is answered by leaving the backplane open and saying so, which is a diagnosis; the alternative is a panic on somebody else's goroutine. */
+/* CloseWithContext is Close under a deadline the teardown declares. What the deadline bounds is the WAIT for the publishes already past the closed check, not the publishes themselves: ServerSentEventBackplane.Publish takes no context, so a replicate blocked on a broker that stopped reading cannot be cancelled from here, and closing the backplane under it is the very send-on-a-closed-channel the wait exists to prevent.
+
+   So an expired budget does not close the backplane — it HANDS IT ON, to a closer of its own that waits the publishes out and closes it when they end. What the budget buys is the caller's return, not the abandonment of what the hub owns: the hub is the only holder of the reference, so a close that returned without either closing it or handing it on put the backplane's connection, its channels and its listen goroutine beyond every door in the process, and did it on the branch where the shut flag already makes every later close answer nil. */
 func (instance *ServerSentEventHub) CloseWithContext(closeContext context.Context) error {
     return instance.shutdownWithin(closeContext)
 }
@@ -298,8 +300,10 @@ func (instance *ServerSentEventHub) shutdownWithin(closeContext context.Context)
 
     /* the publishes that were already past the closed check finish before the backplane they hold is closed under them */
     if false == awaitPublishesInFlight(closeContext, &instance.publishesInFlight) {
+        instance.closeBackplaneWhenPublishesEnd(backplane, logger)
+
         return exception.NewError(
-            "server sent event hub stopped waiting for the publishes in flight when its close deadline passed; the backplane was left open under them",
+            "server sent event hub stopped waiting for the publishes in flight when its close deadline passed; the backplane it owns is closed by a detached closer once they end",
             exceptioncontract.Context{
                 "reason": "hub shutdown",
             },
@@ -310,6 +314,23 @@ func (instance *ServerSentEventHub) shutdownWithin(closeContext context.Context)
     closeServerSentEventBackplane(closeContext, backplane, logger, "hub shutdown")
 
     return nil
+}
+
+/* closeBackplaneWhenPublishesEnd is where the backplane goes when the teardown's deadline runs out before the publishes holding it do. The hub is its only holder and the shut flag has already made every later close answer nil, so a branch that returned without it left the connection, both channels and the listen goroutine unreachable for the life of the process — filed, on every close after the first, as a success.
+
+   It runs detached because the thing it waits for is precisely what the caller could not wait for, and it closes under no deadline of its own because the backplane bounds each stretch of its own close with its package constants; the caller's context is spent by construction on this path. The wait is safe to leave running: the shut flag is set under the write lock before this, and a publish counts itself in under the read lock only after reading that same flag, so nothing can join the group once this branch is reached. A process that exits first leaves what any crash leaves.
+
+   The recover is the shape a bare goroutine needs: the close below contains its own panic and reports it, but the reporting itself runs through a logger the application supplied, and a panic there would take the process down for a caller that has already been answered. */
+func (instance *ServerSentEventHub) closeBackplaneWhenPublishesEnd(backplane ServerSentEventBackplane, logger loggingcontract.Logger) {
+    go func() {
+        defer func() {
+            _ = recover()
+        }()
+
+        instance.publishesInFlight.Wait()
+
+        closeServerSentEventBackplane(context.Background(), backplane, logger, "hub shutdown, detached")
+    }()
 }
 
 /* awaitPublishesInFlight waits for the replicates already past the closed check, up to the deadline the teardown carries, and answers whether they all ended. The wait runs on a goroutine because a WaitGroup cannot be selected on; the goroutine ends with the last publish whether anybody is still listening or not. */

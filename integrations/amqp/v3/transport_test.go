@@ -2860,3 +2860,27 @@ func TestTeardownStretchWithin_AnswersTheRemainderOrThePackageBound(t *testing.T
         t.Fatalf("a spent deadline answered %s, wanted zero", answered)
     }
 }
+
+/* the package bound is the ceiling of one stretch and the caller's deadline the ceiling of the TOTAL: an operator who declares an hour is asking for an hour of teardown, not an hour of the first stretch that wedges. Read unclamped, a MORE generous budget made every stretch longer than the constant that used to bound it. */
+func TestTeardownStretchWithin_ClampsAGenerousDeadlineToThePackageBound(t *testing.T) {
+    generousContext, cancelGenerous := context.WithTimeout(context.Background(), time.Hour)
+    defer cancelGenerous()
+
+    if answered := teardownStretchWithin(generousContext, closeJoinTimeout); closeJoinTimeout != answered {
+        t.Fatalf("an hour-long deadline gave one stretch %s, wanted it clamped to the package bound %s", answered, closeJoinTimeout)
+    }
+}
+
+/* a context carrying a cancellation and no deadline is read like a spent one. Nothing in the framework hands one down — every caller passes context.Background or a deadline — but CloseWithContext is reached by an application through a type assertion, and the manager registry closed beside these transports abandons on exactly this signal; two components of one teardown reading the same cancellation opposite ways is the defect. */
+func TestTeardownStretchWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, hasDeadline := cancelledContext.Deadline(); true == hasDeadline {
+        t.Fatalf("the probe needs a context with a cancellation and NO deadline, this one carries a deadline")
+    }
+
+    if answered := teardownStretchWithin(cancelledContext, closeJoinTimeout); 0 != answered {
+        t.Fatalf("a cancelled context answered %s, wanted zero", answered)
+    }
+}

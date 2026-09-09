@@ -651,3 +651,35 @@ func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing
         t.Fatalf("a spent deadline answered %s/%s, wanted zero twice", drainGrace, cancellationGrace)
     }
 }
+
+/* neither half exceeds the package grace: a declared budget bounds the TOTAL a teardown spends, and reading it per stretch inverted the declaration — an operator who raised the budget to an hour so a slow component could finish made this storage wait thirty minutes for a drain it used to abandon after five seconds. */
+func TestAsyncStorage_CloseGracesWithin_ClampsEachHalfToThePackageGrace(t *testing.T) {
+    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    defer func() { _ = storage.Close() }()
+
+    generousContext, cancelGenerous := context.WithTimeout(context.Background(), time.Hour)
+    defer cancelGenerous()
+
+    drainGrace, cancellationGrace := storage.closeGracesWithin(generousContext)
+    if asyncStorageCloseGrace != drainGrace || asyncStorageCloseGrace != cancellationGrace {
+        t.Fatalf("an hour-long deadline gave the stretches %s/%s, wanted both clamped to the package grace %s", drainGrace, cancellationGrace, asyncStorageCloseGrace)
+    }
+}
+
+/* a cancellation without a deadline is read like a spent deadline, because the delegate below is handed the worker's cancellation either way and the registry this storage writes through abandons on the same signal. */
+func TestAsyncStorage_CloseGracesWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *testing.T) {
+    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    defer func() { _ = storage.Close() }()
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, hasDeadline := cancelledContext.Deadline(); true == hasDeadline {
+        t.Fatalf("the probe needs a context with a cancellation and NO deadline, this one carries a deadline")
+    }
+
+    drainGrace, cancellationGrace := storage.closeGracesWithin(cancelledContext)
+    if 0 != drainGrace || 0 != cancellationGrace {
+        t.Fatalf("a cancelled context answered %s/%s, wanted zero twice", drainGrace, cancellationGrace)
+    }
+}

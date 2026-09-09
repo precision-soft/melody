@@ -562,6 +562,46 @@ func TestServerSentEventHub_ShutdownWaitsForAnInFlightPublishBeforeClosingTheBac
     }
 }
 
+/* the deadline bounds the CALLER's wait, not the fate of what the hub owns. On the branch where it runs out the hub is still the only holder of the backplane and has already set the flag that makes every later close answer nil, so a return that neither closed it nor handed it on put its connection, its channels and its listen goroutine beyond every door in the process — and reported success from then on. The two assertions are ordered: it must NOT be closed while the publish is inside it, which is the rationale the branch was written for, and it must be closed once the publish ends, which is what nobody was doing. */
+func TestServerSentEventHub_ASpentCloseDeadlineHandsTheBackplaneToADetachedCloser(t *testing.T) {
+    hub := NewServerSentEventHub()
+    backplane := newGatedBackplane()
+    hub.SetBackplane(backplane)
+
+    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+
+    <-backplane.entered
+
+    spentContext, cancelSpent := context.WithTimeout(context.Background(), time.Nanosecond)
+    defer cancelSpent()
+
+    time.Sleep(5 * time.Millisecond)
+
+    closeErr := hub.CloseWithContext(spentContext)
+    if nil == closeErr {
+        t.Fatalf("a close whose deadline ran out under an in-flight publish reported success")
+    }
+
+    select {
+    case <-backplane.closed:
+        t.Fatalf("the backplane was closed under a publish still inside it")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    close(backplane.release)
+
+    select {
+    case <-backplane.closed:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the backplane was never closed: the hub dropped its only reference and every later close answers nil, so nothing in the process can reach it")
+    }
+
+    /* and the handing-on does not become a second closer: the shut flag answers a later close before it can reach the backplane, which a double close would show as a panic on the channel this double shuts */
+    if closeErr := hub.Close(); nil != closeErr {
+        t.Fatalf("a close after the detached one reported %v", closeErr)
+    }
+}
+
 func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *testing.T) {
     hub := NewServerSentEventHub()
     backplane := newGatedBackplane()

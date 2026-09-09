@@ -1769,10 +1769,16 @@ func (instance *Transport) logError(runtimeInstance runtimecontract.Runtime, mes
     logger.Error(message, exception.LogContext(err))
 }
 
-/* teardownStretchWithin answers how long one stretch of a close may take: what is LEFT of the caller's deadline, or the package's own bound when the caller declared none. Each stretch asks again rather than dividing the budget up front, because the stretches are serial and the ones that end in microseconds — a healthy consume join, a channel close over a live socket — must not have spent a share they never needed on behalf of the one that wedges.
+/* teardownStretchWithin answers how long one stretch of a close may take: the SMALLER of what is left of the caller's deadline and the package's own bound for that stretch. Each stretch asks again rather than dividing the budget up front, because the stretches are serial and the ones that end in microseconds — a healthy consume join, a channel close over a live socket — must not have spent a share they never needed on behalf of the one that wedges.
 
-   A deadline already spent answers zero, which every waiter below reads as "do not wait": the connection is still cut and the channels are still closed, because those are the operations the teardown exists to perform, and only the WAITING is what the budget was about. */
+   The package bound stays the ceiling of each stretch and the caller's deadline the ceiling of the TOTAL, which is the pair of promises an operator who declares a budget is making: one hour for the whole teardown, not one hour for the first stretch that wedges. Handing the remainder through unclamped read the declaration backwards — a MORE generous budget made every stretch LONGER than the constant that used to bound it, taking a thirty-second consume join to fifty-nine minutes and a five-second audit drain to thirty.
+
+   A deadline already spent, or a context already cancelled, answers zero, which every waiter below reads as "do not wait": the connection is still cut and the channels are still closed, because those are the operations the teardown exists to perform, and only the WAITING is what the budget was about. The cancellation is read as well as the deadline because a context carrying one without the other is a live shape of this door — nothing in the framework hands one down, every caller passes context.Background or a deadline, but CloseWithContext is reached by an application through a type assertion — and the registry closed beside these transports already abandons on exactly that signal. Two components of one teardown reading the same cancellation opposite ways is the defect, not the figure either of them chose. */
 func teardownStretchWithin(closeContext context.Context, packageBound time.Duration) time.Duration {
+    if nil != closeContext.Err() {
+        return 0
+    }
+
     deadline, hasDeadline := closeContext.Deadline()
     if false == hasDeadline {
         return packageBound
@@ -1783,7 +1789,7 @@ func teardownStretchWithin(closeContext context.Context, packageBound time.Durat
         return 0
     }
 
-    return remaining
+    return min(remaining, packageBound)
 }
 
 var _ messagebuscontract.Transport = (*Transport)(nil)

@@ -526,6 +526,87 @@ func TestLogOnRecoverAndExitAfter_ShieldsTheHookAndTheRecord(t *testing.T) {
     }
 }
 
+/* the marker tells a re-executed test binary which half of the zero-budget probe it is: the hook is blocked in both, and what differs is whether the caller declared a budget at all */
+const exitHandlerBudgetProbeMarker = "MELODY_EXIT_HANDLER_BUDGET_PROBE"
+
+func TestLogOnRecoverAndExitAfter_ADeclaredZeroDoesNotDisarmTheShield(t *testing.T) {
+    blockForever := func(_ context.Context) {
+        select {}
+    }
+
+    if "declared-none" == os.Getenv(exitHandlerBudgetProbeMarker) {
+        exitStepBudget = 200 * time.Millisecond
+
+        LogOnRecoverAndExitAfter(
+            &captureLogger{},
+            exception.NewExitError(9, exception.NewError("boom", nil, nil)),
+            1,
+            0,
+            blockForever,
+        )
+
+        return
+    }
+
+    if "declared-positive" == os.Getenv(exitHandlerBudgetProbeMarker) {
+        exitStepBudget = 30 * time.Second
+
+        LogOnRecoverAndExitAfter(
+            &captureLogger{},
+            exception.NewExitError(9, exception.NewError("boom", nil, nil)),
+            1,
+            200*time.Millisecond,
+            blockForever,
+        )
+
+        return
+    }
+
+    /* the two halves pin the two directions the door can be broken in, and each is read on the figure the ABANDONMENT NAMES rather than on the fact that one happened: a bound read off the wrong figure abandons the step just the same and says nothing about which value produced it */
+    probeModes := []struct {
+        mode           string
+        expectedFigure string
+    }{
+        {mode: "declared-none", expectedFigure: "did not return within 200ms"},
+        {mode: "declared-positive", expectedFigure: "did not return within 200ms"},
+    }
+
+    for _, probeMode := range probeModes {
+        /* the child is bounded from out here because the form this test exists to refuse does not return at all: without it the mutant hangs the suite until go test times out, instead of failing in a second with the reason */
+        probeContext, cancelProbe := context.WithTimeout(context.Background(), 20*time.Second)
+
+        command := exec.CommandContext(
+            probeContext,
+            os.Args[0],
+            "-test.run=^TestLogOnRecoverAndExitAfter_ADeclaredZeroDoesNotDisarmTheShield$",
+        )
+        command.Env = append(os.Environ(), exitHandlerBudgetProbeMarker+"="+probeMode.mode)
+
+        output, runErr := command.CombinedOutput()
+
+        /* the deadline is read BEFORE the cancel, which would otherwise be the reason the context carries an error and would report every healthy child as one that never exited */
+        probeDeadlinePassed := errors.Is(probeContext.Err(), context.DeadlineExceeded)
+        cancelProbe()
+
+        if true == probeDeadlinePassed {
+            t.Fatalf("[%s] the child never exited: a blocked before-exit hook left os.Exit unreachable, output %q", probeMode.mode, string(output))
+        }
+
+        var exitErr *exec.ExitError
+        if false == errors.As(runErr, &exitErr) {
+            t.Fatalf("[%s] expected the child to exit non-zero, got %v with output %q", probeMode.mode, runErr, string(output))
+        }
+
+        if 9 != exitErr.ExitCode() {
+            t.Fatalf("[%s] expected the deliberate exit code 9 to be reached past the blocked hook, got %d with output %q", probeMode.mode, exitErr.ExitCode(), string(output))
+        }
+
+        if false == strings.Contains(string(output), probeMode.expectedFigure) {
+            t.Fatalf("[%s] expected the abandonment to name %q, got %q", probeMode.mode, probeMode.expectedFigure, string(output))
+        }
+    }
+}
+
 /* the marker tells a re-executed test binary that it is the child taking the exit that LogOnRecoverAndExit is named for */
 const logOnRecoverAndExitProbeMarker = "MELODY_LOG_ON_RECOVER_AND_EXIT_PROBE"
 
