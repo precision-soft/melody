@@ -2168,3 +2168,434 @@ func TestContainer_Close_ReachesTheContextTakingDoorWithoutADeadline(t *testing.
         t.Fatal("a close with no budget handed the service a deadline")
     }
 }
+
+/* armParallelTeardown reaches the opt-in the way an application does: through a type assertion on the concrete container, because the Container contract declares neither this door nor IsClosed nor CloseWithContext, for the reason written at each of them. */
+func armParallelTeardown(t *testing.T, serviceContainer containercontract.Container) {
+    t.Helper()
+
+    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
+    if false == isArmable {
+        t.Fatalf("expected the container to carry the parallel teardown door")
+    }
+
+    if armErr := armable.ArmParallelTeardown(); nil != armErr {
+        t.Fatalf("unexpected arm error: %v", armErr)
+    }
+}
+
+/* waveMateCloser closes by announcing that it started and then waiting, for a bounded moment, to be told that its wave-mate started too. Serially the first one to close waits the whole moment out and reports it, because the second has not begun; in one wave both announce before either waits. The bound is what keeps the failing arm a failure rather than a hung suite. */
+type waveMateCloser struct {
+    started      chan struct{}
+    mateStarted  <-chan struct{}
+    mateDeadline time.Duration
+}
+
+func (instance *waveMateCloser) Close() error {
+    close(instance.started)
+
+    select {
+    case <-instance.mateStarted:
+        return nil
+    case <-time.After(instance.mateDeadline):
+        return errors.New("the wave mate had not started")
+    }
+}
+
+func registerWaveMatePair(t *testing.T, serviceContainer containercontract.Container, mateDeadline time.Duration) {
+    t.Helper()
+
+    firstStarted := make(chan struct{})
+    secondStarted := make(chan struct{})
+
+    first := &waveMateCloser{started: firstStarted, mateStarted: secondStarted, mateDeadline: mateDeadline}
+    second := &waveMateCloser{started: secondStarted, mateStarted: firstStarted, mateDeadline: mateDeadline}
+
+    if registerErr := serviceContainer.Register(
+        "app.wave.first",
+        func(resolver containercontract.Resolver) (*waveMateCloser, error) {
+            return first, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.wave.second",
+        func(resolver containercontract.Resolver) (*waveMateCloser, error) {
+            return second, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := FromResolver[*waveMateCloser](serviceContainer, "app.wave.first"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := FromResolver[*waveMateCloser](serviceContainer, "app.wave.second"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+}
+
+/* the two services below have no edge between them, so the graph puts them in one wave: armed, both are inside their Close at the same moment and neither has to wait. */
+func TestContainer_Close_ArmedTheServicesOfOneWaveCloseAtOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    registerWaveMatePair(t, serviceContainer, time.Second)
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected both services of the wave to be closing at the same moment, got: %v", closeErr)
+    }
+}
+
+/* the sibling that makes the test above mean something: the same pair, the same bound, the door NOT armed. One of the two waits its whole moment out and says so, which is the observation the armed run has to remove. Without this arm, an armed run that closed serially would pass on a bound nobody exercised. */
+func TestContainer_Close_NotArmedTheServicesOfOneWaveCloseOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerWaveMatePair(t, serviceContainer, 50*time.Millisecond)
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the serial teardown to report a service that waited for a mate that had not started")
+    }
+
+    if false == strings.Contains(closeErr.Error(), "failed to close container services") {
+        t.Fatalf("expected the failure map to carry the report, got: %v", closeErr)
+    }
+}
+
+/* a wave is the set of nodes with no relation to one another, so a dependency is one wave past the LAST dependent that frees it — which is what keeps the ordering the whole point of the walk. */
+func TestTeardownCloseOrder_ADependencyIsOneWavePastItsLastDependent(t *testing.T) {
+    nodeKeys := []string{"service:dependent.first", "service:dependent.second", "service:shared", "service:unrelated"}
+
+    edges := map[string]map[string]struct{}{
+        "service:dependent.first":  {"service:shared": struct{}{}},
+        "service:dependent.second": {"service:shared": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:dependent.first":  1,
+        "service:dependent.second": 2,
+        "service:shared":           3,
+        "service:unrelated":        4,
+    }
+
+    closeOrder, closeWaveIndexOf, remaining := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    if 0 != len(remaining) {
+        t.Fatalf("expected no cycle remainder, got %v", remaining)
+    }
+
+    if 4 != len(closeOrder) {
+        t.Fatalf("expected every node in the close order, got %v", closeOrder)
+    }
+
+    for _, nodeKey := range []string{"service:dependent.first", "service:dependent.second", "service:unrelated"} {
+        if 0 != closeWaveIndexOf[nodeKey] {
+            t.Fatalf("expected %s to open the teardown in wave 0, got wave %d", nodeKey, closeWaveIndexOf[nodeKey])
+        }
+    }
+
+    if 1 != closeWaveIndexOf["service:shared"] {
+        t.Fatalf("expected the shared dependency one wave past both dependents, got wave %d", closeWaveIndexOf["service:shared"])
+    }
+}
+
+/* the waves are read off the same drain that produces the serial order, so a caller that ignores them closes exactly what it closed before, in exactly that order. The order asserted here is the one the walk answered before the waves existed: newest first among the free nodes, the shared dependency last. */
+func TestTeardownCloseOrder_TheSerialOrderIsUnchangedByTheWaves(t *testing.T) {
+    nodeKeys := []string{"service:dependent.first", "service:dependent.second", "service:shared", "service:unrelated"}
+
+    edges := map[string]map[string]struct{}{
+        "service:dependent.first":  {"service:shared": struct{}{}},
+        "service:dependent.second": {"service:shared": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:dependent.first":  1,
+        "service:dependent.second": 2,
+        "service:shared":           3,
+        "service:unrelated":        4,
+    }
+
+    closeOrder, _, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:unrelated", "service:dependent.second", "service:dependent.first", "service:shared"}
+
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the serial order untouched by the waves, wanted %v got %v", expectedOrder, closeOrder)
+    }
+}
+
+/* arming is the moment the application says its teardown graph is complete, so it is the moment a declared edge naming a service nobody registered stops being a tolerated no-op and becomes the ordering that is not there. */
+func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{}, nil
+        },
+        WithTeardownDependency("app.stroage"),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
+    if false == isArmable {
+        t.Fatalf("expected the container to carry the parallel teardown door")
+    }
+
+    armErr := armable.ArmParallelTeardown()
+    if nil == armErr {
+        t.Fatalf("expected the misspelled teardown dependency to refuse the arming")
+    }
+
+    if false == errors.Is(armErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the never-registered sentinel, got: %v", armErr)
+    }
+
+    if false == strings.Contains(armErr.Error(), "never registered") {
+        t.Fatalf("expected the refusal to name what is missing, got: %v", armErr)
+    }
+}
+
+/* the sibling that keeps the refusal above from being a refusal of the door's own purpose: a dependency that WAS registered and simply never built is the optional collaborator and the lazy singleton, and it must arm. */
+func TestContainer_ArmParallelTeardown_AdmitsADeclaredDependencyOnARegisteredServiceNobodyBuilt(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if registerErr := serviceContainer.Register(
+        "app.storage",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{}, nil
+        },
+        WithTeardownDependency("app.storage"),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    armParallelTeardown(t, serviceContainer)
+}
+
+/* a declaration keyed by TYPE writes into the same graph the name form writes into, so it orders the teardown the same way — and T and *T name one node, because the container files them under one canonical type. */
+func TestContainer_Close_ADeclaredTeardownDependencyKeyedByTypeOrdersTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.storage",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        WithTeardownDependencyOfType[closeOrderServiceB](),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    /* the DEPENDENT is built first and the dependency second, so the creation stamp alone would close the dependency FIRST — under the service still holding it. Only the declared edge can turn that around, which is what makes this an observation rather than a coincidence. */
+    if _, getErr := FromResolver[*closeOrderServiceA](serviceContainer, "app.reporter"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := FromResolver[*closeOrderServiceB](serviceContainer, "app.storage"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "a" != closeSequence[0] || "b" != closeSequence[1] {
+        t.Fatalf("expected the type-keyed declaration to close the dependent first, got %v", closeSequence)
+    }
+}
+
+/* capturingHolder is the shape the reflection walk exists for: a service that HOLDS a collaborator it never resolved, because its provider closed over a value built before it. Nothing about it writes an edge. */
+type capturingHolder struct {
+    recorder *closeOrderRecorder
+    held     *closeOrderServiceB
+}
+
+func (instance *capturingHolder) Close() error {
+    instance.recorder.record("holder")
+
+    return nil
+}
+
+func registerCapturingPair(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder) {
+    t.Helper()
+
+    /* built before the container, the way a composition root builds what it then publishes: the provider below has nothing to resolve and hands it back */
+    captured := &closeOrderServiceB{recorder: recorder}
+
+    if registerErr := serviceContainer.Register(
+        "app.storage",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return captured, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.holder",
+        func(resolver containercontract.Resolver) (*capturingHolder, error) {
+            return &capturingHolder{recorder: recorder, held: captured}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    /* the holder is built FIRST, so the creation stamp alone closes the storage before it — which is the wrong order, and the accident the walk has to correct */
+    if _, getErr := FromResolver[*capturingHolder](serviceContainer, "app.holder"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := FromResolver[*closeOrderServiceB](serviceContainer, "app.storage"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+}
+
+/* the holder captured its collaborator instead of resolving it, so no edge was ever written and the creation order alone closes the collaborator FIRST — under the holder that is still using it. Armed, the walk sees what the holder holds and the graph gains the edge the provider did not write. */
+func TestContainer_Close_ArmedAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerCapturingPair(t, serviceContainer, recorder)
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "holder" != closeSequence[0] || "b" != closeSequence[1] {
+        t.Fatalf("expected the held collaborator to be closed after its holder, got %v", closeSequence)
+    }
+}
+
+/* the sequence above is the property, but on its own it cannot pin the edge: with no edge the two land in ONE wave and are closed at the same moment, so the order recorded is whatever the scheduler chose and the assertion passes about half the time. The wave is what nothing can decide by luck — a dependency is one past its last dependent, or it is beside it. */
+func TestContainer_ArmParallelTeardown_AHeldCollaboratorIsOneWavePastTheServiceHoldingIt(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerCapturingPair(t, serviceContainer, recorder)
+
+    planned, carriesPlan := serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    })
+    if false == carriesPlan {
+        t.Fatalf("expected the container to carry the teardown plan door")
+    }
+
+    waveByNode := make(map[string]int)
+    for _, entry := range planned.TeardownPlan() {
+        waveByNode[entry.NodeKey] = entry.WaveIndex
+    }
+
+    holderWave, holderPlanned := waveByNode["service:app.holder"]
+    storageWave, storagePlanned := waveByNode["service:app.storage"]
+
+    if false == holderPlanned || false == storagePlanned {
+        t.Fatalf("expected both services in the teardown plan, got %v", waveByNode)
+    }
+
+    if holderWave >= storageWave {
+        t.Fatalf("expected the held collaborator at least one wave past its holder, got holder=%d storage=%d", holderWave, storageWave)
+    }
+}
+
+/* the sibling that makes the test above an observation rather than a coincidence: the same pair, not armed, closes in the order the creation stamp gives — the collaborator first, under the service still holding it. It is the state this repository has shipped, and it is what the walk changes. */
+func TestContainer_Close_NotArmedAHeldCollaboratorIsClosedBeforeTheServiceHoldingIt(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerCapturingPair(t, serviceContainer, recorder)
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if "b" != closeSequence[0] || "holder" != closeSequence[1] {
+        t.Fatalf("expected the unarmed teardown to keep the creation order, got %v", closeSequence)
+    }
+}
+
+/* a map is counted and never entered, because iterating one another goroutine writes is a fatal error no recover catches. The cost is a real edge the walk cannot see, and it is written down here so the limit is a decision rather than an oversight. */
+func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
+    held := &closeOrderServiceB{}
+
+    throughField := heldPointerIdentities(&capturingHolder{held: held})
+    if 0 == len(throughField) {
+        t.Fatalf("expected the walk to reach a collaborator held in a field")
+    }
+
+    heldIdentity, hasPointer := pointerKeyOf(held)
+    if false == hasPointer {
+        t.Fatalf("expected the collaborator to carry a pointer identity")
+    }
+
+    foundThroughField := false
+    for _, identity := range throughField {
+        if identity == heldIdentity {
+            foundThroughField = true
+        }
+    }
+
+    if false == foundThroughField {
+        t.Fatalf("expected the field walk to find the collaborator")
+    }
+
+    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held})
+    for _, identity := range throughMap {
+        if identity == heldIdentity {
+            t.Fatalf("expected the walk to leave a map unentered")
+        }
+    }
+}

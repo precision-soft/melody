@@ -1,5 +1,9 @@
 package contract
 
+import (
+    "reflect"
+)
+
 type RegisterOptions struct {
     AlsoRegisterType         bool
     TypeRegistrationIsStrict bool
@@ -13,6 +17,10 @@ type RegisterOptions struct {
 
        It orders teardown and nothing else: it does not build the named service, does not make it exist, and does not enter the cycle report of a resolution. An edge naming a service that was never created is dropped by the teardown walk, so declaring a dependency on an optional service is not an error at either end. */
     TeardownDependencyNames []string
+    /* TeardownDependencyTypes are the same declaration keyed by TYPE rather than by name, for the collaborator a registration knows as a type and not as a spelling — which is every service reached through GetByType, and every one whose name belongs to a module the declaring code does not own. The container files T and *T under one type, so either form names the same node.
+
+       It carries the same meaning and the same limits as the names above, and both are written into the one graph the teardown walks. */
+    TeardownDependencyTypes []reflect.Type
 }
 
 type RegisterOption func(option *RegisterOptions)

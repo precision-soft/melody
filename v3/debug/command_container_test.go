@@ -1370,3 +1370,93 @@ func TestContainerCommand_BuildSweepReachesAScopedRegistrationTheNameListCannotS
         t.Fatalf("expected the sweep to list the scoped registration, got %q", rendered)
     }
 }
+
+/* the teardown block is the operator's way of checking the assertion that arming the waves makes: it names which services close together and which of them nothing orders. A service built without ever resolving another reads "none", which is exactly the row an operator has to look at twice before arming. */
+func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        "teardown.storage",
+        func(resolver containercontract.Resolver) (*teardownProbeStorage, error) {
+            return &teardownProbeStorage{}, nil
+        },
+    )
+
+    serviceContainer.MustRegister(
+        "teardown.holder",
+        func(resolver containercontract.Resolver) (*teardownProbeHolder, error) {
+            storage, resolveErr := container.FromResolver[*teardownProbeStorage](resolver, "teardown.storage")
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &teardownProbeHolder{storage: storage}, nil
+        },
+    )
+
+    serviceContainer.MustRegister(
+        "teardown.unordered",
+        func(resolver containercontract.Resolver) (*teardownProbeStorage, error) {
+            return &teardownProbeStorage{}, nil
+        },
+        container.WithoutTypeRegistration(),
+    )
+
+    if _, resolveErr := container.FromResolver[*teardownProbeHolder](serviceContainer, "teardown.holder"); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if _, resolveErr := container.FromResolver[*teardownProbeStorage](serviceContainer, "teardown.unordered"); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=table", "--table-width=400"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    /* the title says which of the two orders will run, so an operator reading a shutdown knows which one produced it */
+    teardownRows := debugTableBlockRow(rendered, "TEARDOWN (SEQUENTIAL)")
+    if 0 == len(teardownRows) {
+        t.Fatalf("expected the sequential teardown block, got %q", rendered)
+    }
+
+    orderingByNode := make(map[string]string, len(teardownRows))
+    waveByNode := make(map[string]string, len(teardownRows))
+
+    for _, row := range teardownRows {
+        waveByNode[row[1]] = row[0]
+        orderingByNode[row[1]] = row[3]
+    }
+
+    if "proved" != orderingByNode["service:teardown.holder"] {
+        t.Fatalf("expected the resolving service to carry a proved ordering, got %v", orderingByNode)
+    }
+
+    if "none" != orderingByNode["service:teardown.unordered"] {
+        t.Fatalf("expected the service nothing orders to read none, got %v", orderingByNode)
+    }
+
+    /* the storage is one wave past the holder that resolved it, which is the whole claim the block renders */
+    if "0" != waveByNode["service:teardown.holder"] || "1" != waveByNode["service:teardown.storage"] {
+        t.Fatalf("expected the dependency one wave past its dependent, got %v", waveByNode)
+    }
+}
+
+type teardownProbeStorage struct{}
+
+func (instance *teardownProbeStorage) Close() error {
+    return nil
+}
+
+type teardownProbeHolder struct {
+    storage *teardownProbeStorage
+}
+
+func (instance *teardownProbeHolder) Close() error {
+    return nil
+}

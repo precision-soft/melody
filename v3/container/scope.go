@@ -674,7 +674,8 @@ func closeCreatedScopeInstances(
         }
     }
 
-    closeOrder, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
+    /* a scope closes serially: it lives for one request, its teardown is microseconds, and the opt-in that buys waves is an assertion about the application's own providers, which a per-request scope has no way to make. */
+    closeOrder, _, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
 
     closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})

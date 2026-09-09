@@ -1,6 +1,8 @@
 package container
 
 import (
+    "reflect"
+
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
@@ -41,6 +43,17 @@ func Replacing() containercontract.RegisterOption {
 func WithTeardownDependency(serviceNames ...string) containercontract.RegisterOption {
     return func(option *containercontract.RegisterOptions) {
         option.TeardownDependencyNames = append(option.TeardownDependencyNames, serviceNames...)
+    }
+}
+
+/* WithTeardownDependencyOfType is WithTeardownDependency keyed by the collaborator's TYPE instead of by its name, and everything written above about the name form holds here word for word. It exists because a name is not always what the declaring code knows: a service reached through GetByType has no name at the site that holds it, and a collaborator registered by a module belongs to a spelling that module owns and may change, while the type is the thing both sides already agree on.
+
+   T and *T name the same node, because the container files them under one canonical type. A type nothing was ever registered under is dropped by the teardown walk exactly as an unknown name is. */
+func WithTeardownDependencyOfType[T any]() containercontract.RegisterOption {
+    dependencyType := reflect.TypeOf((*T)(nil)).Elem()
+
+    return func(option *containercontract.RegisterOptions) {
+        option.TeardownDependencyTypes = append(option.TeardownDependencyTypes, dependencyType)
     }
 }
 

@@ -13,6 +13,10 @@ var ErrServiceTypeAlreadyRegistered = errors.New("service type already registere
 /* ErrTeardownDependencyNameIsRequired is the cause of a Register refusal for a WithTeardownDependency naming nothing. An empty name cannot be an edge, and dropping it silently would report a teardown order that was never installed. */
 var ErrTeardownDependencyNameIsRequired = errors.New("teardown dependency name is required")
 
+var ErrTeardownDependencyTypeIsRequired = errors.New("teardown dependency type is required")
+
+var ErrTeardownDependencyWasNeverRegistered = errors.New("a declared teardown dependency names a service that was never registered")
+
 /* ErrTeardownDependencyIsSelf is the cause of a Register refusal for a service declaring a teardown dependency on itself. The teardown walk ignores a self-edge, so the declaration would be inert; it is refused where it is written rather than dropped where it is read. */
 var ErrTeardownDependencyIsSelf = errors.New("a service cannot declare a teardown dependency on itself")
 

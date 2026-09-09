@@ -125,10 +125,12 @@ func containerNameStore(
             containerInstance.instances[serviceName] = value
             containerInstance.builtServiceNames[serviceName] = struct{}{}
             containerInstance.recordCreationOrderLocked(containerNameNodeKey(serviceName))
+            containerInstance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value)
 
             if nil != canonicalTargetType {
                 containerInstance.typeInstances[canonicalTargetType] = value
-                containerInstance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalTargetType))
+                containerInstance.recordCreationOrderLocked(containerTypeNodeKey(canonicalTargetType))
+                containerInstance.recordHeldIdentitiesLocked(containerTypeNodeKey(canonicalTargetType), value)
             }
 
             return value, false, nil
@@ -148,7 +150,8 @@ func containerTypeStore(
             }
 
             containerInstance.typeInstances[canonicalTargetType] = value
-            containerInstance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalTargetType))
+            containerInstance.recordCreationOrderLocked(containerTypeNodeKey(canonicalTargetType))
+            containerInstance.recordHeldIdentitiesLocked(containerTypeNodeKey(canonicalTargetType), value)
 
             return value, false, nil
         },
@@ -379,7 +382,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     }
 
     if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = "type:" + typeIdentityKey(canonicalTargetType)
+        instance.rootRequestedKey = containerTypeNodeKey(canonicalTargetType)
     }
 
     requestedKey := instance.rootRequestedKey
@@ -397,7 +400,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         }
     }
 
-    nodeKey := "type:" + typeKey
+    nodeKey := containerTypeNodeKeyPrefix + typeKey
     if true == scopedTypeNamesExist || true == scopedTypeProviderExists {
         nodeKey = scopedTypeNodeKey(typeKey)
     }

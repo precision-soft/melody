@@ -73,10 +73,23 @@ type container struct {
     /* the published plan every new scope is bound to by reference. A registration clears it and the next scope rebuilds it, so creating a scope costs one atomic load once boot has settled. */
     scopePlanPointer atomic.Pointer[scopePlan]
     isClosed         bool
-    /* teardownFinished is the SECOND of the two closing states, and the pair is what lets a service's own Close still resolve what it depends on. isClosed is set before the first service Close runs and refuses every new CREATION for the whole teardown; teardownFinished is set after the last one returns and refuses every RESOLUTION from then on. Between them the memoized instances are still served, because a worker reporting its drain at Close is entitled to the logger it reports through — which is the whole reason the logger is closed last — while after them a resolution used to answer a closed instance with a nil error, so a caller that kept a resolver got a handle to a dead service and no way to know it. */
+    /* declaredTeardownEdges is the list of edges an application wrote by hand rather than resolving, kept beside the graph they were written into. The graph itself cannot say where an edge came from — that is its virtue, since the teardown must read one graph — but the difference matters twice: an edge naming a service that was never registered is a wiring typo the resolution form cannot produce, and the operator reading the teardown wants to know which orderings were asserted and which were observed. */
+    declaredTeardownEdges []declaredTeardownEdge
+    /* heldIdentitiesByNodeKey is what each built service was seen to hold, recorded at construction and matched at teardown. It is written only while the waves are armed; see teardown_reflection.go for why the walk is there and not at teardown. */
+    heldIdentitiesByNodeKey map[string][]pointerIdentity
+    /* teardownInWaves is the application's assertion that this container's teardown graph is complete: that every ordering its services need is either written by a resolution or declared. It is off by default, because the teardown the framework has shipped so far is strictly sequential and a service that depends on another without saying so has been carried by the creation order all along. */
+    teardownInWaves bool
+    /* teardownFinished is the SECOND of the two closing states, and the pair is what lets a service's own Close still resolve what it depends on. isClosed is set before the first service Close runs and refuses every new CREATION for the whole teardown; teardownFinished is set after the last one returns and refuses every RESOLUTION from then on. Between them the memoized instances are still served, because a worker reporting its drain at Close is entitled to the logger it reports through, while after them a resolution used to answer a closed instance with a nil error, so a caller that kept a resolver got a handle to a dead service and no way to know it. */
     teardownFinished bool
     closeErr         error
     closeOnce        sync.Once
+}
+
+/* declaredTeardownEdge is one hand-written ordering: the service that declared it, the node it named, and the spelling it used, which is what a refusal has to quote back. */
+type declaredTeardownEdge struct {
+    dependentServiceName string
+    dependencyNodeKey    string
+    dependencySpelling   string
 }
 
 func (instance *container) Get(serviceName string) (any, error) {
@@ -294,7 +307,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName == registeredServiceName {
                 instance.typeInstances[registeredType] = value
-                instance.recordCreationOrderLocked("type:" + typeIdentityKey(registeredType))
+                instance.recordCreationOrderLocked(containerTypeNodeKey(registeredType))
                 break
             }
         }
@@ -509,6 +522,29 @@ func (instance *container) register(
         }
     }
 
+    for _, dependencyType := range registerOption.TeardownDependencyTypes {
+        if nil == dependencyType {
+            return exception.NewError(
+                "a teardown dependency type is required",
+                map[string]any{
+                    "serviceName": serviceName,
+                },
+                ErrTeardownDependencyTypeIsRequired,
+            )
+        }
+
+        /* a registration declaring a teardown edge to its OWN registered type is declaring one on itself: the two nodes are collapsed onto one representative before the walk, so the edge would be a self-edge the walk drops — silently, which is the shape this refuses everywhere else */
+        if nil != serviceType && containerTypeNodeKey(serviceType) == containerTypeNodeKey(dependencyType) {
+            return exception.NewError(
+                "a service cannot declare a teardown dependency on its own registered type",
+                map[string]any{
+                    "serviceName": serviceName,
+                },
+                ErrTeardownDependencyIsSelf,
+            )
+        }
+    }
+
     instance.providers[serviceName] = provider
     if nil != serviceType {
         instance.providerServiceTypeByName[serviceName] = serviceType
@@ -535,10 +571,11 @@ func (instance *container) register(
 
     /* the declared edges are written last, once the registration cannot fail anymore: the graph is never pruned, so an edge left behind by a refused registration would outlive it for the life of the process. They go into the very graph a resolution writes into, in the same key space, so the teardown reads one graph and cannot order two ways. */
     for _, dependencyName := range registerOption.TeardownDependencyNames {
-        instance.registerDependencyLocked(
-            containerNameNodeKey(serviceName),
-            containerNameNodeKey(dependencyName),
-        )
+        instance.recordDeclaredTeardownEdgeLocked(serviceName, containerNameNodeKey(dependencyName), dependencyName)
+    }
+
+    for _, dependencyType := range registerOption.TeardownDependencyTypes {
+        instance.recordDeclaredTeardownEdgeLocked(serviceName, containerTypeNodeKey(dependencyType), dependencyType.String())
     }
 
     return nil

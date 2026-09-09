@@ -16,6 +16,14 @@ func containerNameNodeKey(serviceName string) string {
     return containerNameNodeKeyPrefix + serviceName
 }
 
+/* containerTypeNodeKeyPrefix is the one spelling of a container TYPE node's key, for the same reason the name prefix above is one: an edge declared under one spelling and a node created under another never meet, and the ordering is silently absent rather than wrong. It was a literal at ten sites until an edge could be declared against a type; the name side has carried its constant since the graph existed. */
+const containerTypeNodeKeyPrefix = "type:"
+
+/* containerTypeNodeKey is the key a container service is known by under its TYPE. It canonicalises first, because the container files T and *T under one type — a caller naming either has to reach the node the container actually created, and canonicalServiceType is idempotent, so a site that already holds the canonical form is unchanged by asking. */
+func containerTypeNodeKey(targetType reflect.Type) string {
+    return containerTypeNodeKeyPrefix + typeIdentityKey(canonicalServiceType(targetType))
+}
+
 /* the scoped node keys carry their own prefix so the two levels never share one. The resolution stack detects a cycle by node key, and a scoped service that resolves the container service it replaces must be reported as repeating the scoped node rather than the container one; the container's teardown walks its own dependency graph by the same keys and must never find a node standing for a value it does not hold. */
 func scopedNameNodeKey(serviceName string) string {
     return "scope:service:" + serviceName

@@ -214,6 +214,8 @@ func (instance *ContainerCommand) describeServiceList(
             }
         }
 
+        addTeardownBlock(builder, serviceContainer)
+
         envelope.Table = builder.Build()
 
         return
@@ -225,6 +227,48 @@ func (instance *ContainerCommand) describeServiceList(
         option.Limit,
         option.Offset,
     )
+}
+
+/* addTeardownBlock renders the order the container will tear itself down in, and it is here because arming the parallel teardown is an assertion an operator has to be able to CHECK rather than take on trust. What the table says is which services close together and which of them nothing orders: a service with no dependencies is one the graph has nothing to say about, so under waves it closes beside everything else in its wave — and if it in fact needs one of them to outlive it, this listing is where that becomes visible before a shutdown finds out.
+
+   A container that does not carry the door — an application running its own Container implementation — is skipped rather than rendered as a teardown with nothing in it, which would read as a container with nothing to close. */
+func addTeardownBlock(builder *output.TableBuilder, serviceContainer containercontract.Container) {
+    planned, carriesPlan := serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+        TeardownRunsInWaves() bool
+    })
+    if false == carriesPlan {
+        return
+    }
+
+    entries := planned.TeardownPlan()
+    if 0 == len(entries) {
+        return
+    }
+
+    title := "TEARDOWN (SEQUENTIAL)"
+    if true == planned.TeardownRunsInWaves() {
+        title = "TEARDOWN (DEPENDENCY WAVES)"
+    }
+
+    teardownBlock := builder.AddBlock(
+        title,
+        []string{"wave", "node", "closed before", "ordering"},
+    )
+
+    for _, entry := range entries {
+        ordering := "proved"
+        if 0 == len(entry.Dependencies) {
+            ordering = "none"
+        }
+
+        teardownBlock.AddRow(
+            fmt.Sprintf("%d", entry.WaveIndex),
+            entry.NodeKey,
+            strings.Join(entry.Dependencies, ", "),
+            ordering,
+        )
+    }
 }
 
 func renderServiceDescriptionState(item containerServiceDescriptionItem) string {

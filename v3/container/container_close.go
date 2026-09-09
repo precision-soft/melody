@@ -8,6 +8,7 @@ import (
     "runtime/debug"
     "sort"
     "strings"
+    "sync"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -30,6 +31,131 @@ func (instance *container) IsClosed() bool {
     defer instance.mutex.RUnlock()
 
     return instance.isClosed
+}
+
+/* ArmParallelTeardown lets the container close, in one wave, every service the teardown graph proves has no relation to any other service in that wave. It is OFF by default: the teardown this container has shipped is strictly sequential, and a service that needs another to outlive it without ever saying so has been carried by the creation order rather than by the graph, which is an accident that holds until the day it does not.
+
+   Arming it is an ASSERTION about the application's own providers, not a performance setting, and that is why it is a door in the composition root rather than a configuration key: whoever turns it on has to be the person who wrote the providers. What is asserted is that every ordering the services need is written down — by a provider that RESOLVES its collaborator, which records the edge as a side effect of the resolution and cannot fall out of step with what the provider uses, or by WithTeardownDependency where there is genuinely nothing to resolve. A provider that captures an already-built collaborator and hands it back declares nothing, and under waves "no edge" is read as "no relation" rather than as an order nobody chose.
+
+   What it buys is not speed. On the applications measured, the whole teardown is a millisecond and the waves save none of it; what changes is that a service is no longer STARVED — every closer in a wave starts at once and sees the whole of what is left of the deadline, instead of the remainder the component before it did not spend, so "the budget was already gone when this one was reached" stops being the ordinary case.
+
+   One residue no graph can close, and it is the reason this is opt-in rather than default: two Close methods that touch the same EXTERNAL state — one file, one table, a sql.Register name, a system resource — have no relation this container can see, whatever it walks. Declaring the edge between them is the only thing that orders them, and nothing here will report that it is missing. */
+func (instance *container) ArmParallelTeardown() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if refusalErr := instance.refuseUnregisteredDeclaredTeardownEdgesLocked(); nil != refusalErr {
+        return refusalErr
+    }
+
+    instance.teardownInWaves = true
+
+    instance.recordHeldIdentitiesOfBuiltServicesLocked()
+
+    return nil
+}
+
+/* recordDeclaredTeardownEdgeLocked writes a hand-declared ordering into the same graph a resolution writes into, in the same key space, and keeps a note of it beside the graph. Both halves are needed: the teardown must read ONE graph or it can order two ways, and the refusal below must be able to name the spelling somebody wrote. */
+func (instance *container) recordDeclaredTeardownEdgeLocked(serviceName string, dependencyNodeKey string, dependencySpelling string) {
+    instance.registerDependencyLocked(containerNameNodeKey(serviceName), dependencyNodeKey)
+
+    instance.declaredTeardownEdges = append(
+        instance.declaredTeardownEdges,
+        declaredTeardownEdge{
+            dependentServiceName: serviceName,
+            dependencyNodeKey:    dependencyNodeKey,
+            dependencySpelling:   dependencySpelling,
+        },
+    )
+}
+
+/* expandDeclaredTypeEdgesLocked makes a declaration keyed by TYPE name the same service the name form would. A type node exists only where a service was resolved THROUGH its type; a service registered under a name and resolved by that name has one node, the name's, however many types it is filed under. So a declared type edge would point at a node that was never created and be dropped by the walk — silently, which is the one outcome this door must never have.
+
+   It is expanded rather than rewritten at the declaration, because the type it names may be registered after the declaring service: what the type stands for is only settled once the wiring is done, which is where the teardown reads it. */
+func (instance *container) expandDeclaredTypeEdgesLocked() {
+    for _, declaredEdge := range instance.declaredTeardownEdges {
+        if false == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix) {
+            continue
+        }
+
+        identityKey := strings.TrimPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix)
+
+        registeredType, known := instance.typeIdentityKeyToType[identityKey]
+        if false == known {
+            continue
+        }
+
+        for _, registeredServiceName := range instance.typeRegistrationNamesByType[registeredType] {
+            instance.registerDependencyLocked(
+                containerNameNodeKey(declaredEdge.dependentServiceName),
+                containerNameNodeKey(registeredServiceName),
+            )
+        }
+    }
+}
+
+/* teardownNodeWasRegisteredLocked answers whether anything was ever REGISTERED under this node key — which is a different question from whether it was built. A registered service that no resolution ever reached is the ordinary optional collaborator and the ordinary lazy singleton; a node nobody registered under any spelling is a name or a type that exists nowhere, which no wiring can make true later. */
+func (instance *container) teardownNodeWasRegisteredLocked(nodeKey string) bool {
+    if true == strings.HasPrefix(nodeKey, containerNameNodeKeyPrefix) {
+        serviceName := strings.TrimPrefix(nodeKey, containerNameNodeKeyPrefix)
+
+        if _, registered := instance.providers[serviceName]; true == registered {
+            return true
+        }
+
+        if _, built := instance.instances[serviceName]; true == built {
+            return true
+        }
+
+        if _, scoped := instance.scopedProviders[serviceName]; true == scoped {
+            return true
+        }
+
+        return false
+    }
+
+    for registeredType := range instance.typeProviders {
+        if containerTypeNodeKey(registeredType) == nodeKey {
+            return true
+        }
+    }
+
+    for registeredType := range instance.typeInstances {
+        if containerTypeNodeKey(registeredType) == nodeKey {
+            return true
+        }
+    }
+
+    for registeredType := range instance.typeRegistrationNamesByType {
+        if containerTypeNodeKey(registeredType) == nodeKey {
+            return true
+        }
+    }
+
+    return false
+}
+
+/* refuseUnregisteredDeclaredTeardownEdgesLocked is the half of the parallel opt-in that has to fail CLOSED. A declared edge naming a service nobody registered is dropped by the teardown walk, deliberately, so that naming an optional collaborator is not an error — and while the teardown is sequential that silence costs nothing, because the creation order carries the ordering anyway. Under waves it costs the ordering itself: the edge that was supposed to hold two services apart is not there, they land in one wave, and a misspelling reads exactly like a service that has no dependencies.
+
+   It refuses on NEVER REGISTERED and never on never BUILT: a registered service the application chose not to resolve is the optional collaborator the door was written for, and refusing it would break the very case its GoDoc admits. */
+func (instance *container) refuseUnregisteredDeclaredTeardownEdgesLocked() error {
+    for _, declaredEdge := range instance.declaredTeardownEdges {
+        if true == instance.teardownNodeWasRegisteredLocked(declaredEdge.dependencyNodeKey) {
+            continue
+        }
+
+        return exception.NewError(
+            "a declared teardown dependency names a service that was never registered, and the parallel teardown cannot be armed over an ordering that is not there",
+            exceptioncontract.Context{
+                "serviceName":  declaredEdge.dependentServiceName,
+                "dependency":   declaredEdge.dependencySpelling,
+                "dependencyOf": declaredEdge.dependencyNodeKey,
+            },
+            ErrTeardownDependencyWasNeverRegistered,
+        )
+    }
+
+    return nil
 }
 
 /* resolutionsRefused answers the memoized handle's liveness question: not whether a teardown began, which is what IsClosed reports, but whether this container has stopped answering resolutions altogether. The two differ for the whole teardown, and container_resolver.go refuses on this second state for the same reason. */
@@ -60,21 +186,19 @@ func (instance *container) CloseWithContext(closeContext context.Context) error 
     return instance.closeErr
 }
 
-func (instance *container) closeInternal(closeContext context.Context) error {
-    type closer interface {
-        Close() error
-    }
+/* teardownPlan is what the teardown will do, computed without doing any of it: the order, the wave each service belongs to, what a cycle left unproved, and the value behind every node. */
+type teardownPlan struct {
+    closeOrder       []string
+    closeWaveIndexOf map[string]int
+    cycleNodeKeys    []string
+    valueOfNodeKey   map[string]any
+    canonicalEdges   map[string]map[string]struct{}
+}
 
-    type closeCandidate struct {
-        nodeKey string
-        value   any
-    }
+/* teardownPlanLocked works out that plan from what the container holds right now. It is one computation with two readers — the teardown itself, and the operator's read-only view — for the same reason teardownCloseOrder is shared with the scope: two of these would be two chances to describe an order that is not the one that runs.
 
-    instance.mutex.Lock()
-
-    /* mark closed while still holding the lock so the resolver's creation guard refuses new creations for the whole teardown; the sync.Once in Close serializes repeated callers. */
-    instance.isClosed = true
-
+   It takes the container's WRITE lock through its caller, not the read one, because the held-identity edges it merges are written into the dependency graph as it goes. */
+func (instance *container) teardownPlanLocked() teardownPlan {
     typeStringToType := make(map[string]reflect.Type, len(instance.typeInstances))
 
     createdNodeKeys := make(
@@ -90,7 +214,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     for targetType := range instance.typeInstances {
         typeKey := typeIdentityKey(targetType)
         typeStringToType[typeKey] = targetType
-        createdNodeKeys = append(createdNodeKeys, "type:"+typeKey)
+        createdNodeKeys = append(createdNodeKeys, containerTypeNodeKeyPrefix+typeKey)
     }
 
     sort.Slice(
@@ -107,8 +231,8 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             return instanceValue, exists
         }
 
-        if true == strings.HasPrefix(nodeKey, "type:") {
-            typeKey := strings.TrimPrefix(nodeKey, "type:")
+        if true == strings.HasPrefix(nodeKey, containerTypeNodeKeyPrefix) {
+            typeKey := strings.TrimPrefix(nodeKey, containerTypeNodeKeyPrefix)
             targetType, typeExists := typeStringToType[typeKey]
             if false == typeExists {
                 return nil, false
@@ -207,7 +331,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     }
 
     typeAliasRepresentative := func(typeNodeKey string) (string, bool) {
-        typeKey := strings.TrimPrefix(typeNodeKey, "type:")
+        typeKey := strings.TrimPrefix(typeNodeKey, containerTypeNodeKeyPrefix)
         targetType, typeExists := typeStringToType[typeKey]
         if false == typeExists {
             return "", false
@@ -237,7 +361,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     }
 
     for _, nodeKey := range createdNodeKeys {
-        if false == strings.HasPrefix(nodeKey, "type:") {
+        if false == strings.HasPrefix(nodeKey, containerTypeNodeKeyPrefix) {
             continue
         }
 
@@ -258,6 +382,12 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     }
 
     /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it */
+    /* a declaration keyed by a type is expanded onto the names that type is registered under, for the same reason and at the same moment as the held identities below: after this the graph is one graph, and the walk reads it once */
+    instance.expandDeclaredTypeEdgesLocked()
+
+    /* what the providers HELD joins what they resolved, in the one graph, BEFORE it is translated into the canonical key space: an edge written after the translation would be in the graph and not in the walk, which is the one place a second source of edges could silently do nothing */
+    instance.teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey)
+
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
@@ -297,7 +427,39 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         }
     }
 
-    closeOrder, remaining := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
+    closeOrder, closeWaveIndexOf, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
+
+    return teardownPlan{
+        closeOrder:       closeOrder,
+        closeWaveIndexOf: closeWaveIndexOf,
+        cycleNodeKeys:    cycleNodeKeys,
+        valueOfNodeKey:   valueOfNodeKey,
+        canonicalEdges:   canonicalEdges,
+    }
+}
+
+func (instance *container) closeInternal(closeContext context.Context) error {
+    type closer interface {
+        Close() error
+    }
+
+    type closeCandidate struct {
+        nodeKey   string
+        value     any
+        waveIndex int
+    }
+
+    instance.mutex.Lock()
+
+    /* mark closed while still holding the lock so the resolver's creation guard refuses new creations for the whole teardown; the sync.Once in Close serializes repeated callers. */
+    instance.isClosed = true
+
+    plan := instance.teardownPlanLocked()
+
+    closeOrder := plan.closeOrder
+    closeWaveIndexOf := plan.closeWaveIndexOf
+    remaining := plan.cycleNodeKeys
+    valueOfNodeKey := plan.valueOfNodeKey
 
     dependencyCycleDetected := 0 < len(remaining)
 
@@ -312,10 +474,20 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         candidates = append(
             candidates,
             closeCandidate{
-                nodeKey: nodeKey,
-                value:   value,
+                nodeKey:   nodeKey,
+                value:     value,
+                waveIndex: closeWaveIndexOf[nodeKey],
             },
         )
+    }
+
+    /* the replaced instances belong one wave past everything the graph proved: they carry no edges anymore, so nothing can be said about what they still hold */
+    replacedWaveIndex := 0
+
+    for _, waveIndex := range closeWaveIndexOf {
+        if waveIndex >= replacedWaveIndex {
+            replacedWaveIndex = waveIndex + 1
+        }
     }
 
     /* the container-built instances an override evicted from the maps close after the ordered walk: they carry no edges anymore, and the identity marks below keep an instance a provider handed to several names from closing twice. */
@@ -324,11 +496,14 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             candidates,
             closeCandidate{
                 /* keyed by position: the replaced instances carry no node key, and one shared constant key let a second replaced close that failed overwrite the first's record in the failure map, naming one failure where two happened */
-                nodeKey: fmt.Sprintf("container.replacedInstance[%d]", replacedIndex),
-                value:   replacedValue,
+                nodeKey:   fmt.Sprintf("container.replacedInstance[%d]", replacedIndex),
+                value:     replacedValue,
+                waveIndex: replacedWaveIndex,
             },
         )
     }
+
+    teardownInWaves := instance.teardownInWaves
 
     instance.mutex.Unlock()
 
@@ -336,7 +511,10 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     closedValues := make(map[any]struct{})
     failures := make(map[string]string)
 
-    for _, candidate := range candidates {
+    /* the three books above are written by every closer, and under the waves that is more than one goroutine at a time. The claim is taken BEFORE the close rather than after it, which is what makes "closed exactly once" hold when two candidates carrying one value land in the same wave; on the serial path the two orders cannot be told apart, since nothing else runs between them. */
+    var teardownBookMutex sync.Mutex
+
+    claimCandidate := func(candidate closeCandidate) (closer, bool) {
         pointerKey, hasPointer := pointerKeyOf(candidate.value)
         if true == hasPointer && true == isZeroSizePointerIdentity(pointerKey) {
             hasPointer = false
@@ -344,36 +522,87 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
         comparableValue := false == hasPointer && false == isZeroSizeValue(candidate.value) && true == isComparableValue(candidate.value)
 
+        teardownBookMutex.Lock()
+        defer teardownBookMutex.Unlock()
+
         if true == hasPointer {
             if _, alreadyClosed := closedPointers[pointerKey]; true == alreadyClosed {
-                continue
+                return nil, false
             }
         } else if true == comparableValue {
             if _, alreadyClosed := closedValues[candidate.value]; true == alreadyClosed {
-                continue
+                return nil, false
             }
-        }
-
-        closeable, isCloseable := candidate.value.(closer)
-        if false == isCloseable {
-            if true == hasPointer {
-                closedPointers[pointerKey] = struct{}{}
-            } else if true == comparableValue {
-                closedValues[candidate.value] = struct{}{}
-            }
-
-            continue
-        }
-
-        closeErr := closeServiceValueWithin(closeContext, candidate.value, closeable)
-        if nil != closeErr {
-            failures[candidate.nodeKey] = errorText(closeErr)
         }
 
         if true == hasPointer {
             closedPointers[pointerKey] = struct{}{}
         } else if true == comparableValue {
             closedValues[candidate.value] = struct{}{}
+        }
+
+        closeable, isCloseable := candidate.value.(closer)
+        if false == isCloseable {
+            return nil, false
+        }
+
+        return closeable, true
+    }
+
+    closeOneCandidate := func(candidate closeCandidate) {
+        closeable, shouldClose := claimCandidate(candidate)
+        if false == shouldClose {
+            return
+        }
+
+        closeErr := closeServiceValueWithin(closeContext, candidate.value, closeable)
+        if nil == closeErr {
+            return
+        }
+
+        teardownBookMutex.Lock()
+        failures[candidate.nodeKey] = errorText(closeErr)
+        teardownBookMutex.Unlock()
+    }
+
+    if false == teardownInWaves {
+        for _, candidate := range candidates {
+            closeOneCandidate(candidate)
+        }
+    } else {
+        /* a wave is the set of services the graph proved have no relation to one another, so they are closed at once and each of them sees the whole of what is left of the deadline instead of the remainder the one before it did not spend. The waves themselves stay serial: that is the ordering, and it is the only thing the parallelism must not touch.
+
+           The candidates are GROUPED rather than scanned in place, because the serial order they arrive in is the drain's pop order, where a node freed by an early pop can be popped ahead of a node that was available from the start — so two waves interleave in that slice, and a contiguous run of one wave is not a wave. */
+        candidatesByWave := make(map[int][]closeCandidate, len(candidates))
+        highestWaveIndex := 0
+
+        for _, candidate := range candidates {
+            candidatesByWave[candidate.waveIndex] = append(candidatesByWave[candidate.waveIndex], candidate)
+
+            if candidate.waveIndex > highestWaveIndex {
+                highestWaveIndex = candidate.waveIndex
+            }
+        }
+
+        for waveIndex := 0; waveIndex <= highestWaveIndex; waveIndex = waveIndex + 1 {
+            wave, populated := candidatesByWave[waveIndex]
+            if false == populated {
+                continue
+            }
+
+            var waveGroup sync.WaitGroup
+
+            for _, candidate := range wave {
+                waveGroup.Add(1)
+
+                go func(waveCandidate closeCandidate) {
+                    defer waveGroup.Done()
+
+                    closeOneCandidate(waveCandidate)
+                }(candidate)
+            }
+
+            waveGroup.Wait()
         }
     }
 
@@ -594,12 +823,14 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
 
    The edges are expected in the same key space as the nodes; an edge naming a node that was not created is dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately and appended last, so the caller can both close it and report it.
 
+   It also answers the WAVE each node belongs to: one past the last of its dependents, which makes a wave the set of nodes with no relation to one another at that moment. The wave falls out of this same drain rather than out of a second walk over the graph — two walks are two chances to order a teardown differently, which is the reason this function is shared in the first place — and the serial order is unchanged by its presence, so a caller that ignores the waves closes exactly what it closed before, in exactly that order.
+
    The container and the request scope share this walk because they answer the same question about different sets: the container asks it of everything it built for the process, the scope of everything it built for one request. Two implementations of it would be two chances to order a teardown differently. */
 func teardownCloseOrder(
     nodeKeys []string,
     edges map[string]map[string]struct{},
     creationOrderOf map[string]int,
-) ([]string, []string) {
+) ([]string, map[string]int, []string) {
     if nil == creationOrderOf {
         creationOrderOf = map[string]int{}
     }
@@ -655,6 +886,13 @@ func teardownCloseOrder(
 
     closeOrder := make([]string, 0, len(nodeKeys))
 
+    /* a node nobody depends on opens the walk, so it is in wave zero; every other node is pushed one wave past the LAST dependent that frees it, which is what makes two nodes of one wave provably unrelated: an edge between them would put the dependency at least one wave later. */
+    closeWaveIndexOf := make(map[string]int, len(nodeKeys))
+
+    for _, nodeKey := range available {
+        closeWaveIndexOf[nodeKey] = 0
+    }
+
     for 0 < availableHeap.Len() {
         current := heap.Pop(availableHeap).(string)
 
@@ -666,6 +904,10 @@ func teardownCloseOrder(
         }
 
         for dependencyKey := range dependencies {
+            if closeWaveIndexOf[current]+1 > closeWaveIndexOf[dependencyKey] {
+                closeWaveIndexOf[dependencyKey] = closeWaveIndexOf[current] + 1
+            }
+
             inDegree[dependencyKey] = inDegree[dependencyKey] - 1
             if 0 == inDegree[dependencyKey] {
                 heap.Push(
@@ -692,5 +934,20 @@ func teardownCloseOrder(
 
     closeOrder = append(closeOrder, cycleNodeKeys...)
 
-    return closeOrder, cycleNodeKeys
+    /* what a cycle leaves behind has no wave that means anything, because its members constrain one another: it gets a wave of its own, past everything the drain proved, and a caller closing in waves runs that one serially. */
+    if 0 < len(cycleNodeKeys) {
+        cycleWaveIndex := 0
+
+        for _, waveIndex := range closeWaveIndexOf {
+            if waveIndex >= cycleWaveIndex {
+                cycleWaveIndex = waveIndex + 1
+            }
+        }
+
+        for _, nodeKey := range cycleNodeKeys {
+            closeWaveIndexOf[nodeKey] = cycleWaveIndex
+        }
+    }
+
+    return closeOrder, closeWaveIndexOf, cycleNodeKeys
 }
