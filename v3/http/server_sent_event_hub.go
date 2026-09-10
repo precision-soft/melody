@@ -33,6 +33,9 @@ type ServerSentEventHub struct {
     /* the publishes that have passed the closed check and not yet returned. Shutdown waits on it before it closes the backplane, and the clear path of SetBackplane waits on it before handing the caller a backplane to close, which is what makes the contract sentence — a broadcast during a graceful stop is not pushed — true rather than merely intended. The counter is incremented under the read lock, so neither a shutdown nor a clear can start between the check and the increment. */
     publishesInFlight sync.WaitGroup
 
+    /* publishesOutstanding is the same count as the group above, in a form that can be READ. A WaitGroup can only be waited on, and waiting needs a goroutine that has to be scheduled before it can answer — which is the one thing a shutdown reached with its deadline already spent cannot afford, so it was told "still in flight" over a hub where nothing was. Raised and lowered exactly where the group is, under the same read lock that reads the closed flag, so once that flag is set this count can only fall. */
+    publishesOutstanding atomic.Int64
+
     dropped           atomic.Uint64
     backplaneFailures atomic.Uint64
 }
@@ -264,7 +267,9 @@ func (instance *ServerSentEventHub) Shutdown() {
 
 /* CloseWithContext is Close under a deadline the teardown declares. What the deadline bounds is the WAIT for the publishes already past the closed check, not the publishes themselves: ServerSentEventBackplane.Publish takes no context, so a replicate blocked on a broker that stopped reading cannot be cancelled from here, and closing the backplane under it is the very send-on-a-closed-channel the wait exists to prevent.
 
-   So an expired budget does not close the backplane — it HANDS IT ON, to a closer of its own that waits the publishes out and closes it when they end. What the budget buys is the caller's return, not the abandonment of what the hub owns: the hub is the only holder of the reference, so a close that returned without either closing it or handing it on put the backplane's connection, its channels and its listen goroutine beyond every door in the process, and did it on the branch where the shut flag already makes every later close answer nil. */
+   So an expired budget does not close the backplane under a publish that is still inside it — it HANDS IT ON, to a closer of its own that waits the publishes out and closes it when they end. What the budget buys is the caller's return, not the abandonment of what the hub owns: the hub is the only holder of the reference, so a close that returned without either closing it or handing it on put the backplane's connection, its channels and its listen goroutine beyond every door in the process, and did it on the branch where the shut flag already makes every later close answer nil.
+
+   An expired budget over a hub with NOTHING past the closed check closes the backplane here and answers nil. There is no publish to be cut and nothing to hand on, and a shared teardown budget is spent by the time it reaches most components, so the other reading made the ordinary clean shutdown of a quiet hub report a failure and hand a backplane to a goroutine for no reason. */
 func (instance *ServerSentEventHub) CloseWithContext(closeContext context.Context) error {
     return instance.shutdownWithin(closeContext)
 }
@@ -298,8 +303,16 @@ func (instance *ServerSentEventHub) shutdownWithin(closeContext context.Context)
         return nil
     }
 
-    /* the publishes that were already past the closed check finish before the backplane they hold is closed under them */
-    if false == awaitPublishesInFlight(closeContext, &instance.publishesInFlight) {
+    /* the publishes that were already past the closed check finish before the backplane they hold is closed under them.
+
+       A hub with NOTHING past that check is not waited for at all. The count is readable and the group is not, and that is the whole difference: the wait needs a goroutine to be scheduled before it can answer, and a shutdown reached with its deadline already spent — the normal state when an earlier component ate the budget — selects on a Done() that is ready before that goroutine has run. Measured, such a shutdown reported publishes in flight over a hub where there were none 300 times out of 300, handed the backplane to a detached closer 300 times out of 300, and returned an error that put the hub in the operator's failure map and the process on exit 1; with no deadline, the same call closed in place and answered nil. */
+    publishesEnded := 0 == instance.publishesOutstanding.Load()
+
+    if false == publishesEnded {
+        publishesEnded = awaitPublishesInFlight(closeContext, &instance.publishesInFlight)
+    }
+
+    if false == publishesEnded {
         instance.closeBackplaneWhenPublishesEnd(backplane, logger)
 
         return exception.NewError(
@@ -423,8 +436,11 @@ func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEven
     }
 
     instance.publishesInFlight.Add(1)
+    instance.publishesOutstanding.Add(1)
     instance.mutex.RUnlock()
 
+    /* the count is lowered AFTER the group, deliberately: defers run last-registered-first, so this order keeps the readable count the MORE conservative of the two and nobody can read zero while the group is still holding a waiter */
+    defer instance.publishesOutstanding.Add(-1)
     defer instance.publishesInFlight.Done()
 
     publishErr := recoverServerSentEventBackplanePublish(backplane, topic, event)

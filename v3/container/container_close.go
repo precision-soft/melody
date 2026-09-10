@@ -85,12 +85,16 @@ func (instance *container) expandDeclaredTypeEdgesLocked() {
             continue
         }
 
-        for _, registeredServiceName := range instance.typeRegistrationNamesByType[registeredType] {
-            instance.registerDependencyLocked(
-                containerNameNodeKey(declaredEdge.dependentServiceName),
-                containerNameNodeKey(registeredServiceName),
-            )
+        /* the declaration names ONE service, so it is expanded only where the type names one. A type several services are registered under — which only a non-strict type registration allows — names a SET, and writing an edge onto each of them wrote orderings the declaring code never asked for: measured, a declarer that ordered itself before the type, and one service of that set that ordered itself before the declarer, produced a cycle nobody declared and failed a teardown in which all three services closed and every Close answered nil. Arming refuses the ambiguity where the author can still fix it; on the default path the declaration is dropped, which is the silence register_option.go already promises for a dependency nothing registered. */
+        registeredServiceNames := instance.typeRegistrationNamesByType[registeredType]
+        if 1 != len(registeredServiceNames) {
+            continue
         }
+
+        instance.registerDependencyLocked(
+            containerNameNodeKey(declaredEdge.dependentServiceName),
+            containerNameNodeKey(registeredServiceNames[0]),
+        )
     }
 }
 
@@ -140,6 +144,10 @@ func (instance *container) teardownNodeWasRegisteredLocked(nodeKey string) bool 
    It refuses on NEVER REGISTERED and never on never BUILT: a registered service the application chose not to resolve is the optional collaborator the door was written for, and refusing it would break the very case its GoDoc admits. */
 func (instance *container) refuseUnregisteredDeclaredTeardownEdgesLocked() error {
     for _, declaredEdge := range instance.declaredTeardownEdges {
+        if ambiguityErr := instance.refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge); nil != ambiguityErr {
+            return ambiguityErr
+        }
+
         if true == instance.teardownNodeWasRegisteredLocked(declaredEdge.dependencyNodeKey) {
             continue
         }
@@ -156,6 +164,37 @@ func (instance *container) refuseUnregisteredDeclaredTeardownEdgesLocked() error
     }
 
     return nil
+}
+
+/* refuseAmbiguousDeclaredTypeEdgeLocked is the other half of the fail-closed arming guard, beside the refusal for a dependency nothing ever registered. A declaration keyed by a TYPE has to name one service to be ordered against; a type more than one service is registered under names a SET, and there is no reading of "close me before this type" that a set answers. Reading it as "before every one of them" is what the expansion used to do, and it wrote orderings the declaring code never asked for — one of which closed a cycle nobody declared and failed a teardown in which every service closed successfully.
+
+   It refuses at ARMING rather than at the declaration, for the reason the expansion is deferred: the type may be registered after the declaring service, so what the type stands for is only settled once the wiring is done. And it refuses only under the opt-in, like its sibling: arming is new surface, so a refusal there breaks no shipped consumer, while the default path keeps the promise register_option.go makes about a declaration it cannot resolve. */
+func (instance *container) refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge declaredTeardownEdge) error {
+    if false == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix) {
+        return nil
+    }
+
+    identityKey := strings.TrimPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix)
+
+    registeredType, known := instance.typeIdentityKeyToType[identityKey]
+    if false == known {
+        return nil
+    }
+
+    registeredServiceNames := instance.typeRegistrationNamesByType[registeredType]
+    if 2 > len(registeredServiceNames) {
+        return nil
+    }
+
+    return exception.NewError(
+        "a declared teardown dependency names a type more than one service is registered under, so it does not name one service to be ordered against, and the parallel teardown cannot be armed over an ordering that is not one ordering",
+        exceptioncontract.Context{
+            "serviceName": declaredEdge.dependentServiceName,
+            "dependency":  declaredEdge.dependencySpelling,
+            "registered":  registeredServiceNames,
+        },
+        ErrTeardownDependencyTypeIsAmbiguous,
+    )
 }
 
 /* resolutionsRefused answers the memoized handle's liveness question: not whether a teardown began, which is what IsClosed reports, but whether this container has stopped answering resolutions altogether. The two differ for the whole teardown, and container_resolver.go refuses on this second state for the same reason. */

@@ -4,6 +4,7 @@ import (
     "context"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -679,11 +680,22 @@ func TestAwaitPublishesInFlight_EndsWithTheDeadlineAndSaysSo(t *testing.T) {
 func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadlinePasses(t *testing.T) {
     hub := NewServerSentEventHub()
 
-    backplane := &countingServerSentEventBackplane{}
+    backplane := &countingServerSentEventBackplane{
+        publishGate: make(chan struct{}),
+        publishing:  make(chan struct{}, 1),
+    }
     hub.SetBackplane(backplane)
 
-    hub.publishesInFlight.Add(1)
-    defer hub.publishesInFlight.Done()
+    /* the publish in flight is created by a BROADCAST, the door a replicate actually travels, rather than by raising the hub's bookkeeping by hand. The hub records a publish in flight in more than one place — a group to wait on and a count to read — and a fixture that writes one of them stops creating the state it names the moment the other is consulted. */
+    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+
+    select {
+    case <-backplane.publishing:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the publish never reached the backplane; there is nothing in flight for the close to abandon")
+    }
+
+    defer close(backplane.publishGate)
 
     boundedContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
     defer cancel()
@@ -710,21 +722,77 @@ func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadli
         t.Fatalf("the failure does not name what happened: %v", closeErr)
     }
 
-    if 0 != backplane.closeCalls {
-        t.Fatalf("the backplane was closed %d times under publishes still holding it", backplane.closeCalls)
+    if 0 != backplane.closeCalls.Load() {
+        t.Fatalf("the backplane was closed %d times under publishes still holding it", backplane.closeCalls.Load())
     }
 }
 
+/* countingServerSentEventBackplane counts its closes, and holds each publish until its gate opens when it was given one. The count is atomic because the detached closer the hub hands this backplane to writes it from its own goroutine, after the test that reads it has returned. */
 type countingServerSentEventBackplane struct {
-    closeCalls int
+    closeCalls  atomic.Int64
+    publishGate chan struct{}
+    publishing  chan struct{}
 }
 
 func (instance *countingServerSentEventBackplane) Publish(topic string, event ServerSentEvent) error {
+    if nil == instance.publishGate {
+        return nil
+    }
+
+    select {
+    case instance.publishing <- struct{}{}:
+    default:
+    }
+
+    <-instance.publishGate
+
     return nil
 }
 
 func (instance *countingServerSentEventBackplane) Close() error {
-    instance.closeCalls = instance.closeCalls + 1
+    instance.closeCalls.Add(1)
 
     return nil
+}
+
+/* a hub with NOTHING past the closed check is not waited for at all, whatever its deadline says. The wait needs a goroutine to be scheduled before it can answer, and a shutdown reached with its deadline already spent — the normal state once an earlier component has eaten a shared teardown budget — selects on a Done() that is ready before that goroutine has run. So it reported publishes in flight over a hub where there were none, handed the backplane it owns to a detached closer, and answered with a failure that put the hub in the operator's map and the process on a non-zero exit. The sibling above is the arm that still has to refuse. */
+func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceWhenNothingIsInFlight(t *testing.T) {
+    hub := NewServerSentEventHub()
+
+    backplane := &countingServerSentEventBackplane{}
+    hub.SetBackplane(backplane)
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := hub.CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("a hub with nothing in flight reported a failure under a spent deadline: %v", closeErr)
+    }
+
+    if 1 != backplane.closeCalls.Load() {
+        t.Fatalf("the backplane was closed %d times, wanted exactly one close and in place", backplane.closeCalls.Load())
+    }
+}
+
+/* the same answer by the other door: a cancellation carrying no deadline at all, which is what a caller asserting its way to CloseWithContext hands over. */
+func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceUnderACancellationWithoutADeadline(t *testing.T) {
+    hub := NewServerSentEventHub()
+
+    backplane := &countingServerSentEventBackplane{}
+    hub.SetBackplane(backplane)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, hasDeadline := cancelledContext.Deadline(); true == hasDeadline {
+        t.Fatalf("this test needs a cancellation with NO deadline, this context carries one")
+    }
+
+    if closeErr := hub.CloseWithContext(cancelledContext); nil != closeErr {
+        t.Fatalf("a hub with nothing in flight reported a failure under a cancellation: %v", closeErr)
+    }
+
+    if 1 != backplane.closeCalls.Load() {
+        t.Fatalf("the backplane was closed %d times, wanted exactly one close and in place", backplane.closeCalls.Load())
+    }
 }

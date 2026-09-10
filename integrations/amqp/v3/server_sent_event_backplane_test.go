@@ -937,3 +937,123 @@ func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNot
         t.Fatalf("the close handshake was cut off over a socket nothing was written to: %v", closeErr)
     }
 }
+
+/* the same close reached with a cancellation and no deadline at all, which is the state a caller produces by asserting its way to CloseWithContext while holding one. The stretch is then zero, and a zero stretch used to become CloseDeadline(now): the client cut the closing handshake at a deadline already behind it and answered an i/o timeout over a live connection the broker was reading, so the teardown named this backplane for a budget somebody else had spent. Read with the transport's sibling test — the two doors carry one mechanism. */
+func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Dialer:      dialer.Dial,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.spent",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    if false == backplane.ownsConnection {
+        t.Fatalf("this test needs a backplane that OWNS its connection; it measures the owned branch")
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, hasDeadline := cancelledContext.Deadline(); true == hasDeadline {
+        t.Fatalf("this test needs a cancellation with NO deadline, this context carries one")
+    }
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- backplane.CloseWithContext(cancelledContext) }()
+
+    if closeErr := awaitOutcome(t, "close of a healthy owned connection under a cancellation", closeOutcome, 5*time.Second); nil != closeErr {
+        t.Fatalf("a healthy owned connection closed under a cancellation reported a failure: %v", closeErr)
+    }
+}
+
+/* and under a deadline that has already passed, which is what a shared teardown budget produces on its own once an earlier component has spent it. */
+func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Dialer:      dialer.Dial,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.spent.deadline",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- backplane.CloseWithContext(spentContext) }()
+
+    if closeErr := awaitOutcome(t, "close of a healthy owned connection under a spent deadline", closeOutcome, 5*time.Second); nil != closeErr {
+        t.Fatalf("a healthy owned connection closed under a spent deadline reported a failure: %v", closeErr)
+    }
+}
+
+/* the arm that has to FAIL: a write this close could not join is cut on purpose, and the answer about that cut is still reported even though the budget is gone. Without it the two tests above would be indistinguishable from a close that stopped reporting its connection at all. */
+func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub()
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Dialer:      dialer.Dial,
+        Hub:         hub,
+        Exchange:    "melody.sse.test.spent.wedged",
+        CallTimeout: 200 * time.Millisecond,
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    if false == backplane.ownsConnection {
+        t.Fatalf("this test needs a backplane that OWNS its connection; it measures the cut of the owned branch")
+    }
+
+    gated := dialer.Latest()
+    if nil == gated {
+        t.Fatalf("the gated connection was never recorded; there is no socket to wedge")
+    }
+
+    /* a healthy publish FIRST, so the publish channel is open before the socket is wedged: opening it is itself an RPC over the same socket, and wedging ahead of it blocks that RPC instead of the publish this test is about — which left the publish half free and the close with nothing to cut */
+    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+        t.Fatalf("the healthy publish failed, so nothing below measures a wedged one: %v", publishErr)
+    }
+
+    gated.Wedge()
+
+    publishing := make(chan error, 1)
+    go func() { publishing <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
+
+    /* the gate is the backplane's OWN count of writes on the socket, not the socket's count of blocked ones: the connection carries heartbeats of its own, so a blocked write is not necessarily THIS publish, and waiting on the wrong one let the close run with the publish half free and nothing to cut. What the close reads is what this waits for. */
+    deadline := time.Now().Add(2 * time.Second)
+    for 0 == backplane.writesInFlight.Load() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("the publish never reached the socket; there is nothing wedged for the close to cut")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    if 0 != gated.BlockedWrites() && 0 == backplane.writesInFlight.Load() {
+        t.Fatalf("the write in flight ended before the close; the measurement would be of a free publish half")
+    }
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- backplane.CloseWithContext(spentContext) }()
+
+    closeErr := awaitOutcome(t, "close of an owned connection with a wedged write", closeOutcome, 5*time.Second)
+
+    <-publishing
+
+    if nil == closeErr {
+        t.Fatalf("a cut wedged write was reported as a clean close")
+    }
+}

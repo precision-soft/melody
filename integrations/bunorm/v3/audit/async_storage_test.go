@@ -683,3 +683,61 @@ func TestAsyncStorage_CloseGracesWithin_ACancelledContextWithoutADeadlineDoesNot
         t.Fatalf("a cancelled context answered %s/%s, wanted zero twice", drainGrace, cancellationGrace)
     }
 }
+
+/* a close reached with its deadline already spent is the NORMAL state of a teardown whose budget an earlier component ate, and over an empty queue it has nothing to abandon. Both graces are zero there, so every wait below is armed and ready at once; answered from the sentinel goroutine — which has not been scheduled yet — the close cancelled a worker holding nothing and named entries that were not there. The pair below is what separates the two: the same spent deadline over an empty queue and over a save that will not give up. */
+func TestAsyncStorage_CloseWithASpentDeadlineOverAnEmptyQueueReportsNothing(t *testing.T) {
+    storage := NewAsyncStorage(newRecordingStorage(), 4)
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := storage.CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("an empty queue under a spent deadline reported a failure: %v", closeErr)
+    }
+}
+
+/* the sibling of the test above, and the arm that has to FAIL: the same spent deadline over a save that ignores its cancellation is still reported, because the entries behind it really were not stored. Without this arm the guard above would be indistinguishable from one that stopped reporting altogether. */
+func TestAsyncStorage_CloseWithASpentDeadlineOverAWedgedSaveStillReports(t *testing.T) {
+    ignoring := newContextIgnoringStorage()
+    storage := NewAsyncStorage(ignoring, 4)
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+        t.Fatalf("the entry was not queued, so nothing below measures a wedged save: %v", saveErr)
+    }
+
+    select {
+    case <-ignoring.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached; there is no wedged save to abandon")
+    }
+
+    defer close(ignoring.release)
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    closeErr := storage.CloseWithContext(spentContext)
+    if nil == closeErr {
+        t.Fatalf("a save that ignored its cancellation was reported as a clean close")
+    }
+
+    if false == strings.Contains(closeErr.Error(), "ignored its cancellation") {
+        t.Fatalf("the failure does not name what happened: %v", closeErr)
+    }
+}
+
+/* a context CANCELLED but carrying no deadline reaches the same zero graces by the other door, and answers the same way over an empty queue. It is the form a caller reaches by asserting its way to CloseWithContext with a cancellation in hand, which is the producer the GoDoc of the grace helper names. */
+func TestAsyncStorage_CloseWithACancelledContextWithoutADeadlineOverAnEmptyQueueReportsNothing(t *testing.T) {
+    storage := NewAsyncStorage(newRecordingStorage(), 4)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, hasDeadline := cancelledContext.Deadline(); true == hasDeadline {
+        t.Fatalf("this test needs a cancellation with NO deadline, this context carries one")
+    }
+
+    if closeErr := storage.CloseWithContext(cancelledContext); nil != closeErr {
+        t.Fatalf("an empty queue under a cancellation reported a failure: %v", closeErr)
+    }
+}

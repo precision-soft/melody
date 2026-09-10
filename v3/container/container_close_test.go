@@ -2599,3 +2599,229 @@ func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
         }
     }
 }
+
+/* labelledCloser records its own name, which is what a test about WHICH of several services an ordering reached needs: the shared fixtures above record one letter per type, and the question below is about two services of the SAME type. */
+type labelledCloser struct {
+    label    string
+    recorder *closeOrderRecorder
+}
+
+func (instance *labelledCloser) Close() error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+/* declaringCloser is a second type, so the declaration under test names a type its declarer is not itself registered under — the self-declaration is refused at the registration door and is a different case. */
+type declaringCloser struct {
+    label    string
+    recorder *closeOrderRecorder
+}
+
+func (instance *declaringCloser) Close() error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+func newAmbiguousTypeRecorder() (*closeOrderRecorder, *[]string) {
+    mutex := &sync.Mutex{}
+    closeSequence := make([]string, 0, 4)
+
+    return &closeOrderRecorder{mutex: mutex, closeSequence: &closeSequence}, &closeSequence
+}
+
+/* registerAmbiguousTypeWiring is the shape the fan-out turned into a cycle nobody declared. The author writes TWO orderings, neither circular: the router closes before the type it knows its collaborator by, and one service closes before the router. The second service happens to be registered under the same type, which only a non-strict type registration allows — and reading the declaration as "before EVERY service of that type" adds router -> primary, which nobody wrote and which closes the ring.
+
+   oneNameOnly drops the second registration, so the same wiring has an unambiguous type: that arm must keep the edge it declares, and it is also the arm where the cycle is REAL, because the single service of the type is the one that ordered itself before the router. */
+func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder, oneNameOnly bool) {
+    t.Helper()
+
+    if false == oneNameOnly {
+        if registerErr := serviceContainer.Register(
+            "app.fallback",
+            func(_ containercontract.Resolver) (*labelledCloser, error) {
+                return &labelledCloser{label: "fallback", recorder: recorder}, nil
+            },
+            WithTypeRegistration(false),
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.primary",
+        func(_ containercontract.Resolver) (*labelledCloser, error) {
+            return &labelledCloser{label: "primary", recorder: recorder}, nil
+        },
+        WithTypeRegistration(false),
+        WithTeardownDependency("app.router"),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.router",
+        func(_ containercontract.Resolver) (*declaringCloser, error) {
+            return &declaringCloser{label: "router", recorder: recorder}, nil
+        },
+        WithTeardownDependencyOfType[*labelledCloser](),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+}
+
+func buildEveryRegisteredService(t *testing.T, serviceContainer containercontract.Container, serviceNames ...string) {
+    t.Helper()
+
+    for _, serviceName := range serviceNames {
+        if _, getErr := serviceContainer.Get(serviceName); nil != getErr {
+            t.Fatalf("unexpected get error for %s: %v", serviceName, getErr)
+        }
+    }
+}
+
+/* a teardown dependency declared on a TYPE that more than one service is registered under orders NOTHING, and a close that reached it does not report a cycle nobody declared. Expanded onto every name of the type it wrote an edge the declaring code never asked for, and where one service of that type had already ordered itself before the declarer that edge closed a ring: the close then answered "dependency cycle detected" over a teardown in which all three services closed and every Close returned nil, and it did so with the parallel opt-in NOT armed, on the path this commit promised to leave alone. */
+func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoCycle(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder, closeSequence := newAmbiguousTypeRecorder()
+
+    registerAmbiguousTypeWiring(t, serviceContainer, recorder, false)
+    buildEveryRegisteredService(t, serviceContainer, "app.fallback", "app.primary", "app.router")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("a declaration on an ambiguous type reported a failure over a teardown that closed everything: %v", closeErr)
+    }
+
+    if 3 != len(*closeSequence) {
+        t.Fatalf("expected all three services to close, got %v", *closeSequence)
+    }
+}
+
+/* the same wiring cannot be ARMED: a type several services are registered under names a set, and there is no reading of "close me before this type" that a set answers. The refusal lands at the door where the author can still choose — which is the same place, and for the same reason, as the refusal for a dependency nothing ever registered. */
+func TestContainer_ArmParallelTeardown_RefusesADeclarationOnAnAmbiguousType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder, _ := newAmbiguousTypeRecorder()
+
+    registerAmbiguousTypeWiring(t, serviceContainer, recorder, false)
+
+    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
+    if false == isArmable {
+        t.Fatalf("expected the container to carry the parallel teardown door")
+    }
+
+    armErr := armable.ArmParallelTeardown()
+    if nil == armErr {
+        t.Fatalf("arming was allowed over a declaration that names a type more than one service is registered under")
+    }
+
+    if false == errors.Is(armErr, ErrTeardownDependencyTypeIsAmbiguous) {
+        t.Fatalf("the refusal does not carry the ambiguity cause: %v", armErr)
+    }
+
+    if false == strings.Contains(armErr.Error(), "more than one service is registered under") {
+        t.Fatalf("the refusal does not name what is ambiguous: %v", armErr)
+    }
+
+    /* the declarer and the set it could not choose between are what the author acts on, and they travel in the context rather than in the message */
+    var typedError *exception.Error
+    if false == errors.As(armErr, &typedError) {
+        t.Fatalf("the refusal is not a melody error carrying a context: %v", armErr)
+    }
+
+    if "app.router" != typedError.Context()["serviceName"] {
+        t.Fatalf("the refusal does not name the declaring service: %v", typedError.Context())
+    }
+
+    registeredNames, areNames := typedError.Context()["registered"].([]string)
+    if false == areNames || 2 != len(registeredNames) {
+        t.Fatalf("the refusal does not name the services the type stands for: %v", typedError.Context())
+    }
+}
+
+/* the arm that has to keep WORKING: a type exactly one service is registered under still writes its edge, so the narrowing is about ambiguity and not about the door. It is also the arm where the cycle is REAL — the single service of the type declared itself before the router — so the close reports it, which is what tells this fix apart from one that stopped reporting cycles at all. */
+func TestContainer_Close_ADeclarationOnAnUnambiguousTypeStillOrdersAndStillReportsARealCycle(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder, closeSequence := newAmbiguousTypeRecorder()
+
+    registerAmbiguousTypeWiring(t, serviceContainer, recorder, true)
+    buildEveryRegisteredService(t, serviceContainer, "app.primary", "app.router")
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("a cycle the wiring actually declares was not reported")
+    }
+
+    if false == strings.Contains(closeErr.Error(), "cycle") {
+        t.Fatalf("the failure does not name the cycle: %v", closeErr)
+    }
+
+    if 2 != len(*closeSequence) {
+        t.Fatalf("expected both services to close even under a cycle, got %v", *closeSequence)
+    }
+}
+
+/* mutualParentService and mutualChildService hold each other, which is what a parent and a child with a back-pointer are and what the reflection walk has to answer about: each pointer is evidence that the other must outlive it, and the two together are evidence of nothing. */
+type mutualParentService struct {
+    recorder *closeOrderRecorder
+    child    *mutualChildService
+}
+
+func (instance *mutualParentService) Close() error {
+    instance.recorder.record("parent")
+
+    return nil
+}
+
+type mutualChildService struct {
+    recorder *closeOrderRecorder
+    parent   *mutualParentService
+}
+
+func (instance *mutualChildService) Close() error {
+    instance.recorder.record("child")
+
+    return nil
+}
+
+/* two services that hold EACH OTHER gain no edge at all, so an armed teardown closes them in the order it closed them before and reports nothing. Written both ways the pair is a ring, and a ring fails a teardown in which every service closed — measured on this very fixture, unarmed nil against armed "dependency cycle detected" over two closes that both answered nil. Dropping both is the rule the walk already states about itself: an edge it does not reach is an edge the graph does not gain, and the pair keeps the position the sequential teardown gave it. The sibling above, where the holding goes ONE way, is what keeps this from being a filter that swallows the walk's whole purpose. */
+func TestContainer_Close_ArmedAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    parent := &mutualParentService{recorder: recorder}
+    child := &mutualChildService{recorder: recorder, parent: parent}
+    parent.child = child
+
+    if registerErr := serviceContainer.Register(
+        "app.parent",
+        func(_ containercontract.Resolver) (*mutualParentService, error) { return parent, nil },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.child",
+        func(_ containercontract.Resolver) (*mutualChildService, error) { return child, nil },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    buildEveryRegisteredService(t, serviceContainer, "app.parent", "app.child")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("a mutually held pair reported a failure over a teardown that closed both: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected both services to close, got %v", closeSequence)
+    }
+}

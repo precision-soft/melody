@@ -123,10 +123,29 @@ func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey 
         nodeKeyOfIdentity[identity] = nodeKey
     }
 
+    heldEdges := make(map[string]map[string]struct{}, len(valueOfNodeKey))
+
     for nodeKey := range valueOfNodeKey {
         for _, identity := range instance.heldIdentitiesByNodeKey[nodeKey] {
             heldNodeKey, isNode := nodeKeyOfIdentity[identity]
             if false == isNode || heldNodeKey == nodeKey {
+                continue
+            }
+
+            if nil == heldEdges[nodeKey] {
+                heldEdges[nodeKey] = make(map[string]struct{})
+            }
+
+            heldEdges[nodeKey][heldNodeKey] = struct{}{}
+        }
+    }
+
+    /* two services that hold EACH OTHER give this walk two true statements and no ordering: each is evidence that the other must outlive it, and together they say nothing. Writing both is what the graph reads as a cycle, and a cycle fails a teardown in which every service closed — measured on a parent and a child with a back-pointer, the plainest shape in Go, unarmed nil against armed "dependency cycle detected" over two closes that both answered nil.
+
+       So neither is written, and the pair keeps the position the sequential teardown gives it. That is not a special case bolted on: it is the rule this file already states at the top, that an edge the walk does not reach is an edge the graph does not gain, which leaves the pair exactly where it was. A ring longer than two is not closed here, and the row is filed rather than left implied. */
+    for nodeKey, heldSet := range heldEdges {
+        for heldNodeKey := range heldSet {
+            if _, mutual := heldEdges[heldNodeKey][nodeKey]; true == mutual {
                 continue
             }
 

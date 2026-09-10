@@ -17,6 +17,9 @@ var ErrTeardownDependencyTypeIsRequired = errors.New("teardown dependency type i
 
 var ErrTeardownDependencyWasNeverRegistered = errors.New("a declared teardown dependency names a service that was never registered")
 
+/* ErrTeardownDependencyTypeIsAmbiguous is the cause of an arming refusal for a teardown dependency keyed by a TYPE that more than one service is registered under. The declaration has to name ONE service to be ordered against; a type several services share names a set, and reading it as "before all of them" wrote orderings the declaring code never asked for — including, where one of them already ordered itself before the declarer, a cycle nobody declared, which failed a teardown in which every service closed. */
+var ErrTeardownDependencyTypeIsAmbiguous = errors.New("a declared teardown dependency names a type more than one service is registered under")
+
 /* ErrTeardownDependencyIsSelf is the cause of a Register refusal for a service declaring a teardown dependency on itself. The teardown walk ignores a self-edge, so the declaration would be inert; it is refused where it is written rather than dropped where it is read. */
 var ErrTeardownDependencyIsSelf = errors.New("a service cannot declare a teardown dependency on itself")
 

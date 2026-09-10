@@ -259,6 +259,8 @@ const closeJoinTimeout = 30 * time.Second
 
    A failed join is read together with writesInFlight rather than on its own: the publish half is equally held by a healthy confirmation inside its budget, and reading that as a wedged write left both channels open on a caller-owned connection and named a blocked write that did not exist.
 
+   The cut of an owned connection is reported; a close the caller left NO time for is not. The two are told apart rather than both read off the deadline, because the stretch reaches zero by two different roads: deliberately, when the join failed over a write genuinely in flight, and by arithmetic, on every teardown whose shared budget an earlier component already spent. On the second road the client cuts the closing handshake at a deadline already behind it and answers an i/o timeout over a live connection the broker was reading — which named this transport for a budget somebody else spent, while the teardown's own record already names that budget.
+
    The signature promises an error and the old body could never produce one: every underlying close was discarded and teardown reporting read success whatever happened. A channel or connection already torn down by the broker answers amqp091.ErrClosed, which is the state Close exists to reach — not a failure. */
 func (instance *Transport) Close() error {
     return instance.CloseWithContext(context.Background())
@@ -300,12 +302,20 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
     writeInFlight := 0 < instance.writesInFlight.Load()
 
     if true == ownsConnection && nil != connection {
-        deadline := time.Now()
-        if true == publishJoined || false == writeInFlight {
-            deadline = deadline.Add(teardownStretchWithin(closeContext, instance.resolvedPublishTimeout()))
+        /* a write this close could not join is CUT: the deadline is now, deliberately, and whatever the client answers about it is the record of that cut. Every other close is given what is left of the caller's budget. */
+        cutWedgedWrite := false == publishJoined && true == writeInFlight
+
+        closeStretch := time.Duration(0)
+        if false == cutWedgedWrite {
+            closeStretch = teardownStretchWithin(closeContext, instance.resolvedPublishTimeout())
         }
 
-        closeErrs = append(closeErrs, ignoringAlreadyClosed(connection.CloseDeadline(deadline)))
+        connectionCloseErr := ignoringAlreadyClosed(connection.CloseDeadline(time.Now().Add(closeStretch)))
+
+        /* a close the caller gave NO time is not a close that FAILED. The stretch is zero on every teardown whose budget an earlier component already spent, and the client then cuts the closing handshake at a deadline already behind it and answers an i/o timeout — over a live connection the broker was reading, measured 20 times out of 20, where the same connection closed clean with no deadline at all. Reported, it named this connection for a budget somebody else spent, and the teardown's own record already names that budget. A stretch that was POSITIVE and still ran out says something different, and so does the cut above: both are reported. */
+        if true == cutWedgedWrite || 0 < closeStretch {
+            closeErrs = append(closeErrs, connectionCloseErr)
+        }
     }
 
     switch {
@@ -335,6 +345,11 @@ func ignoringAlreadyClosed(closeErr error) error {
 
 /* lockWithin takes the mutex unless the wait outlives the bound, and reports which. A publish holds its mutex across a socket write the amqp client cannot interrupt, so a teardown that joined the publish half unbounded would hang exactly on the write it exists to end; a join that fails is the measurement that the write is wedged. On failure the goroutine is left to take and release the mutex whenever the write returns, so the mutex is never left held by nobody. */
 func lockWithin(mutex *sync.Mutex, bound time.Duration) bool {
+    /* a mutex nobody holds is taken here, whatever the bound says. The bound is zero on every teardown whose budget an earlier component already spent, and a zero bound arms a timer that is ready at once, so the select below reported a publish half NOBODY was holding as a wedged write — measured 2000 times out of 2000. The question is asked before the goroutine is launched rather than inside it, because what a spent budget cannot wait for is that goroutine being scheduled: the non-blocking read of a channel a goroutine has not reached yet answers "not done" however done the work is. */
+    if true == mutex.TryLock() {
+        return true
+    }
+
     locked := make(chan struct{})
     abandoned := make(chan struct{})
 
@@ -378,6 +393,19 @@ func closeChannels(channels ...*amqp091.Channel) []error {
 
 /* closeChannelsWithin is closeChannels bounded: a channel close is an RPC over the connection's socket and observes no context, so on a connection the caller owns — the one teardown cannot cut — a broker that stops reading mid-close would otherwise hold teardown for as long as the socket does. Past the bound the closes are left to end when the socket does, and the bound is reported. */
 func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []error {
+    /* a close with nothing to close cannot fail to return. closeChannels skips a nil channel, so a transport whose channels were never opened asks for no socket work at all — and it was answered with a fabricated "did not return within 0s" 2000 times out of 2000, because a spent budget makes the bound zero and a zero bound arms a timer that is ready before the goroutine below has been scheduled. Counted here rather than left to that goroutine, for exactly that reason. */
+    openChannels := 0
+
+    for _, channel := range channels {
+        if nil != channel {
+            openChannels = openChannels + 1
+        }
+    }
+
+    if 0 == openChannels {
+        return nil
+    }
+
     outcome := make(chan []error, 1)
 
     go func() {
@@ -391,6 +419,13 @@ func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []er
     case closeErrs := <-outcome:
         return closeErrs
     case <-timer.C:
+        /* the closes and the timer can become ready in the same instant, and a select between two ready cases picks at random: an answer that exists is preferred over a bound that expired, so a close that finished is never reported as one that was abandoned */
+        select {
+        case closeErrs := <-outcome:
+            return closeErrs
+        default:
+        }
+
         return []error{exception.NewError(
             "amqp channel close did not return within the bound on a caller-owned connection; the channels end with that connection",
             map[string]any{"bound": bound.String()},
@@ -408,13 +443,6 @@ func (instance *Transport) awaitConsumeLoopWithin(bound time.Duration) {
 
         close(joined)
     }()
-
-    /* a join that is already done is answered before the timer is consulted: a spent deadline arms a timer that is ready at once, and a select between two ready cases picks at random — which would leave a loop that had already ended reported as abandoned */
-    select {
-    case <-joined:
-        return
-    default:
-    }
 
     timer := time.NewTimer(bound)
     defer timer.Stop()

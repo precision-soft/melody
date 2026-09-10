@@ -2884,3 +2884,130 @@ func TestTeardownStretchWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *t
         t.Fatalf("a cancelled context answered %s, wanted zero", answered)
     }
 }
+
+/* a mutex nobody holds is taken whatever the bound says. The bound reaches zero on every teardown whose budget an earlier component already spent, and a zero bound arms a timer ready at once — so the join of a publish half NOBODY was holding was answered false, and the caller read that as a wedged write. The pair is what separates the fix from one that simply always answers true. */
+func TestTransport_LockWithinTakesAFreeMutexAtAZeroBound(t *testing.T) {
+    var mutex sync.Mutex
+
+    if false == lockWithin(&mutex, 0) {
+        t.Fatalf("a free mutex was reported as a failed join at a zero bound")
+    }
+
+    mutex.Unlock()
+}
+
+/* the arm that has to FAIL: a mutex somebody else holds is still not taken at a zero bound, which is the measurement the teardown depends on to tell a busy publish half from a free one. */
+func TestTransport_LockWithinStillRefusesAHeldMutexAtAZeroBound(t *testing.T) {
+    var mutex sync.Mutex
+
+    mutex.Lock()
+    defer mutex.Unlock()
+
+    if true == lockWithin(&mutex, 0) {
+        t.Fatalf("a held mutex was reported as joined at a zero bound")
+    }
+}
+
+/* a close with nothing to close cannot fail to return. closeChannels skips a nil channel, so a transport whose channels were never opened asks for no socket work at all — and at a zero bound it was answered with a fabricated "did not return within the bound" over a close that had nothing to do. */
+func TestTransport_CloseChannelsWithinAnswersNothingToCloseAtAZeroBound(t *testing.T) {
+    if closeErrs := closeChannelsWithin(0); 0 != len(closeErrs) {
+        t.Fatalf("closing no channels at all reported %d failures: %v", len(closeErrs), closeErrs)
+    }
+
+    if closeErrs := closeChannelsWithin(0, nil, nil); 0 != len(closeErrs) {
+        t.Fatalf("closing two nil channels reported %d failures: %v", len(closeErrs), closeErrs)
+    }
+}
+
+/* the teardown of a connection this transport dialled itself, reached with a cancellation and no deadline at all — the state a caller produces by asserting its way to CloseWithContext while holding one. The stretch is then zero, and a zero stretch used to become CloseDeadline(now), which cuts the closing handshake at a deadline already behind it: the client answered an i/o timeout over a live connection the broker was reading, and the teardown named this transport for a budget somebody else had spent. */
+func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return amqp091.Dial(dsn) },
+        Queue:    "melody.amqp.test.spent.teardown",
+        Registry: NewMessageRegistry(),
+    })
+
+    if _, connectErr := transport.connect(); nil != connectErr {
+        t.Fatalf("the connection was not opened, so nothing below measures a healthy close: %v", connectErr)
+    }
+
+    if false == transport.ownsConnection {
+        t.Fatalf("this test needs a transport that OWNS its connection; it measures the owned branch")
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, hasDeadline := cancelledContext.Deadline(); true == hasDeadline {
+        t.Fatalf("this test needs a cancellation with NO deadline, this context carries one")
+    }
+
+    if closeErr := transport.CloseWithContext(cancelledContext); nil != closeErr {
+        t.Fatalf("a healthy owned connection closed under a cancellation reported a failure: %v", closeErr)
+    }
+}
+
+/* the same door under a deadline that has already passed, which is the form a shared teardown budget produces on its own once an earlier component has spent it. */
+func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return amqp091.Dial(dsn) },
+        Queue:    "melody.amqp.test.spent.teardown.deadline",
+        Registry: NewMessageRegistry(),
+    })
+
+    if _, connectErr := transport.connect(); nil != connectErr {
+        t.Fatalf("the connection was not opened, so nothing below measures a healthy close: %v", connectErr)
+    }
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := transport.CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("a healthy owned connection closed under a spent deadline reported a failure: %v", closeErr)
+    }
+}
+
+/* the arm that has to FAIL: a write the close could not join IS cut, deliberately, and whatever the client answers about that cut is still reported. Without this arm the two tests above would be indistinguishable from a close that stopped reporting the connection at all.
+
+   The transport reaches its connection through a DIALER rather than being handed one, because that is what makes it the OWNER — and the owned branch is the one under test. Handed the same connection directly it would be caller-owned, the whole owned block would be skipped, and the failure this asserts would arrive from the caller-owned arm of the switch below it instead: the test would pass while pinning nothing. */
+func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, nil, func() (*amqp091.Connection, error) { return connection, nil })
+
+    if false == transport.ownsConnection {
+        t.Fatalf("this test needs a transport that OWNS its connection; it measures the cut of the owned branch")
+    }
+
+    gated.Wedge()
+
+    sending := make(chan error, 1)
+    go func() {
+        sending <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "wedged"}))
+    }()
+
+    /* the gate is the transport's OWN count of writes on the socket, not the socket's count of blocked ones: the connection carries heartbeats of its own, so a blocked write is not necessarily THIS send. What the close reads is what this waits for. */
+    deadline := time.Now().Add(2 * time.Second)
+    for 0 == transport.writesInFlight.Load() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("the send never reached the socket; there is nothing wedged for the close to cut")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    closeErr := transport.CloseWithContext(spentContext)
+
+    <-sending
+
+    if nil == closeErr {
+        t.Fatalf("a cut wedged write was reported as a clean close")
+    }
+}

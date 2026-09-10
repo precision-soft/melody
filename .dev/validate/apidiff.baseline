@@ -235,6 +235,7 @@ v3 ~ compatible ~ ./config.StaticExcludedPathsKey ~ added ~ unclassified ~
 v3 ~ compatible ~ ./config.TeardownTimeoutKey ~ added ~ keep ~ MELODY_TEARDOWN_TIMEOUT, the environment key an operator declares the teardown budget with; zero means no deadline, a negative value fails the boot, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container.ClosedWithScope ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container.ErrTeardownDependencyTypeIsRequired ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrTeardownDependencyTypeIsAmbiguous ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container.ErrTeardownDependencyWasNeverRegistered ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container.WithTeardownDependencyOfType ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container/contract.OverrideOption ~ added ~ unclassified ~
