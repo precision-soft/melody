@@ -230,6 +230,7 @@ type teardownPlan struct {
     closeOrder       []string
     closeWaveIndexOf map[string]int
     cycleNodeKeys    []string
+    cycleWaveIndex   int
     valueOfNodeKey   map[string]any
     canonicalEdges   map[string]map[string]struct{}
 }
@@ -468,10 +469,17 @@ func (instance *container) teardownPlanLocked() teardownPlan {
 
     closeOrder, closeWaveIndexOf, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
 
+    /* the wave the cycle remainder was given is the one wave that is closed one service at a time whatever the caller armed: its members constrain one another, so it is a set with an order and not a set without relations, and the drain's remainder order is the only order it has */
+    cycleWaveIndex := -1
+    if 0 < len(cycleNodeKeys) {
+        cycleWaveIndex = closeWaveIndexOf[cycleNodeKeys[0]]
+    }
+
     return teardownPlan{
         closeOrder:       closeOrder,
         closeWaveIndexOf: closeWaveIndexOf,
         cycleNodeKeys:    cycleNodeKeys,
+        cycleWaveIndex:   cycleWaveIndex,
         valueOfNodeKey:   valueOfNodeKey,
         canonicalEdges:   canonicalEdges,
     }
@@ -626,6 +634,15 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         for waveIndex := 0; waveIndex <= highestWaveIndex; waveIndex = waveIndex + 1 {
             wave, populated := candidatesByWave[waveIndex]
             if false == populated {
+                continue
+            }
+
+            /* the cycle remainder is the one wave whose members are NOT unrelated: each of them waits on another, in a ring the drain could not open, and closing them at once is closing them in no order at all — measured, three services declared in a ring were all inside their Close at the same moment. They are closed one after the other, in the remainder's own order, as teardownCloseOrder promises; the waves before and after them are untouched */
+            if waveIndex == plan.cycleWaveIndex {
+                for _, candidate := range wave {
+                    closeOneCandidate(candidate)
+                }
+
                 continue
             }
 

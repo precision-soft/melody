@@ -3011,3 +3011,91 @@ func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
         t.Fatalf("a cut wedged write was reported as a clean close")
     }
 }
+
+/* the channels of a connection the CALLER owns, closed under a budget an earlier component already spent: the close is left to end when the socket does — which it does, on its own, a moment later — and nothing is reported, because a close given no time is not a close that failed. Measured before, the zero bound armed a timer that was ready before the closing goroutine had run and reported the close as one that did not return, ten times out of ten, over a channel that was closed within a hundred milliseconds. */
+func TestTransport_CloseWithContextLeavesTheChannelsOfACallerOwnedConnectionToCloseUnderASpentDeadline(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    if true == transport.ownsConnection {
+        t.Fatalf("this test needs a connection the CALLER owns; it measures the channel branch")
+    }
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "healthy"})); nil != sendErr {
+        t.Fatalf("the send did not open the publish channel, so nothing below measures an open channel: %v", sendErr)
+    }
+
+    transport.mutex.Lock()
+    publishChannel := transport.publishChannel
+    transport.mutex.Unlock()
+
+    if nil == publishChannel {
+        t.Fatalf("expected the send to leave a publish channel open")
+    }
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := transport.CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("a channel close given no time was reported as a failure: %v", closeErr)
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for false == publishChannel.IsClosed() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("the channel left to close on its own never did")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+}
+
+/* the arm that has to FAIL: the same caller-owned channels under a bound that was POSITIVE and ran out, over a socket that stopped taking writes. That close is still reported, which is what tells the guard above apart from one that stopped reporting the channel branch altogether. */
+func TestTransport_CloseWithContextStillReportsTheChannelsOfACallerOwnedConnectionThatOutliveAPositiveBound(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    if true == transport.ownsConnection {
+        t.Fatalf("this test needs a connection the CALLER owns; it measures the channel branch")
+    }
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 5, Name: "healthy"})); nil != sendErr {
+        t.Fatalf("the send did not open the publish channel: %v", sendErr)
+    }
+
+    gated.Wedge()
+
+    boundedContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    closeErr := transport.CloseWithContext(boundedContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "did not return within the bound") {
+        t.Fatalf("a channel close that outlived a positive bound was not reported: %v", closeErr)
+    }
+}
+
+/* an OWNED connection whose closing handshake outlives a bound that was POSITIVE — the broker stopped taking writes, nothing of this transport's was in flight — is still reported. The two sibling tests pin a spent deadline and a cut write; this one pins the branch between them, which a guard that only ever reported the cut would leave silent. */
+func TestTransport_CloseWithContextStillReportsAnOwnedConnectionThatOutlivesAPositiveBound(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, _ := newWedgeTestTransport(t, nil, func() (*amqp091.Connection, error) { return connection, nil })
+
+    if _, connectErr := transport.connect(); nil != connectErr {
+        t.Fatalf("the connection was not opened: %v", connectErr)
+    }
+
+    if false == transport.ownsConnection {
+        t.Fatalf("this test needs a transport that OWNS its connection")
+    }
+
+    gated.Wedge()
+
+    boundedContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    if closeErr := transport.CloseWithContext(boundedContext); nil == closeErr {
+        t.Fatalf("an owned connection whose close outlived a positive bound was reported as a clean close")
+    }
+}

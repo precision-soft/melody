@@ -48,7 +48,7 @@ func WithTeardownDependency(serviceNames ...string) containercontract.RegisterOp
 
 /* WithTeardownDependencyOfType is WithTeardownDependency keyed by the collaborator's TYPE instead of by its name, and everything written above about the name form holds here word for word. It exists because a name is not always what the declaring code knows: a service reached through GetByType has no name at the site that holds it, and a collaborator registered by a module belongs to a spelling that module owns and may change, while the type is the thing both sides already agree on.
 
-   T and *T name the same node, because the container files them under one canonical type. A type nothing was ever registered under is dropped by the teardown walk exactly as an unknown name is. */
+   T and *T name the same node, because the container files them under one canonical type. A type nothing was ever registered under is dropped by the teardown walk exactly as an unknown name is — and so is a type MORE THAN ONE service is registered under, which only a non-strict type registration produces: the declaration names one service to be ordered against, a set is not one, and reading it as "before every one of them" wrote orderings the declaring code never asked for. On the default path that declaration orders nothing and says nothing, the silence a dropped name already has; ArmParallelTeardown refuses it with ErrTeardownDependencyTypeIsAmbiguous, where the author can still fix it. */
 func WithTeardownDependencyOfType[T any]() containercontract.RegisterOption {
     dependencyType := reflect.TypeOf((*T)(nil)).Elem()
 

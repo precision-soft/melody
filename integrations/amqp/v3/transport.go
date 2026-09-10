@@ -412,6 +412,11 @@ func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []er
         outcome <- closeChannels(channels...)
     }()
 
+    /* a close the caller gave NO time is not a close that FAILED, on this branch as on the owned one: the bound is zero on every teardown whose budget an earlier component already spent, and a zero bound arms a timer that is ready before the goroutine above has been scheduled, so a close that ends a millisecond later was reported as one that did not return — measured 10 times out of 10 over channels that were closed on their own within a hundred milliseconds. The closes are left to end when the socket does, which is what the report below says happens past the bound anyway; a bound that was POSITIVE and still ran out says something different and is reported. */
+    if 0 >= bound {
+        return nil
+    }
+
     timer := time.NewTimer(bound)
     defer timer.Stop()
 

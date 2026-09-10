@@ -1,6 +1,7 @@
 package audit
 
 import (
+    "strconv"
     "context"
     "errors"
     "path/filepath"
@@ -739,5 +740,45 @@ func TestAsyncStorage_CloseWithACancelledContextWithoutADeadlineOverAnEmptyQueue
 
     if closeErr := storage.CloseWithContext(cancelledContext); nil != closeErr {
         t.Fatalf("an empty queue under a cancellation reported a failure: %v", closeErr)
+    }
+}
+
+/* the count of what is outstanding FALLS as the worker stores: a storage that accepted entries and stored them all is, under a spent deadline, a storage with nothing to abandon, and it answers nil. Without the decrement the count would stay where the producers left it and the close would report an abandonment over work that was done. */
+func TestAsyncStorage_CloseWithASpentDeadlineAfterTheEntriesWereStoredReportsNothing(t *testing.T) {
+    delegate := newRecordingStorage()
+    close(delegate.release)
+
+    storage := NewAsyncStorage(delegate, 16)
+
+    const entryCount = 5
+
+    for index := 0; index < entryCount; index = index + 1 {
+        if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "order", EntityId: strconv.Itoa(index), Operation: "insert"}); nil != saveErr {
+            t.Fatalf("save %d: %v", index, saveErr)
+        }
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for {
+        delegate.mutex.Lock()
+        stored := len(delegate.saved)
+        delegate.mutex.Unlock()
+
+        if entryCount == stored {
+            break
+        }
+
+        if true == time.Now().After(deadline) {
+            t.Fatalf("the worker stored %d of %d entries; nothing below measures a drained storage", stored, entryCount)
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := storage.CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("a storage that had stored everything reported a failure under a spent deadline: %v", closeErr)
     }
 }

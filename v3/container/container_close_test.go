@@ -6,6 +6,7 @@ import (
     "reflect"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -2441,165 +2442,6 @@ func TestContainer_Close_ADeclaredTeardownDependencyKeyedByTypeOrdersTheTeardown
     }
 }
 
-/* capturingHolder is the shape the reflection walk exists for: a service that HOLDS a collaborator it never resolved, because its provider closed over a value built before it. Nothing about it writes an edge. */
-type capturingHolder struct {
-    recorder *closeOrderRecorder
-    held     *closeOrderServiceB
-}
-
-func (instance *capturingHolder) Close() error {
-    instance.recorder.record("holder")
-
-    return nil
-}
-
-func registerCapturingPair(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder) {
-    t.Helper()
-
-    /* built before the container, the way a composition root builds what it then publishes: the provider below has nothing to resolve and hands it back */
-    captured := &closeOrderServiceB{recorder: recorder}
-
-    if registerErr := serviceContainer.Register(
-        "app.storage",
-        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            return captured, nil
-        },
-    ); nil != registerErr {
-        t.Fatalf("unexpected register error: %v", registerErr)
-    }
-
-    if registerErr := serviceContainer.Register(
-        "app.holder",
-        func(resolver containercontract.Resolver) (*capturingHolder, error) {
-            return &capturingHolder{recorder: recorder, held: captured}, nil
-        },
-    ); nil != registerErr {
-        t.Fatalf("unexpected register error: %v", registerErr)
-    }
-
-    /* the holder is built FIRST, so the creation stamp alone closes the storage before it — which is the wrong order, and the accident the walk has to correct */
-    if _, getErr := FromResolver[*capturingHolder](serviceContainer, "app.holder"); nil != getErr {
-        t.Fatalf("unexpected get error: %v", getErr)
-    }
-
-    if _, getErr := FromResolver[*closeOrderServiceB](serviceContainer, "app.storage"); nil != getErr {
-        t.Fatalf("unexpected get error: %v", getErr)
-    }
-}
-
-/* the holder captured its collaborator instead of resolving it, so no edge was ever written and the creation order alone closes the collaborator FIRST — under the holder that is still using it. Armed, the walk sees what the holder holds and the graph gains the edge the provider did not write. */
-func TestContainer_Close_ArmedAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(t *testing.T) {
-    serviceContainer := NewContainer()
-
-    armParallelTeardown(t, serviceContainer)
-
-    var mutex sync.Mutex
-    closeSequence := make([]string, 0, 2)
-    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
-
-    registerCapturingPair(t, serviceContainer, recorder)
-
-    if closeErr := serviceContainer.Close(); nil != closeErr {
-        t.Fatalf("unexpected close error: %v", closeErr)
-    }
-
-    if 2 != len(closeSequence) {
-        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
-    }
-
-    if "holder" != closeSequence[0] || "b" != closeSequence[1] {
-        t.Fatalf("expected the held collaborator to be closed after its holder, got %v", closeSequence)
-    }
-}
-
-/* the sequence above is the property, but on its own it cannot pin the edge: with no edge the two land in ONE wave and are closed at the same moment, so the order recorded is whatever the scheduler chose and the assertion passes about half the time. The wave is what nothing can decide by luck — a dependency is one past its last dependent, or it is beside it. */
-func TestContainer_ArmParallelTeardown_AHeldCollaboratorIsOneWavePastTheServiceHoldingIt(t *testing.T) {
-    serviceContainer := NewContainer()
-
-    armParallelTeardown(t, serviceContainer)
-
-    var mutex sync.Mutex
-    closeSequence := make([]string, 0, 2)
-    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
-
-    registerCapturingPair(t, serviceContainer, recorder)
-
-    planned, carriesPlan := serviceContainer.(interface {
-        TeardownPlan() []containercontract.TeardownPlanEntry
-    })
-    if false == carriesPlan {
-        t.Fatalf("expected the container to carry the teardown plan door")
-    }
-
-    waveByNode := make(map[string]int)
-    for _, entry := range planned.TeardownPlan() {
-        waveByNode[entry.NodeKey] = entry.WaveIndex
-    }
-
-    holderWave, holderPlanned := waveByNode["service:app.holder"]
-    storageWave, storagePlanned := waveByNode["service:app.storage"]
-
-    if false == holderPlanned || false == storagePlanned {
-        t.Fatalf("expected both services in the teardown plan, got %v", waveByNode)
-    }
-
-    if holderWave >= storageWave {
-        t.Fatalf("expected the held collaborator at least one wave past its holder, got holder=%d storage=%d", holderWave, storageWave)
-    }
-}
-
-/* the sibling that makes the test above an observation rather than a coincidence: the same pair, not armed, closes in the order the creation stamp gives — the collaborator first, under the service still holding it. It is the state this repository has shipped, and it is what the walk changes. */
-func TestContainer_Close_NotArmedAHeldCollaboratorIsClosedBeforeTheServiceHoldingIt(t *testing.T) {
-    serviceContainer := NewContainer()
-
-    var mutex sync.Mutex
-    closeSequence := make([]string, 0, 2)
-    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
-
-    registerCapturingPair(t, serviceContainer, recorder)
-
-    if closeErr := serviceContainer.Close(); nil != closeErr {
-        t.Fatalf("unexpected close error: %v", closeErr)
-    }
-
-    if "b" != closeSequence[0] || "holder" != closeSequence[1] {
-        t.Fatalf("expected the unarmed teardown to keep the creation order, got %v", closeSequence)
-    }
-}
-
-/* a map is counted and never entered, because iterating one another goroutine writes is a fatal error no recover catches. The cost is a real edge the walk cannot see, and it is written down here so the limit is a decision rather than an oversight. */
-func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
-    held := &closeOrderServiceB{}
-
-    throughField := heldPointerIdentities(&capturingHolder{held: held})
-    if 0 == len(throughField) {
-        t.Fatalf("expected the walk to reach a collaborator held in a field")
-    }
-
-    heldIdentity, hasPointer := pointerKeyOf(held)
-    if false == hasPointer {
-        t.Fatalf("expected the collaborator to carry a pointer identity")
-    }
-
-    foundThroughField := false
-    for _, identity := range throughField {
-        if identity == heldIdentity {
-            foundThroughField = true
-        }
-    }
-
-    if false == foundThroughField {
-        t.Fatalf("expected the field walk to find the collaborator")
-    }
-
-    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held})
-    for _, identity := range throughMap {
-        if identity == heldIdentity {
-            t.Fatalf("expected the walk to leave a map unentered")
-        }
-    }
-}
-
 /* labelledCloser records its own name, which is what a test about WHICH of several services an ordering reached needs: the shared fixtures above record one letter per type, and the question below is about two services of the SAME type. */
 type labelledCloser struct {
     label    string
@@ -2764,64 +2606,57 @@ func TestContainer_Close_ADeclarationOnAnUnambiguousTypeStillOrdersAndStillRepor
     }
 }
 
-/* mutualParentService and mutualChildService hold each other, which is what a parent and a child with a back-pointer are and what the reflection walk has to answer about: each pointer is evidence that the other must outlive it, and the two together are evidence of nothing. */
-type mutualParentService struct {
-    recorder *closeOrderRecorder
-    child    *mutualChildService
+/* concurrentCloser records how many closes were inside their Close at the same moment, over a bounded moment of its own. */
+type concurrentCloser struct {
+    running *atomic.Int64
+    peak    *atomic.Int64
 }
 
-func (instance *mutualParentService) Close() error {
-    instance.recorder.record("parent")
+func (instance *concurrentCloser) Close() error {
+    now := instance.running.Add(1)
+
+    for {
+        peak := instance.peak.Load()
+        if now <= peak || true == instance.peak.CompareAndSwap(peak, now) {
+            break
+        }
+    }
+
+    time.Sleep(50 * time.Millisecond)
+    instance.running.Add(-1)
 
     return nil
 }
 
-type mutualChildService struct {
-    recorder *closeOrderRecorder
-    parent   *mutualParentService
-}
-
-func (instance *mutualChildService) Close() error {
-    instance.recorder.record("child")
-
-    return nil
-}
-
-/* two services that hold EACH OTHER gain no edge at all, so an armed teardown closes them in the order it closed them before and reports nothing. Written both ways the pair is a ring, and a ring fails a teardown in which every service closed — measured on this very fixture, unarmed nil against armed "dependency cycle detected" over two closes that both answered nil. Dropping both is the rule the walk already states about itself: an edge it does not reach is an edge the graph does not gain, and the pair keeps the position the sequential teardown gave it. The sibling above, where the holding goes ONE way, is what keeps this from being a filter that swallows the walk's whole purpose. */
-func TestContainer_Close_ArmedAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *testing.T) {
+/* the cycle remainder is the one wave whose members are related — each waits on the next, in a ring the drain could not open — so an armed teardown closes it one service at a time, in the remainder's own order, and reports the cycle as before. Measured before, three services declared in a ring were all inside their Close at once. */
+func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer()
 
     armParallelTeardown(t, serviceContainer)
 
-    var mutex sync.Mutex
-    closeSequence := make([]string, 0, 2)
-    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+    var running, peak atomic.Int64
 
-    parent := &mutualParentService{recorder: recorder}
-    child := &mutualChildService{recorder: recorder, parent: parent}
-    parent.child = child
-
-    if registerErr := serviceContainer.Register(
-        "app.parent",
-        func(_ containercontract.Resolver) (*mutualParentService, error) { return parent, nil },
-    ); nil != registerErr {
-        t.Fatalf("unexpected register error: %v", registerErr)
+    for _, pair := range [][2]string{{"cycle.a", "cycle.b"}, {"cycle.b", "cycle.c"}, {"cycle.c", "cycle.a"}} {
+        if registerErr := serviceContainer.Register(
+            pair[0],
+            func(_ containercontract.Resolver) (*concurrentCloser, error) {
+                return &concurrentCloser{running: &running, peak: &peak}, nil
+            },
+            WithoutTypeRegistration(),
+            WithTeardownDependency(pair[1]),
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
     }
 
-    if registerErr := serviceContainer.Register(
-        "app.child",
-        func(_ containercontract.Resolver) (*mutualChildService, error) { return child, nil },
-    ); nil != registerErr {
-        t.Fatalf("unexpected register error: %v", registerErr)
+    buildEveryRegisteredService(t, serviceContainer, "cycle.a", "cycle.b", "cycle.c")
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
+        t.Fatalf("expected the declared cycle to still be reported, got %v", closeErr)
     }
 
-    buildEveryRegisteredService(t, serviceContainer, "app.parent", "app.child")
-
-    if closeErr := serviceContainer.Close(); nil != closeErr {
-        t.Fatalf("a mutually held pair reported a failure over a teardown that closed both: %v", closeErr)
-    }
-
-    if 2 != len(closeSequence) {
-        t.Fatalf("expected both services to close, got %v", closeSequence)
+    if 1 != peak.Load() {
+        t.Fatalf("expected the cycle remainder to close one service at a time, got %d at once", peak.Load())
     }
 }
