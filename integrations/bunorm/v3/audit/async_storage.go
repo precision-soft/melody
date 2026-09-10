@@ -165,7 +165,7 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
     return grace, grace
 }
 
-/* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A deadline already passed leaves both at zero: the queue is closed, the worker cancelled, and the answer names what was still queued — which is the whole of what the operator can still be told once the budget is gone. */
+/* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */
 func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) error {
     drainGrace, cancellationGrace := instance.closeGracesWithin(closeContext)
 
@@ -223,9 +223,18 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
             return nil
         }
 
+        /* a zero grace is no measurement: whether the save in hand honoured its cancellation cannot be known when nothing waited for it to react, so the answer says what it can — the budget was spent before this storage was reached, and this many entries were not confirmed stored. "Ignored" is said only where a grace was given and ran out */
+        if 0 >= cancellationGrace {
+            return exception.NewError(
+                "async audit storage was closed with its budget already spent; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored",
+                map[string]any{"outstanding": instance.entriesOutstanding.Load(), "queued": len(instance.queue)},
+                nil,
+            )
+        }
+
         return exception.NewError(
             "async audit storage abandoned a save that ignored its cancellation after a second drain grace; the entries still queued behind it were not stored",
-            map[string]any{"grace": cancellationGrace.String(), "queued": len(instance.queue)},
+            map[string]any{"grace": cancellationGrace.String(), "outstanding": instance.entriesOutstanding.Load(), "queued": len(instance.queue)},
             nil,
         )
     }

@@ -303,12 +303,16 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     instance.instances[serviceName] = value
     instance.recordCreationOrderLocked(containerNameNodeKey(serviceName))
 
+    /* what the installed value HOLDS is recorded where a built value's is, under the same node, replacing the record of the value it evicted: without it an armed teardown read the override as holding nothing — its holder shared a wave with what it held — and read what the evicted value used to hold as if the new value held it. The value comes from the caller and is already in use, so it is walked as published memory. */
+    instance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value, true)
+
     /* the override propagates only to the types this NAME is registered under, by the loop below: the previous block also wrote it under the override value's own canonical type whenever that type was registered by ANY service, so overriding one name answered a different service's GetByType with this value. A canonical type this name owns is already reached by the loop; a type another service owns must not learn this override; and a free type is deliberately left out here (unlike the scope, which exposes it) because a container value-type service filed under a second, uncollapsed node closes twice at teardown. */
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName == registeredServiceName {
                 instance.typeInstances[registeredType] = value
                 instance.recordCreationOrderLocked(containerTypeNodeKey(registeredType))
+                instance.recordHeldIdentitiesLocked(containerTypeNodeKey(registeredType), value, true)
                 break
             }
         }
@@ -546,6 +550,33 @@ func (instance *container) register(
         }
     }
 
+    /* once the waves are armed, the rule arming asked of every declared edge is asked of each new one here, at the door that declares it: arming validated a snapshot, and a declaration registered after it used to land, silently, in one wave with the service it named */
+    if true == instance.teardownInWaves {
+        for _, dependencyName := range registerOption.TeardownDependencyNames {
+            declaredEdge := declaredTeardownEdge{
+                dependentServiceName: serviceName,
+                dependencyNodeKey:    containerNameNodeKey(dependencyName),
+                dependencySpelling:   dependencyName,
+            }
+
+            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredEdge); nil != refusalErr {
+                return refusalErr
+            }
+        }
+
+        for _, dependencyType := range registerOption.TeardownDependencyTypes {
+            declaredEdge := declaredTeardownEdge{
+                dependentServiceName: serviceName,
+                dependencyNodeKey:    containerTypeNodeKey(dependencyType),
+                dependencySpelling:   dependencyType.String(),
+            }
+
+            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredEdge); nil != refusalErr {
+                return refusalErr
+            }
+        }
+    }
+
     instance.providers[serviceName] = provider
     if nil != serviceType {
         instance.providerServiceTypeByName[serviceName] = serviceType
@@ -632,6 +663,28 @@ func (instance *container) registerType(
                 },
                 ErrServiceTypeAlreadyRegistered,
             )
+        }
+
+        /* a second name under a type a declaration already names would make that declaration ambiguous — the refusal arming gives it — after arming answered; under the waves the ambiguity is refused where it is created, at the registration that would create it */
+        if true == instance.teardownInWaves {
+            typeNodeKey := containerTypeNodeKey(canonicalType)
+
+            for _, declaredEdge := range instance.declaredTeardownEdges {
+                if declaredEdge.dependencyNodeKey != typeNodeKey {
+                    continue
+                }
+
+                return exception.NewError(
+                    "a second service cannot be registered under a type a teardown dependency already names once the parallel teardown is armed, because the declaration would then name a set and order nothing",
+                    map[string]any{
+                        "serviceName":         serviceName,
+                        "serviceType":         canonicalType.String(),
+                        "existingServiceName": existingServiceNames[0],
+                        "declaredBy":          declaredEdge.dependentServiceName,
+                    },
+                    ErrTeardownDependencyTypeIsAmbiguous,
+                )
+            }
         }
 
         instance.typeRegistrationNamesByType[canonicalType] = append(

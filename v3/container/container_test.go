@@ -995,3 +995,192 @@ func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T
 
     _ = serviceContainer.MustGet("app.must.get.failure")
 }
+
+/* armedTypedProbe carries a field so two instances are two allocations: every zero-size allocation shares one address, and the teardown folds services of one address onto one node. */
+type armedTypedProbe struct{ label string }
+
+func (instance *armedTypedProbe) Close() error { return nil }
+
+/* arming validated a snapshot: a declaration registered after it was never checked, and landed in one wave with the service it named. The rule arming asks of every edge is asked of each new edge at the door that declares it. */
+func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    registerErr := serviceContainer.Register(
+        "app.late",
+        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        WithoutTypeRegistration(),
+        WithTeardownDependency("app.missing"),
+    )
+
+    if false == errors.Is(registerErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the late declaration on a service nobody registered to be refused, got %v", registerErr)
+    }
+}
+
+/* the sibling that keeps the door open for what it exists for: a late declaration on a REGISTERED service is admitted, and orders the teardown. */
+func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredService(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if registerErr := serviceContainer.Register(
+        "app.store",
+        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    armParallelTeardown(t, serviceContainer)
+
+    if registerErr := serviceContainer.Register(
+        "app.late",
+        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        WithoutTypeRegistration(),
+        WithTeardownDependency("app.store"),
+    ); nil != registerErr {
+        t.Fatalf("expected the late declaration on a registered service to be admitted, got %v", registerErr)
+    }
+
+    buildEveryRegisteredService(t, serviceContainer, "app.store", "app.late")
+
+    entries := serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan()
+
+    for _, entry := range entries {
+        if "service:app.store" == entry.NodeKey && 1 != entry.WaveIndex {
+            t.Fatalf("expected the late declaration to order the store one wave past its dependent, got %+v", entries)
+        }
+    }
+}
+
+/* a second name under a type a declaration already names makes that declaration ambiguous — the refusal arming gives it — after arming answered; under the waves the ambiguity is refused where it is created. */
+func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if registerErr := serviceContainer.Register(
+        "app.declarer",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
+        WithoutTypeRegistration(),
+        WithTeardownDependencyOfType[*armedTypedProbe](),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.first",
+        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        WithTypeRegistration(false),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    armParallelTeardown(t, serviceContainer)
+
+    registerErr := serviceContainer.Register(
+        "app.second",
+        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        WithTypeRegistration(false),
+    )
+
+    if false == errors.Is(registerErr, ErrTeardownDependencyTypeIsAmbiguous) {
+        t.Fatalf("expected the second registration under the declared type to be refused as ambiguous, got %v", registerErr)
+    }
+
+    buildEveryRegisteredService(t, serviceContainer, "app.declarer", "app.first")
+
+    entries := serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan()
+
+    for _, entry := range entries {
+        if "service:app.first" == entry.NodeKey && 1 != entry.WaveIndex {
+            t.Fatalf("expected the declaration to keep ordering the one service the type names, got %+v", entries)
+        }
+    }
+}
+
+/* what an override holds is recorded where a built value's is, under the same node: an armed teardown used to read the override as holding nothing, so its holder shared a wave with what it held. */
+func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    recorder := &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}
+    held := &closeOrderServiceB{recorder: recorder}
+
+    if registerErr := serviceContainer.Register(
+        "app.held",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) { return held, nil },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.holder",
+        func(resolver containercontract.Resolver) (*capturingHolder, error) { return &capturingHolder{recorder: recorder}, nil },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    buildEveryRegisteredService(t, serviceContainer, "app.held", "app.holder")
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{recorder: recorder, held: held}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    entries := serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan()
+
+    for _, entry := range entries {
+        if "service:app.held" == entry.NodeKey && 1 != entry.WaveIndex {
+            t.Fatalf("expected the held service to be one wave past the override holding it, got %+v", entries)
+        }
+    }
+}
+
+/* the record of the value an override evicted does not outlive it: an armed teardown used to keep it, and read what the evicted value held as if the new value held it. */
+func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicted(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    recorder := &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}
+    held := &closeOrderServiceB{recorder: recorder}
+
+    if registerErr := serviceContainer.Register(
+        "app.held",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) { return held, nil },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.holder",
+        func(resolver containercontract.Resolver) (*capturingHolder, error) { return &capturingHolder{recorder: recorder, held: held}, nil },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    buildEveryRegisteredService(t, serviceContainer, "app.held", "app.holder")
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{recorder: recorder}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    entries := serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan()
+
+    for _, entry := range entries {
+        if "service:app.holder" == entry.NodeKey && 0 != len(entry.Dependencies) {
+            t.Fatalf("expected the evicted value's record to go with it, got %+v", entries)
+        }
+    }
+}

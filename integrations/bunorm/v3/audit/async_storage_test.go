@@ -722,8 +722,14 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAWedgedSaveStillReports(t *test
         t.Fatalf("a save that ignored its cancellation was reported as a clean close")
     }
 
-    if false == strings.Contains(closeErr.Error(), "ignored its cancellation") {
+    /* what a spent budget can say: the save was cancelled and nothing confirmed it stored. Whether it IGNORED the cancellation is not measurable when no grace waited for its reaction, and the answer does not claim it */
+    if false == strings.Contains(closeErr.Error(), "budget already spent") || true == strings.Contains(closeErr.Error(), "ignored its cancellation") {
         t.Fatalf("the failure does not name what happened: %v", closeErr)
+    }
+
+    var reported *exception.Error
+    if false == errors.As(closeErr, &reported) || int64(1) != reported.Context()["outstanding"] {
+        t.Fatalf("expected the save in hand to be counted as outstanding, got %v", closeErr)
     }
 }
 
@@ -780,5 +786,60 @@ func TestAsyncStorage_CloseWithASpentDeadlineAfterTheEntriesWereStoredReportsNot
 
     if closeErr := storage.CloseWithContext(spentContext); nil != closeErr {
         t.Fatalf("a storage that had stored everything reported a failure under a spent deadline: %v", closeErr)
+    }
+}
+
+/* contextHonouringStorage parks the save until it is released or CANCELLED, the way a real delegate under a context does. */
+type contextHonouringStorage struct {
+    entered chan struct{}
+    release chan struct{}
+    once    sync.Once
+}
+
+func (instance *contextHonouringStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case <-instance.release:
+        return nil
+    }
+}
+
+/* a spent budget gives the save in hand no grace to react to its cancellation, so whether it IGNORED it is not measurable — and it was claimed anyway, over a delegate that honoured the cancellation within microseconds. The answer says what a spent budget can say: cancelled, and not confirmed stored, the save in hand counted. */
+func TestAsyncStorage_CloseWithASpentDeadlineOverAnHonouringSaveDoesNotClaimItWasIgnored(t *testing.T) {
+    honouring := &contextHonouringStorage{entered: make(chan struct{}), release: make(chan struct{})}
+    storage := NewAsyncStorage(honouring, 4)
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+        t.Fatalf("the entry was not queued: %v", saveErr)
+    }
+
+    select {
+    case <-honouring.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached; there is no save in hand")
+    }
+
+    defer close(honouring.release)
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    closeErr := storage.CloseWithContext(spentContext)
+    if nil == closeErr {
+        t.Fatalf("a save cut by a spent budget was reported as a clean close")
+    }
+
+    if true == strings.Contains(closeErr.Error(), "ignored its cancellation") {
+        t.Fatalf("a save given no grace to react was reported as having ignored its cancellation: %v", closeErr)
+    }
+
+    var reported *exception.Error
+    if false == errors.As(closeErr, &reported) || int64(1) != reported.Context()["outstanding"] {
+        t.Fatalf("expected the save in hand to be counted as outstanding, got %v", closeErr)
     }
 }

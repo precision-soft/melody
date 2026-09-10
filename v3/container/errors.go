@@ -17,6 +17,9 @@ var ErrTeardownDependencyTypeIsRequired = errors.New("teardown dependency type i
 
 var ErrTeardownDependencyWasNeverRegistered = errors.New("a declared teardown dependency names a service that was never registered")
 
+/* ErrTeardownDependencyIsScoped is the cause of an arming refusal for a teardown dependency naming a SCOPED service. A scoped service is built and closed by each scope, so it never has a node in the container's teardown graph, and an edge towards it is dropped by the walk exactly as an edge towards a name nobody registered is; under waves that drop is the ordering itself, so it is refused where the author can still fix it. */
+var ErrTeardownDependencyIsScoped = errors.New("a declared teardown dependency names a scoped service, which has no node in the container's teardown graph")
+
 /* ErrTeardownDependencyTypeIsAmbiguous is the cause of an arming refusal for a teardown dependency keyed by a TYPE that more than one service is registered under. The declaration has to name ONE service to be ordered against; a type several services share names a set, and reading it as "before all of them" wrote orderings the declaring code never asked for — including, where one of them already ordered itself before the declarer, a cycle nobody declared, which failed a teardown in which every service closed. */
 var ErrTeardownDependencyTypeIsAmbiguous = errors.New("a declared teardown dependency names a type more than one service is registered under")
 

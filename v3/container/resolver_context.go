@@ -125,12 +125,12 @@ func containerNameStore(
             containerInstance.instances[serviceName] = value
             containerInstance.builtServiceNames[serviceName] = struct{}{}
             containerInstance.recordCreationOrderLocked(containerNameNodeKey(serviceName))
-            containerInstance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value)
+            containerInstance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value, false)
 
             if nil != canonicalTargetType {
                 containerInstance.typeInstances[canonicalTargetType] = value
                 containerInstance.recordCreationOrderLocked(containerTypeNodeKey(canonicalTargetType))
-                containerInstance.recordHeldIdentitiesLocked(containerTypeNodeKey(canonicalTargetType), value)
+                containerInstance.recordHeldIdentitiesLocked(containerTypeNodeKey(canonicalTargetType), value, false)
             }
 
             return value, false, nil
@@ -151,7 +151,7 @@ func containerTypeStore(
 
             containerInstance.typeInstances[canonicalTargetType] = value
             containerInstance.recordCreationOrderLocked(containerTypeNodeKey(canonicalTargetType))
-            containerInstance.recordHeldIdentitiesLocked(containerTypeNodeKey(canonicalTargetType), value)
+            containerInstance.recordHeldIdentitiesLocked(containerTypeNodeKey(canonicalTargetType), value, false)
 
             return value, false, nil
         },

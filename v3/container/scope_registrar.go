@@ -83,8 +83,8 @@ func (instance *scope) registerOnScope(
 ) error {
     registerOption := applyRegisterServiceOptions(options)
 
-    /* refused here for the reason the container's scoped door states: a scope keeps its own teardown graph, recorded from the resolutions that scope actually made, so a declaration written at registration has nowhere to be written into. Accepting it would install nothing while reading as an ordering that holds. */
-    if 0 < len(registerOption.TeardownDependencyNames) {
+    /* refused here for the reason the container's scoped door states: a scope keeps its own teardown graph, recorded from the resolutions that scope actually made, so a declaration written at registration has nowhere to be written into. Accepting it would install nothing while reading as an ordering that holds. The form keyed by type is the same declaration and gets the same refusal. */
+    if 0 < len(registerOption.TeardownDependencyNames) || 0 < len(registerOption.TeardownDependencyTypes) {
         return exception.NewError(
             "a scoped registration cannot declare a teardown dependency",
             map[string]any{

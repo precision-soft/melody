@@ -3,6 +3,7 @@ package container
 import (
     "context"
     "errors"
+    "fmt"
     "reflect"
     "strings"
     "sync"
@@ -2632,8 +2633,6 @@ func (instance *concurrentCloser) Close() error {
 func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer()
 
-    armParallelTeardown(t, serviceContainer)
-
     var running, peak atomic.Int64
 
     for _, pair := range [][2]string{{"cycle.a", "cycle.b"}, {"cycle.b", "cycle.c"}, {"cycle.c", "cycle.a"}} {
@@ -2649,6 +2648,9 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
         }
     }
 
+    /* armed after the wiring, as the door asks: a declaration made after arming is validated at its own door, and the first of these names a service registered only later */
+    armParallelTeardown(t, serviceContainer)
+
     buildEveryRegisteredService(t, serviceContainer, "cycle.a", "cycle.b", "cycle.c")
 
     closeErr := serviceContainer.Close()
@@ -2658,5 +2660,207 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
 
     if 1 != peak.Load() {
         t.Fatalf("expected the cycle remainder to close one service at a time, got %d at once", peak.Load())
+    }
+}
+
+/* a scoped service is built and closed by each scope, so it never has a node in the container's graph and an edge towards it can never order anything; the arming guard used to count the scoped registration as registered and admit an ordering the walk then dropped in silence. */
+func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedService(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    if registerErr := serviceContainer.RegisterScoped(
+        "scoped.store",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected scoped register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{}, nil
+        },
+        WithoutTypeRegistration(),
+        WithTeardownDependency("scoped.store"),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    armErr := serviceContainer.(interface{ ArmParallelTeardown() error }).ArmParallelTeardown()
+    if false == errors.Is(armErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the dependency on a scoped service to refuse the arming with ErrTeardownDependencyIsScoped, got %v", armErr)
+    }
+}
+
+type countingConcurrentCloser struct {
+    running *atomic.Int64
+    peak    *atomic.Int64
+    closed  *atomic.Int64
+}
+
+func (instance *countingConcurrentCloser) Close() error {
+    now := instance.running.Add(1)
+
+    for {
+        peak := instance.peak.Load()
+        if now <= peak || true == instance.peak.CompareAndSwap(peak, now) {
+            break
+        }
+    }
+
+    time.Sleep(50 * time.Millisecond)
+    instance.running.Add(-1)
+    instance.closed.Add(1)
+
+    return nil
+}
+
+/* the built instances an override evicted carry no edges, so nothing can be said about what they hold — of one another either; they used to share one wave and close at once. */
+func TestContainer_Close_ArmedTheReplacedInstancesCloseOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    var running, peak, closed atomic.Int64
+
+    for _, serviceName := range []string{"app.replaced.first", "app.replaced.second"} {
+        if registerErr := serviceContainer.Register(
+            serviceName,
+            func(resolver containercontract.Resolver) (*countingConcurrentCloser, error) {
+                return &countingConcurrentCloser{running: &running, peak: &peak, closed: &closed}, nil
+            },
+            WithoutTypeRegistration(),
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+
+        if _, getErr := serviceContainer.Get(serviceName); nil != getErr {
+            t.Fatalf("unexpected get error: %v", getErr)
+        }
+
+        if overrideErr := serviceContainer.OverrideProtectedInstance(serviceName, &closeOrderServiceA{recorder: &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}}); nil != overrideErr {
+            t.Fatalf("unexpected override error: %v", overrideErr)
+        }
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != closed.Load() {
+        t.Fatalf("expected both replaced instances to be closed, got %d", closed.Load())
+    }
+
+    if 1 != peak.Load() {
+        t.Fatalf("expected the replaced instances to close one at a time, got %d at once", peak.Load())
+    }
+}
+
+type mutualConcurrentCloser struct {
+    running *atomic.Int64
+    peak    *atomic.Int64
+    closed  *atomic.Int64
+    partner *mutualConcurrentCloser
+}
+
+func (instance *mutualConcurrentCloser) Close() error {
+    return (&countingConcurrentCloser{running: instance.running, peak: instance.peak, closed: instance.closed}).Close()
+}
+
+/* two services that hold each other gain no edge, because no ordering between them is true — but they are not unrelated, and under waves "no edge" used to mean "same wave", so the two closed at once, each Close entering the other. They are one group inside the wave, closed one after the other. */
+func TestContainer_Close_ArmedAMutuallyHeldPairClosesOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    var running, peak, closed atomic.Int64
+
+    holder := &mutualConcurrentCloser{running: &running, peak: &peak, closed: &closed}
+    collaborator := &mutualConcurrentCloser{running: &running, peak: &peak, closed: &closed, partner: holder}
+    holder.partner = collaborator
+
+    if registerErr := serviceContainer.Register(
+        "app.mutual.holder",
+        func(resolver containercontract.Resolver) (*mutualConcurrentCloser, error) { return holder, nil },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.mutual.collaborator",
+        func(resolver containercontract.Resolver) (*mutualConcurrentCloser, error) { return collaborator, nil },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    buildEveryRegisteredService(t, serviceContainer, "app.mutual.holder", "app.mutual.collaborator")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != closed.Load() {
+        t.Fatalf("expected both services of the pair to be closed, got %d", closed.Load())
+    }
+
+    if 1 != peak.Load() {
+        t.Fatalf("expected the mutually held pair to close one at a time, got %d at once", peak.Load())
+    }
+}
+
+type mutualWaveMate struct {
+    mate    *waveMateCloser
+    partner *mutualWaveMate
+}
+
+func (instance *mutualWaveMate) Close() error {
+    return instance.mate.Close()
+}
+
+/* the arm that keeps the group from being a serialisation of the whole wave: two mutually held pairs with no relation between them are two groups, and the groups still start at once. Each pair's first member waits for the other pair's first member to have started; closed group after group, one of them waits its whole moment out and says so. */
+func TestContainer_Close_ArmedTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    firstStarted := make(chan struct{})
+    secondStarted := make(chan struct{})
+    mates := []*waveMateCloser{
+        {started: firstStarted, mateStarted: secondStarted, mateDeadline: time.Second},
+        {started: secondStarted, mateStarted: firstStarted, mateDeadline: time.Second},
+    }
+
+    for pairIndex := 0; pairIndex < 2; pairIndex = pairIndex + 1 {
+        plainMateStarted := make(chan struct{})
+        close(plainMateStarted)
+        plain := &waveMateCloser{started: make(chan struct{}), mateStarted: plainMateStarted, mateDeadline: time.Second}
+        first := &mutualWaveMate{mate: mates[pairIndex]}
+        second := &mutualWaveMate{mate: plain, partner: first}
+        first.partner = second
+
+        for memberIndex, member := range []*mutualWaveMate{first, second} {
+            captured := member
+            serviceName := fmt.Sprintf("app.pair%d.member%d", pairIndex, memberIndex)
+
+            if registerErr := serviceContainer.Register(
+                serviceName,
+                func(resolver containercontract.Resolver) (*mutualWaveMate, error) { return captured, nil },
+                WithoutTypeRegistration(),
+            ); nil != registerErr {
+                t.Fatalf("unexpected register error: %v", registerErr)
+            }
+
+            if _, getErr := serviceContainer.Get(serviceName); nil != getErr {
+                t.Fatalf("unexpected get error: %v", getErr)
+            }
+        }
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected the two groups to be closing at the same moment, got: %v", closeErr)
     }
 }

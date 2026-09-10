@@ -236,6 +236,7 @@ v3 ~ compatible ~ ./config.TeardownTimeoutKey ~ added ~ keep ~ MELODY_TEARDOWN_T
 v3 ~ compatible ~ ./container.ClosedWithScope ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container.ErrTeardownDependencyTypeIsRequired ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container.ErrTeardownDependencyTypeIsAmbiguous ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container.ErrTeardownDependencyIsScoped ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container.ErrTeardownDependencyWasNeverRegistered ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container.WithTeardownDependencyOfType ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container/contract.OverrideOption ~ added ~ unclassified ~
