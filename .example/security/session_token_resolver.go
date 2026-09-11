@@ -9,11 +9,12 @@ import (
 )
 
 const (
-    SessionKeySecurityUserId = "security.userId"
-    SessionKeySecurityRoles  = "security.roles"
+    SessionKeySecurityUserId            = "security.userId"
+    SessionKeySecurityRoles             = "security.roles"
+    SessionKeySecurityCredentialVersion = "security.credentialVersion"
 )
 
-func SessionTokenResolver() melodysecuritycontract.TokenResolver {
+func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
     return func(request melodyhttpcontract.Request) melodysecuritycontract.Token {
         sessionInstance := getSession(request)
         if nil == sessionInstance {
@@ -38,10 +39,22 @@ func SessionTokenResolver() melodysecuritycontract.TokenResolver {
             return melodysecurity.NewAnonymousToken()
         }
 
-        return melodysecurity.NewAuthenticatedToken(
-            userId,
-            roles,
-        )
+        credentialVersion, ok := getStringFromSession(sessionInstance, SessionKeySecurityCredentialVersion)
+        if false == ok || "" == credentialVersion {
+            sessionInstance.Clear()
+            return melodysecurity.NewAnonymousToken()
+        }
+
+        user, found, lookupErr := lookupUser(request, userId)
+        if nil != lookupErr {
+            return melodysecurity.NewAnonymousToken()
+        }
+        if false == found || nil == user || userId != user.Id || "" == user.Password || 0 == len(user.Roles) || credentialVersion != SessionCredentialVersion(user.Password) {
+            sessionInstance.Clear()
+            return melodysecurity.NewAnonymousToken()
+        }
+
+        return melodysecurity.NewAuthenticatedToken(user.Id, append([]string{}, user.Roles...))
     }
 }
 

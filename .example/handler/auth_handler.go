@@ -83,7 +83,8 @@ func LoginHandler() melodyhttpcontract.Handler {
         }
 
         rotatedSession.Set(security.SessionKeySecurityUserId, user.Id)
-        rotatedSession.Set(security.SessionKeySecurityRoles, user.Roles)
+        rotatedSession.Set(security.SessionKeySecurityRoles, append([]string{}, user.Roles...))
+        rotatedSession.Set(security.SessionKeySecurityCredentialVersion, security.SessionCredentialVersion(user.Password))
 
         redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(route.ProductsListPageName, nil)
 

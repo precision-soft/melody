@@ -188,11 +188,12 @@ func (instance *UserService) Update(
 
     previousUsername := user.Username
 
-    user.Username = username
-    user.Password = passwordHash
-    user.Roles = roles
+    modified := *user
+    modified.Username = username
+    modified.Password = passwordHash
+    modified.Roles = append([]string{}, roles...)
 
-    updated, updateErr := instance.userRepository.Update(ctx, user)
+    updated, updateErr := instance.userRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -200,7 +201,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(user, previousUsername)
+    updatedEvent := event.NewUserUpdatedEvent(&modified, previousUsername)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
@@ -210,7 +211,7 @@ func (instance *UserService) Update(
         return nil, true, dispatchErr
     }
 
-    return user, true, nil
+    return &modified, true, nil
 }
 
 func (instance *UserService) DeleteById(
@@ -262,7 +263,7 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
         return nil, false, nil
     }
 
-    user, found, findErr := instance.FindByUsername(normalizedUsername)
+    user, found, findErr := instance.userRepository.FindByUsername(context.Background(), normalizedUsername)
     if nil != findErr {
         return nil, false, findErr
     }

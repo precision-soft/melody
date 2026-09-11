@@ -2,7 +2,7 @@
 
 HTTP observability for Melody: distributed tracing and Prometheus metrics as HTTP middlewares, built on [`go.opentelemetry.io/otel`](https://github.com/open-telemetry/opentelemetry-go).
 
-Structured logging already exists in core Melody; this integration adds traces and metrics.
+Structured logging already exists in core Melody; this integration adds traces and metrics. Tracing records a status written directly by a handler, including streamed 5xx responses and connection upgrades. The middleware forwards flushing, hijacking, and response-controller access through its recording writer.
 
 ## Version lines
 

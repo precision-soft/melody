@@ -260,7 +260,7 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
         return nil, false, nil
     }
 
-    user, found, findErr := instance.FindByUsername(normalizedUsername)
+    user, found, findErr := instance.userRepository.FindByUsername(context.Background(), normalizedUsername)
     if nil != findErr {
         return nil, false, findErr
     }

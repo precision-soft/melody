@@ -89,7 +89,7 @@ Userland code must treat `token.IsAuthenticated()` as the canonical guard for ac
 3. **Regex match** (`accesscontrol.NewRegexRule`) with **first match wins** (declaration order). The pattern is compiled **unanchored** and tested as a substring of the canonicalized path — `/public` matches `/admin/public-notes` as readily as `/public` — deliberately, mirroring the path regex of other frameworks; a rule meant to name one section must anchor itself: `^/public(/|$)`
 4. **Fallback** rule with an empty prefix (only `accesscontrol.NewRawPrefixRule("")` builds one; the segment reach refuses an empty path)
 
-The matcher folds the request path (`//admin`, `/x/../admin`) to its canonical spelling before matching. The fold alone would not be sufficient — the router matches the path as sent — which is why the http kernel refuses a non-canonical request path before anything routes or authorizes it (`requestPathIsCanonical`); the matcher's own fold remains as its defence for a caller consulting `AccessControl` without that guard, and it can only make a rule match more, never open what a rule had closed. This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).
+The matcher folds the path before selecting a rule. The HTTP kernel first refuses non-canonical paths, including surrounding whitespace, so routing and authorization use the same spelling. Direct matcher callers must enforce the same boundary: normalization can select a more permissive rule than the raw path.
 
 ### Role checks
 

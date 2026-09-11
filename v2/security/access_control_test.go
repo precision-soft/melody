@@ -497,3 +497,30 @@ func TestNewAccessControlRule_LonePublicAccessAllowed(t *testing.T) {
         t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.attributes)
     }
 }
+
+func TestNewAccessControlRegexRule_RequiresEveryPublicBranchToBeAnchored(t *testing.T) {
+    for _, pattern := range []string{"^/public|/status", "(?m)^/public", "(^/public)?"} {
+        t.Run(pattern, func(t *testing.T) {
+            defer func() {
+                if nil == recover() {
+                    t.Fatal("expected an unsafe public pattern to be refused")
+                }
+            }()
+            NewAccessControlRegexRule(pattern, "PUBLIC_ACCESS")
+        })
+    }
+}
+
+func TestNewAccessControlRegexRule_AcceptsGroupedAndFlaggedPublicPatterns(t *testing.T) {
+    for _, pattern := range []string{"(?i)^/public(/|$)", `\A/public(/|$)`, "^(?:/public|/status)(/|$)", "^/public$|^/status$"} {
+        t.Run(pattern, func(t *testing.T) {
+            control := NewAccessControl(NewAccessControlRegexRule(pattern, "PUBLIC_ACCESS"))
+            if _, matched := control.Match("/public"); false == matched {
+                t.Fatal("anchored public path did not match")
+            }
+            if _, matched := control.Match("/admin/status-board"); true == matched {
+                t.Fatal("anchored rule matched inside a protected path")
+            }
+        })
+    }
+}

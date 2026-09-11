@@ -2900,3 +2900,33 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
         t.Fatal("the file-backed response in flight was never closed on the abort path: one descriptor leaks per aborted request")
     }
 }
+
+func TestKernel_RefusesWhitespacePathBeforeTheHandler(t *testing.T) {
+    handlerRan := false
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/admin/*path...",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerRan = true
+            return TextResponse(nethttp.StatusOK, "admin"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/admin/secret%20", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusBadRequest != recorder.Code {
+        t.Fatalf("expected a non-canonical path to be refused with %d, got %d", nethttp.StatusBadRequest, recorder.Code)
+    }
+
+    if true == handlerRan {
+        t.Fatalf("the handler ran for a non-canonical path that should have been refused before routing to it")
+    }
+}

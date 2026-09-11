@@ -20,6 +20,8 @@ Conceptually, the example models a minimal admin-style catalog application:
 
 ---
 
+Login and signed-in requests read the current user directly from the repository, bypassing cached account records. Role changes take effect on the next request; a deleted account or a changed password invalidates its old session. If the repository is unavailable, the request remains unauthenticated. Sessions created before credential-version tracking require a new login, and in-memory accounts receive new password hashes after a restart.
+
 ## Seeded credentials
 
 For convenience, the example ships with a few predefined users:

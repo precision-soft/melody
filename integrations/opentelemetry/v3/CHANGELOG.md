@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- tracing: record statuses committed directly by streaming handlers, including 5xx error spans and successful connection upgrades. Informational responses do not hide the final status; the writer preserves streaming and response-controller access.
+
 - `otlp` — the flush reserve moved onto the door the container actually calls, and a close reached with the deadline already spent is refused instead of being driven under it. The container prefers `CloseWithContext` on any service that carries one, so a reserve applied in `Close()` alone was a reserve the teardown never spent: a shutdown with no deadline handed the provider NO margin where it used to have five seconds. Worse, an expired one is not merely a dropped flush — `TracerProvider.Shutdown` latches its shut flag through a compare-and-swap BEFORE its loop, returns at the head of the first iteration, never empties its list of span processors, and answers `nil` to every later call, so the provider is left permanently unclosable with its batch goroutine, its ticker and its exporter connection still running. Refusing the call keeps it closable by whatever comes next and names the reason in the container's failure map, where the vendor's bare `context deadline exceeded` used to stand.
 
 - `tracing_middleware.go` — a handler error with no response carries the client-facing status onto the span's `http.response.status_code` instead of omitting it. The attribute was set only from a live response, so a handled 4xx produced a span marked `Error` with no status code at all, and a trace query filtering on `http.response.status_code` lost every errored request

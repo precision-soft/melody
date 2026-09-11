@@ -381,53 +381,28 @@ func TestLocalStorage_NegativeSizeMeansUnknownAndSkipsTheLengthCheck(t *testing.
     }
 }
 
-func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
+func TestLocalStorage_PutPreservesOldObjectsWithTempNames(t *testing.T) {
     baseDirectory := t.TempDir()
     storage := NewLocalStorage(baseDirectory)
     runtimeInstance := testRuntime()
-
-    if putErr := storage.Put(runtimeInstance, "report.txt", strings.NewReader("first"), -1, storagecontract.PutOptions{}); nil != putErr {
-        t.Fatalf("unexpected put error: %v", putErr)
+    key := "report.txt.tmp-00112233445566aa"
+    if err := storage.Put(runtimeInstance, key, strings.NewReader("owned data"), -1, storagecontract.PutOptions{}); nil != err {
+        t.Fatal(err)
     }
-
-    /* a crash mid-write leaves exactly this shape behind: a temp object no error path could clean; nothing sweeps it but a later Put of the same key */
-    staleTemp := filepath.Join(baseDirectory, "report.txt.tmp-00112233445566aa")
-    if writeErr := os.WriteFile(staleTemp, []byte("orphan"), 0o640); nil != writeErr {
-        t.Fatalf("could not plant the stale temp: %v", writeErr)
+    old := time.Now().Add(-2 * time.Hour)
+    if err := os.Chtimes(filepath.Join(baseDirectory, key), old, old); nil != err {
+        t.Fatal(err)
     }
-    staleInstant := time.Now().Add(-2 * time.Hour)
-    if touchErr := os.Chtimes(staleTemp, staleInstant, staleInstant); nil != touchErr {
-        t.Fatalf("could not age the stale temp: %v", touchErr)
+    if err := storage.Put(runtimeInstance, "report.txt", strings.NewReader("replacement"), -1, storagecontract.PutOptions{}); nil != err {
+        t.Fatal(err)
     }
-
-    /* a FRESH temp is a concurrent writer still at work — its mtime is recent, so the sweep must leave it alone */
-    freshTemp := filepath.Join(baseDirectory, "report.txt.tmp-ffeeddccbbaa9988")
-    if writeErr := os.WriteFile(freshTemp, []byte("in flight"), 0o640); nil != writeErr {
-        t.Fatalf("could not plant the fresh temp: %v", writeErr)
+    reader, err := storage.Get(runtimeInstance, key)
+    if nil != err {
+        t.Fatal(err)
     }
-
-    /* an operator's own file that merely resembles a temp name — wrong suffix shape — is never the sweep's to touch */
-    unowned := filepath.Join(baseDirectory, "report.txt.tmp-notahexsuffix!!")
-    if writeErr := os.WriteFile(unowned, []byte("operator data"), 0o640); nil != writeErr {
-        t.Fatalf("could not plant the unowned file: %v", writeErr)
-    }
-    if touchErr := os.Chtimes(unowned, staleInstant, staleInstant); nil != touchErr {
-        t.Fatalf("could not age the unowned file: %v", touchErr)
-    }
-
-    if putErr := storage.Put(runtimeInstance, "report.txt", strings.NewReader("second"), -1, storagecontract.PutOptions{}); nil != putErr {
-        t.Fatalf("unexpected put error: %v", putErr)
-    }
-
-    if _, statErr := os.Stat(staleTemp); false == os.IsNotExist(statErr) {
-        t.Fatalf("expected the stale temp to be swept, stat answered %v", statErr)
-    }
-
-    if _, statErr := os.Stat(freshTemp); nil != statErr {
-        t.Fatalf("expected the fresh temp to survive the sweep: %v", statErr)
-    }
-
-    if _, statErr := os.Stat(unowned); nil != statErr {
-        t.Fatalf("expected the operator's own file to survive the sweep: %v", statErr)
+    defer reader.Close()
+    payload, err := io.ReadAll(reader)
+    if nil != err || "owned data" != string(payload) {
+        t.Fatalf("stored object changed: %q, %v", payload, err)
     }
 }

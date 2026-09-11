@@ -1708,6 +1708,7 @@ func TestWriteResponse_ADeleteOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t 
 
 func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T) {
     canonicalPaths := []string{
+        "/public name",
         "/",
         "/login",
         "/admin",
@@ -1727,6 +1728,11 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
 
     /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request */
     foldedPaths := []string{
+        "/public ",
+        " /public",
+        "/public\t",
+        "/public\u00a0",
+        "/public\u2003",
         "/admin/x/../../login",
         "/admin/..",
         "/admin/../login",

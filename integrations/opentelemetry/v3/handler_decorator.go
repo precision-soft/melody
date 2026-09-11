@@ -131,12 +131,11 @@ type statusRecordingResponseWriter struct {
 }
 
 func (instance *statusRecordingResponseWriter) WriteHeader(statusCode int) {
-    if false == instance.wroteHeader {
+    instance.ResponseWriter.WriteHeader(statusCode)
+    if false == instance.wroteHeader && (200 <= statusCode || nethttp.StatusSwitchingProtocols == statusCode) {
         instance.statusCode = statusCode
         instance.wroteHeader = true
     }
-
-    instance.ResponseWriter.WriteHeader(statusCode)
 }
 
 func (instance *statusRecordingResponseWriter) Write(payload []byte) (int, error) {
@@ -176,11 +175,20 @@ func (instance *statusRecordingResponseWriter) ReadFrom(reader io.Reader) (int64
     return io.Copy(instance.ResponseWriter, reader)
 }
 
+func (instance *statusRecordingResponseWriter) Push(target string, options *nethttp.PushOptions) error {
+    pusher, supported := instance.ResponseWriter.(nethttp.Pusher)
+    if false == supported {
+        return nethttp.ErrNotSupported
+    }
+    return pusher.Push(target, options)
+}
+
 /* Unwrap exposes the underlying writer so http.ResponseController can reach its flush/hijack/deadline support through the wrapper, mirroring the http kernel's recording writer. */
 func (instance *statusRecordingResponseWriter) Unwrap() nethttp.ResponseWriter {
     return instance.ResponseWriter
 }
 
+var _ nethttp.Pusher = (*statusRecordingResponseWriter)(nil)
 var _ nethttp.Flusher = (*statusRecordingResponseWriter)(nil)
 var _ nethttp.Hijacker = (*statusRecordingResponseWriter)(nil)
 var _ io.ReaderFrom = (*statusRecordingResponseWriter)(nil)

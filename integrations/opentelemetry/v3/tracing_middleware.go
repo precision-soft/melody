@@ -53,10 +53,20 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
 
             tracedRuntime := runtime.New(spanContext, runtimeInstance.Scope(), runtimeInstance.Container())
 
-            response, handlerErr := next(tracedRuntime, writer, request)
+            recorder := &statusRecordingResponseWriter{ResponseWriter: writer, statusCode: nethttp.StatusOK}
+            response, handlerErr := next(tracedRuntime, recorder, request)
 
             /* isNilResponse: a typed-nil concrete response passes a bare interface comparison and the StatusCode() dereference would panic here, charging the handler's defect to the observability layer */
-            if false == isNilResponse(response) {
+            if true == recorder.wroteHeader {
+                statusCode := recorder.statusCode
+                if true == recorder.hijacked {
+                    statusCode = nethttp.StatusSwitchingProtocols
+                }
+                span.SetAttributes(attribute.Int("http.response.status_code", statusCode))
+                if 500 <= statusCode {
+                    span.SetStatus(codes.Error, nethttp.StatusText(statusCode))
+                }
+            } else if false == isNilResponse(response) {
                 span.SetAttributes(attribute.Int("http.response.status_code", response.StatusCode()))
                 if 500 <= response.StatusCode() {
                     span.SetStatus(codes.Error, nethttp.StatusText(response.StatusCode()))

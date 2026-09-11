@@ -14,6 +14,10 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
+### Request path and public regex validation
+
+Requests whose decoded path has surrounding whitespace now receive HTTP 400 before routing or authorization. Use a canonical URL; interior spaces remain valid. Direct access-control callers must also reject spellings their router interprets differently.
+
 ### Application: the error handler is consulted, and the shutdown drain runs whatever failed before it
 
 **What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. An http process now makes that one decision where serving begins; a console process keeps making it at boot-end, so its dispatcher still exposes the listener set a serving process runs. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.

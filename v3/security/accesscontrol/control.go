@@ -123,11 +123,7 @@ func (instance Rule) claimsPath(normalizedPath string) bool {
     return prefixLength < len(normalizedPath) && '/' == normalizedPath[prefixLength]
 }
 
-/* CanonicalizePath folds the spellings that reach the same resource into the one the rules are written in. net/http hands the path through unfolded, so "//admin/panel" and "/open/../admin/panel" are matched by no rule that names "/admin" — and no rule matched is granted, with the token never consulted.
-
-Folding is NOT sufficient on its own, and the http kernel does not rely on it: because the router matches the path as sent and does not fold "..", a request routed to a protected handler under a folded spelling would be authorized here against the folded spelling's rule — a different, possibly more permissive one, or none. The kernel closes that by refusing a non-canonical request path before it is routed or authorized (http.requestPathIsCanonical), so every path this sees is already the one spelling. The fold remains as the matcher's own defence for a caller that consults a Control without that guard.
-
-The surrounding whitespace is trimmed before the fold rather than left alone: the trim makes the matcher answer for one spelling more than the router accepts, which refuses more than intended and never less. */
+/* CanonicalizePath normalizes the path for rule lookup. HTTP callers must reject non-canonical spellings before routing or authorization: folding dot segments or surrounding whitespace can select a more permissive rule than the raw path. The HTTP kernel enforces this boundary; direct matcher callers must enforce the same agreement with their router. */
 func CanonicalizePath(requestPath string) string {
     canonicalPath := strings.TrimSpace(requestPath)
     if "" == canonicalPath {

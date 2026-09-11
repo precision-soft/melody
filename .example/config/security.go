@@ -2,6 +2,9 @@ package config
 
 import (
     "github.com/precision-soft/melody/.example/entity"
+    "github.com/precision-soft/melody/.example/repository"
+    melodycontainer "github.com/precision-soft/melody/container"
+    melodyhttpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/.example/route"
     "github.com/precision-soft/melody/.example/security"
     melodyapplication "github.com/precision-soft/melody/application"
@@ -63,10 +66,10 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         "main",
         melodysecurity.NewPathPrefixMatcher("/"),
         []melodysecuritycontract.Rule{},
-        melodysecurity.NewResolverTokenSource(security.SessionTokenResolver()),
+        melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup)),
         route.LoginPagePattern,
         route.LogoutPattern,
-        security.NewSessionLoginHandler(),
+        security.NewSessionLoginHandler(sessionUserLookup),
         security.NewSessionLogoutHandler(),
         override,
     )
@@ -97,3 +100,12 @@ func (instance *Module) registerApiKeyFirewall(builder *melodysecurityconfig.Bui
 }
 
 var _ melodyapplication.SecurityModule = (*Module)(nil)
+
+func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    runtimeInstance := request.RuntimeInstance()
+    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Container(), repository.ServiceUserRepository)
+    if nil != resolveErr {
+        return nil, false, resolveErr
+    }
+    return userRepository.FindById(runtimeInstance.Context(), userId)
+}

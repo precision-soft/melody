@@ -1,6 +1,7 @@
 package security
 
 import (
+    "github.com/precision-soft/melody/v2/.example/entity"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -72,4 +73,12 @@ func requestCarryingSessionAttribute(t *testing.T, value any) melodyhttpcontract
     request.Attributes().Set(melodyhttp.RequestAttributeSession, value)
 
     return request
+}
+
+func testSessionUserLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    roles := []string{"ROLE_USER", "ROLE_EDITOR"}
+    if "user-3" == userId {
+        roles = []string{"ROLE_USER", "ROLE_ADMIN"}
+    }
+    return entity.NewUser(userId, "test-user", "test-password-hash", roles), true, nil
 }
