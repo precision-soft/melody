@@ -25,7 +25,8 @@
 # Unlike its neighbours this band needs the development container: the Go toolchain lives there, and the
 # scan runs against the toolchain that builds — which is also why a standard-library advisory is a row
 # here until the IMAGE moves, not until any go.mod does. govulncheck is installed into the container on
-# first use and needs the network for the module download and for the vulnerability database.
+# first use, at the version pinned below, and needs the network for the module download and for the
+# vulnerability database.
 #
 # `--report` prints the current reachable findings as baseline-shaped rows (reason left for the reader to
 # write at the site), for regenerating the baseline after a toolchain or dependency move.
@@ -54,6 +55,15 @@ fi
 SERVICE_NAME_STRING="dev"
 CONTAINER_ROOT_PATH="/app"
 BASELINE_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.baseline"
+
+# the tool is pinned, not `@latest`: the container builds it with the image's own toolchain under
+# GOTOOLCHAIN=local, so the day the tool's `go` directive moves past the image the install is refused and
+# the whole gate is red on a release nobody here made — measured 2026-09-11, when x/vuln v1.8.0 started
+# requiring go 1.26 on a golang:1.25 image, and the lane died with its reason swallowed. The database the
+# scan reads is fetched live whatever the tool version, so the pin costs nothing an advisory could name.
+# It moves together with the FROM line of `.dev/docker/Dockerfile`: v1.7.0 is the last release whose
+# go directive a 1.25 toolchain satisfies.
+GOVULNCHECK_VERSION_STRING="v1.7.0"
 
 require_docker
 require_docker_daemon
@@ -125,17 +135,20 @@ fi
 # silently counted as clean. govulncheck answers 0 for a clean module and 3 for one with findings; any
 # other exit is the tool failing, which is a failure of the band, never a pass.
 SCAN_OUTPUT_STRING="$(
-    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" sh -s -- "${MODULE_RELATIVE_PATH_LIST[@]}" <<'CONTAINER_SCRIPT'
+    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" sh -s -- "${GOVULNCHECK_VERSION_STRING}" "${MODULE_RELATIVE_PATH_LIST[@]}" <<'CONTAINER_SCRIPT'
 set -u
+GOVULNCHECK_VERSION="$1"
+shift
+# an install that fails hands its last lines to the host under the same DETAIL shape a failing module
+# uses, so the refusal names the cause instead of only the fact
 if ! command -v govulncheck >/dev/null 2>&1; then
-    if ! go install golang.org/x/vuln/cmd/govulncheck@latest >/dev/null 2>&1; then
+    INSTALL_OUTPUT="$(go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" 2>&1)"
+    INSTALL_EXIT_CODE=$?
+    if [ 0 -ne "${INSTALL_EXIT_CODE}" ] || ! command -v govulncheck >/dev/null 2>&1; then
         printf 'PROTOCOL\tINSTALL-FAILED\n'
+        printf '%s\n' "${INSTALL_OUTPUT}" | tail -5 | awk '{ print "PROTOCOL\tDETAIL\t" $0 }' | tr -d '\r'
         exit 0
     fi
-fi
-if ! command -v govulncheck >/dev/null 2>&1; then
-    printf 'PROTOCOL\tINSTALL-FAILED\n'
-    exit 0
 fi
 for MODULE_PATH in "$@"; do
     [ -n "${MODULE_PATH}" ] || continue
@@ -159,7 +172,8 @@ CONTAINER_SCRIPT
 )"
 
 if printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep -Fxq $'PROTOCOL\tINSTALL-FAILED'; then
-    fail "govulncheck is not installed in the ${SERVICE_NAME_STRING} container and installing it failed — the band cannot run, and reporting success here would mean it silently contributed nothing"
+    printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep $'^PROTOCOL\tDETAIL\t' | cut -f3- || true
+    fail "govulncheck is not installed in the ${SERVICE_NAME_STRING} container and installing golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION_STRING} failed (the tool's last lines are above) — the band cannot run, and reporting success here would mean it silently contributed nothing"
 fi
 
 SCANNED_COUNT_NUMBER="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep -c $'\tSCANNED$' || true)"

@@ -43,6 +43,39 @@ fi
 VALIDATION_STAMP_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-stamp"
 VALIDATION_RUN_LOG_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-run.log"
 
+# git hands the hook, on stdin, the refs it is about to send: `<local ref> <local sha> <remote ref>
+# <remote sha>`, one line per update, and the remote's name as the first argument. A local sha reachable
+# from a remote-tracking ref of THAT remote is content the remote already holds — pushed once before,
+# through this same hook — so a push made of such shas alone (a new branch name on a commit already
+# pushed, `git push origin a:b`) carries not one byte the gate has not certified. The stamp is a proof
+# about CONTENT, and the content is not moving; demanding it here would run the full gate for nothing,
+# which is what it did: a branch-off of a pushed HEAD in a fresh clone, whose stamp another clone held,
+# was refused, ran the whole gate in the background, and reported red on a lane that failed for its
+# own reasons. Remote-tracking refs are stale in one direction only — a sha the remote has since dropped
+# was still pushed and validated when it was there — never towards a sha the remote has that the
+# ref does not name, because a push updates them. A deletion (an all-zero local sha) sends nothing.
+# Any sha the remote does not hold falls through to the stamp checks below, unchanged.
+REMOTE_NAME_STRING="${1:-}"
+PUSHED_UPDATE_COUNT_NUMBER=0
+UNHELD_SHA_COUNT_NUMBER=0
+while IFS=" " read -r LOCAL_REF_STRING LOCAL_SHA_STRING REMOTE_REF_STRING REMOTE_SHA_STRING; do
+    if [[ "" = "${LOCAL_SHA_STRING}" ]]; then
+        continue
+    fi
+    PUSHED_UPDATE_COUNT_NUMBER=$((PUSHED_UPDATE_COUNT_NUMBER + 1))
+    if [[ "${LOCAL_SHA_STRING}" =~ ^0+$ ]]; then
+        continue
+    fi
+    if [[ "" = "${REMOTE_NAME_STRING}" ]] || [[ "" = "$(git for-each-ref --contains "${LOCAL_SHA_STRING}" "refs/remotes/${REMOTE_NAME_STRING}/" 2>/dev/null || true)" ]]; then
+        UNHELD_SHA_COUNT_NUMBER=$((UNHELD_SHA_COUNT_NUMBER + 1))
+    fi
+done
+
+if [[ 0 -lt "${PUSHED_UPDATE_COUNT_NUMBER}" ]] && [[ 0 -eq "${UNHELD_SHA_COUNT_NUMBER}" ]]; then
+    success "pre-push: every commit of the ${PUSHED_UPDATE_COUNT_NUMBER} ref update(s) is already held by ${REMOTE_NAME_STRING} — nothing the gate has not certified leaves this machine"
+    exit 0
+fi
+
 # a push without a valid proof is refused — that part is not negotiable, the gate cannot run inside the
 # push window — but the refusal STARTS the gate instead of only naming it, so the worst case is pushing
 # twice: the first push kicks the full run off in the background and the second one, after it reports
