@@ -674,7 +674,7 @@ func closeCreatedScopeInstances(
         }
     }
 
-    /* a scope closes serially: it lives for one request, its teardown is microseconds, and the opt-in that buys waves is an assertion about the application's own providers, which a per-request scope has no way to make. */
+    /* a scope closes serially: it lives for one request, its teardown is microseconds, and the opt-in that buys waves is an assertion about the application's own providers, which a per-request scope has no way to make. The wave map the shared drain computes on the way is dropped here — measured, two allocations and about two hundred nanoseconds per scope close — and that is the price of keeping ONE drain for the container and the scope, where a second signature for a walk that skips the waves would be a second chance to order a teardown differently. */
     closeOrder, _, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
 
     closedPointers := make(map[pointerIdentity]struct{})

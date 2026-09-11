@@ -843,3 +843,90 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAnHonouringSaveDoesNotClaimItWa
         t.Fatalf("expected the save in hand to be counted as outstanding, got %v", closeErr)
     }
 }
+
+/* slowRecordingStorage stores every entry after a fixed delay, so a drain in progress has a measurable middle a second closer can arrive in */
+type slowRecordingStorage struct {
+    mutex sync.Mutex
+    delay time.Duration
+    saved int
+}
+
+func (instance *slowRecordingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+    time.Sleep(instance.delay)
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.saved = instance.saved + len(entries)
+
+    return nil
+}
+
+/* a second closer arriving with its budget spent — the ordinary state under a shared teardown deadline, when the application and the container both reach the storage — used to cancel the worker out from under the first closer's drain and dead-letter the entries the first was still being given time to store; it answers nil at once now and leaves the drain to the closer that owns it */
+func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAlone(t *testing.T) {
+    delegate := &slowRecordingStorage{delay: 20 * time.Millisecond}
+    storage := NewAsyncStorage(delegate, 8)
+
+    for index := 0; index < 3; index = index + 1 {
+        if saveErr := storage.Save(context.Background(), "audit", Entry{}); nil != saveErr {
+            t.Fatalf("unexpected save error: %v", saveErr)
+        }
+    }
+
+    firstOutcome := make(chan error, 1)
+
+    go func() {
+        firstContext, cancel := context.WithTimeout(context.Background(), time.Second)
+        defer cancel()
+
+        firstOutcome <- storage.CloseWithContext(firstContext)
+    }()
+
+    time.Sleep(5 * time.Millisecond)
+
+    spentContext, cancelSpent := context.WithTimeout(context.Background(), time.Nanosecond)
+    defer cancelSpent()
+    <-spentContext.Done()
+
+    if secondErr := storage.CloseWithContext(spentContext); nil != secondErr {
+        t.Fatalf("expected the second closer to answer nil at once, got %v", secondErr)
+    }
+
+    select {
+    case firstErr := <-firstOutcome:
+        if nil != firstErr {
+            t.Fatalf("expected the first closer's drain to finish clean, got %v", firstErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the first closer did not return")
+    }
+
+    delegate.mutex.Lock()
+    defer delegate.mutex.Unlock()
+
+    if 3 != delegate.saved {
+        t.Fatalf("expected every entry stored by the first closer's drain, got %d", delegate.saved)
+    }
+}
+
+/* a grace of a few microseconds — the leftover of a budget an earlier component spent — is no measurement of a delegate's reaction, and it said "ignored its cancellation" over a delegate that honoured it 289 times out of 300; below the floor both stretches read as none */
+func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
+    storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}, 8)
+    defer func() { _ = storage.Close() }()
+
+    shortContext, cancelShort := context.WithTimeout(context.Background(), 500*time.Microsecond)
+    defer cancelShort()
+
+    drainGrace, cancellationGrace := storage.closeGracesWithin(shortContext)
+    if 0 != drainGrace || 0 != cancellationGrace {
+        t.Fatalf("expected a remainder below the floor to read as no grace, got %v and %v", drainGrace, cancellationGrace)
+    }
+
+    roomyContext, cancelRoomy := context.WithTimeout(context.Background(), 10*time.Millisecond)
+    defer cancelRoomy()
+
+    drainGrace, cancellationGrace = storage.closeGracesWithin(roomyContext)
+    if 0 >= drainGrace || 0 >= cancellationGrace {
+        t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
+    }
+}

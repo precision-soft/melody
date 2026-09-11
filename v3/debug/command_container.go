@@ -112,10 +112,11 @@ func (instance *ContainerCommand) Run(
 }
 
 type containerServiceDescriptionItem struct {
-    Name     string `json:"name"`
-    Lifetime string `json:"lifetime"`
-    IsBuilt  bool   `json:"isBuilt"`
-    TypeName string `json:"typeName"`
+    Name     string                        `json:"name"`
+    Lifetime string                        `json:"lifetime"`
+    IsBuilt  bool                          `json:"isBuilt"`
+    TypeName string                        `json:"typeName"`
+    Teardown *containerServiceTeardownItem `json:"teardown,omitempty"`
 }
 
 /* describeServiceList is the default listing: it runs no provider. The descriptions carry both lifetimes; a container without the descriptions door is listed by name alone, with a warning naming the limitation instead of a silent narrower answer. */
@@ -169,6 +170,14 @@ func (instance *ContainerCommand) describeServiceList(
     total := len(items)
     items = output.WindowItems(items, option.Limit, option.Offset)
 
+    view := newTeardownView(serviceContainer)
+    shownNames := make(map[string]struct{}, len(items))
+
+    for index := range items {
+        items[index].Teardown = view.forService(items[index].Name)
+        shownNames[items[index].Name] = struct{}{}
+    }
+
     if output.FormatTable == option.Format {
         builder := output.NewTableBuilder()
 
@@ -214,7 +223,7 @@ func (instance *ContainerCommand) describeServiceList(
             }
         }
 
-        addTeardownBlock(builder, serviceContainer)
+        view.addBlock(builder, shownNames)
 
         envelope.Table = builder.Build()
 
@@ -229,45 +238,146 @@ func (instance *ContainerCommand) describeServiceList(
     )
 }
 
-/* addTeardownBlock renders the order the container will tear itself down in, and it is here because arming the parallel teardown is an assertion an operator has to be able to CHECK rather than take on trust. What the table says is which services close together and which of them nothing orders: a service with no dependencies is one the graph has nothing to say about, so under waves it closes beside everything else in its wave — and if it in fact needs one of them to outlive it, this listing is where that becomes visible before a shutdown finds out.
+/* containerServiceTeardownItem is the teardown's answer about one built container service, carried beside the service in every form the command answers: the wave the drain gives it, the services it is closed before, the services closed before it, and whether anything orders it at all. It is nil on a service the plan does not list — a registration never built, a scoped one — so the json document omits the key instead of inventing a wave for a service the teardown will never meet. */
+type containerServiceTeardownItem struct {
+    Wave         int      `json:"wave"`
+    ClosedBefore []string `json:"closedBefore"`
+    ClosedAfter  []string `json:"closedAfter"`
+    Ordering     string   `json:"ordering"`
+    Group        int      `json:"group"`
+}
 
-   A container that does not carry the door — an application running its own Container implementation — is skipped rather than rendered as a teardown with nothing in it, which would read as a container with nothing to close. */
-func addTeardownBlock(builder *output.TableBuilder, serviceContainer containercontract.Container) {
+/* teardownView is the plan read once per command, both as the block the table renders and as the per-service answer the items carry.
+
+   Arming the parallel teardown is an assertion an operator has to be able to CHECK rather than take on trust, and the check has to read the same in every form the command answers. It did not: the default listing rendered the block, the --build sweep, the single-service door and the json document said nothing about the teardown at all, and the one block that rendered listed every node whatever window the listing had applied.
+
+   The ordering of a node is read on BOTH sides of it. A node with no dependencies and no dependents is the one the graph has nothing to say about, and under waves it closes beside everything else in its wave — that is the node an operator has to look at. Read on the outgoing edges alone, every pure dependency — the logger, the tracer provider, exactly what a dependent needs to outlive it — read as unordered, which is the opposite of what the edge towards it proves.
+
+   A container that does not carry the door — an application running its own Container implementation — has no view: it is skipped rather than rendered as a teardown with nothing in it, which would read as a container with nothing to close. */
+type teardownView struct {
+    entries   []containercontract.TeardownPlanEntry
+    byNodeKey map[string]*containerServiceTeardownItem
+    inWaves   bool
+}
+
+/* teardownNameNodeKeyPrefix is the spelling the plan gives a node filed under a name, as TeardownPlanEntry documents it; a node filed only under its type carries the other prefix and no name a listing could window on. */
+const teardownNameNodeKeyPrefix = "service:"
+
+/* newTeardownView reads the plan once and answers nil for a container that does not carry the door or has nothing built; every reader below tolerates the nil, so a command over such a container renders its listing with no teardown in it rather than failing. */
+func newTeardownView(serviceContainer containercontract.Container) *teardownView {
     planned, carriesPlan := serviceContainer.(interface {
         TeardownPlan() []containercontract.TeardownPlanEntry
         TeardownRunsInWaves() bool
     })
     if false == carriesPlan {
-        return
+        return nil
     }
 
     entries := planned.TeardownPlan()
     if 0 == len(entries) {
+        return nil
+    }
+
+    byNodeKey := make(map[string]*containerServiceTeardownItem, len(entries))
+
+    for _, entry := range entries {
+        byNodeKey[entry.NodeKey] = &containerServiceTeardownItem{
+            Wave:         entry.WaveIndex,
+            ClosedBefore: append([]string{}, entry.Dependencies...),
+            ClosedAfter:  []string{},
+            Group:        entry.SerialGroup,
+        }
+    }
+
+    /* the dependents are derived from the dependencies rather than asked of the container: the plan states each edge once, at its dependent, and this view is the one reader that needs the edge from its other end */
+    for _, entry := range entries {
+        for _, dependencyKey := range entry.Dependencies {
+            dependency, listed := byNodeKey[dependencyKey]
+            if false == listed {
+                continue
+            }
+
+            dependency.ClosedAfter = append(dependency.ClosedAfter, entry.NodeKey)
+        }
+    }
+
+    for _, item := range byNodeKey {
+        sort.Strings(item.ClosedAfter)
+
+        item.Ordering = "proved"
+        if 0 == len(item.ClosedBefore) && 0 == len(item.ClosedAfter) {
+            item.Ordering = "none"
+        }
+    }
+
+    return &teardownView{
+        entries:   entries,
+        byNodeKey: byNodeKey,
+        inWaves:   planned.TeardownRunsInWaves(),
+    }
+}
+
+/* forService answers the teardown item of a service filed under its name, nil for a name the plan does not list. A service filed only under its type has no name to be asked by and reaches the table through the block alone. */
+func (instance *teardownView) forService(serviceName string) *containerServiceTeardownItem {
+    if nil == instance {
+        return nil
+    }
+
+    return instance.byNodeKey[teardownNameNodeKeyPrefix+serviceName]
+}
+
+/* addBlock renders the plan for the nodes the listing shows: a node filed under a name is kept when that name is in the window, a node filed only under its type has no name a window could name and is kept always. The wave index is the plan's, not the window's, so a windowed listing still says where each shown service stands in the whole teardown. */
+func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames map[string]struct{}) {
+    if nil == instance {
+        return
+    }
+
+    rows := make([][]string, 0, len(instance.entries))
+
+    for _, entry := range instance.entries {
+        if true == strings.HasPrefix(entry.NodeKey, teardownNameNodeKeyPrefix) {
+            if _, shown := shownNames[strings.TrimPrefix(entry.NodeKey, teardownNameNodeKeyPrefix)]; false == shown {
+                continue
+            }
+        }
+
+        item := instance.byNodeKey[entry.NodeKey]
+
+        /* a group is printed by its number, empty for a service in none: the operator reads "these close one after the other" from two rows sharing a figure, which "same wave, no dependencies" used to hide */
+        group := ""
+        if 0 != item.Group {
+            group = fmt.Sprintf("%d", item.Group)
+        }
+
+        rows = append(
+            rows,
+            []string{
+                fmt.Sprintf("%d", entry.WaveIndex),
+                entry.NodeKey,
+                strings.Join(item.ClosedBefore, ", "),
+                item.Ordering,
+                strings.Join(item.ClosedAfter, ", "),
+                group,
+            },
+        )
+    }
+
+    if 0 == len(rows) {
         return
     }
 
     title := "TEARDOWN (SEQUENTIAL)"
-    if true == planned.TeardownRunsInWaves() {
+    if true == instance.inWaves {
         title = "TEARDOWN (DEPENDENCY WAVES)"
     }
 
     teardownBlock := builder.AddBlock(
         title,
-        []string{"wave", "node", "closed before", "ordering"},
+        []string{"wave", "node", "closed before", "ordering", "closed after", "group"},
     )
 
-    for _, entry := range entries {
-        ordering := "proved"
-        if 0 == len(entry.Dependencies) {
-            ordering = "none"
-        }
-
-        teardownBlock.AddRow(
-            fmt.Sprintf("%d", entry.WaveIndex),
-            entry.NodeKey,
-            strings.Join(entry.Dependencies, ", "),
-            ordering,
-        )
+    for _, row := range rows {
+        teardownBlock.AddRow(row[0], row[1], row[2], row[3], row[4], row[5])
     }
 }
 
@@ -280,20 +390,22 @@ func renderServiceDescriptionState(item containerServiceDescriptionItem) string 
 }
 
 type containerServiceListItem struct {
-    Name             string   `json:"name"`
-    TypeName         string   `json:"typeName"`
-    ErrorString      string   `json:"error"`
-    ErrorCauseChain  []string `json:"errorCauseChain"`
-    ErrorContextJson string   `json:"errorContextJson"`
+    Name             string                        `json:"name"`
+    TypeName         string                        `json:"typeName"`
+    ErrorString      string                        `json:"error"`
+    ErrorCauseChain  []string                      `json:"errorCauseChain"`
+    ErrorContextJson string                        `json:"errorContextJson"`
+    Teardown         *containerServiceTeardownItem `json:"teardown,omitempty"`
 }
 
 type containerServiceDetails struct {
-    Name             string   `json:"name"`
-    Lifetime         string   `json:"lifetime"`
-    TypeName         string   `json:"typeName"`
-    ErrorString      string   `json:"error"`
-    ErrorCauseChain  []string `json:"errorCauseChain"`
-    ErrorContextJson string   `json:"errorContextJson"`
+    Name             string                        `json:"name"`
+    Lifetime         string                        `json:"lifetime"`
+    TypeName         string                        `json:"typeName"`
+    ErrorString      string                        `json:"error"`
+    ErrorCauseChain  []string                      `json:"errorCauseChain"`
+    ErrorContextJson string                        `json:"errorContextJson"`
+    Teardown         *containerServiceTeardownItem `json:"teardown,omitempty"`
 }
 
 func resolveErrorContextJson(resolveErr error, option output.Option) string {
@@ -437,7 +549,12 @@ func (instance *ContainerCommand) populateServiceList(
     okItems := make([]containerServiceListItem, 0, len(selected))
     errorItems := make([]containerServiceListItem, 0, len(selected))
 
+    /* the view is read AFTER the sweep resolved the window, because the plan lists what is built and the sweep is what builds it */
+    shownNames := make(map[string]struct{}, len(selected))
+
     for _, name := range selected {
+        shownNames[name] = struct{}{}
+
         serviceInstance, getErr := resolveServiceForLifetime(serviceContainer, runScope, name, scopedNames)
 
         typeName := ""
@@ -468,6 +585,16 @@ func (instance *ContainerCommand) populateServiceList(
         } else {
             okItems = append(okItems, item)
         }
+    }
+
+    view := newTeardownView(serviceContainer)
+
+    for index := range okItems {
+        okItems[index].Teardown = view.forService(okItems[index].Name)
+    }
+
+    for index := range errorItems {
+        errorItems[index].Teardown = view.forService(errorItems[index].Name)
     }
 
     reportServiceSweepFailures(errorItems, envelope)
@@ -558,6 +685,8 @@ func (instance *ContainerCommand) populateServiceList(
                 }
             }
         }
+
+        view.addBlock(builder, shownNames)
 
         envelope.Table = builder.Build()
 
@@ -1062,6 +1191,8 @@ func (instance *ContainerCommand) populateSingleService(
         lifetime = containercontract.ServiceLifetimeScoped
     }
 
+    view := newTeardownView(serviceContainer)
+
     details := containerServiceDetails{
         Name:             serviceName,
         Lifetime:         lifetime,
@@ -1069,6 +1200,7 @@ func (instance *ContainerCommand) populateSingleService(
         ErrorString:      errorString,
         ErrorCauseChain:  errorCauseChain,
         ErrorContextJson: errorContextJson,
+        Teardown:         view.forService(serviceName),
     }
 
     if output.FormatTable == option.Format {
@@ -1104,6 +1236,8 @@ func (instance *ContainerCommand) populateSingleService(
 
             block.AddRow("errorContextJson", details.ErrorContextJson)
         }
+
+        view.addBlock(builder, map[string]struct{}{serviceName: {}})
 
         envelope.Table = builder.Build()
 

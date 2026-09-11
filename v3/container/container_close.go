@@ -10,6 +10,7 @@ import (
     "sort"
     "strings"
     "sync"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -42,10 +43,16 @@ func (instance *container) IsClosed() bool {
 
    One residue no graph can close, and it is the reason this is opt-in rather than default: two Close methods that touch the same EXTERNAL state — one file, one table, a sql.Register name, a system resource — have no relation this container can see, whatever it walks. Declaring the edge between them is the only thing that orders them, and nothing here will report that it is missing.
 
-   Arming validates what is registered at that moment, and every registration made after it is validated at its own door under the same rules: a declaration naming a service nothing registered, a scoped service, or a type more than one service is registered under is refused there, and so is the second registration under a type a declaration already names. Without that the guard would be a snapshot, and a registration arriving after it would land in one wave with the service it declared itself before. */
+   Arming validates what is registered at that moment, and every registration made after it is validated at its own door under the same rules: a declaration naming a service nothing registered, a scoped service, or a type more than one service is registered under is refused there, and so is the second registration under a type a declaration already names. Without that the guard would be a snapshot, and a registration arriving after it would land in one wave with the service it declared itself before.
+
+   A closed container refuses to arm, with the cause Register answers on the same condition. Accepted, the call did worse than report success over nothing: it walked instances the teardown had already closed, re-created the records that teardown had just released, and left the flag set on a container that will never close again. */
 func (instance *container) ArmParallelTeardown() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if true == instance.isClosed {
+        return newContainerClosedError("ArmParallelTeardown")
+    }
 
     if refusalErr := instance.refuseUnregisteredDeclaredTeardownEdgesLocked(); nil != refusalErr {
         return refusalErr
@@ -72,10 +79,12 @@ func (instance *container) recordDeclaredTeardownEdgeLocked(serviceName string, 
     )
 }
 
-/* expandDeclaredTypeEdgesLocked makes a declaration keyed by TYPE name the same service the name form would. A type node exists only where a service was resolved THROUGH its type; a service registered under a name and resolved by that name has one node, the name's, however many types it is filed under. So a declared type edge would point at a node that was never created and be dropped by the walk. On the default path a declaration the container cannot resolve — a type nothing registered, or one several services share — is dropped with the silence register_option.go promises; on the armed path that silence cannot happen, because arming and every registration after it refuse the declaration first.
+/* expandedDeclaredTypeEdgesLocked makes a declaration keyed by TYPE name the same service the name form would. A type node exists only where a service was resolved THROUGH its type; a service registered under a name and resolved by that name has one node, the name's, however many types it is filed under. So a declared type edge would point at a node that was never created and be dropped by the walk. On the default path a declaration the container cannot resolve — a type nothing registered, or one several services share — is dropped with the silence register_option.go promises; on the armed path that silence cannot happen, because arming and every registration after it refuse the declaration first.
 
-   It is expanded rather than rewritten at the declaration, because the type it names may be registered after the declaring service: what the type stands for is only settled once the wiring is done, which is where the teardown reads it. */
-func (instance *container) expandDeclaredTypeEdgesLocked() {
+   It is expanded rather than rewritten at the declaration, because the type it names may be registered after the declaring service: what the type stands for is only settled once the wiring is done, which is where the teardown reads it. And it is expanded for ONE plan, handed back in the container's own keys, rather than written into the graph: what a type stands for can still change after a plan was computed — a second, non-strict registration under it turns the declaration ambiguous, and the plan then drops it — but an expansion written into the graph by the operator's view outlived that change, and the edge it left closed a ring with the resolution the newcomer made, so a clean teardown reported a cycle, on the default path, over services that had every one closed. The plan is the only reader of what a declaration stands for now, exactly as it is of what a service holds. */
+func (instance *container) expandedDeclaredTypeEdgesLocked() [][2]string {
+    expanded := make([][2]string, 0)
+
     for _, declaredEdge := range instance.declaredTeardownEdges {
         if false == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix) {
             continue
@@ -94,11 +103,16 @@ func (instance *container) expandDeclaredTypeEdgesLocked() {
             continue
         }
 
-        instance.registerDependencyLocked(
-            containerNameNodeKey(declaredEdge.dependentServiceName),
-            containerNameNodeKey(registeredServiceNames[0]),
+        expanded = append(
+            expanded,
+            [2]string{
+                containerNameNodeKey(declaredEdge.dependentServiceName),
+                containerNameNodeKey(registeredServiceNames[0]),
+            },
         )
     }
+
+    return expanded
 }
 
 /* teardownNodeWasRegisteredLocked answers whether anything was ever REGISTERED under this node key in the container's own graph — which is a different question from whether it was built. A registered service that no resolution ever reached is the ordinary optional collaborator and the ordinary lazy singleton; a node nobody registered under any spelling is a name or a type that exists nowhere, which no wiring can make true later. A SCOPED registration does not count: a scoped service is built and closed by each scope, so it never has a node here, and an edge towards it can never order anything. */
@@ -138,6 +152,23 @@ func (instance *container) teardownNodeWasRegisteredLocked(nodeKey string) bool 
     return false
 }
 
+/* teardownNodeIsScopedLocked answers whether a node key names a SCOPED registration, under either spelling: a name in the scoped providers, or a type a scoped registration filed. The two spellings of one declaration used to part company here — the name form was refused as scoped and the type form of the same dependency as never registered, which is false, the service being registered one lifetime away — against the package document's word that everything said of the name form holds for the type form word for word. */
+func (instance *container) teardownNodeIsScopedLocked(nodeKey string) bool {
+    if true == strings.HasPrefix(nodeKey, containerNameNodeKeyPrefix) {
+        _, scoped := instance.scopedProviders[strings.TrimPrefix(nodeKey, containerNameNodeKeyPrefix)]
+
+        return scoped
+    }
+
+    for registeredType, serviceNames := range instance.scopedTypeRegistrationNamesByType {
+        if 0 < len(serviceNames) && containerTypeNodeKey(registeredType) == nodeKey {
+            return true
+        }
+    }
+
+    return false
+}
+
 /* refuseUnregisteredDeclaredTeardownEdgesLocked is the half of the parallel opt-in that has to fail CLOSED. A declared edge naming a service nobody registered is dropped by the teardown walk, deliberately, so that naming an optional collaborator is not an error — and while the teardown is sequential that silence costs nothing, because the creation order carries the ordering anyway. Under waves it costs the ordering itself: the edge that was supposed to hold two services apart is not there, they land in one wave, and a misspelling reads exactly like a service that has no dependencies.
 
    It refuses on NEVER REGISTERED and never on never BUILT: a registered service the application chose not to resolve is the optional collaborator the door was written for, and refusing it would break the very case its GoDoc admits. */
@@ -161,23 +192,19 @@ func (instance *container) refuseDeclaredTeardownEdgeLocked(declaredEdge declare
         return nil
     }
 
-    if true == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerNameNodeKeyPrefix) {
-        serviceName := strings.TrimPrefix(declaredEdge.dependencyNodeKey, containerNameNodeKeyPrefix)
-
-        if _, scoped := instance.scopedProviders[serviceName]; true == scoped {
-            return exception.NewError(
-                "a declared teardown dependency names a scoped service, which is built and closed by each scope and has no node in the container's teardown graph, so the parallel teardown cannot be armed over an ordering that cannot be written",
-                exceptioncontract.Context{
-                    "serviceName": declaredEdge.dependentServiceName,
-                    "dependency":  declaredEdge.dependencySpelling,
-                },
-                ErrTeardownDependencyIsScoped,
-            )
-        }
+    if true == instance.teardownNodeIsScopedLocked(declaredEdge.dependencyNodeKey) {
+        return exception.NewError(
+            "a declared teardown dependency names a scoped service, which is built and closed by each scope and has no node in the container's teardown graph, and the parallel teardown admits no ordering that cannot be written",
+            exceptioncontract.Context{
+                "serviceName": declaredEdge.dependentServiceName,
+                "dependency":  declaredEdge.dependencySpelling,
+            },
+            ErrTeardownDependencyIsScoped,
+        )
     }
 
     return exception.NewError(
-        "a declared teardown dependency names a service that was never registered, and the parallel teardown cannot be armed over an ordering that is not there",
+        "a declared teardown dependency names a service that was never registered, and the parallel teardown admits no ordering that is not there",
         exceptioncontract.Context{
             "serviceName":  declaredEdge.dependentServiceName,
             "dependency":   declaredEdge.dependencySpelling,
@@ -208,7 +235,7 @@ func (instance *container) refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge de
     }
 
     return exception.NewError(
-        "a declared teardown dependency names a type more than one service is registered under, so it does not name one service to be ordered against, and the parallel teardown cannot be armed over an ordering that is not one ordering",
+        "a declared teardown dependency names a type more than one service is registered under, so it does not name one service to be ordered against, and the parallel teardown admits no ordering that is not one ordering",
         exceptioncontract.Context{
             "serviceName": declaredEdge.dependentServiceName,
             "dependency":  declaredEdge.dependencySpelling,
@@ -235,7 +262,9 @@ func (instance *container) Close() error {
 
 /* CloseWithContext is Close under a deadline the caller declares, handed to every service that can observe one. It is declared on the container rather than on the Container contract because a method added there is a method every application carrying its own implementation would have to grow, and because the caller that has a budget already reaches this value through a type assertion for IsClosed; WithTeardownDependency is declared the same way, for the same reason.
 
-   The deadline is shared, not copied: it bounds the teardown as a whole, which is the figure a supervisor's termination grace is measured against, so each service sees what is LEFT of it rather than a fresh window of its own. A component that spends the whole budget therefore starves the ones the graph puts after it — measured on the example, seven of eight closes cost under two milliseconds together and one costs thirty seconds — and that is the intended reading of a whole-teardown budget: what the operator learns is which service ate it, which is what the failure map names.
+   The deadline is shared, not copied: it bounds the teardown as a whole, which is the figure a supervisor's termination grace is measured against, so each service sees what is LEFT of it rather than a fresh window of its own. A component that spends the whole budget therefore starves the ones the graph puts after it — measured on the example, seven of eight closes cost under two milliseconds together and one costs thirty seconds — and that is the intended reading of a whole-teardown budget: what the operator learns is which service ate it, and which were left with none.
+
+   The failure map names only the closes that FAILED, and a spent budget is not one of them: a closer reached with the deadline gone answers nil where it has nothing left to do, which is the ordinary state once an earlier component has eaten the budget, so a teardown that ran twice its deadline used to exit clean with no trace of the service that ate it — measured, an eighty-millisecond close under a forty-millisecond budget answered nil ten times out of ten and recorded nothing. A teardown that runs past its deadline therefore keeps a record of its own: the budget it was given, what it spent, the closers that were running when the deadline passed, the ones reached after it, and the duration of every close. The record travels beside the failures in the error when a close failed, and through TeardownDeadlineOverrun when none did, which is how an overrun that exits clean still reaches the journal. It is a diagnostic and never a failure: failing the teardown for it would punish the plain Close that CONTAINER.md declares bounded by nothing but itself, change the exit code of every deployment whose closers exceed the budget while releasing everything, and judge twice a figure the shield around the teardown already judges once.
 
    A context with no deadline is the caller saying there is no term, and every service that reads it is told the same. */
 func (instance *container) CloseWithContext(closeContext context.Context) error {
@@ -259,7 +288,7 @@ type teardownPlan struct {
 
 /* teardownPlanLocked works out that plan from what the container holds right now. It is one computation with two readers — the teardown itself, and the operator's read-only view — for the same reason teardownCloseOrder is shared with the scope: two of these would be two chances to describe an order that is not the one that runs.
 
-   It takes the container's WRITE lock through its caller, not the read one, because the held-identity edges it merges are written into the dependency graph as it goes. */
+   It writes nothing: the edges it derives — from what a service holds, and from what a declared type stands for — are this plan's, merged into the canonical graph it hands back and forgotten with it, so a caller holding the READ lock computes the same plan the teardown computes under the write lock, and a plan computed by the view cannot outlive the state it was drawn from. */
 func (instance *container) teardownPlanLocked() teardownPlan {
     typeStringToType := make(map[string]reflect.Type, len(instance.typeInstances))
 
@@ -443,14 +472,11 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         assignRepresentative(nodeKey, value)
     }
 
-    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it */
-    /* a declaration keyed by a type is expanded onto the names that type is registered under, for the same reason and at the same moment as the held identities below: after this the graph is one graph, and the walk reads it once */
-    instance.expandDeclaredTypeEdgesLocked()
+    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it. A declaration keyed by a type is expanded onto the name that type is registered under at the same moment, for this plan, and translated with the rest: after this the graph is one graph, and the walk reads it once */
+    expandedEdges := instance.expandedDeclaredTypeEdgesLocked()
 
     /* what the providers HELD joins what they resolved in the graph the walk reads — the canonical one, merged below AFTER the translation, since that is the graph the drain runs over and the one place a second source of edges could otherwise silently do nothing. The inferences are this plan's and are not written into the container's graph, where the view would leave them to outlive the state they were drawn from. The pairs the walk could NOT order — held both ways, or around a ring — come back as canonical keys too, and are grouped so that a wave closes each group one service at a time */
     inferredEdges, unorderedPairs := instance.teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey, representativeOf)
-
-    unorderedGroupOf := unorderedGroupsOf(unorderedPairs)
 
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
@@ -464,26 +490,31 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         dependencies[inferredEdge[1]] = struct{}{}
     }
 
-    for dependentKey, dependencySet := range instance.dependencyGraph {
+    addCanonicalEdge := func(dependentKey string, dependencyKey string) {
         canonicalDependent, dependentCreated := representativeOf[dependentKey]
-        if false == dependentCreated {
-            continue
+        canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
+
+        if false == dependentCreated || false == dependencyCreated {
+            return
         }
 
+        dependencies, exists := canonicalEdges[canonicalDependent]
+        if false == exists {
+            dependencies = make(map[string]struct{})
+            canonicalEdges[canonicalDependent] = dependencies
+        }
+
+        dependencies[canonicalDependency] = struct{}{}
+    }
+
+    for dependentKey, dependencySet := range instance.dependencyGraph {
         for dependencyKey := range dependencySet {
-            canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
-            if false == dependencyCreated {
-                continue
-            }
-
-            dependencies, exists := canonicalEdges[canonicalDependent]
-            if false == exists {
-                dependencies = make(map[string]struct{})
-                canonicalEdges[canonicalDependent] = dependencies
-            }
-
-            dependencies[canonicalDependency] = struct{}{}
+            addCanonicalEdge(dependentKey, dependencyKey)
         }
+    }
+
+    for _, expandedEdge := range expandedEdges {
+        addCanonicalEdge(expandedEdge[0], expandedEdge[1])
     }
 
     /* an alias group is as old as its OLDEST member: the same instance filed under a name and under a type came into being once, and the stamp of the later filing would claim it was built after services that were in fact built from it */
@@ -502,6 +533,17 @@ func (instance *container) teardownPlanLocked() teardownPlan {
     }
 
     closeOrder, closeWaveIndexOf, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
+
+    /* the groups are formed AFTER the drain, from the pairs whose two members landed in one wave: two services in different waves cannot run at once whatever the walk saw, and grouping them anyway pulled everything linked to either into one serial goroutine — measured, a bus that resolved two listeners which each held a pointer back to it closed the two listeners, unrelated to each other, one after the other in the wave past the bus, which is the starvation the waves exist to remove */
+    sameWavePairs := make([][2]string, 0, len(unorderedPairs))
+
+    for _, pair := range unorderedPairs {
+        if closeWaveIndexOf[pair[0]] == closeWaveIndexOf[pair[1]] {
+            sameWavePairs = append(sameWavePairs, pair)
+        }
+    }
+
+    unorderedGroupOf := unorderedGroupsOf(sameWavePairs)
 
     /* the wave the cycle remainder was given is the one wave that is closed one service at a time whatever the caller armed: its members constrain one another, so it is a set with an order and not a set without relations, and the drain's remainder order is the only order it has */
     cycleWaveIndex := -1
@@ -583,6 +625,10 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         waveIndex int
     }
 
+    /* the clock starts before the lock, because the plan computed under it is spent out of the same budget the caller declared */
+    teardownStartedAt := time.Now()
+    deadline, hasDeadline := closeContext.Deadline()
+
     instance.mutex.Lock()
 
     /* mark closed while still holding the lock so the resolver's creation guard refuses new creations for the whole teardown; the sync.Once in Close serializes repeated callers. */
@@ -645,7 +691,12 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     closedValues := make(map[any]struct{})
     failures := make(map[string]string)
 
-    /* the three books above are written by every closer, and under the waves that is more than one goroutine at a time. The claim is taken BEFORE the close rather than after it, which is what makes "closed exactly once" hold when two candidates carrying one value land in the same wave; on the serial path the two orders cannot be told apart, since nothing else runs between them. */
+    /* the books of the deadline: what every close cost, the closes that were running when the deadline passed, and the closes reached after it. They are what names the service that ate the budget, which the failure map cannot, since spending it is not a failure. */
+    closeDurations := make(map[string]time.Duration)
+    spentBy := make(map[string]time.Duration)
+    starved := make([]string, 0)
+
+    /* the books above are written by every closer, and under the waves that is more than one goroutine at a time. The claim is taken BEFORE the close rather than after it, which is what makes "closed exactly once" hold when two candidates carrying one value land in the same wave; on the serial path the two orders cannot be told apart, since nothing else runs between them. */
     var teardownBookMutex sync.Mutex
 
     claimCandidate := func(candidate closeCandidate) (closer, bool) {
@@ -689,14 +740,27 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             return
         }
 
+        /* the stamps are the goroutine's own, so a wave's closers are timed side by side; what is classified is where each close stood against the deadline — running when it passed, or reached after it */
+        startedAt := time.Now()
         closeErr := closeServiceValueWithin(closeContext, candidate.value, closeable)
-        if nil == closeErr {
-            return
-        }
+        finishedAt := time.Now()
 
         teardownBookMutex.Lock()
-        failures[candidate.nodeKey] = errorText(closeErr)
-        teardownBookMutex.Unlock()
+        defer teardownBookMutex.Unlock()
+
+        closeDurations[candidate.nodeKey] = finishedAt.Sub(startedAt)
+
+        if true == hasDeadline {
+            if false == startedAt.Before(deadline) {
+                starved = append(starved, candidate.nodeKey)
+            } else if true == finishedAt.After(deadline) {
+                spentBy[candidate.nodeKey] = finishedAt.Sub(startedAt)
+            }
+        }
+
+        if nil != closeErr {
+            failures[candidate.nodeKey] = errorText(closeErr)
+        }
     }
 
     if false == teardownInWaves {
@@ -733,7 +797,9 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 continue
             }
 
-            /* a service the walk saw holding another that holds it back — a pair, or a ring — has no edge, because no ordering between them is true; but it is not unrelated to it, and closing the two at once is each Close entering the other. Those form a group inside the wave, closed one after the other in the wave's own order, while the rest of the wave and the other groups still start at once */
+            /* a service the walk saw holding another that holds it back — a pair, or a ring — has no edge, because no ordering between them is true; but it is not unrelated to it, and closing the two at once is each Close entering the other. Those form a group inside the wave, closed one after the other in the wave's own order, while the rest of the wave and the other groups still start at once.
+
+               The goroutines below carry no recover of their own, and that is measured rather than assumed: everything that runs on one is closeOneCandidate, whose claim reads kinds and pointers through reflect and keys the value book only after Comparable() said it may, whose close is contained by closeServiceValue and its context-taking twin, and whose failure text is produced under errorText's own recover. Nothing on that path can panic uncontained, so a recover here would be a mechanism guarding nothing. */
             var waveGroup sync.WaitGroup
 
             serialGroups := make(map[int][]closeCandidate)
@@ -776,15 +842,26 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         }
     }
 
+    deadlineRecord := teardownDeadlineContext(hasDeadline, deadline, teardownStartedAt, time.Now(), closeDurations, spentBy, starved)
+
+    /* the deadline record rides beside whatever the error carries, on both of its shapes: an operator reading a failed teardown asks the same question about the budget as one reading a clean one */
+    withDeadline := func(errorContext exceptioncontract.Context) exceptioncontract.Context {
+        if nil != deadlineRecord {
+            errorContext["deadline"] = deadlineRecord
+        }
+
+        return errorContext
+    }
+
     var resultErr error
 
     if true == dependencyCycleDetected {
         if 0 == len(failures) {
             resultErr = exception.NewError(
                 "container close dependency cycle detected",
-                exceptioncontract.Context{
+                withDeadline(exceptioncontract.Context{
                     "nodes": remaining,
-                },
+                }),
                 nil,
             )
         } else {
@@ -796,21 +873,62 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     if nil == resultErr && 0 < len(failures) {
         resultErr = exception.NewError(
             "failed to close container services",
-            exceptioncontract.Context{
+            withDeadline(exceptioncontract.Context{
                 "failures": failures,
-            },
+            }),
             nil,
         )
     }
 
-    /* the second closing state is taken only now, after the last Close returned: from here a resolution is refused rather than answered out of the maps, which is what the whole teardown just emptied of meaning. The records of what each service held go with it: they kept every named collaborator alive for the plan, and a plan is not computed again */
+    /* the second closing state is taken only now, after the last Close returned: from here a resolution is refused rather than answered out of the maps, which is what the whole teardown just emptied of meaning. The records of what each service held go with it: they kept every named collaborator alive for the plan, and a plan is not computed again. The deadline record stays, for the one reader that asks after a clean teardown */
     instance.mutex.Lock()
     instance.teardownFinished = true
     instance.heldIdentitiesByNodeKey = nil
     instance.heldIdentitiesByValue = nil
+    instance.teardownDeadline = deadlineRecord
     instance.mutex.Unlock()
 
     return resultErr
+}
+
+/* teardownDeadlineContext is the record of a teardown that ran PAST its deadline — nil for one that had no deadline, and for one that finished inside it. The budget is what was left of the deadline when the teardown began, floored at zero for a teardown reached with the budget already gone; the durations are kept whole rather than reduced to the closer that straddled the line, because twenty closes of four milliseconds eat a forty-millisecond budget with no single one of them to name. Durations are rendered as text, so the journal reads "80.8ms" rather than a count of nanoseconds. */
+func teardownDeadlineContext(
+    hasDeadline bool,
+    deadline time.Time,
+    startedAt time.Time,
+    finishedAt time.Time,
+    closeDurations map[string]time.Duration,
+    spentBy map[string]time.Duration,
+    starved []string,
+) exceptioncontract.Context {
+    if false == hasDeadline || false == finishedAt.After(deadline) {
+        return nil
+    }
+
+    budget := deadline.Sub(startedAt)
+    if 0 > budget {
+        budget = 0
+    }
+
+    renderDurations := func(durations map[string]time.Duration) map[string]string {
+        rendered := make(map[string]string, len(durations))
+
+        for nodeKey, duration := range durations {
+            rendered[nodeKey] = duration.String()
+        }
+
+        return rendered
+    }
+
+    sort.Strings(starved)
+
+    return exceptioncontract.Context{
+        "budget":    budget.String(),
+        "spent":     finishedAt.Sub(startedAt).String(),
+        "spentBy":   renderDurations(spentBy),
+        "starved":   starved,
+        "durations": renderDurations(closeDurations),
+    }
 }
 
 /* closeServiceValueWithin runs one service's close under the teardown's deadline when the service can take one, and under its own terms otherwise. The preference is asked of the VALUE rather than declared on any contract, the way bunorm's registry prefers a provider's OpenContext over its Open: a service that grows the door does not have to be re-registered, and one that never grows it is not broken by the door existing.

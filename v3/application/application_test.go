@@ -942,3 +942,55 @@ func newTeardownTimeoutTestApplication(t *testing.T, teardownTimeout string) *Ap
         runtimeFlags:  NewRuntimeFlags(config.ModeHttp),
     }
 }
+
+/* an overrun with no failure is a diagnostic, never a failure: the teardown answers nil, the record goes to the journal as a warning, and the process keeps its exit code — failing it would punish the plain Close the container declares bounded by nothing but itself and judge twice a figure the shield already judges once */
+func TestCloseAndExitOnFailure_AnOverrunAloneExitsZero(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
+        stepContext, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+        defer cancel()
+
+        step(stepContext)
+
+        return true
+    }
+
+    exitedWith := -1
+    applicationExit = func(code int) {
+        exitedWith = code
+    }
+
+    kernelInstance := newTestKernel()
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    if registerErr := serviceContainer.Register(
+        "app.eater",
+        func(_ containercontract.Resolver) (*overrunSleeper, error) { return &overrunSleeper{sleep: 80 * time.Millisecond}, nil },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.eater"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    written := captureEmergencyLogger(t, func() {
+        applicationInstance.closeAndExitOnFailure()
+    })
+
+    if -1 != exitedWith {
+        t.Fatalf("expected an overrun alone to leave the exit code alone, got %d", exitedWith)
+    }
+
+    if false == strings.Contains(written, "overran its deadline") {
+        t.Fatalf("expected the overrun in the journal, got %q", written)
+    }
+}

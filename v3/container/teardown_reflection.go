@@ -3,6 +3,7 @@ package container
 import (
     "reflect"
     "sort"
+    "sync"
 )
 
 /* teardownWalkDepthLimit, teardownWalkElementLimit and teardownWalkNodeBudget bound the walk below. None touches CORRECTNESS: an edge the walk does not reach is an edge the graph does not gain, which leaves the pair exactly where the sequential teardown left it. They bound COST, and they are written as figures rather than left open because a service holding a large inline array of structs would otherwise pay for a walk whose answer is almost always the same one. The first two bound one level each; the budget bounds the whole, because a nesting of arrays multiplies the two per-level limits into a figure no per-level limit can hold — measured, a million inline cells cost thirty milliseconds under the container's write lock, once per filing. */
@@ -20,32 +21,39 @@ type heldPointer struct {
 
 /* heldPointerIdentities answers which pointer identities a freshly built service VALUE holds, transitively, so the teardown can ask afterwards which of them are services of this container. It exists for the provider that CAPTURES its collaborator instead of resolving it: resolving records the edge as a side effect and cannot fall out of step with what the provider uses, while capturing records nothing and leaves the pair ordered by the accident of creation order.
 
-   It is walked at CONSTRUCTION and matched at teardown, not walked at teardown, for two reasons that point the same way: the value has not been published to its caller yet, so the memory of the value itself — its own fields, the structs and arrays laid out inside them, the slices it allocated — is not being written by anyone; and the teardown holds the container's lock over maps a walk would otherwise be reading while they are the very maps the teardown is enumerating.
+   It is walked where the value is filed and matched at teardown, not walked at teardown, because the teardown holds the container's lock over maps a walk would otherwise be reading while they are the very maps the teardown is enumerating.
 
-   That premise ends at the first pointer. What a pointer names is memory somebody else may own and may be writing at this very moment — a logger every service shares, a hub whose backplane is swapped under its own mutex, a context whose done channel the runtime stores on first use — and the walk enters it anyway, because the collaborator reached through an intermediate struct is an ordinary shape. What keeps that read safe is WHAT is read there: a pointer word, which the hardware reads whole, and the struct and array layouts around it, which are not values at all. An interface, a slice or a string is two or three words that a concurrent writer replaces one at a time, so a read torn across them fabricates a type word — and a context's done channel is exactly that, an atomic.Value whose type word is a runtime sentinel in the middle of its first store — which no recover catches. Those are not read beyond the value's own memory; the cost is that a collaborator reached ONLY through a foreign object's interface field is not seen, and the pair keeps the order it had. Measured under the race detector, the earlier walk that read them reported a race on both shapes in every run; this one reports none.
+   Every word it reads is read as memory somebody else may own and may be writing at this very moment, the value's own words included. The premise that a freshly built value is nobody's yet ends at its first pointer — a logger every service shares, a hub whose backplane is swapped under its own mutex, a context whose done channel the runtime stores on first use — and it does not hold for the value itself either: a provider that hands back an object built before the container and already in use, the plainest capturing provider there is, hands back memory with an owner writing it; so does an override, and so does everything already built when the application arms. Walked as the value's own memory, each of those read interface fields their owner was rewriting, which the race detector reported on every run, for the objects built before arming, for the override, and for the pre-built object a provider returned after arming alike; the rule is one now, and it is the memory's, not the door's.
 
-   A value walked AFTER it was published — everything already built when the application arms, and a value installed through an override — is somebody else's memory from its first word, and is walked as such: pointers and layouts only, its own interface and slice fields included. The example application arms after its boot, which has built services by then; measured under the race detector, walking a built service's interface field while its owner rewrote it reported the race on every run.
+   What keeps a read of foreign memory safe is WHAT is read there: a pointer word, which the hardware reads whole, and the struct and array layouts around it, which are not values at all. Safe is not synchronised: the race detector reports a pointer word read while its owner rewrites it, and no shipped test constructs that shape — the read is accepted on what the hardware guarantees, and written down here so that a green race band is read as the choice of shapes it is. An interface or a string is two words that a concurrent writer replaces one at a time, so a read torn across them fabricates a type word — and a context's done channel is exactly that, an atomic.Value whose type word is a runtime sentinel in the middle of its first store — which no recover catches. Neither is read, anywhere; the cost is that a collaborator reached ONLY through an interface field is not seen, and the pair keeps the order it had — an override holding its collaborator as `logger loggingcontract.Logger` is the ordinary shape of it, and it is written down here rather than left to be discovered. Measured on the three example applications of this repository, the walk finds zero edges the resolutions had not already recorded, so what the interface rule costs on that corpus is nothing.
+
+   A slice is not read either, wherever it sits: the value cannot tell a slice it allocated from a header it was HANDED — a registry answering All() with its internal slice — and the elements of a handed slice are rewritten by their owner while the walk reads them, which the race detector reported five times over on two hundred constructions. The cost is the collaborator held in a slice, which keeps the order it had; measured on the three example applications, no service holds a service that way.
 
    A map, a func and a chan are neither counted nor entered, at any depth: iterating a map another goroutine writes is `fatal error: concurrent map iteration and map write`, and the other two name nothing a teardown can match. A service that reaches its collaborator only through one of them keeps the order it had.
 
    A pointer met a second time is entered again only from a SHALLOWER path, because the depth limit is measured along the path: recorded as seen the first time whatever the depth, a pointer first reached at the limit was never entered and then refused entry from a path that had room, so which field of a struct came first decided whether a held service was found. Measured, a collaborator behind a chain of five links was found or lost by the order of two fields.
 
    Measured, on the example application of this major, this walk finds ZERO edges the resolutions had not already recorded: its services are genuinely disjoint objects, coupled at teardown by behaviour rather than by the object graph. It is kept because the shape it exists for — a provider returning a struct that holds a service registered elsewhere — is an ordinary one to write, and because it costs about a hundred reflect operations once per process. The figure is written here so that nobody reads its presence as coverage. */
-func heldPointerIdentities(root any, published bool) []heldPointer {
+func heldPointerIdentities(root any) []heldPointer {
     found := make([]heldPointer, 0)
-    enteredAtDepth := make(map[pointerIdentity]int)
+    entered := make(map[pointerIdentity]walkEntry)
     visited := 0
 
-    var walk func(value reflect.Value, depth int, owned bool)
+    /* walk answers whether it saw the WHOLE of what it was given: false where the depth limit or the node budget cut a subtree short, true otherwise — including the interfaces and slices it declines to enter, which are a decision and not a cut, so a second path to the same object gains nothing by entering again */
+    var walk func(value reflect.Value, depth int) bool
 
-    walk = func(value reflect.Value, depth int, owned bool) {
-        if depth > teardownWalkDepthLimit || false == value.IsValid() {
-            return
+    walk = func(value reflect.Value, depth int) bool {
+        if false == value.IsValid() {
+            return true
+        }
+
+        if depth > teardownWalkDepthLimit {
+            return false
         }
 
         visited = visited + 1
         if visited > teardownWalkNodeBudget {
-            return
+            return false
         }
 
         switch value.Kind() {
@@ -53,75 +61,132 @@ func heldPointerIdentities(root any, published bool) []heldPointer {
             /* the pointer word is read ONCE, here: in foreign memory a concurrent writer may replace it between two reads, and an identity taken from one read with a record taken from another names the old target while keeping the new one alive — measured, in eighty-eight thousand of two hundred thousand walks over a field swapped in a loop */
             target := value.Elem()
             if false == target.IsValid() {
-                return
+                return true
             }
 
             identity := pointerIdentity{pointer: target.UnsafeAddr(), valueType: value.Type()}
 
-            previousDepth, already := enteredAtDepth[identity]
-            if true == already && previousDepth <= depth {
-                return
-            }
+            previous, already := entered[identity]
+            if true == already {
+                /* met again while its own walk is still on the stack, the pointer is a cycle, not a cut: the walk in progress sees everything this path would */
+                if true == previous.inProgress {
+                    return true
+                }
 
-            enteredAtDepth[identity] = depth
+                if previous.depth <= depth || false == previous.cut {
+                    return false == previous.cut
+                }
+            }
 
             if false == already && false == isZeroSizePointerIdentity(identity) {
                 found = append(found, heldPointer{identity: identity, keepAlive: target})
             }
 
-            /* the root's own target is the value's memory while the value is unpublished; every other target is somebody else's */
-            walk(target, depth+1, 0 == depth && true == owned)
-        case reflect.Interface:
-            if false == owned {
-                return
-            }
+            entered[identity] = walkEntry{depth: depth, inProgress: true}
 
-            if false == value.IsNil() {
-                walk(value.Elem(), depth+1, owned)
-            }
+            complete := walk(target, depth+1)
+
+            entered[identity] = walkEntry{depth: depth, cut: false == complete}
+
+            return complete
         case reflect.Struct:
             fieldCount := value.NumField()
             if fieldCount > teardownWalkElementLimit {
                 fieldCount = teardownWalkElementLimit
             }
 
+            complete := true
+
             for fieldIndex := 0; fieldIndex < fieldCount; fieldIndex = fieldIndex + 1 {
-                walk(value.Field(fieldIndex), depth+1, owned)
-            }
-        case reflect.Slice:
-            if false == owned || true == value.IsNil() {
-                return
+                if false == walk(value.Field(fieldIndex), depth+1) {
+                    complete = false
+                }
             }
 
-            elementCount := value.Len()
-            if elementCount > teardownWalkElementLimit {
-                elementCount = teardownWalkElementLimit
-            }
-
-            for elementIndex := 0; elementIndex < elementCount; elementIndex = elementIndex + 1 {
-                walk(value.Index(elementIndex), depth+1, owned)
-            }
+            return complete
         case reflect.Array:
+
+            /* an array of scalars is one node: its elements cannot name anything, and counting each of them against the budget is how a lookup table of sixty-four kibibytes spent the whole walk before the pointer field declared after it — measured, the collaborator found or lost by whether it came before or after the table */
+            if false == typeCanHoldIdentity(value.Type().Elem()) {
+                return true
+            }
+
             elementCount := value.Len()
             if elementCount > teardownWalkElementLimit {
                 elementCount = teardownWalkElementLimit
             }
 
+            complete := true
+
             for elementIndex := 0; elementIndex < elementCount; elementIndex = elementIndex + 1 {
-                walk(value.Index(elementIndex), depth+1, owned)
+                if false == walk(value.Index(elementIndex), depth+1) {
+                    complete = false
+                }
             }
+
+            return complete
         }
+
+        return true
     }
 
-    walk(reflect.ValueOf(root), 0, false == published)
+    walk(reflect.ValueOf(root), 0)
 
     return found
+}
+
+/* walkEntry is what the walk remembers of a pointer it entered: the depth of the path it took, whether that path saw the whole of the target, and whether the walk of the target is still in progress — in which case a second meeting is a cycle rather than a second path. A second, shallower path enters the target again only when the first was cut: the depth limit is measured along the path, so a subtree cut at one depth may be whole from a shallower one — but a subtree that WAS whole gains nothing from a second walk, and paid for one anyway. Measured, a chain of links all pointing at one large object walked that object once per link that reached it from a shallower path, and the budget went before the root's last field. */
+type walkEntry struct {
+    depth      int
+    cut        bool
+    inProgress bool
+}
+
+/* typeCanHoldIdentity answers whether the walk could find a pointer identity anywhere below a value of this type — which is a question about the TYPE, so it is asked once per type and remembered: a pointer, an interface or a slice may name one; a struct may through any field, an array through its element; a scalar, a string, a map, a chan and a func cannot, because the walk reads none of them. It is what lets an array of scalars count as one node instead of one per element. */
+func typeCanHoldIdentity(valueType reflect.Type) bool {
+    if answer, known := typeIdentityCapability.Load(valueType); true == known {
+        return answer.(bool)
+    }
+
+    answer := typeCanHoldIdentityUncached(valueType, map[reflect.Type]struct{}{})
+
+    typeIdentityCapability.Store(valueType, answer)
+
+    return answer
+}
+
+var typeIdentityCapability sync.Map
+
+/* the visiting set stops a recursive type — a struct holding an array of itself cannot exist, but a struct holding a pointer to itself answers true at the pointer before the recursion could begin — from being asked forever; a type met again on the way down answers false for that branch, and the branch that actually holds a pointer answers for the whole */
+func typeCanHoldIdentityUncached(valueType reflect.Type, visiting map[reflect.Type]struct{}) bool {
+    switch valueType.Kind() {
+    case reflect.Pointer, reflect.Interface, reflect.Slice:
+        return true
+    case reflect.Array:
+        return typeCanHoldIdentityUncached(valueType.Elem(), visiting)
+    case reflect.Struct:
+        if _, alreadyVisiting := visiting[valueType]; true == alreadyVisiting {
+            return false
+        }
+
+        visiting[valueType] = struct{}{}
+
+        for fieldIndex := 0; fieldIndex < valueType.NumField(); fieldIndex = fieldIndex + 1 {
+            if true == typeCanHoldIdentityUncached(valueType.Field(fieldIndex).Type, visiting) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    return false
 }
 
 /* recordHeldIdentitiesLocked keeps what a service holds, against the node it was filed under, for the teardown to read. It does nothing at all unless the application armed the waves: the walk is the whole cost of the feature, and an application closing sequentially has no use for its answer.
 
    One POINTER value is walked ONCE however many nodes it is filed under: a service resolved through its type is filed under its name and under the type, and each filing asked for the walk again over the same object — twice the cost, measured, for the same answer. The record is shared between the nodes, read-only; a service registered as a struct VALUE has no pointer to key the record on and is walked once per filing. A node re-filed with a new value — an override — replaces its record, so what the evicted value held cannot order the value that took its place. */
-func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any, published bool) {
+func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any) {
     if false == instance.teardownInWaves {
         return
     }
@@ -140,7 +205,7 @@ func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any,
         }
     }
 
-    walked := heldPointerIdentities(value, published)
+    walked := heldPointerIdentities(value)
 
     instance.heldIdentitiesByNodeKey[nodeKey] = walked
 
@@ -149,14 +214,14 @@ func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any,
     }
 }
 
-/* recordHeldIdentitiesOfBuiltServicesLocked walks what is already built, which is what arming has to do to be usable at all: an application arms after its wiring, and by then a boot may have built services along the way. Everything built AFTER this point is walked where it is filed. What is walked here has been published — it is being used — so it is walked as foreign memory. */
+/* recordHeldIdentitiesOfBuiltServicesLocked walks what is already built, which is what arming has to do to be usable at all: an application arms after its wiring, and by then a boot may have built services along the way. Everything built AFTER this point is walked where it is filed, by the same rule. */
 func (instance *container) recordHeldIdentitiesOfBuiltServicesLocked() {
     for serviceName, value := range instance.instances {
-        instance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value, true)
+        instance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value)
     }
 
     for registeredType, value := range instance.typeInstances {
-        instance.recordHeldIdentitiesLocked(containerTypeNodeKey(registeredType), value, true)
+        instance.recordHeldIdentitiesLocked(containerTypeNodeKey(registeredType), value)
     }
 }
 
@@ -164,7 +229,7 @@ func (instance *container) recordHeldIdentitiesOfBuiltServicesLocked() {
 
    The identity map is built from the node values themselves, so a match means "this pointer IS that service" rather than "this pointer has that type". A node holding its own identity is skipped: the walk starts at the value, so every node holds itself.
 
-   An inferred edge that lies on a CYCLE is not written. Two services that hold each other give this walk two true statements and no ordering; a ring of them gives it one statement per link and no ordering either; and a held pointer running against an edge a provider resolved or an application declared is an inference contradicting an assertion. In every one of those the graph read a cycle and failed a teardown in which every service had closed — measured on a parent and a child with a back-pointer, the plainest shape in Go, and on a ring longer than the walk's reach, which the pair rule alone left standing. So an inferred edge is written only where the graph, with every inferred edge added, offers no way back from its dependency to its dependent. What is dropped is always an inference: the resolved and declared edges are in the graph before any of these is, and a cycle those close by themselves is reported exactly as before. The test is a reachability in the combined graph, which no iteration order can change — asked in the CANONICAL key space, where a service filed under its name and under its type is one node, because a ring that exists only once the aliases are folded together is the ring the drain will read.
+   An inferred edge that lies on a CYCLE is not written. Two services that hold each other give this walk two true statements and no ordering; a ring of them gives it one statement per link and no ordering either; and a held pointer running against an edge a provider resolved or an application declared is an inference contradicting an assertion. In every one of those the graph read a cycle and failed a teardown in which every service had closed — measured on a parent and a child with a back-pointer, the plainest shape in Go, and on a ring longer than the walk's reach, which the pair rule alone left standing. So an inferred edge is written only where the graph, with every inferred edge added, offers no way back from its dependency to its dependent — every inferred edge except those of a pair held BOTH ways, which are no ordering and therefore no way back either: with them in the graph, a service holding one member of such a pair had its own edge dropped for a ring that ran through the pair's edge, an inference that did not survive itself, and landed in a wave after what it holds, twenty times out of twenty. What is dropped is always an inference: the resolved and declared edges are in the graph before any of these is, and a cycle those close by themselves is reported exactly as before. The test is a reachability in the combined graph, which no iteration order can change — asked in the CANONICAL key space, where a service filed under its name and under its type is one node, because a ring that exists only once the aliases are folded together is the ring the drain will read.
 
    The ring is looked for among the nodes that were CREATED, which are the ones the drain will read: a declared edge towards a service nobody built is dropped by the drain, so a way back that runs through such a node is not a way back — measured, it dropped a true inference on a pair the graph then left in one wave.
 
@@ -187,72 +252,76 @@ func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey 
         nodeKeyOfIdentity[identity] = nodeKey
     }
 
-    heldEdges := make(map[string]map[string]struct{}, len(valueOfNodeKey))
+    heldCanonical := make(map[[2]string]struct{}, len(valueOfNodeKey))
 
     for nodeKey := range valueOfNodeKey {
         for _, held := range instance.heldIdentitiesByNodeKey[nodeKey] {
             heldNodeKey, isNode := nodeKeyOfIdentity[held.identity]
-            if false == isNode || heldNodeKey == nodeKey {
+            if false == isNode {
                 continue
             }
 
-            if nil == heldEdges[nodeKey] {
-                heldEdges[nodeKey] = make(map[string]struct{})
+            canonicalDependent, dependentCreated := representativeOf[nodeKey]
+            canonicalDependency, dependencyCreated := representativeOf[heldNodeKey]
+
+            if false == dependentCreated || false == dependencyCreated || canonicalDependent == canonicalDependency {
+                continue
             }
 
-            heldEdges[nodeKey][heldNodeKey] = struct{}{}
+            heldCanonical[[2]string{canonicalDependent, canonicalDependency}] = struct{}{}
         }
     }
 
-    combined := make(map[string]map[string]struct{}, len(instance.dependencyGraph)+len(heldEdges))
+    isMutual := func(edge [2]string) bool {
+        _, mutual := heldCanonical[[2]string{edge[1], edge[0]}]
+
+        return mutual
+    }
+
+    combined := make(map[string]map[string]struct{}, len(instance.dependencyGraph)+len(heldCanonical))
 
     addCombined := func(dependentKey string, dependencyKey string) {
-        canonicalDependent, dependentCreated := representativeOf[dependentKey]
-        canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
-
-        if false == dependentCreated || false == dependencyCreated || canonicalDependent == canonicalDependency {
-            return
+        if nil == combined[dependentKey] {
+            combined[dependentKey] = make(map[string]struct{})
         }
 
-        if nil == combined[canonicalDependent] {
-            combined[canonicalDependent] = make(map[string]struct{})
-        }
-
-        combined[canonicalDependent][canonicalDependency] = struct{}{}
+        combined[dependentKey][dependencyKey] = struct{}{}
     }
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
+        canonicalDependent, dependentCreated := representativeOf[dependentKey]
+        if false == dependentCreated {
+            continue
+        }
+
         for dependencyKey := range dependencySet {
-            addCombined(dependentKey, dependencyKey)
+            canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
+            if false == dependencyCreated || canonicalDependent == canonicalDependency {
+                continue
+            }
+
+            addCombined(canonicalDependent, canonicalDependency)
         }
     }
 
-    for dependentKey, dependencySet := range heldEdges {
-        for dependencyKey := range dependencySet {
-            addCombined(dependentKey, dependencyKey)
+    /* a pair held BOTH ways is no ordering at all, so neither of its two edges is in the graph the way back is looked for in */
+    for edge := range heldCanonical {
+        if false == isMutual(edge) {
+            addCombined(edge[0], edge[1])
         }
     }
 
     inferred = make([][2]string, 0)
     unordered = make([][2]string, 0)
 
-    for nodeKey, heldSet := range heldEdges {
-        for heldNodeKey := range heldSet {
-            canonicalDependent := representativeOf[nodeKey]
-            canonicalDependency := representativeOf[heldNodeKey]
+    for edge := range heldCanonical {
+        if true == isMutual(edge) || true == reachesNodeKey(combined, edge[1], edge[0]) {
+            unordered = append(unordered, edge)
 
-            if canonicalDependent == canonicalDependency {
-                continue
-            }
-
-            if true == reachesNodeKey(combined, canonicalDependency, canonicalDependent) {
-                unordered = append(unordered, [2]string{canonicalDependent, canonicalDependency})
-
-                continue
-            }
-
-            inferred = append(inferred, [2]string{canonicalDependent, canonicalDependency})
+            continue
         }
+
+        inferred = append(inferred, edge)
     }
 
     sortNodeKeyPairs(inferred)

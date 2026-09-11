@@ -5,6 +5,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
 )
@@ -55,6 +56,18 @@ func (instance *Application) close(closeContext context.Context) error {
         logging.CloseEmergencyLogger()
 
         return serviceContainerCloseErr
+    }
+
+    /* a teardown that ran past its deadline and failed nothing is a diagnostic, not a failure: it returns nil and exits clean, and the record of who spent the budget would be lost with it — the only close that could have named the service was the one that answered nil. The container keeps that record behind a door, read here under the same discoverer-only rule as the failure above, and written to the same journal as a warning; a Container implementation without the door has nothing to say, and a close with no deadline leaves no record. */
+    if false == alreadyClosed {
+        overrunReporter, reportsOverrun := serviceContainer.(interface {
+            TeardownDeadlineOverrun() exceptioncontract.Context
+        })
+        if true == reportsOverrun {
+            if overrun := overrunReporter.TeardownDeadlineOverrun(); nil != overrun {
+                emergencyLogger.Warning("service container teardown overran its deadline", overrun)
+            }
+        }
     }
 
     logging.CloseEmergencyLogger()

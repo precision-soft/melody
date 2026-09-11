@@ -1048,10 +1048,22 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredSer
         TeardownPlan() []containercontract.TeardownPlanEntry
     }).TeardownPlan()
 
+    storePlanned := false
+
     for _, entry := range entries {
-        if "service:app.store" == entry.NodeKey && 1 != entry.WaveIndex {
+        if "service:app.store" != entry.NodeKey {
+            continue
+        }
+
+        storePlanned = true
+
+        if 1 != entry.WaveIndex {
             t.Fatalf("expected the late declaration to order the store one wave past its dependent, got %+v", entries)
         }
+    }
+
+    if false == storePlanned {
+        t.Fatalf("expected the store in the plan, got %+v", entries)
     }
 }
 
@@ -1094,10 +1106,22 @@ func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredT
         TeardownPlan() []containercontract.TeardownPlanEntry
     }).TeardownPlan()
 
+    firstPlanned := false
+
     for _, entry := range entries {
-        if "service:app.first" == entry.NodeKey && 1 != entry.WaveIndex {
+        if "service:app.first" != entry.NodeKey {
+            continue
+        }
+
+        firstPlanned = true
+
+        if 1 != entry.WaveIndex {
             t.Fatalf("expected the declaration to keep ordering the one service the type names, got %+v", entries)
         }
+    }
+
+    if false == firstPlanned {
+        t.Fatalf("expected the first service in the plan, got %+v", entries)
     }
 }
 
@@ -1136,10 +1160,22 @@ func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t 
         TeardownPlan() []containercontract.TeardownPlanEntry
     }).TeardownPlan()
 
+    heldPlanned := false
+
     for _, entry := range entries {
-        if "service:app.held" == entry.NodeKey && 1 != entry.WaveIndex {
+        if "service:app.held" != entry.NodeKey {
+            continue
+        }
+
+        heldPlanned = true
+
+        if 1 != entry.WaveIndex {
             t.Fatalf("expected the held service to be one wave past the override holding it, got %+v", entries)
         }
+    }
+
+    if false == heldPlanned {
+        t.Fatalf("expected the held service in the plan, got %+v", entries)
     }
 }
 
@@ -1178,9 +1214,107 @@ func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicte
         TeardownPlan() []containercontract.TeardownPlanEntry
     }).TeardownPlan()
 
+    holderPlanned := false
+
     for _, entry := range entries {
-        if "service:app.holder" == entry.NodeKey && 0 != len(entry.Dependencies) {
+        if "service:app.holder" != entry.NodeKey {
+            continue
+        }
+
+        holderPlanned = true
+
+        if 0 != len(entry.Dependencies) {
             t.Fatalf("expected the evicted value's record to go with it, got %+v", entries)
         }
+    }
+
+    if false == holderPlanned {
+        t.Fatalf("expected the holder in the plan, got %+v", entries)
+    }
+}
+
+/* the walk's memo of a value an override evicted goes with the value: keyed on its address, the memo kept every collaborator the evicted value held alive until Close — measured, five hundred overrides installed one after the other under the armed teardown kept all five hundred evicted values from collection */
+func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvicted(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    serviceContainer.MustRegister(
+        "app.holder",
+        func(_ containercontract.Resolver) (*capturingHolder, error) { return &capturingHolder{}, nil },
+        WithoutTypeRegistration(),
+    )
+
+    first := &capturingHolder{held: &closeOrderServiceB{}}
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", first); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    firstKey, _ := pointerKeyOf(first)
+
+    concrete := serviceContainer.(*container)
+
+    concrete.mutex.RLock()
+    _, memoised := concrete.heldIdentitiesByValue[firstKey]
+    concrete.mutex.RUnlock()
+
+    if false == memoised {
+        t.Fatalf("expected the installed value's walk memoised while it is installed")
+    }
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{held: &closeOrderServiceB{}}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    concrete.mutex.RLock()
+    _, stillMemoised := concrete.heldIdentitiesByValue[firstKey]
+    concrete.mutex.RUnlock()
+
+    if true == stillMemoised {
+        t.Fatalf("expected the evicted value's memo released with it")
+    }
+}
+
+/* after arming, a declaration keyed by a TYPE the container has registered is admitted at the registration door, and the edge it names is in the plan: the door refuses the type nothing registered and the ambiguous type, and this is the arm that shows it admits the one it should */
+func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "app.pool",
+        func(_ containercontract.Resolver) (*sharedPoolService, error) { return &sharedPoolService{label: "pool"}, nil },
+    )
+
+    armParallelTeardown(t, serviceContainer)
+
+    if registerErr := serviceContainer.Register(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "declarer"}, nil },
+        WithTeardownDependencyOfType[*sharedPoolService](),
+    ); nil != registerErr {
+        t.Fatalf("expected the declaration on a registered type admitted after arming, got %v", registerErr)
+    }
+
+    MustFromResolver[*poolDeclarerService](serviceContainer, "app.declarer")
+    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool")
+
+    declarerPlanned := false
+
+    for _, entry := range serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan() {
+        if "service:app.declarer" != entry.NodeKey {
+            continue
+        }
+
+        declarerPlanned = true
+
+        if 1 != len(entry.Dependencies) || "service:app.pool" != entry.Dependencies[0] {
+            t.Fatalf("expected the declared type edge in the plan, got %+v", entry)
+        }
+    }
+
+    if false == declarerPlanned {
+        t.Fatalf("expected the declarer in the plan")
     }
 }

@@ -1,17 +1,21 @@
 package container
 
 import (
+    "context"
     "sort"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
 /* TeardownPlan answers what the teardown would do if it ran now, without running any of it. It is a read-only door, declared on the concrete container and reached through a type assertion the way IsClosed and CloseWithContext are, and it is the door `debug:container` reads.
 
-   It takes the container's write lock rather than the read one, because working the plan out merges the edges derived from what each service was seen to HOLD into the graph, which is a write. The cost is one walk, on an operator command. */
+   It takes the container's read lock, because working the plan out writes nothing: the edges derived from what each service holds and from what each declared type stands for are the plan's own, computed for this answer and forgotten with it. Written into the graph instead, they outlived the state they were drawn from, and a resolution or a registration made after the view closed a ring nothing had declared. The cost is one plan, on an operator command.
+
+   After Close the answer is the plan of a container that has nothing left to close: the records of what each service held are released with the teardown, so the plan the teardown ran is not recomputed from here — it was the teardown's, once. */
 func (instance *container) TeardownPlan() []containercontract.TeardownPlanEntry {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
 
     plan := instance.teardownPlanLocked()
 
@@ -32,6 +36,7 @@ func (instance *container) TeardownPlan() []containercontract.TeardownPlanEntry 
                 NodeKey:      nodeKey,
                 WaveIndex:    plan.closeWaveIndexOf[nodeKey],
                 Dependencies: dependencies,
+                SerialGroup:  plan.unorderedGroupOf[nodeKey],
             },
         )
     }
@@ -45,4 +50,31 @@ func (instance *container) TeardownRunsInWaves() bool {
     defer instance.mutex.RUnlock()
 
     return instance.teardownInWaves
+}
+
+/* TeardownDeadlineOverrun answers the record of a teardown that ran past the deadline it was given, and nil for one that had no deadline, finished inside it, or has not run: the budget, what was spent, the closers running when the deadline passed, the closers reached after it, and the duration of every close, as CloseWithContext describes them. It exists for the teardown that overran and FAILED NOTHING — a closer reached with the budget gone answers nil where it has nothing left to do — because that teardown returns no error to carry the record, and a container has no journal of its own; the application reads this door after a clean close and writes the record as a warning. A teardown that failed carries the same record beside its failures, in the error. */
+func (instance *container) TeardownDeadlineOverrun() exceptioncontract.Context {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.teardownDeadline
+}
+
+/* The doors below are reached through a type assertion on the concrete container, because none of them is declared on the Container contract, for the reason written at IsClosed: a method added to the contract is a method every application carrying its own implementation would have to grow. Naming their shapes here, once, gives the compiler something to hold the container to — a door renamed or re-signed fails this package instead of turning every assertion at its callers into a silent false. The callers keep spelling the assertion themselves, since importing a name from here would couple them to the implementation the contract exists to hide. */
+type parallelTeardownArmer interface {
+    ArmParallelTeardown() error
+}
+
+type teardownPlanner interface {
+    TeardownPlan() []containercontract.TeardownPlanEntry
+    TeardownRunsInWaves() bool
+    TeardownDeadlineOverrun() exceptioncontract.Context
+}
+
+type contextCloser interface {
+    CloseWithContext(closeContext context.Context) error
+}
+
+type closedContainerChecker interface {
+    IsClosed() bool
 }

@@ -10,4 +10,6 @@ type TeardownPlanEntry struct {
     WaveIndex int
     /* Dependencies are the services this one is closed BEFORE, in the graph's own key space. EMPTY means nothing in this container orders this service against any other — neither a resolution, nor a declaration, nor a collaborator it was seen to hold — so under waves it closes beside everything else in its wave. */
     Dependencies []string
+    /* SerialGroup is the group of services this one is closed one after the other WITH inside its wave, counting from one, and zero for a service in no group. Two services seen holding each other — or a ring of them — carry no edge, because no ordering between them is true, but they are not unrelated: a wave closes such a group one service at a time while the rest of the wave starts together. Without the figure the view read "same wave, no dependencies" for a pair the teardown deliberately keeps apart. */
+    SerialGroup int
 }

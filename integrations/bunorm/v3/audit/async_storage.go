@@ -162,8 +162,16 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
 
     grace := min(remaining/2, asyncStorageCloseGrace)
 
+    /* a grace too short for a delegate to react in is no grace: the answer "the save ignored its cancellation" is a measurement only where something waited long enough to see a reaction, and a remainder of a few microseconds — the ordinary leftover once an earlier component has spent the budget — gave that verdict over a delegate that honoured its cancellation in 289 closes out of 300 */
+    if asyncStorageCloseGraceFloor > grace {
+        return 0, 0
+    }
+
     return grace, grace
 }
+
+/* asyncStorageCloseGraceFloor is the shortest grace that is a measurement: below it the two stretches are read as none, and the close answers what it can say without waiting. */
+const asyncStorageCloseGraceFloor = time.Millisecond
 
 /* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */
 func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) error {
@@ -176,6 +184,11 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
         close(instance.queue)
     }
     instance.mutex.Unlock()
+
+    /* a second closer owns nothing here: the first is draining under its own graces, and a second one arriving with a spent budget — the ordinary state under a shared teardown deadline, when the application and the container both reach the storage — used to cancel the worker out from under that drain, dead-lettering the entries the first closer was still being given time to store, and then answer nil. It answers nil at once instead; what the storage did belongs to the closer that closed it. */
+    if true == alreadyClosed {
+        return nil
+    }
 
     /* nothing outstanding is nothing to abandon and nothing to cancel, so neither a grace nor a goroutine to watch it is reached. Both graces are zero on every teardown whose budget an earlier component already spent, and the answers below then cancelled a worker that had nothing in hand and named entries that were not there — measured 300 times out of 300, against 0 out of 300 on the same call with no deadline at all.
 
@@ -204,6 +217,15 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
 
     instance.workerCancel()
 
+    /* a zero grace is no measurement: whether the save in hand honoured its cancellation cannot be known when nothing waited for it to react, so the answer says what it can — the budget was spent before this storage was reached, and this many entries were not confirmed stored. It is decided here, before any timer: a timer of zero is not "now", and a delegate that reacted in the same instant used to be reported, one close in thirty thousand, as a wedged save cancelled after a drain grace of zero. "Ignored" is said only where a grace was given and ran out. */
+    if 0 >= cancellationGrace {
+        return exception.NewError(
+            "async audit storage was closed with its budget already spent; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored",
+            map[string]any{"outstanding": instance.entriesOutstanding.Load(), "queued": len(instance.queue)},
+            nil,
+        )
+    }
+
     drainedAfterCancellation := false
 
     select {
@@ -219,28 +241,11 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     }
 
     if false == drainedAfterCancellation {
-        if true == alreadyClosed {
-            return nil
-        }
-
-        /* a zero grace is no measurement: whether the save in hand honoured its cancellation cannot be known when nothing waited for it to react, so the answer says what it can — the budget was spent before this storage was reached, and this many entries were not confirmed stored. "Ignored" is said only where a grace was given and ran out */
-        if 0 >= cancellationGrace {
-            return exception.NewError(
-                "async audit storage was closed with its budget already spent; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored",
-                map[string]any{"outstanding": instance.entriesOutstanding.Load(), "queued": len(instance.queue)},
-                nil,
-            )
-        }
-
         return exception.NewError(
             "async audit storage abandoned a save that ignored its cancellation after a second drain grace; the entries still queued behind it were not stored",
             map[string]any{"grace": cancellationGrace.String(), "outstanding": instance.entriesOutstanding.Load(), "queued": len(instance.queue)},
             nil,
         )
-    }
-
-    if true == alreadyClosed {
-        return nil
     }
 
     return exception.NewError(

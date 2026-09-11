@@ -10,6 +10,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal"
 )
 
@@ -84,6 +85,8 @@ type container struct {
     teardownFinished bool
     closeErr         error
     closeOnce        sync.Once
+    /* teardownDeadline is the record of the one teardown this container ran, kept only when it ran PAST the deadline it was given: nil for a teardown with no deadline, and for one that finished inside it. It is what TeardownDeadlineOverrun answers, because a spent budget is not a failure and the error the teardown returns cannot carry it alone. */
+    teardownDeadline exceptioncontract.Context
 }
 
 /* declaredTeardownEdge is one hand-written ordering: the service that declared it, the node it named, and the spelling it used, which is what a refusal has to quote back. */
@@ -297,6 +300,11 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
         if _, wasBuilt := instance.builtServiceNames[serviceName]; true == wasBuilt {
             instance.replacedBuiltInstances = append(instance.replacedBuiltInstances, replacedValue)
         }
+
+        /* the walk's memo of the evicted value goes with it: keyed on the value's address, the memo kept every collaborator the evicted value held alive for as long as the container stood — measured, five hundred overrides installed one after the other under the armed teardown kept all five hundred evicted values from collection until Close, where the unarmed container let all but the last go. A node's own record is replaced below; the memo is what nothing replaced. */
+        if evictedKey, hasEvictedKey := pointerKeyOf(replacedValue); true == hasEvictedKey && nil != instance.heldIdentitiesByValue {
+            delete(instance.heldIdentitiesByValue, evictedKey)
+        }
     }
     delete(instance.builtServiceNames, serviceName)
 
@@ -304,7 +312,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     instance.recordCreationOrderLocked(containerNameNodeKey(serviceName))
 
     /* what the installed value HOLDS is recorded where a built value's is, under the same node, replacing the record of the value it evicted: without it an armed teardown read the override as holding nothing — its holder shared a wave with what it held — and read what the evicted value used to hold as if the new value held it. The value comes from the caller and is already in use, so it is walked as published memory. */
-    instance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value, true)
+    instance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value)
 
     /* the override propagates only to the types this NAME is registered under, by the loop below: the previous block also wrote it under the override value's own canonical type whenever that type was registered by ANY service, so overriding one name answered a different service's GetByType with this value. A canonical type this name owns is already reached by the loop; a type another service owns must not learn this override; and a free type is deliberately left out here (unlike the scope, which exposes it) because a container value-type service filed under a second, uncollapsed node closes twice at teardown. */
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
@@ -312,7 +320,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
             if serviceName == registeredServiceName {
                 instance.typeInstances[registeredType] = value
                 instance.recordCreationOrderLocked(containerTypeNodeKey(registeredType))
-                instance.recordHeldIdentitiesLocked(containerTypeNodeKey(registeredType), value, true)
+                instance.recordHeldIdentitiesLocked(containerTypeNodeKey(registeredType), value)
                 break
             }
         }
@@ -729,4 +737,8 @@ type providerAny func(resolver containercontract.Resolver) (any, error)
 var (
     _ containercontract.Container       = (*container)(nil)
     _ containercontract.ScopedRegistrar = (*container)(nil)
+    _ parallelTeardownArmer             = (*container)(nil)
+    _ teardownPlanner                   = (*container)(nil)
+    _ contextCloser                     = (*container)(nil)
+    _ closedContainerChecker            = (*container)(nil)
 )

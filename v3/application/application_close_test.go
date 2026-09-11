@@ -3,10 +3,15 @@ package application
 import (
     "context"
     "errors"
+    "io"
+    "os"
+    "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/config"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/logging"
 )
 
 /* Close is what a boot that died halfway and a clean shutdown both reach, and neither shape had ever been driven: an application assembled without a kernel — the state a boot failure leaves — has nothing to tear down, and dereferencing the absent kernel there would replace a clean exit with a panic inside the one handler that must not panic. */
@@ -171,5 +176,126 @@ func TestApplicationClose_ConcurrentClosesReportOneFailureOnce(t *testing.T) {
 
     if 1 != reportedFailures {
         t.Fatalf("expected the one teardown failure to be reported exactly once, got %d reports", reportedFailures)
+    }
+}
+
+/* overrunSleeper is the plain closer that eats a budget and answers nil: bounded by nothing but itself, and named by nobody until the deadline record */
+type overrunSleeper struct {
+    sleep time.Duration
+}
+
+func (instance *overrunSleeper) Close() error {
+    time.Sleep(instance.sleep)
+
+    return nil
+}
+
+/* captureEmergencyLogger hands back what the emergency logger wrote during a call: the logger is built lazily on os.Stderr, so it is closed before the call, os.Stderr is a pipe for its duration, and it is closed again after it so the lines are flushed and the next caller gets a logger on the real stderr */
+func captureEmergencyLogger(t *testing.T, action func()) string {
+    t.Helper()
+
+    logging.CloseEmergencyLogger()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+    }()
+
+    action()
+
+    logging.CloseEmergencyLogger()
+
+    _ = writeEnd.Close()
+    os.Stderr = originalStderr
+
+    output, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    return string(output)
+}
+
+/* a teardown that ran past its deadline and failed nothing returns nil — a spent budget is not a failure — and the record of who spent it reaches the journal as a warning, through the door the container keeps for exactly that close */
+func TestApplicationClose_AnOverrunTheContainerReportsIsWrittenAsAWarningAndReturnsNil(t *testing.T) {
+    kernelInstance := newTestKernel()
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    if registerErr := serviceContainer.Register(
+        "app.eater",
+        func(_ containercontract.Resolver) (*overrunSleeper, error) { return &overrunSleeper{sleep: 80 * time.Millisecond}, nil },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.eater"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var closeErr error
+
+    written := captureEmergencyLogger(t, func() {
+        closeContext, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+        defer cancel()
+
+        closeErr = applicationInstance.close(closeContext)
+    })
+
+    if nil != closeErr {
+        t.Fatalf("expected the overrun alone to return nil, got %v", closeErr)
+    }
+
+    if false == strings.Contains(written, "service container teardown overran its deadline") || false == strings.Contains(written, `"warning"`) {
+        t.Fatalf("expected the overrun written as a warning, got %q", written)
+    }
+
+    if false == strings.Contains(written, "service:app.eater") || false == strings.Contains(written, `"spentBy"`) {
+        t.Fatalf("expected the record to name the closer that spent the budget, got %q", written)
+    }
+}
+
+/* the record belongs to whoever performed the close: a container somebody else already closed is not reported again here, the rule the failure above follows */
+func TestApplicationClose_AnOverrunSomebodyElseAlreadyCarriedAwayIsNotReportedAgain(t *testing.T) {
+    kernelInstance := newTestKernel()
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    if registerErr := serviceContainer.Register(
+        "app.eater",
+        func(_ containercontract.Resolver) (*overrunSleeper, error) { return &overrunSleeper{sleep: 80 * time.Millisecond}, nil },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.eater"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+    defer cancel()
+
+    if closeErr := serviceContainer.(interface {
+        CloseWithContext(context.Context) error
+    }).CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    written := captureEmergencyLogger(t, func() {
+        if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
+            t.Fatalf("expected the second close to stay quiet, got %v", closeErr)
+        }
+    })
+
+    if true == strings.Contains(written, "overran") {
+        t.Fatalf("expected the overrun somebody else carried away not to be reported again, got %q", written)
     }
 }

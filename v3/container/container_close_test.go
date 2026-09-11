@@ -13,6 +13,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
 type closeOrderRecorder struct {
@@ -2862,5 +2863,353 @@ func TestContainer_Close_ArmedTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testin
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("expected the two groups to be closing at the same moment, got: %v", closeErr)
+    }
+}
+
+/* budgetSleeper closes by sleeping through its deadline, ignoring the context it is handed, and answering nil: the plain closer CONTAINER.md declares bounded by nothing but itself, and the one that ate the budget without anything naming it. */
+type budgetSleeper struct {
+    sleep time.Duration
+    label string
+}
+
+func (instance *budgetSleeper) CloseWithContext(_ context.Context) error {
+    time.Sleep(instance.sleep)
+
+    return nil
+}
+
+func (instance *budgetSleeper) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+func teardownDeadlineOverrunOf(t *testing.T, serviceContainer containercontract.Container) exceptioncontract.Context {
+    t.Helper()
+
+    reporter, carriesDoor := serviceContainer.(interface {
+        TeardownDeadlineOverrun() exceptioncontract.Context
+    })
+    if false == carriesDoor {
+        t.Fatalf("expected the container to carry the deadline overrun door")
+    }
+
+    return reporter.TeardownDeadlineOverrun()
+}
+
+func closeContainerWithin(t *testing.T, serviceContainer containercontract.Container, budget time.Duration) error {
+    t.Helper()
+
+    closeContext, cancel := context.WithTimeout(context.Background(), budget)
+    defer cancel()
+
+    return serviceContainer.(interface {
+        CloseWithContext(context.Context) error
+    }).CloseWithContext(closeContext)
+}
+
+func durationOfRecord(t *testing.T, record exceptioncontract.Context, key string) time.Duration {
+    t.Helper()
+
+    text, isText := record[key].(string)
+    if false == isText {
+        t.Fatalf("expected %s rendered as a duration, got %v", key, record[key])
+    }
+
+    duration, parseErr := time.ParseDuration(text)
+    if nil != parseErr {
+        t.Fatalf("expected %s to parse as a duration, got %q: %v", key, text, parseErr)
+    }
+
+    return duration
+}
+
+func namedDurations(t *testing.T, record exceptioncontract.Context, key string) map[string]string {
+    t.Helper()
+
+    named, isNamed := record[key].(map[string]string)
+    if false == isNamed {
+        t.Fatalf("expected %s as durations by node, got %v", key, record[key])
+    }
+
+    return named
+}
+
+/* the measured case: an eighty-millisecond close under a forty-millisecond budget answers nil — a spent budget is not a failure — and used to leave no trace of the service that ate it */
+func TestContainer_CloseWithContext_AnOverrunNamesTheServiceThatSpentTheBudget(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil })
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
+        t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a teardown that ran past its deadline to keep a record")
+    }
+
+    if _, named := namedDurations(t, record, "spentBy")["service:app.eater"]; false == named {
+        t.Fatalf("expected the closer running when the deadline passed to be named, got %v", record)
+    }
+
+    if starved, _ := record["starved"].([]string); 0 != len(starved) {
+        t.Fatalf("expected no closer reached after the deadline, got %v", starved)
+    }
+
+    if spent := durationOfRecord(t, record, "spent"); spent < 80*time.Millisecond {
+        t.Fatalf("expected the whole teardown spent at least the eater's eighty milliseconds, got %v", spent)
+    }
+
+    if budget := durationOfRecord(t, record, "budget"); budget > 40*time.Millisecond || 0 >= budget {
+        t.Fatalf("expected the budget recorded as what was left of forty milliseconds, got %v", budget)
+    }
+}
+
+/* the fast service is registered FIRST, so the eater built after it closes before it — latest created, first closed — and the fast one is reached with the deadline already gone: starved, and named as such, while the eater is named as the one that spent it */
+func TestContainer_CloseWithContext_AServiceReachedWithTheBudgetSpentIsNamedStarved(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister("app.fast", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 0, label: "fast"}, nil }, WithoutTypeRegistration())
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil }, WithoutTypeRegistration())
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.fast")
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
+        t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a record of the overrun")
+    }
+
+    starved, _ := record["starved"].([]string)
+    if 1 != len(starved) || "service:app.fast" != starved[0] {
+        t.Fatalf("expected the service reached after the deadline named starved, got %v", record)
+    }
+
+    if _, named := namedDurations(t, record, "spentBy")["service:app.eater"]; false == named {
+        t.Fatalf("expected the eater named as the closer that spent the budget, got %v", record)
+    }
+
+    if _, timed := namedDurations(t, record, "durations")["service:app.fast"]; false == timed {
+        t.Fatalf("expected every close timed, the starved one included, got %v", record)
+    }
+}
+
+/* under the waves two unrelated closers start together; both are running when the deadline passes, both are named, and the whole teardown costs one of them rather than two */
+func TestContainer_CloseWithContext_ArmedTwoClosersOfOneWaveThatOverlapAreBothNamed(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "first"}, nil }, WithoutTypeRegistration())
+    serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "second"}, nil }, WithoutTypeRegistration())
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.first")
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.second")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
+        t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a record of the overrun")
+    }
+
+    spentBy := namedDurations(t, record, "spentBy")
+    if _, named := spentBy["service:app.first"]; false == named {
+        t.Fatalf("expected the first closer named, got %v", record)
+    }
+
+    if _, named := spentBy["service:app.second"]; false == named {
+        t.Fatalf("expected the second closer named beside it, got %v", record)
+    }
+
+    if spent := durationOfRecord(t, record, "spent"); spent >= 160*time.Millisecond {
+        t.Fatalf("expected the two closers to overlap in one wave, got a teardown of %v", spent)
+    }
+}
+
+/* a close that failed under an overrun carries the deadline record beside its failures, so the operator reading a failed teardown asks the same question about the budget as one reading a clean one */
+func TestContainer_CloseWithContext_AFailureUnderAnOverrunCarriesTheDeadlineRecordBesideTheFailures(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil })
+    serviceContainer.MustRegister("app.failing", func(_ containercontract.Resolver) (*failingCloser, error) { return &failingCloser{}, nil })
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
+    MustFromResolver[*failingCloser](serviceContainer, "app.failing")
+
+    closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond)
+    if nil == closeErr {
+        t.Fatalf("expected the failing close reported")
+    }
+
+    errorContext := exception.LogContext(closeErr)
+
+    failures, hasFailures := errorContext["failures"].(map[string]string)
+    if false == hasFailures || "" == failures["service:app.failing"] {
+        t.Fatalf("expected the failure map beside the record, got %v", errorContext)
+    }
+
+    record, hasRecord := errorContext["deadline"].(exceptioncontract.Context)
+    if false == hasRecord {
+        t.Fatalf("expected the deadline record beside the failures, got %v", errorContext)
+    }
+
+    if _, named := namedDurations(t, record, "spentBy")["service:app.eater"]; false == named {
+        t.Fatalf("expected the eater named in the record carried by the error, got %v", record)
+    }
+}
+
+func TestContainer_CloseWithContext_ATeardownWithinItsBudgetLeavesNoDeadlineRecord(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister("app.fast", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 0, label: "fast"}, nil })
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.fast")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, time.Second); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if record := teardownDeadlineOverrunOf(t, serviceContainer); nil != record {
+        t.Fatalf("expected no record for a teardown inside its budget, got %v", record)
+    }
+}
+
+func TestContainer_Close_WithoutADeadlineLeavesNoDeadlineRecord(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 20 * time.Millisecond, label: "eater"}, nil })
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if record := teardownDeadlineOverrunOf(t, serviceContainer); nil != record {
+        t.Fatalf("expected no record for a close with no deadline, got %v", record)
+    }
+}
+
+type plainValueService struct {
+    label string
+}
+
+/* the durations name the closes that RAN: a service without a Close and a second filing of a value already claimed are neither closed nor timed */
+func TestContainer_CloseWithContext_ANonCloserAndADuplicateValueAreNotRecorded(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    eater := &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}
+
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return eater, nil }, WithoutTypeRegistration())
+    serviceContainer.MustRegister("app.eater.again", func(_ containercontract.Resolver) (*budgetSleeper, error) { return eater, nil }, WithoutTypeRegistration())
+    serviceContainer.MustRegister("app.plain", func(_ containercontract.Resolver) (*plainValueService, error) { return &plainValueService{label: "plain"}, nil })
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
+    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater.again")
+    MustFromResolver[*plainValueService](serviceContainer, "app.plain")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a record of the overrun")
+    }
+
+    if durations := namedDurations(t, record, "durations"); 1 != len(durations) {
+        t.Fatalf("expected exactly the one close that ran timed, got %v", durations)
+    }
+}
+
+type failingCloser struct{}
+
+func (instance *failingCloser) Close() error {
+    return errors.New("the close refused")
+}
+
+type scopedOnlyService struct {
+    label string
+}
+
+func (instance *scopedOnlyService) Close() error { return nil }
+
+/* the two spellings of one declaration answer one cause: a dependency on a type only a scoped registration filed is refused as scoped, the way the same dependency by name is, and not as never registered — the service IS registered, one lifetime away */
+func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedTypeAsScoped(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped",
+        func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil },
+    )
+
+    if registerErr := serviceContainer.Register(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
+        WithTeardownDependencyOfType[*scopedOnlyService](),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    armErr := serviceContainer.(interface{ ArmParallelTeardown() error }).ArmParallelTeardown()
+    if false == errors.Is(armErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the dependency on a scoped type to refuse the arming as scoped, got %v", armErr)
+    }
+}
+
+type sharedPoolService struct {
+    label string
+}
+
+func (instance *sharedPoolService) Close() error { return nil }
+
+type poolDeclarerService struct {
+    label string
+}
+
+func (instance *poolDeclarerService) Close() error { return nil }
+
+/* what a declared type stands for is the plan's to expand, for one plan: written into the graph by the operator's view, the expansion outlived the registration that made the declaration ambiguous — a second, non-strict name under the type, which the plan then drops — and the edge left behind closed a ring with the resolution the first name had made, so the close reported a cycle on the DEFAULT path, over a teardown in which every service closed */
+func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "declarer"}, nil },
+        WithTeardownDependencyOfType[*sharedPoolService](),
+    )
+
+    serviceContainer.MustRegister(
+        "app.pool.first",
+        func(resolver containercontract.Resolver) (*sharedPoolService, error) {
+            /* resolved, so the graph carries the first pool before the declarer — the other half of the ring the expansion used to close */
+            if _, resolveErr := resolver.Get("app.declarer"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &sharedPoolService{label: "first"}, nil
+        },
+        WithTypeRegistration(false),
+    )
+
+    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool.first")
+
+    /* the view between the registrations is what used to write the expansion into the graph */
+    serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan()
+
+    serviceContainer.MustRegister(
+        "app.pool.second",
+        func(_ containercontract.Resolver) (*sharedPoolService, error) { return &sharedPoolService{label: "second"}, nil },
+        WithTypeRegistration(false),
+    )
+
+    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool.second")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
     }
 }

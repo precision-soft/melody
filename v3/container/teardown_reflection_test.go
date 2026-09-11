@@ -7,6 +7,7 @@ import (
     "runtime"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -143,7 +144,7 @@ func TestContainer_Close_NotArmedAHeldCollaboratorIsClosedBeforeTheServiceHoldin
 func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
     held := &closeOrderServiceB{}
 
-    throughField := heldPointerIdentities(&capturingHolder{held: held}, false)
+    throughField := heldPointerIdentities(&capturingHolder{held: held})
     if 0 == len(throughField) {
         t.Fatalf("expected the walk to reach a collaborator held in a field")
     }
@@ -157,7 +158,7 @@ func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
         t.Fatalf("expected the field walk to find the collaborator")
     }
 
-    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held}, false)
+    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held})
     if 0 != len(throughMap) {
         t.Fatalf("expected a map to be neither entered nor counted, got %d identities", len(throughMap))
     }
@@ -283,7 +284,7 @@ func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *tes
     hubIdentity, _ := pointerKeyOf(hub)
 
     for iteration := 0; iteration < 200; iteration = iteration + 1 {
-        identities := heldPointerIdentities(&hubHolder{hub: hub}, false)
+        identities := heldPointerIdentities(&hubHolder{hub: hub})
 
         if false == holdsIdentity(identities, hubIdentity) {
             t.Fatalf("expected the hub itself to be found through the holder's own pointer field")
@@ -300,7 +301,7 @@ func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *tes
     writes.Wait()
 }
 
-/* a context is held through the holder's OWN interface field, so the pointer behind it is read and named; what that pointer names — the runtime's cancel context, with the done channel stored atomically on first use — is foreign memory, and nothing inside it is read. */
+/* a context is held through an INTERFACE field, which the walk does not enter from any door: the holder alone is named, and what the interface names — the runtime's cancel context, with the done channel stored atomically on first use — is never read. The walk that entered a fresh value's own interface fields reached that atomic.Value, whose type word is a runtime sentinel in the middle of its first store. */
 func TestHeldPointerIdentities_DoesNotReadInsideAContextItHolds(t *testing.T) {
     for iteration := 0; iteration < 500; iteration = iteration + 1 {
         ctx, cancel := context.WithCancel(context.Background())
@@ -314,19 +315,18 @@ func TestHeldPointerIdentities_DoesNotReadInsideAContextItHolds(t *testing.T) {
             _ = ctx.Done()
         }()
 
-        identities := heldPointerIdentities(&hubHolder{ctx: ctx}, false)
+        identities := heldPointerIdentities(&hubHolder{ctx: ctx})
 
         firstUse.Wait()
         cancel()
 
-        if 2 > len(identities) {
-            t.Fatalf("expected the holder and the context pointer, got %d identities", len(identities))
+        if 1 != len(identities) || reflect.TypeOf((*hubHolder)(nil)) != identities[0].identity.valueType {
+            t.Fatalf("expected the holder alone, with nothing of the context it holds through an interface, got %d identities", len(identities))
         }
 
-        /* what the walk must not reach is anything BENEATH the context: its pointer is the holder's own interface field, and what that pointer names is the runtime's; a later runtime may lay the context out differently, so the assertion is on what is read, not on a count */
         for _, held := range identities {
-            if false == strings.HasPrefix(held.identity.valueType.String(), "*context.") && reflect.TypeOf((*hubHolder)(nil)) != held.identity.valueType {
-                t.Fatalf("expected nothing beneath the context to be read, got %s", held.identity.valueType)
+            if true == strings.HasPrefix(held.identity.valueType.String(), "*context.") {
+                t.Fatalf("expected nothing of the context to be read, got %s", held.identity.valueType)
             }
         }
     }
@@ -343,7 +343,7 @@ func TestHeldPointerIdentities_StillFindsAServiceBehindAnIntermediateStruct(t *t
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&outerHolder{middle: &intermediateStruct{service: held}}, false), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&outerHolder{middle: &intermediateStruct{service: held}}), heldIdentity) {
         t.Fatalf("expected the service behind an intermediate struct pointer to be found")
     }
 }
@@ -381,11 +381,11 @@ func TestHeldPointerIdentities_FindsAServiceAtTheDepthLimitWhicheverFieldComesFi
     for length := 3; length <= 7; length = length + 1 {
         tail := &chainLink{held: held}
 
-        if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, false), heldIdentity) {
+        if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(length, tail), direct: tail}), heldIdentity) {
             t.Fatalf("expected the service to be found with the long path listed first, chain of %d links", length)
         }
 
-        if false == holdsIdentity(heldPointerIdentities(&directFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, false), heldIdentity) {
+        if false == holdsIdentity(heldPointerIdentities(&directFirstRoot{chain: chainOfLinks(length, tail), direct: tail}), heldIdentity) {
             t.Fatalf("expected the service to be found with the short path listed first, chain of %d links", length)
         }
     }
@@ -405,14 +405,14 @@ func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     first := &wideHolder{}
     first.cells[0][0].service = held
 
-    if false == holdsIdentity(heldPointerIdentities(first, false), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(first), heldIdentity) {
         t.Fatalf("expected a service in the first cell to be found inside the budget")
     }
 
     last := &wideHolder{}
     last.cells[255][255].service = held
 
-    if true == holdsIdentity(heldPointerIdentities(last, false), heldIdentity) {
+    if true == holdsIdentity(heldPointerIdentities(last), heldIdentity) {
         t.Fatalf("expected the walk to stop at its budget before the last cell")
     }
 }
@@ -456,7 +456,7 @@ func TestHeldPointerIdentities_KeepsAHeldCollaboratorAlive(t *testing.T) {
     holder := &capturingHolder{held: &closeOrderServiceB{}}
     runtime.SetFinalizer(holder.held, func(*closeOrderServiceB) { finalized <- struct{}{} })
 
-    identities := heldPointerIdentities(holder, false)
+    identities := heldPointerIdentities(holder)
     holder.held = nil
 
     for cycle := 0; cycle < 3; cycle = cycle + 1 {
@@ -618,7 +618,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
     }
 }
 
-/* a slice is a header of three words a concurrent append replaces, so a slice inside foreign memory is not read either; the value's OWN slices are, since nothing is writing them yet. */
+/* a slice is never read, not even in the value's own memory: the value cannot tell a slice it allocated from a header it was HANDED — a registry answering All() with its internal slice — and the elements of a handed slice are rewritten by their owner while the walk reads them. The cost is the collaborator held in a slice, which keeps the order it had; measured on the three example applications, no service holds a service that way. */
 type foreignBag struct{ items []*closeOrderServiceB }
 
 type bagHolder struct {
@@ -628,21 +628,188 @@ type bagHolder struct {
 
 func (instance *bagHolder) Close() error { return nil }
 
-func TestHeldPointerIdentities_ReadsItsOwnSlicesAndNotASliceOfForeignMemory(t *testing.T) {
+func TestHeldPointerIdentities_DoesNotReadASliceEvenInItsOwnMemory(t *testing.T) {
     own := &closeOrderServiceB{}
     ownIdentity, _ := pointerKeyOf(own)
 
     foreign := &closeOrderServiceB{}
     foreignIdentity, _ := pointerKeyOf(foreign)
 
-    identities := heldPointerIdentities(&bagHolder{bag: &foreignBag{items: []*closeOrderServiceB{foreign}}, items: []*closeOrderServiceB{own}}, false)
+    identities := heldPointerIdentities(&bagHolder{bag: &foreignBag{items: []*closeOrderServiceB{foreign}}, items: []*closeOrderServiceB{own}})
 
-    if false == holdsIdentity(identities, ownIdentity) {
-        t.Fatalf("expected a service in the holder's own slice to be found")
+    if true == holdsIdentity(identities, ownIdentity) {
+        t.Fatalf("expected a service in the holder's own slice to stay unread, since the holder may have been handed that slice")
     }
 
     if true == holdsIdentity(identities, foreignIdentity) {
         t.Fatalf("expected a slice inside foreign memory to stay unread")
+    }
+}
+
+type rewritingRegistry struct {
+    mutex sync.Mutex
+    items []*closeOrderServiceB
+}
+
+func (instance *rewritingRegistry) All() []*closeOrderServiceB {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.items
+}
+
+func (instance *rewritingRegistry) Rewrite(value *closeOrderServiceB) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.items[0] = value
+}
+
+type handedSliceHolder struct {
+    items []*closeOrderServiceB
+}
+
+func (instance *handedSliceHolder) Close() error { return nil }
+
+/* the slice a provider stores is the header a registry handed it, whose first element the registry rewrites under its own mutex while the walk reads it: walked as the holder's own memory that read reported the race under the detector on every run. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the one above. */
+func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t *testing.T) {
+    registry := &rewritingRegistry{items: []*closeOrderServiceB{{}}}
+
+    stop := make(chan struct{})
+    var writes sync.WaitGroup
+
+    writes.Add(1)
+    go func() {
+        defer writes.Done()
+
+        for {
+            select {
+            case <-stop:
+                return
+            default:
+                registry.Rewrite(&closeOrderServiceB{})
+            }
+        }
+    }()
+
+    for round := 0; round < 200; round = round + 1 {
+        serviceContainer := NewContainer()
+
+        armParallelTeardown(t, serviceContainer)
+
+        if registerErr := serviceContainer.Register(
+            "app.holder",
+            func(_ containercontract.Resolver) (*handedSliceHolder, error) { return &handedSliceHolder{items: registry.All()}, nil },
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+
+        if _, getErr := serviceContainer.Get("app.holder"); nil != getErr {
+            t.Fatalf("unexpected get error: %v", getErr)
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("unexpected close error: %v", closeErr)
+        }
+    }
+
+    close(stop)
+    writes.Wait()
+}
+
+type mutualPairA struct {
+    other    *mutualPairB
+    recorder *closeOrderRecorder
+}
+
+func (instance *mutualPairA) Close() error {
+    instance.recorder.record("a")
+
+    return nil
+}
+
+type mutualPairB struct {
+    other    *mutualPairA
+    recorder *closeOrderRecorder
+}
+
+func (instance *mutualPairB) Close() error {
+    instance.recorder.record("b")
+
+    return nil
+}
+
+type pairMemberHolder struct {
+    a        *mutualPairA
+    recorder *closeOrderRecorder
+}
+
+func (instance *pairMemberHolder) Close() error {
+    instance.recorder.record("c")
+
+    return nil
+}
+
+/* a pair held both ways is no ordering, and it is no way back either: the edge from a service holding one member of the pair used to be dropped because the ring it seemed to close ran through the pair's own edge — an inference that did not survive itself — so the holder landed in a wave AFTER what it holds, twenty times out of twenty, where the sequential teardown had closed it first by the accident of creation order. */
+func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testing.T) {
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    a := &mutualPairA{recorder: recorder}
+    b := &mutualPairB{recorder: recorder, other: a}
+    a.other = b
+    c := &pairMemberHolder{a: a, recorder: recorder}
+
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*mutualPairA, error) { return a, nil })
+    serviceContainer.MustRegister("pair.holder", func(_ containercontract.Resolver) (*pairMemberHolder, error) { return c, nil })
+    serviceContainer.MustRegister(
+        "pair.b",
+        func(resolver containercontract.Resolver) (*mutualPairB, error) {
+            /* resolved, so the graph carries b before the holder: that resolution is what made the way back from a to the holder look like one */
+            if _, resolveErr := resolver.Get("pair.holder"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return b, nil
+        },
+    )
+
+    MustFromResolver[*mutualPairB](serviceContainer, "pair.b")
+    MustFromResolver[*mutualPairA](serviceContainer, "pair.a")
+
+    waveOf := make(map[string]int, 3)
+    for _, entry := range serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan() {
+        waveOf[entry.NodeKey] = entry.WaveIndex
+    }
+
+    if waveOf["service:pair.holder"] >= waveOf["service:pair.a"] {
+        t.Fatalf("expected the holder in a wave before the member it holds, got %v", waveOf)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    indexOf := func(label string) int {
+        for index, value := range closeSequence {
+            if label == value {
+                return index
+            }
+        }
+
+        return -1
+    }
+
+    /* b closes first either way, since it resolved the holder; what the repair changes is the holder against the member it holds */
+    if 3 != len(closeSequence) || indexOf("c") > indexOf("a") {
+        t.Fatalf("expected the holder closed before the member it holds, got %v", closeSequence)
     }
 }
 
@@ -681,14 +848,12 @@ func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemor
         }
     }()
 
-    for iteration := 0; iteration < 200; iteration = iteration + 1 {
-        armed := serviceContainer.(*container)
-        armed.mutex.Lock()
-        armed.recordHeldIdentitiesOfBuiltServicesLocked()
-        armed.mutex.Unlock()
-    }
-
+    /* the arming records the hub once; the loop is the walk arming runs, called directly two hundred times under the writer — through the container it would answer from the memo after the first, and before arming it would not walk at all */
     armParallelTeardown(t, serviceContainer)
+
+    for iteration := 0; iteration < 200; iteration = iteration + 1 {
+        heldPointerIdentities(hub)
+    }
 
     close(stop)
     writes.Wait()
@@ -925,9 +1090,284 @@ func TestContainer_ArmParallelTeardown_AnUnbuiltDeclaredDependencyIsNotAWayBack(
         TeardownPlan() []containercontract.TeardownPlanEntry
     }).TeardownPlan()
 
+    heldPlanned := false
+
     for _, entry := range entries {
-        if "service:app.held" == entry.NodeKey && 1 != entry.WaveIndex {
+        if "service:app.held" != entry.NodeKey {
+            continue
+        }
+
+        heldPlanned = true
+
+        if 1 != entry.WaveIndex {
             t.Fatalf("expected the held service one wave past its holder, got %+v", entries)
         }
+    }
+
+    if false == heldPlanned {
+        t.Fatalf("expected the held service in the plan, got %+v", entries)
+    }
+}
+
+/* fatHub is large in the one way the walk cannot collapse: cells holding POINTERS, each a visit whether nil or not — a table of scalars is one node since the scalar-array repair, and a hub made of those would have let the re-walk it exists to provoke cost nothing */
+type fatHub struct {
+    cells [64][256]struct{ left, right *closeOrderServiceB }
+}
+
+type hubLink struct {
+    next *hubLink
+    hub  *fatHub
+}
+
+func newHubChain(hub *fatHub, length int) *hubLink {
+    var head *hubLink
+
+    for index := 0; index < length; index = index + 1 {
+        head = &hubLink{next: head, hub: hub}
+    }
+
+    return head
+}
+
+type chainFirstHolder struct {
+    chain  *hubLink
+    hub    *fatHub
+    collab *closeOrderServiceB
+}
+
+func (instance *chainFirstHolder) Close() error { return nil }
+
+type collaboratorFirstHolder struct {
+    collab *closeOrderServiceB
+    hub    *fatHub
+    chain  *hubLink
+}
+
+func (instance *collaboratorFirstHolder) Close() error { return nil }
+
+/* a large object reached whole through a chain of links was walked AGAIN from every shallower path that reached it afterwards, although the first walk had seen all of it; the re-walks spent the budget before the root's last field, so which field came first decided whether a held service was found. A subtree is entered again from a shallower path only when the first walk was cut. The chain is two links long so that the FIRST meeting of the hub, at the end of the chain, is whole — a longer chain meets it first at a depth where its cells are cut, and the cut walks alone cost the budget whatever the re-entry rule says. */
+func TestHeldPointerIdentities_DoesNotWalkAWholeSubtreeAgainFromAShallowerPath(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+    hub := &fatHub{}
+
+    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collab: held, hub: hub, chain: newHubChain(hub, 2)}), heldIdentity) {
+        t.Fatalf("expected the collaborator declared first to be found")
+    }
+
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collab: held}), heldIdentity) {
+        t.Fatalf("expected the collaborator declared after a chain of links to one large object to be found as well")
+    }
+}
+
+type tableFirstCodec struct {
+    table [256][256]byte
+    peer  *closeOrderServiceB
+}
+
+func (instance *tableFirstCodec) Close() error { return nil }
+
+type peerFirstCodec struct {
+    peer  *closeOrderServiceB
+    table [256][256]byte
+}
+
+func (instance *peerFirstCodec) Close() error { return nil }
+
+/* an inline table of sixty-four kibibytes cost one budget unit per byte, which is the whole budget, so a pointer field declared after it was never reached; an array whose element type cannot name anything is one node */
+func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&peerFirstCodec{peer: held}), heldIdentity) {
+        t.Fatalf("expected the peer declared before the table to be found")
+    }
+
+    if false == holdsIdentity(heldPointerIdentities(&tableFirstCodec{peer: held}), heldIdentity) {
+        t.Fatalf("expected the peer declared after the table to be found as well")
+    }
+}
+
+type selfReferringHolder struct {
+    self   *selfReferringHolder
+    collab *closeOrderServiceB
+}
+
+func (instance *selfReferringHolder) Close() error { return nil }
+
+/* a pointer met again while its own walk is on the stack is a cycle, not a cut: the walk of a value that points at itself must not mark itself cut, or the next shallower path would walk it a second time for nothing */
+func TestHeldPointerIdentities_ReadsAValuePointingAtItselfOnce(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    holder := &selfReferringHolder{collab: held}
+    holder.self = holder
+
+    identities := heldPointerIdentities(holder)
+
+    if false == holdsIdentity(identities, heldIdentity) {
+        t.Fatalf("expected the collaborator of a self-referring holder to be found")
+    }
+
+    if 2 != len(identities) {
+        t.Fatalf("expected the holder and its collaborator recorded once each, got %d", len(identities))
+    }
+}
+
+type listenerBus struct {
+    listeners []*busListener
+}
+
+func (instance *listenerBus) Close() error { return nil }
+
+type busListener struct {
+    back     *listenerBus
+    inFlight *atomic.Int32
+    peak     *atomic.Int32
+}
+
+func (instance *busListener) Close() error {
+    now := instance.inFlight.Add(1)
+
+    for {
+        peak := instance.peak.Load()
+        if now <= peak || true == instance.peak.CompareAndSwap(peak, now) {
+            break
+        }
+    }
+
+    time.Sleep(30 * time.Millisecond)
+
+    instance.inFlight.Add(-1)
+
+    return nil
+}
+
+/* a bus that resolved two listeners, each holding a pointer back to it, gave the walk two edges the resolutions contradict — both dropped, both unordered against the bus — and the union of those pairs put the two listeners, unrelated to each other, into one group: the wave past the bus closed them one after the other, which is the starvation the waves exist to remove. A group is formed from the pairs whose members share a wave; the listeners are in one wave and the bus is not */
+func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(t *testing.T) {
+    var inFlight atomic.Int32
+    var peak atomic.Int32
+
+    serviceContainer := NewContainer()
+
+    for _, name := range []string{"app.p", "app.q"} {
+        serviceContainer.MustRegister(
+            name,
+            func(_ containercontract.Resolver) (*busListener, error) { return &busListener{inFlight: &inFlight, peak: &peak}, nil },
+            WithoutTypeRegistration(),
+        )
+    }
+
+    serviceContainer.MustRegister(
+        "app.bus",
+        func(resolver containercontract.Resolver) (*listenerBus, error) {
+            bus := &listenerBus{}
+
+            for _, name := range []string{"app.p", "app.q"} {
+                listener, resolveErr := FromResolver[*busListener](resolver, name)
+                if nil != resolveErr {
+                    return nil, resolveErr
+                }
+
+                listener.back = bus
+                bus.listeners = append(bus.listeners, listener)
+            }
+
+            return bus, nil
+        },
+    )
+
+    MustFromResolver[*listenerBus](serviceContainer, "app.bus")
+
+    /* armed after the build, so the walk reads the listeners as they are, back-pointers included */
+    armParallelTeardown(t, serviceContainer)
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != peak.Load() {
+        t.Fatalf("expected the two listeners, unrelated to each other, closed together in the wave past their bus, got a peak of %d", peak.Load())
+    }
+}
+
+/* a provider handing back an object built long before the container and already in use — the capturing provider the package document names as the ordinary case — resolved AFTER arming, had its interface fields read while their owner rewrote them, which the race detector reported on every run; the walk reads a fresh value by the same rule as a published one now. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the context test above, where the interface field yields no identity at all. */
+func TestHeldPointerIdentities_ReadsAPreBuiltValueAProviderHandsBackAsPublishedMemory(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    hub := &foreignHub{backplane: &foreignBackplane{label: "first"}}
+
+    stop := make(chan struct{})
+    var writes sync.WaitGroup
+
+    writes.Add(1)
+    go func() {
+        defer writes.Done()
+
+        for label := 0; ; label = label + 1 {
+            select {
+            case <-stop:
+                return
+            default:
+                hub.swap(&foreignBackplane{label: fmt.Sprint(label)})
+            }
+        }
+    }()
+
+    for round := 0; round < 200; round = round + 1 {
+        if registerErr := serviceContainer.Register(
+            fmt.Sprintf("app.hub.%d", round),
+            func(_ containercontract.Resolver) (*foreignHub, error) { return hub, nil },
+            WithoutTypeRegistration(),
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+
+        if _, getErr := serviceContainer.Get(fmt.Sprintf("app.hub.%d", round)); nil != getErr {
+            t.Fatalf("unexpected get error: %v", getErr)
+        }
+    }
+
+    close(stop)
+    writes.Wait()
+}
+
+/* the plan names the group a wave closes one service at a time: a pair held both ways shares a figure, a service in no group reads zero, and the view built on the plan can say "these two close one after the other" where "same wave, no dependencies" used to say the opposite */
+func TestContainer_TeardownPlan_NamesTheSerialGroupOfAMutuallyHeldPair(t *testing.T) {
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    a := &mutualPairA{recorder: recorder}
+    b := &mutualPairB{recorder: recorder, other: a}
+    a.other = b
+
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*mutualPairA, error) { return a, nil })
+    serviceContainer.MustRegister("pair.b", func(_ containercontract.Resolver) (*mutualPairB, error) { return b, nil })
+    serviceContainer.MustRegister("pair.alone", func(_ containercontract.Resolver) (*closeOrderServiceC, error) { return &closeOrderServiceC{recorder: recorder}, nil })
+
+    MustFromResolver[*mutualPairA](serviceContainer, "pair.a")
+    MustFromResolver[*mutualPairB](serviceContainer, "pair.b")
+    MustFromResolver[*closeOrderServiceC](serviceContainer, "pair.alone")
+
+    groupOf := make(map[string]int, 3)
+    for _, entry := range serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan() {
+        groupOf[entry.NodeKey] = entry.SerialGroup
+    }
+
+    if 0 == groupOf["service:pair.a"] || groupOf["service:pair.a"] != groupOf["service:pair.b"] {
+        t.Fatalf("expected the pair in one named group, got %v", groupOf)
+    }
+
+    if 0 != groupOf["service:pair.alone"] {
+        t.Fatalf("expected the service in no group to read zero, got %v", groupOf)
     }
 }

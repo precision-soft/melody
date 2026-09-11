@@ -1460,3 +1460,345 @@ type teardownProbeHolder struct {
 func (instance *teardownProbeHolder) Close() error {
     return nil
 }
+
+type teardownViewStorage struct {
+    label string
+}
+
+func (instance *teardownViewStorage) Close() error {
+    return nil
+}
+
+type teardownViewHolder struct {
+    storage *teardownViewStorage
+}
+
+func (instance *teardownViewHolder) Close() error {
+    return nil
+}
+
+/* three built services: a holder that resolved its storage — one edge, two waves — and a service nothing orders; plus a registration never built, which the plan cannot list */
+func newTeardownViewTestContainer(t *testing.T) containercontract.Container {
+    t.Helper()
+
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        "view.storage",
+        func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
+            return &teardownViewStorage{label: "storage"}, nil
+        },
+    )
+
+    serviceContainer.MustRegister(
+        "view.holder",
+        func(resolver containercontract.Resolver) (*teardownViewHolder, error) {
+            storage, resolveErr := container.FromResolver[*teardownViewStorage](resolver, "view.storage")
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &teardownViewHolder{storage: storage}, nil
+        },
+    )
+
+    serviceContainer.MustRegister(
+        "view.unordered",
+        func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
+            return &teardownViewStorage{label: "unordered"}, nil
+        },
+        container.WithoutTypeRegistration(),
+    )
+
+    serviceContainer.MustRegister(
+        "view.unbuilt",
+        func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
+            return &teardownViewStorage{label: "unbuilt"}, nil
+        },
+        container.WithoutTypeRegistration(),
+    )
+
+    if _, resolveErr := container.FromResolver[*teardownViewHolder](serviceContainer, "view.holder"); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if _, resolveErr := container.FromResolver[*teardownViewStorage](serviceContainer, "view.unordered"); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    return serviceContainer
+}
+
+func teardownRowsByNode(t *testing.T, rendered string) map[string][]string {
+    t.Helper()
+
+    rows := debugTableBlockRow(rendered, "TEARDOWN (SEQUENTIAL)")
+
+    byNode := make(map[string][]string, len(rows))
+    for _, row := range rows {
+        if 6 != len(row) {
+            t.Fatalf("expected six cells per teardown row, got %v", row)
+        }
+
+        byNode[row[1]] = row
+    }
+
+    return byNode
+}
+
+/* the ordering of a node is read on both sides of it: the storage the holder resolved is a pure dependency — it depends on nothing and is depended on — and it read "none", the same word as the service nothing orders, which is the opposite of what the edge towards it proves. Under waves the row an operator has to look at is the one with no relation in EITHER direction. */
+func TestContainerCommand_TheTeardownBlockReadsTheOrderingOnBothSidesOfANode(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(newTeardownViewTestContainer(t)),
+        []string{"--format=table", "--table-width=400"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    byNode := teardownRowsByNode(t, rendered)
+
+    storage, listed := byNode["service:view.storage"]
+    if false == listed {
+        t.Fatalf("expected the storage in the teardown block, got %q", rendered)
+    }
+
+    if "proved" != storage[3] || "service:view.holder" != storage[4] || "" != storage[2] {
+        t.Fatalf("expected the storage ordered by the holder that resolved it, closed after it and before nothing, got %v", storage)
+    }
+
+    holder := byNode["service:view.holder"]
+    if "proved" != holder[3] || "service:view.storage" != holder[2] || "" != holder[4] {
+        t.Fatalf("expected the holder closed before its storage and after nothing, got %v", holder)
+    }
+
+    unordered := byNode["service:view.unordered"]
+    if "none" != unordered[3] || "" != unordered[2] || "" != unordered[4] {
+        t.Fatalf("expected the service nothing orders to read none on both sides, got %v", unordered)
+    }
+
+    if _, listed := byNode["service:view.unbuilt"]; true == listed {
+        t.Fatalf("expected a registration never built to be absent from the plan, got %v", byNode)
+    }
+}
+
+/* the check that arming makes possible has to read the same on every form of the command: the --build sweep used to render no teardown block at all */
+func TestContainerCommand_TheTeardownBlockRendersOnTheBuildSweep(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(newTeardownViewTestContainer(t)),
+        []string{"--format=table", "--table-width=400", "--build"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    byNode := teardownRowsByNode(t, rendered)
+
+    if 4 != len(byNode) {
+        t.Fatalf("expected the sweep, which builds every service, to list all four in the teardown block, got %v", byNode)
+    }
+
+    if "none" != byNode["service:view.unbuilt"][3] {
+        t.Fatalf("expected the service the sweep built, which resolved nothing, to read none, got %v", byNode["service:view.unbuilt"])
+    }
+}
+
+/* the single-service door renders the one row of the service it was asked about, with the wave the whole plan gives it */
+func TestContainerCommand_TheTeardownBlockRendersTheOneRowOfASingleService(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(newTeardownViewTestContainer(t)),
+        []string{"--format=table", "--table-width=400", "view.storage"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    byNode := teardownRowsByNode(t, rendered)
+
+    if 1 != len(byNode) {
+        t.Fatalf("expected exactly the one row of the service asked about, got %v", byNode)
+    }
+
+    storage := byNode["service:view.storage"]
+    if "1" != storage[0] || "proved" != storage[3] || "service:view.holder" != storage[4] {
+        t.Fatalf("expected the storage in wave one, ordered by its holder, got %v", storage)
+    }
+}
+
+/* the block keeps to the window the listing applied, with the wave index of the whole plan: a listing of one service used to render every node */
+func TestContainerCommand_TheTeardownBlockKeepsToTheWindowAndTheGlobalWave(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(newTeardownViewTestContainer(t)),
+        []string{"--format=table", "--table-width=400", "--limit=1", "--offset=1"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    listedRows := debugTableBlockRow(rendered, "SERVICES (CONTAINER)")
+    if 1 != len(listedRows) {
+        t.Fatalf("expected the window to show one service, got %v", listedRows)
+    }
+
+    byNode := teardownRowsByNode(t, rendered)
+
+    shownNode := "service:" + listedRows[0][0]
+    if 1 != len(byNode) {
+        t.Fatalf("expected the teardown block windowed to the one shown service %s, got %v", shownNode, byNode)
+    }
+
+    if _, listed := byNode[shownNode]; false == listed {
+        t.Fatalf("expected the teardown block to carry the shown service %s, got %v", shownNode, byNode)
+    }
+
+    if "service:view.storage" == shownNode && "1" != byNode[shownNode][0] {
+        t.Fatalf("expected the wave of the whole plan, not of the window, got %v", byNode[shownNode])
+    }
+}
+
+type containerCommandTeardownTestEnvelope struct {
+    Data struct {
+        Items []struct {
+            Name     string `json:"name"`
+            Teardown *struct {
+                Wave         int      `json:"wave"`
+                ClosedBefore []string `json:"closedBefore"`
+                ClosedAfter  []string `json:"closedAfter"`
+                Ordering     string   `json:"ordering"`
+            } `json:"teardown"`
+        } `json:"items"`
+    } `json:"data"`
+}
+
+/* the json document carries the teardown beside each built service, and omits the key on a service the plan does not list, so `jq '.data.items[] | select(.teardown.ordering == "none")'` names the services nothing orders */
+func TestContainerCommand_TheJsonDocumentCarriesTheTeardownBesideEachBuiltService(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(newTeardownViewTestContainer(t)),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    var envelope containerCommandTeardownTestEnvelope
+    if unmarshalErr := json.Unmarshal([]byte(rendered), &envelope); nil != unmarshalErr {
+        t.Fatalf("expected a json document, got %v over %q", unmarshalErr, rendered)
+    }
+
+    byName := make(map[string]*struct {
+        Wave         int      `json:"wave"`
+        ClosedBefore []string `json:"closedBefore"`
+        ClosedAfter  []string `json:"closedAfter"`
+        Ordering     string   `json:"ordering"`
+    }, len(envelope.Data.Items))
+
+    for _, item := range envelope.Data.Items {
+        byName[item.Name] = item.Teardown
+    }
+
+    storage := byName["view.storage"]
+    if nil == storage || 1 != storage.Wave || "proved" != storage.Ordering || 1 != len(storage.ClosedAfter) || "service:view.holder" != storage.ClosedAfter[0] || 0 != len(storage.ClosedBefore) {
+        t.Fatalf("expected the storage in wave one, closed after its holder, got %+v", storage)
+    }
+
+    holder := byName["view.holder"]
+    if nil == holder || 0 != holder.Wave || 1 != len(holder.ClosedBefore) || "service:view.storage" != holder.ClosedBefore[0] {
+        t.Fatalf("expected the holder in wave zero, closed before its storage, got %+v", holder)
+    }
+
+    if unordered := byName["view.unordered"]; nil == unordered || "none" != unordered.Ordering {
+        t.Fatalf("expected the service nothing orders to read none, got %+v", unordered)
+    }
+
+    if nil != byName["view.unbuilt"] {
+        t.Fatalf("expected the registration never built to carry no teardown key, got %+v", byName["view.unbuilt"])
+    }
+
+    if false == strings.Contains(rendered, `"teardown":{`) || true == strings.Contains(rendered, `"teardown":null`) {
+        t.Fatalf("expected the teardown key present on built services and absent, not null, on the rest, got %q", rendered)
+    }
+}
+
+type viewPairA struct {
+    other *viewPairB
+}
+
+func (instance *viewPairA) Close() error { return nil }
+
+type viewPairB struct {
+    other *viewPairA
+}
+
+func (instance *viewPairB) Close() error { return nil }
+
+/* the group column is what tells an operator that two services of one wave close one after the other: a pair held both ways shares a figure, and the service in no group prints an empty cell and a zero in the json document */
+func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
+    if false == isArmable {
+        t.Fatalf("expected the container to carry the arming door")
+    }
+
+    if armErr := armable.ArmParallelTeardown(); nil != armErr {
+        t.Fatalf("unexpected arm error: %v", armErr)
+    }
+
+    a := &viewPairA{}
+    b := &viewPairB{other: a}
+    a.other = b
+
+    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*viewPairA, error) { return a, nil })
+    serviceContainer.MustRegister("pair.b", func(_ containercontract.Resolver) (*viewPairB, error) { return b, nil })
+    serviceContainer.MustRegister("pair.alone", func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "alone"}, nil })
+
+    container.MustFromResolver[*viewPairA](serviceContainer, "pair.a")
+    container.MustFromResolver[*viewPairB](serviceContainer, "pair.b")
+    container.MustFromResolver[*teardownViewStorage](serviceContainer, "pair.alone")
+
+    rendered, runErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=table", "--table-width=400"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    rows := debugTableBlockRow(rendered, "TEARDOWN (DEPENDENCY WAVES)")
+
+    groupOf := make(map[string]string, len(rows))
+    for _, row := range rows {
+        if 6 != len(row) {
+            t.Fatalf("expected six cells per teardown row, got %v", row)
+        }
+
+        groupOf[row[1]] = row[5]
+    }
+
+    if "" == groupOf["service:pair.a"] || groupOf["service:pair.a"] != groupOf["service:pair.b"] {
+        t.Fatalf("expected the pair to share a group figure, got %v", groupOf)
+    }
+
+    if "" != groupOf["service:pair.alone"] {
+        t.Fatalf("expected the service in no group to print an empty group cell, got %v", groupOf)
+    }
+
+    renderedJson, jsonErr := runDebugCommand(
+        &ContainerCommand{},
+        newTestRuntime(serviceContainer),
+        []string{"--format=json"},
+    )
+    if nil != jsonErr {
+        t.Fatalf("expected no error, got %v", jsonErr)
+    }
+
+    if false == strings.Contains(renderedJson, `"group":1`) || false == strings.Contains(renderedJson, `"group":0`) {
+        t.Fatalf("expected the json document to carry the group figure beside each built service, got %q", renderedJson)
+    }
+}
