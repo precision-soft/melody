@@ -946,12 +946,17 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
         t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
     }
 
-    /* the floor is on the remainder, not on the halves: a remainder between one and two milliseconds keeps its graces, each under a millisecond — applied to the halves the floor doubled the threshold, and a save of half a millisecond that was finishing inside such a remainder was answered "budget already spent" */
-    narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1500*time.Microsecond)
+    /* a remainder between the floor and twice the floor keeps its DRAIN half — a save of half a millisecond that was finishing inside such a remainder was answered "budget already spent" when the floor was asked of the halves — and gives up its CANCELLATION half, which under a millisecond measures no reaction: given as a grace, a delegate that honoured its cancellation seven hundred microseconds later was reported to have ignored it, three hundred closes out of three hundred */
+    /* nineteen hundred microseconds, not fifteen: the remainder is re-read inside closeGracesWithin, and a scheduling stall of half a millisecond between the two reads — measured four times in twenty thousand, worst three milliseconds — took a remainder of fifteen hundred below the floor and read the halves as none */
+    narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1900*time.Microsecond)
     defer cancelNarrow()
 
     drainGrace, cancellationGrace = storage.closeGracesWithin(narrowContext)
-    if 0 >= drainGrace || 0 >= cancellationGrace {
-        t.Fatalf("expected a remainder above the floor but under twice it to keep its graces, got %v and %v", drainGrace, cancellationGrace)
+    if 0 >= drainGrace || asyncStorageCloseGraceFloor <= drainGrace {
+        t.Fatalf("expected a remainder above the floor but under twice it to keep a drain half under the floor, got %v", drainGrace)
+    }
+
+    if 0 != cancellationGrace {
+        t.Fatalf("expected a remainder above the floor but under twice it to give up the cancellation half, got %v", cancellationGrace)
     }
 }

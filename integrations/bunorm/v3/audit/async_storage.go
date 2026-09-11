@@ -157,17 +157,21 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
 
     remaining := time.Until(deadline)
 
-    /* a remainder too short for a delegate to react in is no grace: the answer "the save ignored its cancellation" is a measurement only where something waited long enough to see a reaction, and a remainder of a few microseconds — the ordinary leftover once an earlier component has spent the budget — gave that verdict over a delegate that honoured its cancellation in 289 closes out of 300. The floor is on the REMAINDER, not on the halves it is split into: applied to a half it doubled the threshold, and a remainder of two milliseconds less a hair — room enough for a save of half a millisecond to finish — was answered "budget already spent" over a save that then finished in the dark */
+    /* a remainder too short for a delegate to react in is no grace: the answer "the save ignored its cancellation" is a measurement only where something waited long enough to see a reaction, and a remainder of a few microseconds — the ordinary leftover once an earlier component has spent the budget — gave that verdict over a delegate that honoured its cancellation in 289 closes out of 300. Below the floor both stretches are none. Above it the two halves are not the same kind of wait, and the floor is asked of each for what it measures: the drain half is a chance for the save in hand to finish, which half a millisecond is — a remainder of two milliseconds less a hair, read against a floor on the halves, was answered "budget already spent" over a save that then finished in the dark — while the cancellation half is a measurement of the delegate's REACTION, which half a millisecond is not: given as a grace, a delegate that honoured its cancellation seven hundred microseconds later was reported to have ignored it, three hundred closes out of three hundred. So a remainder between the floor and twice the floor keeps its drain half and gives up the cancellation half, and the close then says what it can say without waiting for a reaction it had no room to see */
     if asyncStorageCloseGraceFloor > remaining {
         return 0, 0
     }
 
     grace := min(remaining/2, asyncStorageCloseGrace)
 
+    if asyncStorageCloseGraceFloor > grace {
+        return grace, 0
+    }
+
     return grace, grace
 }
 
-/* asyncStorageCloseGraceFloor is the shortest remainder of a deadline that a grace is measured against: below it both stretches are read as none, and the close answers what it can say without waiting. */
+/* asyncStorageCloseGraceFloor is the shortest stretch that is a measurement of a delegate's reaction, and the shortest remainder of a deadline that is given any grace at all: below it both stretches are read as none, and the close answers what it can say without waiting. */
 const asyncStorageCloseGraceFloor = time.Millisecond
 
 /* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */

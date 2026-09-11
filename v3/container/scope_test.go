@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "runtime"
@@ -2046,5 +2047,147 @@ func TestScope_GetByTypeClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.
 
     if false == errors.Is(getByTypeErr, ErrScopeClosed) {
         t.Fatalf("expected the refusal to classify as ErrScopeClosed, got %v", getByTypeErr)
+    }
+}
+
+/* scopeContextDoorService carries both close doors and records which one the scope took, and what the context handed through the preferred one said — the two facts that tell the container's preference from the plain Close the scope used to reach. */
+type scopeContextDoorService struct {
+    closeCalls            int
+    closeWithContextCalls int
+    contextErr            error
+}
+
+func (instance *scopeContextDoorService) Close() error {
+    instance.closeCalls = instance.closeCalls + 1
+
+    return nil
+}
+
+func (instance *scopeContextDoorService) CloseWithContext(closeContext context.Context) error {
+    instance.closeWithContextCalls = instance.closeWithContextCalls + 1
+    instance.contextErr = closeContext.Err()
+
+    return nil
+}
+
+type scopeContextDoorPanickingService struct{}
+
+func (instance *scopeContextDoorPanickingService) Close() error {
+    return nil
+}
+
+func (instance *scopeContextDoorPanickingService) CloseWithContext(closeContext context.Context) error {
+    panic("the context door panicked")
+}
+
+func newScopeWithContextDoorService(t *testing.T) (containercontract.Scope, *scopeContextDoorService) {
+    t.Helper()
+
+    serviceContainer := NewContainer()
+    service := &scopeContextDoorService{}
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.contextDoor",
+        func(resolver containercontract.Resolver) (*scopeContextDoorService, error) {
+            return service, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.scoped.contextDoor"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    return scopeInstance, service
+}
+
+func TestScope_Close_PrefersTheContextDoorOfAScopedService(t *testing.T) {
+    scopeInstance, service := newScopeWithContextDoorService(t)
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != service.closeWithContextCalls || 0 != service.closeCalls {
+        t.Fatalf("expected the scope to close the service through CloseWithContext once and Close never, got CloseWithContext=%d Close=%d", service.closeWithContextCalls, service.closeCalls)
+    }
+
+    if nil != service.contextErr {
+        t.Fatalf("expected a plain Close to hand the service a context with no term, got %v", service.contextErr)
+    }
+}
+
+func TestScope_CloseWithContext_HandsTheCallersContextToTheService(t *testing.T) {
+    scopeInstance, service := newScopeWithContextDoorService(t)
+
+    contextCloser, isContextCloser := scopeInstance.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if false == isContextCloser {
+        t.Fatalf("expected the scope to carry CloseWithContext")
+    }
+
+    spentContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if closeErr := contextCloser.CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != service.closeWithContextCalls {
+        t.Fatalf("expected CloseWithContext to be taken once, got %d", service.closeWithContextCalls)
+    }
+
+    if false == errors.Is(service.contextErr, context.Canceled) {
+        t.Fatalf("expected the service to be handed the caller's spent context, got %v", service.contextErr)
+    }
+
+    if false == scopeInstance.(*scope).Closed() {
+        t.Fatalf("expected CloseWithContext to end the scope the way Close does")
+    }
+}
+
+func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.panickingContextDoor",
+        func(resolver containercontract.Resolver) (*scopeContextDoorPanickingService, error) {
+            return &scopeContextDoorPanickingService{}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.scoped.panickingContextDoor"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := scopeInstance.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the panicking context door to be reported as a failed close")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures || 1 != len(failures) {
+        t.Fatalf("expected exactly the one contained panic to be recorded, got %v", typedError.Context()["failures"])
+    }
+
+    for _, failureText := range failures {
+        if false == strings.Contains(failureText, "service close panicked") {
+            t.Fatalf("expected the record to name the contained panic, got %q", failureText)
+        }
     }
 }

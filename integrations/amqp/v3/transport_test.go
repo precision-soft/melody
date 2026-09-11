@@ -2439,14 +2439,14 @@ func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
         publishTimeout: 2 * time.Second,
     }
 
-    instance.publishMutex.Lock()
+    releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
 
     closed := make(chan error, 1)
     go func() { closed <- instance.Close() }()
 
     refuseOutcome(t, "close while a publish holds the mutex", closed, 200*time.Millisecond)
 
-    instance.publishMutex.Unlock()
+    releaseInstancePublish()
 
     awaitOutcome(t, "close after the publish released the mutex", closed, 2*time.Second)
 }
@@ -2459,8 +2459,8 @@ func TestClose_GivesUpOnThePublishHalfAfterThePublishTimeout(t *testing.T) {
         publishTimeout: 100 * time.Millisecond,
     }
 
-    instance.publishMutex.Lock()
-    defer instance.publishMutex.Unlock()
+    releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
+    defer releaseInstancePublish()
 
     closed := make(chan error, 1)
     go func() { closed <- instance.Close() }()
@@ -2550,7 +2550,7 @@ func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testin
     connection, _ := dialGated(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
 
-    transport.publishMutex.Lock()
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
 
     outcome := make(chan error, 1)
     go func() {
@@ -2559,7 +2559,7 @@ func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testin
 
     sendErr := awaitOutcome(t, "send queued behind the publish mutex", outcome, 3*time.Second)
 
-    transport.publishMutex.Unlock()
+    releaseTransportPublish()
 
     if nil == sendErr || false == strings.Contains(sendErr.Error(), "did not reach the socket within the publish timeout") {
         t.Fatalf("expected the refusal to name the queue rather than a blocked write, got: %v", sendErr)
@@ -2586,7 +2586,7 @@ func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
 
     before := publishedFrameCount(t, connection)
 
-    transport.publishMutex.Lock()
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
 
     outcome := make(chan error, 1)
     go func() {
@@ -2597,7 +2597,7 @@ func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
         t.Fatalf("expected the queued send to fail")
     }
 
-    transport.publishMutex.Unlock()
+    releaseTransportPublish()
 
     /* the goroutine now takes its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by ORDER rather than by waiting: once the goroutine has EXITED, a fence is sent and confirmed, and anything the goroutine wrote stands in the queue before the fence — so the queue grew by exactly the fence. A fixed sleep proved only that the write had not landed yet; the sibling test on the backplane measured the same assertion passing over a goroutine that did write once the sleep was zero. */
     awaitNoPublishGoroutine(t, "(*Transport).publishOnce.func", 3*time.Second)
@@ -2702,8 +2702,8 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     }
 
     /* the publish half is held with nothing on the socket, which is what a confirmation inside its own budget looks like to the join */
-    transport.publishMutex.Lock()
-    defer transport.publishMutex.Unlock()
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
+    defer releaseTransportPublish()
 
     closeErr := transport.Close()
 
@@ -2734,7 +2734,7 @@ func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t
     channelBefore := transport.publishChannel
     transport.mutex.Unlock()
 
-    transport.publishMutex.Lock()
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
 
     outcome := make(chan error, 1)
     var disposition publishDisposition
@@ -2756,7 +2756,7 @@ func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t
 
     awaitOutcome(t, "publishRecoverable on a turn timeout", recoverableOutcome, 3*time.Second)
 
-    transport.publishMutex.Unlock()
+    releaseTransportPublish()
 
     if nil == onceErr || false == errors.Is(onceErr, errPublishTimedOut) {
         t.Fatalf("expected the queued send to be refused with the publish-timeout sentinel, got: %v", onceErr)

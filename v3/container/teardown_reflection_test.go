@@ -391,29 +391,62 @@ func TestHeldPointerIdentities_FindsAServiceAtTheDepthLimitWhicheverFieldComesFi
     }
 }
 
-/* wideHolder nests two arrays at the per-level limit, which is more cells than the walk's whole budget: a service in the first cell is found and one in the last is not, which is the budget doing what the per-level limits cannot. */
+/* the depth limit is measured along the path: a service four links down the chain sits exactly at the limit and is found, five links down it is two past the limit and is not — there is no shorter path here to find it by */
+func TestHeldPointerIdentities_StopsAtTheDepthLimit(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}), heldIdentity) {
+        t.Fatalf("expected a service at the depth limit to be found")
+    }
+
+    if true == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}), heldIdentity) {
+        t.Fatalf("expected a service past the depth limit not to be found")
+    }
+}
+
+/* wideHolder nests two arrays at the per-level limit, which is more cells than the walk's whole budget: the budget is spent level by level, so a service in a cell of such a table is not reached whatever cell it sits in — the first included, where the depth-first walk reached the first cells and not the last — while a service declared BESIDE the table, at a shallower depth, is reached before the table costs anything, which is the shape the walk exists for; a table within the budget is walked to its last cell. */
 type wideHolder struct {
     cells [256][256]struct{ service *closeOrderServiceB }
 }
 
 func (instance *wideHolder) Close() error { return nil }
 
+type wideHolderWithPeer struct {
+    cells [256][256]struct{ service *closeOrderServiceB }
+    peer  *closeOrderServiceB
+}
+
+func (instance *wideHolderWithPeer) Close() error { return nil }
+
+type boundedHolder struct {
+    cells [64][256]struct{ service *closeOrderServiceB }
+}
+
+func (instance *boundedHolder) Close() error { return nil }
+
 func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
-
-    first := &wideHolder{}
-    first.cells[0][0].service = held
-
-    if false == holdsIdentity(heldPointerIdentities(first), heldIdentity) {
-        t.Fatalf("expected a service in the first cell to be found inside the budget")
-    }
 
     last := &wideHolder{}
     last.cells[255][255].service = held
 
     if true == holdsIdentity(heldPointerIdentities(last), heldIdentity) {
-        t.Fatalf("expected the walk to stop at its budget before the last cell")
+        t.Fatalf("expected the walk to stop at its budget before the last cell of a table wider than it")
+    }
+
+    beside := &wideHolderWithPeer{peer: held}
+
+    if false == holdsIdentity(heldPointerIdentities(beside), heldIdentity) {
+        t.Fatalf("expected a peer declared after a table wider than the budget to be found before the table is paid for")
+    }
+
+    bounded := &boundedHolder{}
+    bounded.cells[63][255].service = held
+
+    if false == holdsIdentity(heldPointerIdentities(bounded), heldIdentity) {
+        t.Fatalf("expected the last cell of a table within the budget to be reached")
     }
 }
 
@@ -1231,8 +1264,8 @@ func newCycleMemberShape(held *closeOrderServiceB) (*cycleMemberLink, *cycleMemb
     return &cycleMemberLink{next: &cycleMemberLink{head: head}}, tail
 }
 
-/* a member of a cycle whose only way forward is the way back to an ancestor that was CUT is not a subtree walked whole: recorded as complete on its own, it was refused entry from the shallower path that had room, and which field the root listed first decided again whether the held service was found. Its verdict waits on the root of its component. */
-func TestHeldPointerIdentities_ACycleMemberIsCutWithTheRootItReachesBackTo(t *testing.T) {
+/* a ring whose only way forward is the way back to a head cut at the depth limit: the held service behind the head is past the limit through the chain and inside it through the tail, and it is found whichever of the two the holder lists first — the depth-first walk memoised the ring with the verdict of the first path and refused the shorter one, and which field came first decided */
+func TestHeldPointerIdentities_FindsAHeldServiceBehindARingFromTheShortPathWhicheverFieldComesFirst(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
@@ -1249,7 +1282,7 @@ func TestHeldPointerIdentities_ACycleMemberIsCutWithTheRootItReachesBackTo(t *te
     }
 }
 
-/* cyclicHub is the fat hub with one pointer back into the chain that leads to it: a member of a cycle whose walk was WHOLE. Recorded cut for being on a cycle, it was walked again from the shorter path, and the second walk spent the budget before the collaborator declared after it. */
+/* cyclicHub is the fat hub with one pointer back into the chain that leads to it: reached through the chain and again from the holder directly, it is paid for once, and the collaborator declared after it is found — walked once per path that reached it, the second walk spent the budget before that collaborator */
 type cyclicHub struct {
     cells [64][256]struct{ left, right *closeOrderServiceB }
     back  *cyclicHubLink
@@ -1268,7 +1301,7 @@ type chainFirstCyclicHubHolder struct {
 
 func (instance *chainFirstCyclicHubHolder) Close() error { return nil }
 
-func TestHeldPointerIdentities_DoesNotWalkAWholeCycleMemberAgainFromAShallowerPath(t *testing.T) {
+func TestHeldPointerIdentities_AHubOnARingIsPaidForOnceAndTheCollaboratorAfterItIsFound(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
@@ -1279,6 +1312,50 @@ func TestHeldPointerIdentities_DoesNotWalkAWholeCycleMemberAgainFromAShallowerPa
 
     if false == holdsIdentity(heldPointerIdentities(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a cyclic hub walked whole once to be found")
+    }
+}
+
+/* crossEdgeShape: the deep path reaches the ring's root R at depth 8 and, under it, a chain whose collaborator sits past the depth limit; A reaches back to R, and B holds A through a plain forward edge after A's walk has returned. The short path enters B directly, with room to spare. */
+type crossEdgeNode struct {
+    next  *crossEdgeNode
+    cross *crossEdgeNode
+    back  *crossEdgeNode
+    held  *closeOrderServiceB
+}
+
+type crossEdgeHolder struct {
+    chain *crossEdgeNode
+    short *crossEdgeNode
+}
+
+func (instance *crossEdgeHolder) Close() error { return nil }
+
+func newCrossEdgeShape(held *closeOrderServiceB) (chain *crossEdgeNode, holderOfMember *crossEdgeNode) {
+    beyondTheLimit := &crossEdgeNode{held: held}
+    underTheRoot := &crossEdgeNode{next: beyondTheLimit}
+    root := &crossEdgeNode{next: underTheRoot}
+    member := &crossEdgeNode{back: root}
+    holderOfMember = &crossEdgeNode{cross: member}
+    root.cross = member
+    root.back = holderOfMember
+
+    chain = root
+    for link := 0; link < 3; link = link + 1 {
+        chain = &crossEdgeNode{next: chain}
+    }
+
+    return chain, holderOfMember
+}
+
+/* a holder of a ring member through a plain forward edge, with the held service past the limit through the chain and inside it through the holder: found — the depth-first walk recorded the holder as whole while the ring was being cut, refused it from the short path that had room, and lost the service */
+func TestHeldPointerIdentities_FindsAHeldServiceBehindARingHeldThroughAForwardEdgeFromTheShortPath(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    chain, holderOfMember := newCrossEdgeShape(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&crossEdgeHolder{chain: chain, short: holderOfMember}), heldIdentity) {
+        t.Fatalf("expected the collaborator found through the short path into the holder of a cycle member")
     }
 }
 

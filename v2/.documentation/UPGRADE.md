@@ -90,6 +90,14 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 **Remedy.** Send the canonical path: the folded form the `..`/`.`/`//` resolves to is the resource the client meant. Browsers already do this; a hand-written client or a proxy that forwards a raw target should fold the path itself (Go's `net/http.ServeMux` does the same by redirecting). There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, so it is a defect, not a preference.
 
+### HTTP: a request path padded with whitespace is refused with 400
+
+**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — before it is routed or authorized, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
+
+**Symptom.** A client that sends a path ending in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler.
+
+**Remedy.** Send the path without the padding; nothing legitimate names a resource by a trailing space. There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, which is the defect the refusal closes.
+
 ### Application: a shutdown that leaves request scopes open exits non-zero
 
 **What changed.** After `Shutdown` returns, melody waits — under the same `MELODY_HTTP_SHUTDOWN_TIMEOUT` budget — for every request scope the http kernel opened to close. A drain that does not finish is recorded as `http shutdown left request scopes open`, carrying the count, and `Run` ends non-zero.

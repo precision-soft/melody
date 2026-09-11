@@ -222,6 +222,20 @@ func (instance *gatedDialer) Latest() *gatedConn {
     return instance.latest
 }
 
+/* holdPublishMutex takes a publisher's mutex on the test's behalf and hands back the one release the test calls where its assertions need the goroutine behind the mutex to take its turn AFTER them — a defer would move that release past the assertions. What the cleanup adds is the failing path: a test that fails while holding the mutex exits through Goexit before its release, and the publish goroutine it queued behind the mutex is then parked for good, so the next test that waits for no publish goroutine to be alive fails too, three seconds later, for a failure that was not its own. */
+func holdPublishMutex(t *testing.T, publishMutex *sync.Mutex) func() {
+    t.Helper()
+
+    publishMutex.Lock()
+
+    var release sync.Once
+    releaseOnce := func() { release.Do(publishMutex.Unlock) }
+
+    t.Cleanup(releaseOnce)
+
+    return releaseOnce
+}
+
 /* awaitNoPublishGoroutine returns once no goroutine carrying the named frame is alive — the write goroutine of publishOnce, on either publisher of this package. It is the moment a publish that was told to give up has either returned without writing or finished the write it should not have made, which are the two outcomes a test of the abandoned turn tells apart by what reaches the broker afterwards; the goroutine's exit is the one event both produce, and the runtime's dump is the only door that publishes it. */
 func awaitNoPublishGoroutine(t *testing.T, frame string, within time.Duration) {
     t.Helper()
@@ -230,7 +244,14 @@ func awaitNoPublishGoroutine(t *testing.T, frame string, within time.Duration) {
     stack := make([]byte, 1<<20)
 
     for {
-        dumped := stack[:runtime.Stack(stack, true)]
+        /* a dump that fills the buffer is a dump cut short, and the frame looked for may be past the cut — read as "no such goroutine", that is the verdict the negative wants (an absence a truncated dump cannot vouch for), so the buffer grows until the whole dump fits */
+        written := runtime.Stack(stack, true)
+        for written == len(stack) {
+            stack = make([]byte, 2*len(stack))
+            written = runtime.Stack(stack, true)
+        }
+
+        dumped := stack[:written]
 
         if false == strings.Contains(string(dumped), frame) {
             return

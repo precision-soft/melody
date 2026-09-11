@@ -239,10 +239,17 @@ func splitNormalizedPath(value string) []string {
 
 /* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer reads the same. The router matches the path as sent — splitNormalizedPath drops trailing slashes but folds no dot or empty segment — while the access-control matcher folds "..", "." and "//" through path.Clean before it selects a rule, and the firewall matcher reads the raw path with neither fold. A path that folds to a different spelling therefore routes to one handler and is authorized against another rule, so a request that reaches a protected handler under its sent spelling can be granted the attributes of the folded spelling's rule — a different, possibly public one, or none at all. The static file server already refuses a non-canonical path for exactly this reason; refusing at the kernel keeps the router, the firewall matchers and the access control reading one spelling.
 
+   A path that leading or trailing whitespace would be trimmed from — "/public ", the decoded form of "/public%20" or of a no-break space — is not canonical either: the router keeps the whitespace and the access-control matcher trims it, so the request routed under the sent spelling was authorized under the trimmed one's rule.
+
    A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route "/admin", so it is normalized away here before the comparison rather than refused. A target that does not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and is left to the router to answer. */
 func requestPathIsCanonical(path string) bool {
     if false == strings.HasPrefix(path, "/") {
         return true
+    }
+
+    /* leading or trailing whitespace is the third fold the consumers do not read alike: the router keeps it, so "/public " is a segment of its own and reaches the catch-all, while the access-control matcher trims it and answers with the rule of "/public" — a public one, granting the protected handler to an anonymous request; measured, on the two frozen majors as released. The trim is not removed from the matcher, because a matcher without it leaves the whitespace spelling with no rule at all, which is a grant too; the spelling is refused here, where every consumer is still reading one string */
+    if strings.TrimSpace(path) != path {
+        return false
     }
 
     trimmedPath := path

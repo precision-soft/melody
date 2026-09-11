@@ -31,33 +31,37 @@ type heldPointer struct {
 
    A map, a func and a chan are neither counted nor entered, at any depth: iterating a map another goroutine writes is `fatal error: concurrent map iteration and map write`, and the other two name nothing a teardown can match. A service that reaches its collaborator only through one of them keeps the order it had.
 
-   A pointer met a second time is entered again only from a SHALLOWER path, because the depth limit is measured along the path: recorded as seen the first time whatever the depth, a pointer first reached at the limit was never entered and then refused entry from a path that had room, so which field of a struct came first decided whether a held service was found. Measured, a collaborator behind a chain of five links was found or lost by the order of two fields.
+   The walk is BREADTH-first, by depth: every pointer is entered once, at the shallowest depth any path reaches it, so the depth limit — measured along the path — is asked of each pointer exactly where it stands best, and nothing is ever entered twice. The depth-first walk this replaces memoised a pointer with the verdict of the first path that reached it, and a pointer first reached at the limit was refused entry from a later path that had room, so which field of a struct came first decided whether a held service was found — measured, a collaborator behind a chain of five links was found or lost by the order of two fields; the repair of that, a re-entry from any shallower path, walked a hub of sixteen thousand cells once per path that reached it and spent the budget before the collaborator declared after it; and the repair of THAT, a verdict for cycle members that waited on their root, left the holder of a member met through a forward edge, the member met from the root's own next field, and the back edge landing one past the limit each recorded as whole while the component was being cut — three residues of one class, each found by the review that followed the repair before it. Entered once at its minimal depth, a pointer has no second path to be refused from and no second walk to pay for; a cycle is a pointer already seen, and nothing about it needs a verdict.
 
    Measured, on the example application of this major, this walk finds ZERO edges the resolutions had not already recorded: its services are genuinely disjoint objects, coupled at teardown by behaviour rather than by the object graph. It is kept because the shape it exists for — a provider returning a struct that holds a service registered elsewhere — is an ordinary one to write, and because it costs about a hundred reflect operations once per process. The figure is written here so that nobody reads its presence as coverage. */
 func heldPointerIdentities(root any) []heldPointer {
     found := make([]heldPointer, 0)
-    entered := make(map[pointerIdentity]walkEntry)
+    seen := make(map[pointerIdentity]struct{})
     visited := 0
 
-    /* the pointers whose walk is on the stack, innermost last, and for each the pointers whose verdict waits on it: a pointer met again while its walk is in progress is a cycle, and a cycle's members have ONE verdict — the root's, known only when the root's walk returns. Recorded complete on their own — a member's only way forward being the way back to an ancestor that was then cut — they were refused entry from the shallower path that had room, and which field a struct listed first decided again whether a held service was found; recorded cut instead, every cyclic object was walked again from every shorter path, and a hub of sixteen thousand cells with one pointer back into its chain spent the budget on its second walk and lost the collaborator declared after it. So a member's verdict is provisional until the root's is known — index and lowlink, as a strongly connected component is found — and it becomes cut only where the component was. */
-    stack := make([]pointerIdentity, 0, teardownWalkDepthLimit+1)
-    awaiting := make(map[pointerIdentity][]pointerIdentity)
+    type walkItem struct {
+        value reflect.Value
+        depth int
+    }
 
-    /* walk answers whether it saw the WHOLE of what it was given: false where the depth limit or the node budget cut a subtree short, true otherwise — including the interfaces and slices it declines to enter, which are a decision and not a cut, so a second path to the same object gains nothing by entering again */
-    var walk func(value reflect.Value, depth int) bool
+    queue := []walkItem{{value: reflect.ValueOf(root), depth: 0}}
 
-    walk = func(value reflect.Value, depth int) bool {
+    for 0 < len(queue) {
+        item := queue[0]
+        queue = queue[1:]
+
+        value := item.value
         if false == value.IsValid() {
-            return true
+            continue
         }
 
-        if depth > teardownWalkDepthLimit {
-            return false
+        if item.depth > teardownWalkDepthLimit {
+            continue
         }
 
         visited = visited + 1
         if visited > teardownWalkNodeBudget {
-            return false
+            break
         }
 
         switch value.Kind() {
@@ -65,96 +69,36 @@ func heldPointerIdentities(root any) []heldPointer {
             /* the pointer word is read ONCE, here: in foreign memory a concurrent writer may replace it between two reads, and an identity taken from one read with a record taken from another names the old target while keeping the new one alive — measured, in eighty-eight thousand of two hundred thousand walks over a field swapped in a loop */
             target := value.Elem()
             if false == target.IsValid() {
-                return true
+                continue
             }
 
             identity := pointerIdentity{pointer: target.UnsafeAddr(), valueType: value.Type()}
 
-            previous, already := entered[identity]
-            if true == already {
-                /* met again while its own walk is still on the stack, the pointer is a cycle, not a cut: the walk in progress sees everything this path would, and the pointer whose walk this path belongs to — the innermost on the stack — now reaches back to it, which its verdict must wait for */
-                if true == previous.inProgress {
-                    innermost := stack[len(stack)-1]
-                    innermostEntry := entered[innermost]
-
-                    if previous.index < innermostEntry.lowlink {
-                        innermostEntry.lowlink = previous.index
-                        entered[innermost] = innermostEntry
-                    }
-
-                    return true
-                }
-
-                if previous.depth <= depth || false == previous.cut {
-                    return false == previous.cut
-                }
+            /* a pointer already seen was seen at this depth or a shallower one — the queue is ordered by depth — so this path has nothing to add below it, and a cycle is nothing more than that */
+            if _, already := seen[identity]; true == already {
+                continue
             }
 
-            if false == already && false == isZeroSizePointerIdentity(identity) {
+            seen[identity] = struct{}{}
+
+            if false == isZeroSizePointerIdentity(identity) {
                 found = append(found, heldPointer{identity: identity, keepAlive: target})
             }
 
-            index := len(stack)
-            entered[identity] = walkEntry{depth: depth, inProgress: true, index: index, lowlink: index}
-            stack = append(stack, identity)
-
-            complete := walk(target, depth+1)
-
-            stack = stack[:index]
-            entry := entered[identity]
-            entry.inProgress = false
-            entry.cut = false == complete
-
-            if entry.lowlink < index {
-                /* a member of a cycle whose root is still on the stack: its verdict waits on the root, and so does everything that waited on it; the pointer above it inherits the reach back */
-                root := stack[entry.lowlink]
-                awaiting[root] = append(awaiting[root], identity)
-                awaiting[root] = append(awaiting[root], awaiting[identity]...)
-                delete(awaiting, identity)
-
-                parent := stack[len(stack)-1]
-                parentEntry := entered[parent]
-
-                if entry.lowlink < parentEntry.lowlink {
-                    parentEntry.lowlink = entry.lowlink
-                    entered[parent] = parentEntry
-                }
-            } else if true == entry.cut {
-                /* the root of a cut component: every member walked whole on its own was cut with it */
-                for _, member := range awaiting[identity] {
-                    memberEntry := entered[member]
-                    memberEntry.cut = true
-                    entered[member] = memberEntry
-                }
-
-                delete(awaiting, identity)
-            } else {
-                delete(awaiting, identity)
-            }
-
-            entered[identity] = entry
-
-            return complete
+            queue = append(queue, walkItem{value: target, depth: item.depth + 1})
         case reflect.Struct:
             fieldCount := value.NumField()
             if fieldCount > teardownWalkElementLimit {
                 fieldCount = teardownWalkElementLimit
             }
 
-            complete := true
-
             for fieldIndex := 0; fieldIndex < fieldCount; fieldIndex = fieldIndex + 1 {
-                if false == walk(value.Field(fieldIndex), depth+1) {
-                    complete = false
-                }
+                queue = append(queue, walkItem{value: value.Field(fieldIndex), depth: item.depth + 1})
             }
-
-            return complete
         case reflect.Array:
-
             /* an array of scalars is one node: its elements cannot name anything, and counting each of them against the budget is how a lookup table of sixty-four kibibytes spent the whole walk before the pointer field declared after it — measured, the collaborator found or lost by whether it came before or after the table */
             if false == typeCanHoldIdentity(value.Type().Elem()) {
-                return true
+                continue
             }
 
             elementCount := value.Len()
@@ -162,33 +106,13 @@ func heldPointerIdentities(root any) []heldPointer {
                 elementCount = teardownWalkElementLimit
             }
 
-            complete := true
-
             for elementIndex := 0; elementIndex < elementCount; elementIndex = elementIndex + 1 {
-                if false == walk(value.Index(elementIndex), depth+1) {
-                    complete = false
-                }
+                queue = append(queue, walkItem{value: value.Index(elementIndex), depth: item.depth + 1})
             }
-
-            return complete
         }
-
-        return true
     }
 
-    walk(reflect.ValueOf(root), 0)
-
     return found
-}
-
-/* walkEntry is what the walk remembers of a pointer it entered: the depth of the path it took, whether that path saw the whole of the target, and whether the walk of the target is still in progress — in which case a second meeting is a cycle rather than a second path. A second, shallower path enters the target again only when the first was cut: the depth limit is measured along the path, so a subtree cut at one depth may be whole from a shallower one — but a subtree that WAS whole gains nothing from a second walk, and paid for one anyway. Measured, a chain of links all pointing at one large object walked that object once per link that reached it from a shallower path, and the budget went before the root's last field. */
-type walkEntry struct {
-    depth      int
-    cut        bool
-    inProgress bool
-    /* index is the pointer's position on the walk's stack while its walk is in progress, and lowlink the lowest position it reaches back to through a cycle: equal, the pointer is the root of its component and its verdict is final when its walk returns; lower, the verdict waits on the root */
-    index   int
-    lowlink int
 }
 
 /* typeCanHoldIdentity answers whether the walk could find a pointer identity anywhere below a value of this type — which is a question about the TYPE, so it is asked once per type and remembered: a pointer may name one; a struct may through any field, an array through its element; everything else cannot, because the walk reads none of it — an interface or a slice may well name one, but the walk declines to enter either, so a table of them is one node exactly as a table of scalars is, and counting each cell of a `[256][256]any` spent the whole budget before the pointer field declared after it. It is what lets an array of what the walk does not read count as one node instead of one per element. */

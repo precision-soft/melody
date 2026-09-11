@@ -609,7 +609,7 @@ func (instance *container) register(
         }
     }
 
-    /* the declared edges are written last, once the registration cannot fail anymore: the graph is never pruned, so an edge left behind by a refused registration would outlive it for the life of the process. They go into the very graph a resolution writes into, in the same key space, so the teardown reads one graph and cannot order two ways. */
+    /* the declared edges are written last, once the registration cannot fail anymore: the graph is never pruned, so an edge left behind by a refused registration would outlive it for the life of the process. A declaration keyed by a NAME goes into the very graph a resolution writes into, in the same key space, so the teardown reads one graph and cannot order two ways; one keyed by a type is kept beside the graph and expanded onto the name that type stands for when each plan is built. */
     for _, dependencyName := range registerOption.TeardownDependencyNames {
         instance.recordDeclaredTeardownEdgeLocked(serviceName, containerNameNodeKey(dependencyName), dependencyName)
     }

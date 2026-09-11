@@ -2808,6 +2808,39 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     }
 }
 
+/* the whitespace spelling routes to the catch-all under "/admin" while the access-control matcher trims it and answers with the rule of "/admin"; refused at the kernel, neither is asked */
+func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T) {
+    for _, rawPath := range []string{"/admin%20", "/admin%09", "/admin%C2%A0"} {
+        handlerRan := false
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/*path...",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                handlerRan = true
+                return TextResponse(nethttp.StatusOK, "admin"), nil
+            },
+        )
+
+        serviceContainer := newHttpTestContainer()
+        handler := NewKernel(router).ServeHttp(serviceContainer)
+
+        request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
+        recorder := httptest.NewRecorder()
+
+        handler.ServeHTTP(recorder, request)
+
+        if nethttp.StatusBadRequest != recorder.Code {
+            t.Fatalf("expected %q to be refused with %d, got %d", rawPath, nethttp.StatusBadRequest, recorder.Code)
+        }
+
+        if true == handlerRan {
+            t.Fatalf("the handler ran for %q, which should have been refused before routing to it", rawPath)
+        }
+    }
+}
+
 func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     handlerRan := false
 

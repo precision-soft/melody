@@ -757,14 +757,14 @@ func TestServerSentEventBackplane_CloseClosesTheChannelsWhenNoWriteIsInFlight(t 
     backplane.mutex.Unlock()
 
     /* the mutex is held with nothing at all on the socket, which is what a queue of broadcasts produces */
-    backplane.publishMutex.Lock()
+    releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
 
     closeOutcome := make(chan error, 1)
     go func() { closeOutcome <- backplane.Close() }()
 
     closeErr := awaitOutcome(t, "close with the publish half merely busy", closeOutcome, 5*time.Second)
 
-    backplane.publishMutex.Unlock()
+    releaseBackplanePublish()
 
     if true == errorChainContains(closeErr, "left a publish write blocked on a caller-owned connection") {
         t.Fatalf("teardown named a blocked write over a socket nothing was ever written to: %v", closeErr)
@@ -801,14 +801,14 @@ func TestServerSentEventBackplane_ABroadcastQueuedBehindAnotherIsNotReportedAsAW
     publishChannelBefore := backplane.publishChannel
     backplane.mutex.Unlock()
 
-    backplane.publishMutex.Lock()
+    releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
 
     publishOutcome := make(chan error, 1)
     go func() { publishOutcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "queued"}) }()
 
     publishErr := awaitOutcome(t, "broadcast queued behind the publish mutex", publishOutcome, 3*time.Second)
 
-    backplane.publishMutex.Unlock()
+    releaseBackplanePublish()
 
     if nil == publishErr || false == errorChainContains(publishErr, "did not reach the socket within the call timeout") {
         t.Fatalf("expected the refusal to name the queue rather than a blocked write, got: %v", publishErr)
@@ -849,7 +849,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
 
     deliveries := backplaneWatchQueueDeliveries(t, connection, "melody.sse.test.wedge")
 
-    backplane.publishMutex.Lock()
+    releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
 
     publishOutcome := make(chan error, 1)
     go func() { publishOutcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "abandoned"}) }()
@@ -859,7 +859,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
     }
 
     /* the goroutine now gets its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by ORDER rather than by waiting: once the goroutine has EXITED, a fence broadcast is published, and anything the goroutine wrote stands on the same channel before the fence, which the queue watching the exchange delivers in wire order. Its exit is the one event both the correct code and the defect produce, and the runtime's goroutine dump is the only door that publishes it. A fixed sleep proved only that the write had not landed yet — measured, the same assertion passed over a goroutine that did write once the sleep was zero — and a fence published after a mutex handshake did no better: the woken goroutine is not the one running, so the test kept re-taking the mutex ahead of it and the fence went out first, thirty runs out of thirty */
-    backplane.publishMutex.Unlock()
+    releaseBackplanePublish()
 
     awaitNoPublishGoroutine(t, "(*ServerSentEventBackplane).publishOnce.func", 3*time.Second)
 
@@ -867,9 +867,16 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
         t.Fatalf("fence publish: %v", publishErr)
     }
 
+    /* one term for the whole wait, and the closed channel named: a delivery channel the library closes answers a zero delivery at once and forever, and a timer re-armed per iteration never fired over it — measured, a quarter of a million turns in two hundred milliseconds */
+    fenceTerm := time.After(3 * time.Second)
+
     for {
         select {
-        case delivery := <-deliveries:
+        case delivery, open := <-deliveries:
+            if false == open {
+                t.Fatalf("the watching queue's delivery channel closed before the fence arrived")
+            }
+
             body := string(delivery.Body)
 
             if true == strings.Contains(body, `"abandoned"`) {
@@ -879,7 +886,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
             if true == strings.Contains(body, `"fence"`) {
                 return
             }
-        case <-time.After(3 * time.Second):
+        case <-fenceTerm:
             t.Fatalf("the fence published after the abandoned broadcast never reached the watching queue")
         }
     }
@@ -973,14 +980,14 @@ func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNot
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
-    backplane.publishMutex.Lock()
+    releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
 
     closeOutcome := make(chan error, 1)
     go func() { closeOutcome <- backplane.Close() }()
 
     closeErr := awaitOutcome(t, "close of an owned connection with the publish half busy", closeOutcome, 5*time.Second)
 
-    backplane.publishMutex.Unlock()
+    releaseBackplanePublish()
 
     if nil != closeErr {
         t.Fatalf("the close handshake was cut off over a socket nothing was written to: %v", closeErr)

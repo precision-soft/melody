@@ -1717,6 +1717,9 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/admin//",
         "/.well-known/acme-challenge/token",
         "/assets/app.css",
+        /* whitespace INSIDE the path is a spelling the router and the matcher read alike — neither trims it — so it is not refused */
+        "/public /",
+        "/a b/c",
     }
 
     for _, canonicalPath := range canonicalPaths {
@@ -1725,7 +1728,7 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         }
     }
 
-    /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request */
+    /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request. The whitespace spellings are the decoded forms of "/public%20", "/public%09" and "/public%C2%A0": the router keeps the whitespace and the matcher trims it */
     foldedPaths := []string{
         "/admin/x/../../login",
         "/admin/..",
@@ -1736,6 +1739,10 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/./login",
         "/admin/.",
         "/../etc/passwd",
+        "/public ",
+        "/public\t",
+        "/public\u00a0",
+        "/ ",
     }
 
     for _, foldedPath := range foldedPaths {

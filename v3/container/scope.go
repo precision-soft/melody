@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "fmt"
     "reflect"
     "sort"
@@ -536,8 +537,15 @@ func (instance *scope) Closed() bool {
     return nil == instance.container.Load()
 }
 
-/* Close ends the request the scope stands for and closes the services the scope itself built. Only those: an override was installed from outside and belongs to whoever installed it, and a singleton reached through the scope belongs to the root container, which closes it when the process ends — closing either here would tear down, once per request, something the next request still needs. What the scope built is exactly what a service which read one of those entries turned into, so it holds that request and has nobody else to close it. */
+/* Close ends the request the scope stands for and closes the services the scope itself built. Only those: an override was installed from outside and belongs to whoever installed it, and a singleton reached through the scope belongs to the root container, which closes it when the process ends — closing either here would tear down, once per request, something the next request still needs. What the scope built is exactly what a service which read one of those entries turned into, so it holds that request and has nobody else to close it.
+
+   It is CloseWithContext under no term: the callers the framework ships — the http kernel on the way out of a handler, the cli after a command — declare none, and a service that can take a deadline is told there is none, the way the container's own Close tells its services. */
 func (instance *scope) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* CloseWithContext is Close under a deadline the caller declares, handed to every service the scope built that can observe one — a scoped service carrying CloseWithContext(context.Context) error is closed through that door, as the container closes its own, where the scope used to reach only the plain Close of such a service and the deadline of the teardown never arrived at a request's services. It is declared on the concrete scope rather than on the Scope contract for the reason the container's is: a method added to the contract is a method every scope carried by an application would have to grow, and the caller that has a budget reaches this value through a type assertion, the way Closed is asked. Which caller owns the budget of a request's teardown — the request, the kernel, the shutdown — is not decided by this door; the callers the framework ships close with no term. */
+func (instance *scope) CloseWithContext(closeContext context.Context) error {
     /* the dependency graph lives on the scope but is guarded by the CONTAINER mutex, because the resolver writes it with that lock held and never takes the scope's for it. The snapshot is therefore taken container first, scope second — the one order the two locks are ever taken in. A creation racing this Close either has its edge in the snapshot or does not, and a missing edge degrades to the creation order, latest first; that is the same window the created instances themselves already have. */
     dependencyGraph := map[string]map[string]struct{}(nil)
 
@@ -576,13 +584,14 @@ func (instance *scope) Close() error {
     /* the lock is released before anything is closed, and the scope is already marked closed above: a Close() that reaches back into the scope then reads a closed scope instead of deadlocking on a mutex its own caller holds, which is the ordering the container's own teardown uses */
     instance.mutex.Unlock()
 
-    return closeCreatedScopeInstances(createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
+    return closeCreatedScopeInstances(closeContext, createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
 }
 
-/* closeCreatedScopeInstances closes each service the scope built, once. One instance filed under its name and its type is first collapsed onto the name node along the alias links recorded at filing time, with the edges of both nodes merged onto the survivor, so a dependency edge recorded against either alias constrains the one close that happens; whatever identity the links do not cover is still caught by the pointer/value marks at close time. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
+/* closeCreatedScopeInstances closes each service the scope built, once, each through the door the container prefers — CloseWithContext where the value carries it, under the caller's context, and Close otherwise. One instance filed under its name and its type is first collapsed onto the name node along the alias links recorded at filing time, with the edges of both nodes merged onto the survivor, so a dependency edge recorded against either alias constrains the one close that happens; whatever identity the links do not cover is still caught by the pointer/value marks at close time. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
 
    The order is the scope's own dependency graph, dependents before their dependencies: a scoped repository holding a scoped transaction is the ordinary case now that a scope owns registrations, and closing the two by name would be a coin flip. Nodes the graph says nothing about, and nodes left over by a cycle, fall back to creation order, latest first — the same tie-break the container's teardown applies, because the two share one walk. The evicted instances close after the ordered walk, under the same marks. */
 func closeCreatedScopeInstances(
+    closeContext context.Context,
     createdInstances map[string]any,
     createdTypeInstances map[reflect.Type]any,
     createdAliasNodeKeys map[string]string,
@@ -712,7 +721,7 @@ func closeCreatedScopeInstances(
             return
         }
 
-        closeErr := closeServiceValue(closeable)
+        closeErr := closeServiceValueWithin(closeContext, value, closeable)
         if nil != closeErr {
             failures[nodeKey] = errorText(closeErr)
         }

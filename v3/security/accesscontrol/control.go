@@ -127,7 +127,7 @@ func (instance Rule) claimsPath(normalizedPath string) bool {
 
 Folding is NOT sufficient on its own, and the http kernel does not rely on it: because the router matches the path as sent and does not fold "..", a request routed to a protected handler under a folded spelling would be authorized here against the folded spelling's rule — a different, possibly more permissive one, or none. The kernel closes that by refusing a non-canonical request path before it is routed or authorized (http.requestPathIsCanonical), so every path this sees is already the one spelling. The fold remains as the matcher's own defence for a caller that consults a Control without that guard.
 
-The surrounding whitespace is trimmed before the fold rather than left alone: the trim makes the matcher answer for one spelling more than the router accepts, which refuses more than intended and never less. */
+The surrounding whitespace is trimmed before the fold, and the trim is NOT a defence: it makes the matcher answer for the trimmed spelling where the router serves the sent one, and "/public " — the decoded "/public%20" — was answered with the public rule of "/public" while the router carried it to the catch-all, protected, handler: an anonymous request served. The kernel refuses a path that trimming would change before it is routed or authorized (http.requestPathIsCanonical), which is the whole of what closes that; the trim stays because a matcher without it leaves the whitespace spelling with no rule, which is a grant as well, and a caller consulting the matcher without the kernel's guard is not defended by either. */
 func CanonicalizePath(requestPath string) string {
     canonicalPath := strings.TrimSpace(requestPath)
     if "" == canonicalPath {

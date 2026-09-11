@@ -169,3 +169,54 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
         t.Fatal("expected the refused arming to leave the released records released")
     }
 }
+
+/* the remainder the drain leaves holds the ring and the pure dependencies of its members alike; the flag names the ring: a resolves b, b declares a, and b resolves c — c is closed with the remainder and is on no ring */
+func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "cycle.c",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "c"}, nil },
+        WithoutTypeRegistration(),
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.b",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            if _, resolveErr := resolver.Get("cycle.c"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &poolDeclarerService{label: "b"}, nil
+        },
+        WithoutTypeRegistration(),
+        WithTeardownDependency("cycle.a"),
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.a",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            if _, resolveErr := resolver.Get("cycle.b"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &poolDeclarerService{label: "a"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+
+    MustFromResolver[*poolDeclarerService](serviceContainer, "cycle.a")
+
+    flagged := make(map[string]bool)
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        flagged[entry.NodeKey] = entry.Cycle
+    }
+
+    if false == flagged["service:cycle.a"] || false == flagged["service:cycle.b"] {
+        t.Fatalf("expected the two ring members to be flagged, got %v", flagged)
+    }
+
+    if true == flagged["service:cycle.c"] {
+        t.Fatalf("expected the pure dependency of a ring member not to be flagged as a cycle, got %v", flagged)
+    }
+}

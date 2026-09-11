@@ -1967,3 +1967,30 @@ func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {
         t.Fatalf("expected the json document to carry the group figure beside each built service, got %q", renderedJson)
     }
 }
+
+/* the ordinary service — registered under a name, resolved through its type — is filed under both, and its type key is the container's identity key with the package path and a NUL inside it: the block names the alias by the type's own string, where the raw key wrapped over three lines on every row of the example application */
+func TestContainerCommand_TheTeardownBlockNamesATypeAliasByTheTypesOwnString(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        "view.typed",
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "typed"}, nil },
+    )
+
+    if _, resolveErr := container.FromResolverByType[*teardownViewStorage](serviceContainer); nil != resolveErr {
+        t.Fatalf("resolve by type: %v", resolveErr)
+    }
+
+    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=table"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if false == strings.Contains(rendered, "service:view.typed (also type:*debug.teardownViewStorage)") {
+        t.Fatalf("expected the type alias to be named by the type's own string, got %q", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\x00") || true == strings.Contains(rendered, "precision-soft/melody/v3/debug\x00") {
+        t.Fatalf("expected no raw identity key in the block, got %q", rendered)
+    }
+}

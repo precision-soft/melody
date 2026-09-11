@@ -529,6 +529,14 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Fix the client to emit the canonical spelling; the refusal is deliberately not a redirect, so nothing teaches the client the working spelling while sidestepping a firewall rule. There is no opt-out.
 
+### Http: a request path padded with whitespace is refused with a 400 before the handler
+
+**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — before it is routed or authorized, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
+
+**Symptom.** A client that sends a path ending in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler.
+
+**Remedy.** Send the path without the padding; nothing legitimate names a resource by a trailing space. There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, which is the defect the refusal closes.
+
 ### Http: a urlencoded body that failed to read or parse is refused, and a session save outage answers 500
 
 **What changed.** A `application/x-www-form-urlencoded` body whose read failed answers 413 when the size limit stopped it and 400 when the client broke it, before the handler — it used to be a warning beside an empty form, with the handler running and often answering 200. A multipart upload past `MaxRequestBodyBytes` surfacing from `ParseMultipartForm` is answered 413 instead of a 500 at error level. Separately, a session-storage outage on the save path replaces the handler's response with an empty 500 and suppresses the session cookie; the handler's success used to be delivered with the session write silently lost.

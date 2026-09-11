@@ -265,6 +265,9 @@ type teardownView struct {
 /* teardownNameNodeKeyPrefix is the spelling the plan gives a node filed under a name, as TeardownPlanEntry documents it; a node filed only under its type carries the other prefix and no name a listing could window on. */
 const teardownNameNodeKeyPrefix = "service:"
 
+/* teardownTypeNodeKeyPrefix is the spelling of a container TYPE node's key, the container's own; the view only reads it, to render an alias. */
+const teardownTypeNodeKeyPrefix = "type:"
+
 /* newTeardownView reads the plan once and answers nil for a container that does not carry the door or has nothing built; every reader below tolerates the nil, so a command over such a container renders its listing with no teardown in it rather than failing. */
 func newTeardownView(serviceContainer containercontract.Container) *teardownView {
     planned, carriesPlan := serviceContainer.(interface {
@@ -346,6 +349,23 @@ func (instance *teardownView) forService(serviceName string, lifetime string) *c
     return instance.byNodeKey[teardownNameNodeKeyPrefix+serviceName]
 }
 
+/* readableAliases renders the node keys an instance is also filed under in the spelling an operator can read: a type key is the container's identity key — the package path, a NUL and the type's string — which the ordinary service, registered under a name and resolved through its type, carries as an alias on every row; printed raw it wrapped over three lines of escaped path on every service of the example application. The type's own string is what names it. */
+func readableAliases(aliases []string) []string {
+    readable := make([]string, 0, len(aliases))
+
+    for _, alias := range aliases {
+        if true == strings.HasPrefix(alias, teardownTypeNodeKeyPrefix) {
+            if separator := strings.LastIndex(alias, "\x00"); 0 <= separator {
+                alias = teardownTypeNodeKeyPrefix + alias[separator+1:]
+            }
+        }
+
+        readable = append(readable, alias)
+    }
+
+    return readable
+}
+
 /* addBlock renders the plan for the nodes the listing shows: a node filed under a name is kept when that name — or the name of any alias collapsed onto it — is in the window, a node filed only under its type has no name a window could name and is kept always. The wave index is the plan's, not the window's, so a windowed listing still says where each shown service stands in the whole teardown. */
 func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames map[string]struct{}) {
     if nil == instance {
@@ -363,7 +383,7 @@ func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames 
 
         node := entry.NodeKey
         if 0 < len(entry.Aliases) {
-            node = fmt.Sprintf("%s (also %s)", entry.NodeKey, strings.Join(entry.Aliases, ", "))
+            node = fmt.Sprintf("%s (also %s)", entry.NodeKey, strings.Join(readableAliases(entry.Aliases), ", "))
         }
 
         /* a group is printed by its number, empty for a service in none: the operator reads "these close one after the other" from two rows sharing a figure, which "same wave, no dependencies" used to hide */
