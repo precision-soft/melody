@@ -284,21 +284,19 @@ Render(entries []Entry, options RenderOptions) (string, error)
 
 There is **no all-or-nothing guarantee across destinations.** `melody:cron:generate` walks the destinations in lexicographic order and renders and writes each one before moving to the next, so an error raised while rendering the third of four files leaves the first two already on disk and the last two absent. Per-file atomicity holds; a whole-run rollback does not. Validate a multi-destination configuration in a test, or treat a failed generation as "the output directory is now in an unknown state" and re-run once the error is fixed.
 
-### Reconciling destinations across versions — `--prune`
+### Removing configured destinations — `--prune`
 
-A run writes the destinations the **current** configuration names, and by default touches nothing else. A destination an earlier version wrote and this one no longer names is therefore left exactly as it was: an entry you retired keeps running on every tick forever, and an entry you **moved** to another destination file runs from both — the double execution `melody:cron:run` refuses at construction, produced silently by the generator.
+`--prune` calculates and renders every destination of the current configuration without writing, then deletes only those exact files. It does not generate replacements, scan the output directory, or inspect template ownership markers. Other applications' files and old destinations absent from the current configuration remain untouched. Explicit absolute destinations are included even outside `dir(--out)`, just as they are during generation.
 
-`--prune` closes that. It empties, in `dir(--out)`, the destinations this run did not produce, so the retired job stops. Three rules bound it, because emptying a file is not reversible:
+Missing targets produce a warning (`cron.pruneDestinationMissing` in JSON) and do not fail the run. Non-regular targets, including directories, symlinks and named pipes, are refused. All content must render successfully before the first deletion. Deletion across files is not transactional: a later filesystem error leaves earlier removals completed and reported under `data.pruned`; `data.writes` stays empty. No output or log directories are created.
 
-* **Opt-in.** Without the flag the behaviour is exactly what it was. A deployment that manages the output directory itself — a release directory built fresh every time — needs nothing here.
-* **Proof of ownership.** Only a file whose head carries the current template's ownership marker is touched. The built-in dialects render `cron.CrontabOwnershipMarker` — the two crontab dialects in their header block, the v3 binding's `k8s` template as a leading YAML comment header on every manifest file; a file you or another tool put in the same directory carries no marker and is left alone. A template of your own opts in by implementing `cron.OwnedTemplate` and including the string it returns in **everything** `Render` produces, entries or none — a template that does not implement it is never pruned.
-* **The output directory only.** The sweep reads `dir(--out)` and does not recurse. An entry that named an absolute `DestinationFile` outside that directory is written where you asked and is never swept: those files live where the operator put them.
-
-Emptying means re-rendering the template with no entries, so the destination keeps its header — and with it its marker — and stays recognisable to the next run instead of becoming an unowned file the sweep would refuse to touch ever again. An empty configuration sweeps too: that is precisely the version in which every previously written destination is stale. The run stays a success either way, and the destinations it emptied are named on stdout and under `data.pruned` in the `--format=json` envelope, which is a list on every run.
+An empty configuration without a generated heartbeat has no deletion targets. To retire a destination, run prune with the configuration that still names it, before removing or moving that declaration. Run generation separately when replacements are wanted.
 
 ```bash
-melody:cron:generate --out /etc/cron.d/app --prune
+/opt/app/app melody:cron:generate --out=/etc/cron.d/app --prune
 ```
+
+This replaces the former generate-and-sweep behavior. Review deployment scripts that previously expected `--prune` to generate files as well. `OwnedTemplate` and header markers remain available for compatibility; custom templates need no marker to participate in targeted deletion.
 
 ### Built-in templates
 
@@ -383,7 +381,7 @@ return "", validationErr
 return builder.String(), nil
 }
 
-/* the optional capabilities: the marker opts the dialect into --prune, and the user-column answer
+/* the optional capabilities: the marker identifies the dialect to consumers, and the user-column answer
    keeps the generator's heartbeat-user demand honest for a dialect it knows nothing about */
 func (instance *AnsibleCronTemplate) OwnershipMarker() string {
 return ansibleCronOwnershipMarker

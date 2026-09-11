@@ -30,7 +30,7 @@ var k8sScheduleForbiddenCharacters = []ForbiddenCharacter{
     {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
 }
 
-/* k8sHeaderBlock opens every rendered manifest file with the ownership marker as leading YAML comments, so --prune can reconcile the FILE set of a k8s output directory as it does a crontab one: a stale manifest is emptied down to this header. What that does NOT do — unlike a crontab, which crond re-reads — is retire the CronJob object already applied to a cluster: `kubectl apply -f` over a comments-only file changes nothing, so cluster-level retirement needs `kubectl apply --prune` or an explicit delete in the deployment. */
+/* k8sHeaderBlock identifies generated manifests. Removing a local file with --prune does not delete any CronJob already applied to the cluster; cluster retirement remains a deployment operation. */
 const k8sHeaderBlock = `# GENERATED FILE
 # DO NOT EDIT LOCALLY
 ` + CrontabOwnershipMarker + `
@@ -44,7 +44,7 @@ func (instance *K8sTemplate) Name() string {
     return TemplateNameK8s
 }
 
-/* OwnershipMarker names the comment line every rendered manifest file opens with; the marker is the generating command's, shared with the crontab dialects, because --prune proves who wrote a file, not which dialect rendered it. */
+/* OwnershipMarker returns the template identification line retained in rendered headers. */
 func (instance *K8sTemplate) OwnershipMarker() string {
     return CrontabOwnershipMarker
 }
@@ -56,7 +56,7 @@ func (instance *K8sTemplate) RendersUserColumn() bool {
 
 /* Render renders one batch/v1 CronJob document per entry under a marker-carrying comment header, separated by the YAML document marker; heartbeat options are crontab-only and ignored here */
 func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
-    /* an empty render needs no image: it is what --prune writes into a stale manifest file, and demanding the container image to render zero containers would fail the sweep exactly when the configuration was emptied — the version in which every previously written manifest is stale */
+    /* An empty render contains no containers and requires no image. */
     if 0 == len(entries) {
         return k8sHeaderBlock, nil
     }

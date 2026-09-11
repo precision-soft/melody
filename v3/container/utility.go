@@ -20,7 +20,7 @@ func canonicalServiceType(targetType reflect.Type) reflect.Type {
     return targetType
 }
 
-/* typeIdentityKey is a stable map/stack key that is unique per type identity, unlike String(), which two same-named types from different packages share. A package cannot declare two types of the same name, so the named type's import path — reached through any pointer wrapping — plus the full String() distinguishes them without a registry or a lock. */
+/* typeIdentityKey qualifies named types through pointer wrappers. Unnamed composite types can still share a spelling across packages; provider registrations and teardown declarations validate their reflect.Type identities before sharing this key space. */
 func typeIdentityKey(targetType reflect.Type) string {
     if nil == targetType {
         return ""

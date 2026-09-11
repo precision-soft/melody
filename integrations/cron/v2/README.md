@@ -31,3 +31,7 @@ This module requires:
 * `github.com/urfave/cli/v3` ≥ v3.6.1
 
 Everything else is stdlib. The package surface is shared across all three bindings — the ownership and user-column surface included (`OwnedTemplate`, `UserColumnTemplate`, `RendersUserColumn`, `CrontabOwnershipMarker`, `ErrBusyboxDivergentDaySchedule`) — apart from four things: the built-in `k8s` template and the `Commands` helper ship in the v3 binding only; the v3 binding alone gives the in-process runner a zone of its own (`Configuration.InTimezone`, `Configuration.TimezoneName`, the runner's `--timezone` flag and `ErrUnknownTimezone`); this binding keeps the deprecated abbreviated validation aliases the v3 binding has removed; and this binding keeps `ErrSharedRunnerCommandFlags` with the construction refusal behind it, which the v3 binding has removed. See [Package surface](../README.md#package-surface) in the umbrella README for the lists, then the [umbrella README](../README.md) for the design details.
+
+## Targeted deletion with `--prune`
+
+`--prune` renders the current configured destinations without writing and deletes only those files. It no longer generates replacements or scans neighboring files. Missing targets produce `cron.pruneDestinationMissing` warnings; other filesystem errors fail the run, preserving the report of completed removals. No output or log directories are created. Retire a destination while it is still configured, and run generation separately for replacements. See the [shared generator documentation](../README.md) for the full contract.

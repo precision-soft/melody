@@ -13,7 +13,7 @@ const TemplateNameCrontab = "crontab"
 /* TemplateNameCrontabNoUser renders the user-less crontab dialect: busybox crond (alpine images) and per-user `crontab` files reject the /etc/cron.d user column, so this variant omits it — no more cutting the column with sed in the image build. */
 const TemplateNameCrontabNoUser = "crontab-no-user"
 
-/* CrontabOwnershipMarker is the line every destination this generator's builtin templates render carries — the two crontab dialects in their header block, the k8s dialect as a leading YAML comment — so a later --prune can tell a file this generator wrote from one the operator put in the same directory. It names the command rather than saying "generated", because "GENERATED FILE" is what every generator writes and proves nothing about which one. The marker is shared across the builtin dialects: it proves the writing command, not the dialect, exactly as the two crontab variants already share it on the published majors. */
+/* CrontabOwnershipMarker identifies the generator in rendered headers. It does not establish application ownership and is not used to select prune targets. */
 const CrontabOwnershipMarker = "# owned by melody:cron:generate"
 
 const crontabHeaderBlock = `#############################################################################
@@ -74,7 +74,7 @@ func (instance *CrontabTemplate) Name() string {
     return instance.name
 }
 
-/* OwnershipMarker names the line both dialects carry in their header block, so --prune can prove a destination is one this template wrote before it empties it */
+/* OwnershipMarker returns the template identification line retained in rendered headers. */
 func (instance *CrontabTemplate) OwnershipMarker() string {
     return CrontabOwnershipMarker
 }

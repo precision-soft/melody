@@ -3,7 +3,6 @@ package cron
 import (
     "errors"
     "fmt"
-    "io"
     "os"
     "path/filepath"
     "sort"
@@ -110,7 +109,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
         },
         &clicontract.BoolFlag{
             Name:  flagNamePrune,
-            Usage: "empty the destinations in dir(--out) that this generator wrote earlier and this run no longer produces, so an entry retired or moved between versions stops running. Only files carrying the current template's ownership marker are touched, and destinations outside dir(--out) are never swept",
+            Usage: "calculate the current generation destinations without writing, then remove only those files; warn when a destination does not exist",
         },
     }
 }
@@ -150,16 +149,17 @@ func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) 
 }
 
 type runOptions struct {
-    template           Template
-    outputPath         string
-    logsDir            string
-    binary             string
-    defaultUserName    string
-    heartbeatPath      string
-    heartbeatCommand   []string
-    heartbeatRequested []string
-    heartbeatEnabled   bool
-    prune              bool
+    template            Template
+    outputPath          string
+    logsDir             string
+    binary              string
+    defaultUserName     string
+    heartbeatPath       string
+    heartbeatCommand    []string
+    heartbeatRequested  []string
+    heartbeatEnabled    bool
+    missingDestinations []string
+    prune               bool
 }
 
 func (instance *GenerateCommand) runWithConfiguration(
@@ -174,8 +174,9 @@ func (instance *GenerateCommand) runWithConfiguration(
     emptyMessage := ""
 
     /* the report is a defer so that no failure path can leave the run without a document: under --format=json every early return used to travel straight out past the one door that builds the envelope, and the cli silences the command's own error line in json mode, so `app melody:cron:generate --format=json | jq …` received an empty stream — indistinguishable from a missing binary — for a malformed schedule or an unwritable directory. The sibling integration's commands have carried this shape since the verdict that gave migrate its machine contract. */
+    var missingDestinations []string
     defer func() {
-        runErr = instance.reportWrites(commandContext, option, startedAt, writes, pruned, emptyMessage, runErr)
+        runErr = instance.reportWrites(commandContext, option, startedAt, writes, pruned, emptyMessage, runErr, missingDestinations)
     }()
 
     options, resolveErr := instance.resolveRunOptions(commandContext, configuration)
@@ -191,6 +192,8 @@ func (instance *GenerateCommand) runWithConfiguration(
     writeErr := (error)(nil)
     writes, pruned, emptyMessage, writeErr = instance.writeDestinations(option, options, entries)
 
+    missingDestinations = options.missingDestinations
+
     return writeErr
 }
 
@@ -198,7 +201,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
 ) (*runOptions, error) {
-    options := &runOptions{}
+    options := &runOptions{prune: commandContext.Bool(flagNamePrune)}
 
     templateName := resolveDefault(commandContext, configuration, flagNameTemplate, ParameterTemplate)
     if "" == templateName {
@@ -248,8 +251,8 @@ func (instance *GenerateCommand) resolveRunOptions(
         }
         logsDir = absoluteLogsDir
 
-        /* the logs directory is created while the options are still being resolved, before anything is rendered or written, and deliberately so: it is where the generated lines redirect every job's output, and under system cron a shell whose redirection cannot create its file aborts the whole command, so the directory has to exist by the time the manifest runs whatever became of this generation. Creating it is idempotent and leaves nothing a failed run would need to undo, which is why a run that fails later still leaves it behind. */
-        if mkdirErr := os.MkdirAll(logsDir, 0o755); nil != mkdirErr {
+        /* Generation prepares log directories; prune must calculate paths without creating them. */
+        if mkdirErr := ensureGenerationLogsDir(logsDir, options.prune); nil != mkdirErr {
             return nil, exception.NewError(
                 "cron: could not create the logs directory",
                 exceptioncontract.Context{"directory": logsDir},
@@ -290,7 +293,6 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.heartbeatCommand = commandContext.StringSlice(flagNameHeartbeatCommand)
     options.heartbeatRequested = commandContext.StringSlice(flagNameHeartbeatDestination)
     options.heartbeatEnabled = 0 < len(options.heartbeatCommand) || "" != options.heartbeatPath
-    options.prune = commandContext.Bool(flagNamePrune)
 
     if true == options.heartbeatEnabled && true == rendersUserColumn && "" == options.defaultUserName {
         return nil, exception.NewError(
@@ -340,7 +342,7 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
             config = &EntryConfig{}
         }
 
-        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, config, binary, options.defaultUserName, options.logsDir)
+        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, config, binary, options.defaultUserName, options.logsDir, options.prune)
         if nil != expandErr {
             return nil, expandErr
         }
@@ -368,11 +370,9 @@ func (instance *GenerateCommand) writeDestinations(
         return nil, nil, "", groupErr
     }
 
-    /* an empty configuration still sweeps: emptying the configuration is exactly the version in which every destination the previous one wrote is stale, and answering "nothing to write" while leaving them all live is the worst of the three cases. It stays a success either way — a run that has nothing to write has not failed. */
+    /* An empty generation has no configured destinations to write or remove. */
     if 0 == len(entriesByDestination) && false == options.heartbeatEnabled {
-        pruned, pruneErr := pruneStaleDestinations(options, nil)
-
-        return nil, pruned, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write", pruneErr
+        return nil, nil, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write", nil
     }
 
     if 0 == len(entriesByDestination) && true == options.heartbeatEnabled {
@@ -417,6 +417,10 @@ func (instance *GenerateCommand) writeDestinations(
             )
         }
 
+        if true == options.prune {
+            continue
+        }
+
         if mkdirErr := os.MkdirAll(filepath.Dir(destination), 0o755); nil != mkdirErr {
             return writes, nil, "", exception.NewError(
                 "cron: could not create the output directory",
@@ -436,129 +440,49 @@ func (instance *GenerateCommand) writeDestinations(
         })
     }
 
-    pruned, pruneErr := pruneStaleDestinations(options, writes)
+    if true == options.prune {
+        pruned, pruneErr := pruneDestinations(options, destinationPaths)
 
-    return writes, pruned, "", pruneErr
+        return nil, pruned, "", pruneErr
+    }
+
+    return writes, nil, "", nil
 }
 
-/* pruneStaleDestinations empties the destinations this generator wrote earlier and this run no longer produces. Without it a version that retires an entry leaves its file untouched and crond keeps running the retired job forever, and a version that MOVES an entry to another destination leaves it live in both — the double execution the runner refuses at construction, produced silently by the generator.
-
-   Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose first bytes carry the ownership marker of the template generating now, so a file this generator cannot prove it wrote is left exactly as it is.
-
-   Emptying means rendering the template with no entries: the destination keeps its header and with it the marker, so it stays recognizable to the next run rather than becoming an unowned file the sweep would refuse to touch ever again. */
-func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]string, error) {
-    if false == options.prune {
-        return nil, nil
-    }
-
-    ownedTemplate, isOwnedTemplate := options.template.(OwnedTemplate)
-    if false == isOwnedTemplate {
-        return nil, nil
-    }
-
-    marker := ownedTemplate.OwnershipMarker()
-    if "" == strings.TrimSpace(marker) {
-        return nil, nil
-    }
-
-    written := make(map[string]bool, len(writes))
-    for _, write := range writes {
-        written[write.Destination] = true
-    }
-
-    outputDirectory := filepath.Dir(options.outputPath)
-
-    directoryEntries, readDirErr := os.ReadDir(outputDirectory)
-    if nil != readDirErr {
-        return nil, exception.NewError(
-            "cron: could not read the output directory to prune it",
-            exceptioncontract.Context{"directory": outputDirectory},
-            readDirErr,
-        )
-    }
-
-    emptyContent, renderErr := options.template.Render(nil, RenderOptions{})
-    if nil != renderErr {
-        return nil, exception.NewError(
-            fmt.Sprintf("cron: could not render the empty %s content used to prune", options.template.Name()),
-            exceptioncontract.Context{"template": options.template.Name()},
-            renderErr,
-        )
-    }
-
-    pruned := make([]string, 0)
-
-    for _, directoryEntry := range directoryEntries {
-        /* only a regular file is a candidate. Skipping directories alone left the sweep opening whatever else the directory held, and opening a fifo with no writer blocks forever: one named pipe beside the destinations wedged the generator inside os.Open with no deadline and no diagnostic. A device, a socket and a symlink are refused for the same reason — this generator wrote none of them, so none of them can be one of its own. */
-        if false == directoryEntry.Type().IsRegular() {
+/* pruneDestinations receives only paths whose content has already rendered successfully.
+   The configured destinations are the explicit deletion targets; a shared template marker
+   cannot establish which application owns any other file in the directory. */
+func pruneDestinations(options *runOptions, destinations []string) ([]string, error) {
+    pruned := make([]string, 0, len(destinations))
+    for _, destination := range destinations {
+        info, statErr := os.Lstat(destination)
+        if true == errors.Is(statErr, os.ErrNotExist) {
+            options.missingDestinations = append(options.missingDestinations, destination)
             continue
         }
-
-        candidate := filepath.Join(outputDirectory, directoryEntry.Name())
-        if true == written[candidate] {
-            continue
+        if nil != statErr {
+            return pruned, exception.NewError("cron: could not inspect the prune destination", exceptioncontract.Context{"destination": destination}, statErr)
         }
-
-        owned, ownershipErr := fileCarriesOwnershipMarker(candidate, marker)
-        if nil != ownershipErr {
-            return pruned, ownershipErr
+        if false == info.Mode().IsRegular() {
+            return pruned, exception.NewError("cron: refusing to prune a non-regular destination", exceptioncontract.Context{"destination": destination}, nil)
         }
-
-        if false == owned {
-            continue
+        if removeErr := os.Remove(destination); nil != removeErr {
+            if true == errors.Is(removeErr, os.ErrNotExist) {
+                options.missingDestinations = append(options.missingDestinations, destination)
+                continue
+            }
+            return pruned, exception.NewError("cron: could not remove the prune destination", exceptioncontract.Context{"destination": destination}, removeErr)
         }
-
-        if writeErr := atomicWriteFile(candidate, []byte(emptyContent), 0o644); nil != writeErr {
-            return pruned, writeErr
-        }
-
-        pruned = append(pruned, candidate)
+        pruned = append(pruned, destination)
     }
-
     return pruned, nil
 }
 
-/* ownershipMarkerReadLimit bounds what is read to decide ownership: the marker rides in the header block every rendered destination opens with, and a file large enough to push it past this is not one this generator wrote. */
-const ownershipMarkerReadLimit = 8 * 1024
-
-/* ownershipMarkerLineLimit bounds WHERE in that head the marker may stand: every builtin template renders it inside the leading comment block, within the first few lines. The old check was a substring search over the whole 8KiB head, and emptying is irreversible — an operator's README or commented backup that merely QUOTED the marker anywhere in its opening kilobytes was emptied as if this generator had written it. */
-const ownershipMarkerLineLimit = 10
-
-/* fileCarriesOwnershipMarker recognises ownership by an EXACT marker line among the file's leading lines. Exactness is what keeps two markers apart when one extends the other: a custom dialect that declares its own marker by suffixing the builtin one documents its files as its own, and a substring match read the builtin marker inside the longer line and emptied the custom dialect's files from a builtin run. The builtin dialects share one identical marker line, so the deliberate cross-dialect reconciliation between them is untouched. */
-func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
-    fileInstance, openErr := os.Open(path)
-    if nil != openErr {
-        return false, exception.NewError(
-            "cron: could not read a candidate destination while pruning",
-            exceptioncontract.Context{"destination": path},
-            openErr,
-        )
+func ensureGenerationLogsDir(directory string, prune bool) error {
+    if true == prune {
+        return nil
     }
-    defer fileInstance.Close()
-
-    head := make([]byte, ownershipMarkerReadLimit)
-
-    read, readErr := io.ReadFull(fileInstance, head)
-    if nil != readErr && io.ErrUnexpectedEOF != readErr && io.EOF != readErr {
-        return false, exception.NewError(
-            "cron: could not read a candidate destination while pruning",
-            exceptioncontract.Context{"destination": path},
-            readErr,
-        )
-    }
-
-    lines := strings.SplitN(string(head[:read]), "\n", ownershipMarkerLineLimit+1)
-    if ownershipMarkerLineLimit < len(lines) {
-        lines = lines[:ownershipMarkerLineLimit]
-    }
-
-    for _, line := range lines {
-        if marker == strings.TrimSpace(line) {
-            return true, nil
-        }
-    }
-
-    return false, nil
+    return os.MkdirAll(directory, 0o755)
 }
 
 /* reportWrites is the generator's one report door, reached from the run's defer on every path: the written summary as text lines, or as the single machine-readable document under --format=json — the failure inside it, beside whatever the run had already written before it stopped. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it.
@@ -572,6 +496,7 @@ func (instance *GenerateCommand) reportWrites(
     pruned []string,
     emptyMessage string,
     runErr error,
+    missingDestinations ...[]string,
 ) error {
     if true == output.IsJsonFormat(option.Format) {
         meta := output.NewMeta(instance.Name(), nil, option, startedAt, time.Since(startedAt), output.Version{})
@@ -581,12 +506,18 @@ func (instance *GenerateCommand) reportWrites(
             writes = []destinationWrite{}
         }
 
-        /* pruned is a list on every run, empty rather than null when nothing was swept or the sweep was never asked for: a field whose json type changes with the outcome cannot be consumed at all, which is the rule the machine contracts of the debug family were put on */
+        /* Keep the JSON result lists non-null on every outcome. */
         if nil == pruned {
             pruned = []string{}
         }
 
         envelope.Data = map[string]any{"writes": writes, "pruned": pruned}
+        for _, destinations := range missingDestinations {
+            for _, destination := range destinations {
+                envelope.Warnings = append(envelope.Warnings, output.NewWarning("cron.pruneDestinationMissing", "prune destination does not exist: "+destination, nil))
+            }
+        }
+
 
         if "" != emptyMessage {
             envelope.Warnings = append(envelope.Warnings, output.NewWarning("cron.nothingToWrite", emptyMessage, nil))
@@ -610,7 +541,13 @@ func (instance *GenerateCommand) reportWrites(
         return renderErr
     }
 
-    /* a run that fails part way through still names what it already did, the way the json branch beside it does. Emptying a destination is irreversible and the sweep returns the destinations it emptied beside its failure, so returning here without printing them left the operator of a failed deploy with no record at all of which manifests had just been blanked — not one "pruned" line, not even the "wrote" lines of the writes that had succeeded. */
+    for _, destinations := range missingDestinations {
+        for _, destination := range destinations {
+            _, _ = fmt.Fprintln(commandContext.Writer, "warning: prune destination does not exist: "+destination)
+        }
+    }
+
+    /* Report completed writes and deletions even when a later destination fails. */
     if nil != runErr {
         printDestinationWrites(commandContext, writes)
         printPrunedDestinations(commandContext, pruned)
@@ -649,7 +586,7 @@ func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned 
     }
 }
 
-/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
+/* atomicWriteFile replaces one destination atomically and cleans up its own temporary file on failure. Crash leftovers are not discovered or removed by --prune. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
     if nil != createErr {
@@ -915,6 +852,7 @@ func expandEntriesForCommand(
     binary string,
     defaultUserName string,
     logsDir string,
+    preview ...bool,
 ) ([]Entry, error) {
     user := config.User
     if "" == user {
@@ -928,7 +866,7 @@ func expandEntriesForCommand(
 
     entries := make([]Entry, 0, instances)
     for index := 1; index <= instances; index++ {
-        logPath, logPathErr := resolveEntryLogPath(commandName, config, logsDir, instances, index)
+        logPath, logPathErr := resolveEntryLogPath(commandName, config, logsDir, instances, index, preview...)
         if nil != logPathErr {
             return nil, logPathErr
         }
@@ -971,6 +909,7 @@ func resolveEntryLogPath(
     logsDir string,
     instances int,
     index int,
+    preview ...bool,
 ) (string, error) {
     if true == config.LogDisabled {
         return "", nil
@@ -1019,7 +958,7 @@ func resolveEntryLogPath(
     }
 
     /* a LogFileName carrying a subdirectory ("nightly/report.log") stays within the logs dir and passes the guard above, but nothing else ever creates that subdirectory — and under system cron the shell aborts the whole command when the >> redirection cannot create its file, so the scheduled job silently never runs. The destination side already creates its parent the same way. */
-    if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
+    if mkdirErr := ensureGenerationLogsDir(filepath.Dir(joined), 0 < len(preview) && true == preview[0]); nil != mkdirErr {
         return "", exception.NewError(
             "cron: could not create the log file directory",
             exceptioncontract.Context{

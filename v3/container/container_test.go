@@ -1318,3 +1318,62 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredTyp
         t.Fatalf("expected the declarer in the plan")
     }
 }
+
+/* A declared dependency must not bind to another package's identically spelled slice. */
+func TestContainer_RefusesCollidingDeclaredTypesInEitherRegistrationOrder(t *testing.T) {
+    for _, declarationFirst := range []bool{false, true} {
+        t.Run(map[bool]string{false: "provider-first", true: "declaration-first"}[declarationFirst], func(t *testing.T) {
+            serviceContainer := NewContainer()
+            declare := func() error {
+                return serviceContainer.Register("app.declarer", func(_ containercontract.Resolver) (*testService, error) {
+                    return &testService{}, nil
+                }, WithoutTypeRegistration(), WithTeardownDependencyOfType[*[]collisionalpha.Bus]())
+            }
+            register := func() error {
+                return serviceContainer.Register("app.beta", func(_ containercontract.Resolver) (*[]collisionbeta.Bus, error) {
+                    return new([]collisionbeta.Bus), nil
+                })
+            }
+            first, second := register, declare
+            if true == declarationFirst {
+                first, second = declare, register
+            }
+            if err := first(); nil != err {
+                t.Fatal(err)
+            }
+            if err := second(); nil == err || false == strings.Contains(err.Error(), "identity key collides") {
+                t.Fatalf("expected explicit type identity collision, got %v", err)
+            }
+        })
+    }
+}
+
+func TestContainer_RefusedDeclarationDoesNotReserveTypeIdentities(t *testing.T) {
+    serviceContainer := NewContainer()
+    err := serviceContainer.Register("app.declarer", func(_ containercontract.Resolver) (*testService, error) {
+        return &testService{}, nil
+    }, WithoutTypeRegistration(), WithTeardownDependencyOfType[*[]collisionalpha.Bus](), WithTeardownDependencyOfType[*[]collisionbeta.Bus]())
+    if nil == err || false == strings.Contains(err.Error(), "identity key collides") {
+        t.Fatalf("expected colliding declarations to be refused, got %v", err)
+    }
+    if err := serviceContainer.Register("app.declarer", func(_ containercontract.Resolver) (*[]collisionbeta.Bus, error) {
+        return new([]collisionbeta.Bus), nil
+    }); nil != err {
+        t.Fatalf("refused registration left a service or identity behind: %v", err)
+    }
+}
+
+func TestContainer_DeclaredCompositeTypeStillAcceptsItsOwnProvider(t *testing.T) {
+    serviceContainer := NewContainer()
+    if err := serviceContainer.Register("app.declarer", func(_ containercontract.Resolver) (*testService, error) {
+        return &testService{}, nil
+    }, WithoutTypeRegistration(), WithTeardownDependencyOfType[*[]collisionalpha.Bus]()); nil != err {
+        t.Fatal(err)
+    }
+    if err := serviceContainer.Register("app.alpha", func(_ containercontract.Resolver) (*[]collisionalpha.Bus, error) {
+        return new([]collisionalpha.Bus), nil
+    }); nil != err {
+        t.Fatal(err)
+    }
+    armParallelTeardown(t, serviceContainer)
+}

@@ -311,6 +311,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
+- container: extend the type identity collision guard to declared teardown dependencies, in either registration order. A declaration for a composite type from one package can no longer bind to an identically spelled type from another package. Refused registrations leave no declared identities or edges behind.
+
 - http: reject request paths with surrounding whitespace before routing or authorization, preventing a raw protected path from using the public rule of its trimmed spelling.
 - storage: stop deleting sibling objects based on a temporary-looking name and age. `Put` cleans only the temporary file it allocated; valid keys and stalled writers remain intact.
 

@@ -558,6 +558,14 @@ func (instance *container) register(
         }
     }
 
+    identityTypes := append([]reflect.Type(nil), registerOption.TeardownDependencyTypes...)
+    if true == registerOption.AlsoRegisterType && nil != serviceType {
+        identityTypes = append(identityTypes, serviceType)
+    }
+    if identityErr := instance.validateTypeIdentitiesLocked(serviceName, identityTypes); nil != identityErr {
+        return identityErr
+    }
+
     /* once the waves are armed, the rule arming asked of every declared edge is asked of each new one here, at the door that declares it: arming validated a snapshot, and a declaration registered after it used to land, silently, in one wave with the service it named */
     if true == instance.teardownInWaves {
         for _, dependencyName := range registerOption.TeardownDependencyNames {
@@ -607,6 +615,13 @@ func (instance *container) register(
             delete(instance.collectionPriorityByName, serviceName)
             return registerTypeErr
         }
+    }
+
+    /* Reserve declared identities only after registration succeeds, so a later provider
+       cannot claim their keys for a different type. Refused registrations reserve nothing. */
+    for _, dependencyType := range registerOption.TeardownDependencyTypes {
+        canonicalType := canonicalServiceType(dependencyType)
+        instance.typeIdentityKeyToType[typeIdentityKey(canonicalType)] = canonicalType
     }
 
     /* the declared edges are written last, once the registration cannot fail anymore: the graph is never pruned, so an edge left behind by a refused registration would outlive it for the life of the process. They go into the very graph a resolution writes into, in the same key space, so the teardown reads one graph and cannot order two ways. */
@@ -711,24 +726,38 @@ func (instance *container) registerType(
 
 /* recordTypeIdentityKeyLocked refuses the registration of a type whose identity key another, DIFFERENT type already claimed. The colliding pair would share a creation-guard key and a close node while holding two instances — a resolution of one reads as a cycle through the other, and the teardown merges what it should order. The refusal lands at the boot line that declares the second type, where the wiring mistake is. */
 func (instance *container) recordTypeIdentityKeyLocked(serviceName string, canonicalType reflect.Type) error {
-    identityKey := typeIdentityKey(canonicalType)
-
-    existingType, exists := instance.typeIdentityKeyToType[identityKey]
-    if true == exists && existingType != canonicalType {
-        return exception.NewError(
-            "service type identity key collides with a different registered type",
-            map[string]any{
-                "serviceName":  serviceName,
-                "serviceType":  canonicalType.String(),
-                "existingType": existingType.String(),
-                "identityKey":  identityKey,
-            },
-            nil,
-        )
+    if identityErr := instance.validateTypeIdentitiesLocked(serviceName, []reflect.Type{canonicalType}); nil != identityErr {
+        return identityErr
     }
+    instance.typeIdentityKeyToType[typeIdentityKey(canonicalType)] = canonicalType
+    return nil
+}
 
-    instance.typeIdentityKeyToType[identityKey] = canonicalType
-
+/* Validate the whole registration without reserving keys. Declarations participate in
+   the same identity space as providers, including collisions within one declaration list. */
+func (instance *container) validateTypeIdentitiesLocked(serviceName string, serviceTypes []reflect.Type) error {
+    pending := make(map[string]reflect.Type, len(serviceTypes))
+    for _, serviceType := range serviceTypes {
+        canonicalType := canonicalServiceType(serviceType)
+        identityKey := typeIdentityKey(canonicalType)
+        existingType, exists := pending[identityKey]
+        if false == exists {
+            existingType, exists = instance.typeIdentityKeyToType[identityKey]
+        }
+        if true == exists && existingType != canonicalType {
+            return exception.NewError(
+                "service type identity key collides with a different registered or declared type",
+                map[string]any{
+                    "serviceName":  serviceName,
+                    "serviceType":  canonicalType.String(),
+                    "existingType": existingType.String(),
+                    "identityKey":  identityKey,
+                },
+                nil,
+            )
+        }
+        pending[identityKey] = canonicalType
+    }
     return nil
 }
 
