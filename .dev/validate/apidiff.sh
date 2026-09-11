@@ -83,7 +83,7 @@
 # Like its neighbours the band needs the development container, because the Go toolchain and apidiff live
 # there, and it needs the network on a cold module cache — it fetches the tagged version of each module,
 # which is the whole point of comparing against what was published. apidiff is installed into the
-# container on first use.
+# container on first use, at the version pinned below.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -124,6 +124,13 @@ fi
 SERVICE_NAME_STRING="dev"
 CONTAINER_ROOT_PATH="/app"
 BASELINE_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/apidiff.baseline"
+
+# the tool is pinned, not `@latest`, for the reason the vulncheck band records: the container builds it
+# with the image's own toolchain under GOTOOLCHAIN=local, and x/exp raised its go directive to 1.26 on
+# 2026-08-20 while the image is golang:1.25, so `@latest` was refused and the gate went red on a release
+# nobody here made. x/exp carries no tags, so the pin is the pseudo-version of the last commit before
+# that bump; it moves together with the FROM line of `.dev/docker/Dockerfile`.
+APIDIFF_VERSION_STRING="v0.0.0-20260820122028-d6e0b57b1a69"
 
 # the baseline rows: module ~ class ~ object ~ change ~ disposition ~ reason. The first five are mandatory;
 # the reason is mandatory on a decided row and allowed empty on an unclassified one. Class and change are
@@ -275,17 +282,20 @@ get_latest_tag() {
 # detected on the host rather than silently counted as clean. The reader drops packages that belong to
 # ANOTHER workspace module beneath the compared one, and says how many.
 run_comparisons() {
-    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" sh -s -- "$@" <<'CONTAINER_SCRIPT'
+    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" sh -s -- "${APIDIFF_VERSION_STRING}" "$@" <<'CONTAINER_SCRIPT'
 set -u
+APIDIFF_VERSION="$1"
+shift
+# an install that fails hands its last lines to the host, so the refusal names the cause instead of
+# only the fact
 if ! command -v apidiff >/dev/null 2>&1; then
-    if ! go install golang.org/x/exp/cmd/apidiff@latest >/dev/null 2>&1; then
+    INSTALL_OUTPUT="$(go install "golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION}" 2>&1)"
+    INSTALL_EXIT_CODE=$?
+    if [ 0 -ne "${INSTALL_EXIT_CODE}" ] || ! command -v apidiff >/dev/null 2>&1; then
         printf 'PROTOCOL\tINSTALL-FAILED\n'
+        printf '%s\n' "${INSTALL_OUTPUT}" | tail -5 | awk '{ print "PROTOCOL\tDETAIL\t" $0 }' | tr -d '\r'
         exit 0
     fi
-fi
-if ! command -v apidiff >/dev/null 2>&1; then
-    printf 'PROTOCOL\tINSTALL-FAILED\n'
-    exit 0
 fi
 
 # every workspace module, path and directory, for building the per-module workspaces below
@@ -638,7 +648,8 @@ verify_protocol() {
     local EXPECTED_COUNT_NUMBER="${2}"
 
     if printf '%s\n' "${OUTPUT_STRING}" | grep -Fxq $'PROTOCOL\tINSTALL-FAILED'; then
-        fail "apidiff is not installed in the ${SERVICE_NAME_STRING} container and installing it failed — the band cannot run, and reporting success here would mean it silently contributed nothing"
+        printf '%s\n' "${OUTPUT_STRING}" | grep $'^PROTOCOL\tDETAIL\t' | cut -f3- || true
+        fail "apidiff is not installed in the ${SERVICE_NAME_STRING} container and installing golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION_STRING} failed (the tool's last lines are above) — the band cannot run, and reporting success here would mean it silently contributed nothing"
     fi
 
     local ERROR_LINE_LIST_STRING
