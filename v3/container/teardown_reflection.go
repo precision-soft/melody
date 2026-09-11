@@ -39,6 +39,10 @@ func heldPointerIdentities(root any) []heldPointer {
     entered := make(map[pointerIdentity]walkEntry)
     visited := 0
 
+    /* the pointers whose walk is on the stack, innermost last, and for each the pointers whose verdict waits on it: a pointer met again while its walk is in progress is a cycle, and a cycle's members have ONE verdict — the root's, known only when the root's walk returns. Recorded complete on their own — a member's only way forward being the way back to an ancestor that was then cut — they were refused entry from the shallower path that had room, and which field a struct listed first decided again whether a held service was found; recorded cut instead, every cyclic object was walked again from every shorter path, and a hub of sixteen thousand cells with one pointer back into its chain spent the budget on its second walk and lost the collaborator declared after it. So a member's verdict is provisional until the root's is known — index and lowlink, as a strongly connected component is found — and it becomes cut only where the component was. */
+    stack := make([]pointerIdentity, 0, teardownWalkDepthLimit+1)
+    awaiting := make(map[pointerIdentity][]pointerIdentity)
+
     /* walk answers whether it saw the WHOLE of what it was given: false where the depth limit or the node budget cut a subtree short, true otherwise — including the interfaces and slices it declines to enter, which are a decision and not a cut, so a second path to the same object gains nothing by entering again */
     var walk func(value reflect.Value, depth int) bool
 
@@ -68,8 +72,16 @@ func heldPointerIdentities(root any) []heldPointer {
 
             previous, already := entered[identity]
             if true == already {
-                /* met again while its own walk is still on the stack, the pointer is a cycle, not a cut: the walk in progress sees everything this path would */
+                /* met again while its own walk is still on the stack, the pointer is a cycle, not a cut: the walk in progress sees everything this path would, and the pointer whose walk this path belongs to — the innermost on the stack — now reaches back to it, which its verdict must wait for */
                 if true == previous.inProgress {
+                    innermost := stack[len(stack)-1]
+                    innermostEntry := entered[innermost]
+
+                    if previous.index < innermostEntry.lowlink {
+                        innermostEntry.lowlink = previous.index
+                        entered[innermost] = innermostEntry
+                    }
+
                     return true
                 }
 
@@ -82,11 +94,45 @@ func heldPointerIdentities(root any) []heldPointer {
                 found = append(found, heldPointer{identity: identity, keepAlive: target})
             }
 
-            entered[identity] = walkEntry{depth: depth, inProgress: true}
+            index := len(stack)
+            entered[identity] = walkEntry{depth: depth, inProgress: true, index: index, lowlink: index}
+            stack = append(stack, identity)
 
             complete := walk(target, depth+1)
 
-            entered[identity] = walkEntry{depth: depth, cut: false == complete}
+            stack = stack[:index]
+            entry := entered[identity]
+            entry.inProgress = false
+            entry.cut = false == complete
+
+            if entry.lowlink < index {
+                /* a member of a cycle whose root is still on the stack: its verdict waits on the root, and so does everything that waited on it; the pointer above it inherits the reach back */
+                root := stack[entry.lowlink]
+                awaiting[root] = append(awaiting[root], identity)
+                awaiting[root] = append(awaiting[root], awaiting[identity]...)
+                delete(awaiting, identity)
+
+                parent := stack[len(stack)-1]
+                parentEntry := entered[parent]
+
+                if entry.lowlink < parentEntry.lowlink {
+                    parentEntry.lowlink = entry.lowlink
+                    entered[parent] = parentEntry
+                }
+            } else if true == entry.cut {
+                /* the root of a cut component: every member walked whole on its own was cut with it */
+                for _, member := range awaiting[identity] {
+                    memberEntry := entered[member]
+                    memberEntry.cut = true
+                    entered[member] = memberEntry
+                }
+
+                delete(awaiting, identity)
+            } else {
+                delete(awaiting, identity)
+            }
+
+            entered[identity] = entry
 
             return complete
         case reflect.Struct:
@@ -140,9 +186,12 @@ type walkEntry struct {
     depth      int
     cut        bool
     inProgress bool
+    /* index is the pointer's position on the walk's stack while its walk is in progress, and lowlink the lowest position it reaches back to through a cycle: equal, the pointer is the root of its component and its verdict is final when its walk returns; lower, the verdict waits on the root */
+    index   int
+    lowlink int
 }
 
-/* typeCanHoldIdentity answers whether the walk could find a pointer identity anywhere below a value of this type — which is a question about the TYPE, so it is asked once per type and remembered: a pointer, an interface or a slice may name one; a struct may through any field, an array through its element; a scalar, a string, a map, a chan and a func cannot, because the walk reads none of them. It is what lets an array of scalars count as one node instead of one per element. */
+/* typeCanHoldIdentity answers whether the walk could find a pointer identity anywhere below a value of this type — which is a question about the TYPE, so it is asked once per type and remembered: a pointer may name one; a struct may through any field, an array through its element; everything else cannot, because the walk reads none of it — an interface or a slice may well name one, but the walk declines to enter either, so a table of them is one node exactly as a table of scalars is, and counting each cell of a `[256][256]any` spent the whole budget before the pointer field declared after it. It is what lets an array of what the walk does not read count as one node instead of one per element. */
 func typeCanHoldIdentity(valueType reflect.Type) bool {
     if answer, known := typeIdentityCapability.Load(valueType); true == known {
         return answer.(bool)
@@ -160,7 +209,7 @@ var typeIdentityCapability sync.Map
 /* the visiting set stops a recursive type — a struct holding an array of itself cannot exist, but a struct holding a pointer to itself answers true at the pointer before the recursion could begin — from being asked forever; a type met again on the way down answers false for that branch, and the branch that actually holds a pointer answers for the whole */
 func typeCanHoldIdentityUncached(valueType reflect.Type, visiting map[reflect.Type]struct{}) bool {
     switch valueType.Kind() {
-    case reflect.Pointer, reflect.Interface, reflect.Slice:
+    case reflect.Pointer:
         return true
     case reflect.Array:
         return typeCanHoldIdentityUncached(valueType.Elem(), visiting)
@@ -236,7 +285,7 @@ func (instance *container) recordHeldIdentitiesOfBuiltServicesLocked() {
    What the walk saw holding one another and could not order is not unrelated for that: the sequential teardown closes such a pair one after the other, and a wave must too, because closing them at once is each Close entering the other. The pairs are handed back, in canonical keys, for the wave to keep them apart.
 
    Nothing here is written into the container's graph. An inferred edge is an answer about the values as they are NOW, computed for one plan, and a plan is asked for by the teardown and by the operator's view alike: written into the graph by the view, an inference outlived the state it was drawn from and could not be told from a resolution — a lazy resolution made after the view in the opposite direction then closed a ring nothing had inferred, measured twenty times out of twenty. Both answers come back to the caller, which merges the edges into the plan it is computing and forgets them with it. */
-func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey map[string]any, representativeOf map[string]string) (inferred [][2]string, unordered [][2]string) {
+func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey map[string]any, representativeOf map[string]string, canonicalEdges map[string]map[string]struct{}) (inferred [][2]string, unordered [][2]string) {
     if 0 == len(instance.heldIdentitiesByNodeKey) {
         return nil, nil
     }
@@ -278,7 +327,8 @@ func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey 
         return mutual
     }
 
-    combined := make(map[string]map[string]struct{}, len(instance.dependencyGraph)+len(heldCanonical))
+    /* the way back is looked for in the graph the plan built — resolved, declared and expanded, in canonical keys — plus the held edges that are no pair; it is handed in rather than translated here a second time, because a translation of its own could not see the expansion the plan holds, and an inference over a declaration it did not see closed a ring with it */
+    combined := make(map[string]map[string]struct{}, len(canonicalEdges)+len(heldCanonical))
 
     addCombined := func(dependentKey string, dependencyKey string) {
         if nil == combined[dependentKey] {
@@ -288,19 +338,9 @@ func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey 
         combined[dependentKey][dependencyKey] = struct{}{}
     }
 
-    for dependentKey, dependencySet := range instance.dependencyGraph {
-        canonicalDependent, dependentCreated := representativeOf[dependentKey]
-        if false == dependentCreated {
-            continue
-        }
-
+    for dependentKey, dependencySet := range canonicalEdges {
         for dependencyKey := range dependencySet {
-            canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
-            if false == dependencyCreated || canonicalDependent == canonicalDependency {
-                continue
-            }
-
-            addCombined(canonicalDependent, canonicalDependency)
+            addCombined(dependentKey, dependencyKey)
         }
     }
 

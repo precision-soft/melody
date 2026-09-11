@@ -4,6 +4,7 @@ import (
     "errors"
     "net"
     "os"
+    "runtime"
     "strings"
     "sync"
     "sync/atomic"
@@ -219,6 +220,28 @@ func (instance *gatedDialer) Latest() *gatedConn {
     defer instance.mutex.Unlock()
 
     return instance.latest
+}
+
+/* awaitNoPublishGoroutine returns once no goroutine carrying the named frame is alive — the write goroutine of publishOnce, on either publisher of this package. It is the moment a publish that was told to give up has either returned without writing or finished the write it should not have made, which are the two outcomes a test of the abandoned turn tells apart by what reaches the broker afterwards; the goroutine's exit is the one event both produce, and the runtime's dump is the only door that publishes it. */
+func awaitNoPublishGoroutine(t *testing.T, frame string, within time.Duration) {
+    t.Helper()
+
+    deadline := time.Now().Add(within)
+    stack := make([]byte, 1<<20)
+
+    for {
+        dumped := stack[:runtime.Stack(stack, true)]
+
+        if false == strings.Contains(string(dumped), frame) {
+            return
+        }
+
+        if true == time.Now().After(deadline) {
+            t.Fatalf("a publish goroutine is still alive %v after the caller gave up on it", within)
+        }
+
+        time.Sleep(time.Millisecond)
+    }
 }
 
 /* awaitOutcome reads one outcome within the bound or fails the test naming what did not return; every call that this package bounds is asserted through it, so a mutant that removes the bound fails on this timer instead of hanging the suite. */

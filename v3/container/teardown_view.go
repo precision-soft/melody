@@ -12,7 +12,7 @@ import (
 
    It takes the container's read lock, because working the plan out writes nothing: the edges derived from what each service holds and from what each declared type stands for are the plan's own, computed for this answer and forgotten with it. Written into the graph instead, they outlived the state they were drawn from, and a resolution or a registration made after the view closed a ring nothing had declared. The cost is one plan, on an operator command.
 
-   After Close the answer is the plan of a container that has nothing left to close: the records of what each service held are released with the teardown, so the plan the teardown ran is not recomputed from here — it was the teardown's, once. */
+   After Close the answer still lists every service the container built — the instances stay filed, for the resolver's refusals — but without the edges the walk had inferred, whose records were released with the teardown; it is not the plan the teardown ran, which was computed once, under the write lock, and is not kept. */
 func (instance *container) TeardownPlan() []containercontract.TeardownPlanEntry {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -20,6 +20,11 @@ func (instance *container) TeardownPlan() []containercontract.TeardownPlanEntry 
     plan := instance.teardownPlanLocked()
 
     entries := make([]containercontract.TeardownPlanEntry, 0, len(plan.closeOrder))
+
+    cycleMembers := make(map[string]struct{}, len(plan.cycleNodeKeys))
+    for _, cycleNodeKey := range plan.cycleNodeKeys {
+        cycleMembers[cycleNodeKey] = struct{}{}
+    }
 
     for _, nodeKey := range plan.closeOrder {
         dependencies := make([]string, 0, len(plan.canonicalEdges[nodeKey]))
@@ -30,6 +35,8 @@ func (instance *container) TeardownPlan() []containercontract.TeardownPlanEntry 
 
         sort.Strings(dependencies)
 
+        _, inCycle := cycleMembers[nodeKey]
+
         entries = append(
             entries,
             containercontract.TeardownPlanEntry{
@@ -37,6 +44,8 @@ func (instance *container) TeardownPlan() []containercontract.TeardownPlanEntry 
                 WaveIndex:    plan.closeWaveIndexOf[nodeKey],
                 Dependencies: dependencies,
                 SerialGroup:  plan.unorderedGroupOf[nodeKey],
+                Aliases:      append([]string(nil), plan.aliasesOf[nodeKey]...),
+                Cycle:        inCycle,
             },
         )
     }

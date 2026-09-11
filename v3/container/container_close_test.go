@@ -3032,6 +3032,26 @@ func TestContainer_CloseWithContext_ArmedTwoClosersOfOneWaveThatOverlapAreBothNa
     }
 }
 
+/* a teardown reached with its deadline already gone and nothing to close spent nothing on anything: it kept a record naming nobody — an empty budget, an empty map of durations — and the application then wrote "teardown overran its deadline" about a teardown that did nothing */
+func TestContainer_CloseWithContext_ATeardownThatClosedNothingKeepsNoOverrunRecord(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := serviceContainer.(interface {
+        CloseWithContext(context.Context) error
+    }).CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("expected a clean close of an empty container, got %v", closeErr)
+    }
+
+    if record := serviceContainer.(interface {
+        TeardownDeadlineOverrun() exceptioncontract.Context
+    }).TeardownDeadlineOverrun(); nil != record {
+        t.Fatalf("expected no overrun record for a teardown that closed nothing, got %v", record)
+    }
+}
+
 /* a close that failed under an overrun carries the deadline record beside its failures, so the operator reading a failed teardown asks the same question about the budget as one reading a clean one */
 func TestContainer_CloseWithContext_AFailureUnderAnOverrunCarriesTheDeadlineRecordBesideTheFailures(t *testing.T) {
     serviceContainer := NewContainer()
@@ -3170,6 +3190,128 @@ type poolDeclarerService struct {
 }
 
 func (instance *poolDeclarerService) Close() error { return nil }
+
+/* the declaration's raw edge towards "type:<T>" is not written into the graph: a declaration turned ambiguous by a second, non-strict registration under the type expands to nothing, and the raw edge — translated through the alias of the first service the moment the type had been resolved THROUGH ITSELF — closed a ring with the resolution that first service had made, so the close reported a cycle on the default path over a teardown in which every service closed. The sibling test above resolves by name and never creates the type node, which is why it stayed green over the edge. */
+func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdgeBehind(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "declarer"}, nil },
+        WithTeardownDependencyOfType[*sharedPoolService](),
+    )
+
+    serviceContainer.MustRegister(
+        "app.pool.first",
+        func(resolver containercontract.Resolver) (*sharedPoolService, error) {
+            if _, resolveErr := resolver.Get("app.declarer"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &sharedPoolService{label: "first"}, nil
+        },
+        WithTypeRegistration(false),
+    )
+
+    /* resolved through the TYPE, so a "type:<T>" node exists and is aliased onto the first pool — the node the raw edge used to be translated through */
+    serviceContainer.MustGetByType(reflect.TypeOf((*sharedPoolService)(nil)))
+
+    serviceContainer.MustRegister(
+        "app.pool.second",
+        func(_ containercontract.Resolver) (*sharedPoolService, error) { return &sharedPoolService{label: "second"}, nil },
+        WithTypeRegistration(false),
+    )
+
+    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool.second")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
+    }
+}
+
+/* capturedDeclarerPool holds the declarer by a pointer it was handed, not one it resolved: the walk sees the pointer, the graph sees nothing */
+type capturedDeclarerPool struct {
+    declarer *poolDeclarerService
+}
+
+func (instance *capturedDeclarerPool) Close() error { return nil }
+
+/* a pointer held back against a declaration keyed by a TYPE is no ordering the walk may write: the declaration is expanded for the plan, and the ring check reads the plan's graph — it used to translate the raw graph a second time for itself, where the expansion never arrived, so the inference stood beside the declaration, the plan carried both directions, and the armed close reported a cycle over a teardown in which every service closed. The name form of the same declaration never had the defect, which is the control. */
+func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRing(t *testing.T) {
+    for _, byType := range []bool{true, false} {
+        serviceContainer := NewContainer()
+        declarerInstance := &poolDeclarerService{label: "declarer"}
+
+        option := WithTeardownDependency("app.pool")
+        if true == byType {
+            option = WithTeardownDependencyOfType[*capturedDeclarerPool]()
+        }
+
+        serviceContainer.MustRegister(
+            "app.declarer",
+            func(_ containercontract.Resolver) (*poolDeclarerService, error) { return declarerInstance, nil },
+            option,
+        )
+
+        serviceContainer.MustRegister(
+            "app.pool",
+            func(_ containercontract.Resolver) (*capturedDeclarerPool, error) {
+                return &capturedDeclarerPool{declarer: declarerInstance}, nil
+            },
+        )
+
+        if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); nil != armErr {
+            t.Fatalf("byType=%v arm: %v", byType, armErr)
+        }
+
+        MustFromResolver[*poolDeclarerService](serviceContainer, "app.declarer")
+        MustFromResolver[*capturedDeclarerPool](serviceContainer, "app.pool")
+
+        plan := serviceContainer.(teardownPlanner).TeardownPlan()
+
+        for _, entry := range plan {
+            if "service:app.pool" == entry.NodeKey && 0 != len(entry.Dependencies) {
+                t.Fatalf("byType=%v: the held pointer back was written as an inference over the declaration it contradicts: %v", byType, entry.Dependencies)
+            }
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("byType=%v: expected a clean armed teardown, got %v", byType, closeErr)
+        }
+    }
+}
+
+/* a resolution between two names of ONE instance collapses onto a self-edge, and a self-edge is no edge: the drain skipped it, the walk skipped it, and the plan published it — a service listed as closed before itself, with the operator's view saying "proved" */
+func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "app.a",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "a"}, nil },
+        WithoutTypeRegistration(),
+    )
+
+    serviceContainer.MustRegister(
+        "app.b",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            value, resolveErr := resolver.Get("app.a")
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return value.(*poolDeclarerService), nil
+        },
+        WithoutTypeRegistration(),
+    )
+
+    MustFromResolver[*poolDeclarerService](serviceContainer, "app.b")
+
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if 0 != len(entry.Dependencies) {
+            t.Fatalf("%s is listed as closed before %v — one instance under two names, ordered against itself", entry.NodeKey, entry.Dependencies)
+        }
+    }
+}
 
 /* what a declared type stands for is the plan's to expand, for one plan: written into the graph by the operator's view, the expansion outlived the registration that made the declaration ambiguous — a second, non-strict name under the type, which the plan then drops — and the edge left behind closed a ring with the resolution the first name had made, so the close reported a cycle on the DEFAULT path, over a teardown in which every service closed */
 func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t *testing.T) {

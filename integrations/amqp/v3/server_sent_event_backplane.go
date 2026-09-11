@@ -19,13 +19,13 @@ import (
 
 const defaultServerSentEventBackplaneExchange = "melody.sse"
 
-/* defaultServerSentEventBackplaneCallTimeout bounds one Publish write, the same budget the redis backplane gives one round trip: the caller is typically an http handler or a message-bus worker fanning an event out, its context carries no deadline, and the amqp client discards the context it is handed. */
+/* defaultServerSentEventBackplaneCallTimeout bounds EACH of the two stretches one Publish spends time in — the wait for its turn behind the broadcasts ahead of it, and the write — the same budget the redis backplane gives one round trip: the caller is typically an http handler or a message-bus worker fanning an event out, its context carries no deadline, and the amqp client discards the context it is handed. */
 const defaultServerSentEventBackplaneCallTimeout = time.Second
 
 /* sentinel matched with errors.Is when the connection is gone and no dialer is configured: the listen loop treats this as terminal (re-subscribing can never recover) instead of backing off forever. It is a PLAIN sentinel wrapped in a fresh melody error at the return site, because a package-level *exception.Error carries the already-logged mark on the instance and one logged occurrence would silence every later one process-wide. */
 var errServerSentEventBackplaneConnectionGone = errors.New("amqp sse backplane connection is closed and no dialer is configured")
 
-/* sentinel matched with errors.Is when a publish write did not return inside the call timeout; Publish does not retry such a failure, because the retry would first close the channel the write is still holding, which is the same blocked write spelled differently. Plain and wrapped fresh at the return site, for the reason above. */
+/* sentinel matched with errors.Is when a publish did not return inside the call timeout — its write, or its wait for a turn behind the broadcasts ahead of it. Publish does not retry either failure and keeps the channel on both: after a write that ran out of time the retry would first close the channel that write is still holding, which is the same blocked write spelled differently; after a turn that ran out of time the channel is held by the broadcasts the turn waited behind, and a retry would queue behind the same broadcasts for another budget. Which of the two it was is said by the message, not by the sentinel. Plain and wrapped fresh at the return site, for the reason above. */
 var errServerSentEventBackplanePublishTimedOut = errors.New("amqp sse backplane publish did not return within the call timeout")
 
 type serverSentEventWireEvent struct {
@@ -69,7 +69,7 @@ type ServerSentEventBackplaneConfig struct {
     Exchange   string
     Logger     loggingcontract.Logger
     Reconnect  *ReconnectConfig
-    /* CallTimeout bounds one Publish write. The amqp client discards the context a publish is handed, so a broker that stops reading its socket — a resource alarm, a half-dead peer — would otherwise hold the write, and with it every later broadcast and the hub's shutdown, for good. A write that outlives the timeout fails; on a connection the backplane dialed itself the connection is then cut and redialed on the next publish. A non-positive value takes the default. */
+    /* CallTimeout bounds EACH of the two stretches one Publish spends time in: the wait for its turn behind the broadcasts ahead of it, and the WRITE. The amqp client discards the context a publish is handed, so a broker that stops reading its socket — a resource alarm, a half-dead peer — would otherwise hold the write, and with it every later broadcast and the hub's shutdown, for good. A write that outlives the timeout fails; on a connection the backplane dialed itself the connection is then cut and redialed on the next publish. A broadcast that runs out of budget waiting for its turn is told so, marks nothing, and is not written afterwards. One Publish therefore costs at most two of these budgets end to end, which is the figure to size it by. A non-positive value takes the default. */
     CallTimeout time.Duration
 }
 
@@ -144,7 +144,7 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
     return nil
 }
 
-/* refusalKeepsTheChannel reports whether a publish failure must leave the cached channel where it is. A backplane that is closing has nothing to reopen; a write that ran out of time is still HOLDING the channel, so closing it here would join that blocked write over the same socket — the reset is the blocked write spelled a second time. It is one door read by both attempts because the two used to disagree: the first was guarded, the retry reset unconditionally, and a retry is exactly the attempt that meets a socket already known to be blocked. */
+/* refusalKeepsTheChannel reports whether a publish failure must leave the cached channel where it is. A backplane that is closing has nothing to reopen; a write that ran out of time is still HOLDING the channel, so closing it here would join that blocked write over the same socket — the reset is the blocked write spelled a second time — and a turn that ran out of time waited behind writes that hold it just the same. It is one door read by both attempts because the two used to disagree: the first was guarded, the retry reset unconditionally, and a retry is exactly the attempt that meets a socket already known to be blocked. */
 func (instance *ServerSentEventBackplane) refusalKeepsTheChannel(publishErr error) bool {
     if true == instance.isClosing() {
         return true
@@ -160,7 +160,7 @@ func (instance *ServerSentEventBackplane) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline its caller declares, written in the same pass as the transport's because the two carry one mechanism between them and have already drifted apart once inside a single window. Each stretch takes what is LEFT of the deadline instead of its own constant, which also ends an asymmetry the constants had grown: the channel closes of a caller-owned connection were bounded by one call timeout here and by the join timeout on the transport — a second apart at the defaults for the same operation on the same kind of socket. */
+/* CloseWithContext is Close under a deadline its caller declares, written in the same pass as the transport's because the two carry one mechanism between them and have already drifted apart once inside a single window. Each stretch takes the SMALLER of what is left of the deadline and its own ceiling, and the ceilings are the transport's for the same operation: the publish join and the owned connection's close take this backplane's publish budget, as the transport's take its own, and the channel closes of a caller-owned connection take the join timeout on both — they were bounded by one call timeout here for a while, a second against thirty for the same operation on the same kind of socket, and a deadline shorter than either was the only case in which the two agreed. */
 func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
     instance.hub.SetBackplane(nil)
 
@@ -213,7 +213,8 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
             nil,
         ))
     case false == ownsConnection:
-        closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, instance.resolvedCallTimeout()), consumeChannel, publishChannel)...)
+        /* bounded by the join timeout, as the transport bounds the same operation over the same kind of socket, and not by the call timeout: a channel close is a round trip the broker answers late under a resource alarm exactly as it answers a publish late, and under the call timeout a close the broker answered in two seconds was reported as one that did not return — measured, the transport beside it closed clean on the same connection at the same moment */
+        closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
     default:
         closeErrs = append(closeErrs, closeChannels(consumeChannel, publishChannel)...)
     }

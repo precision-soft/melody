@@ -882,7 +882,23 @@ func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAl
         firstOutcome <- storage.CloseWithContext(firstContext)
     }()
 
-    time.Sleep(5 * time.Millisecond)
+    /* the second closer arrives once the first has taken the storage — read from the flag the first closer sets under the mutex, where a fixed sleep read the scheduler */
+    awaitFirstCloser := time.Now().Add(2 * time.Second)
+    for {
+        storage.mutex.Lock()
+        taken := storage.closed
+        storage.mutex.Unlock()
+
+        if true == taken {
+            break
+        }
+
+        if true == time.Now().After(awaitFirstCloser) {
+            t.Fatal("the first closer never took the storage")
+        }
+
+        time.Sleep(50 * time.Microsecond)
+    }
 
     spentContext, cancelSpent := context.WithTimeout(context.Background(), time.Nanosecond)
     defer cancelSpent()
@@ -928,5 +944,14 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     drainGrace, cancellationGrace = storage.closeGracesWithin(roomyContext)
     if 0 >= drainGrace || 0 >= cancellationGrace {
         t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
+    }
+
+    /* the floor is on the remainder, not on the halves: a remainder between one and two milliseconds keeps its graces, each under a millisecond — applied to the halves the floor doubled the threshold, and a save of half a millisecond that was finishing inside such a remainder was answered "budget already spent" */
+    narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1500*time.Microsecond)
+    defer cancelNarrow()
+
+    drainGrace, cancellationGrace = storage.closeGracesWithin(narrowContext)
+    if 0 >= drainGrace || 0 >= cancellationGrace {
+        t.Fatalf("expected a remainder above the floor but under twice it to keep its graces, got %v and %v", drainGrace, cancellationGrace)
     }
 }

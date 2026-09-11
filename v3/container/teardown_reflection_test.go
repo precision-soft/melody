@@ -1132,13 +1132,13 @@ func newHubChain(hub *fatHub, length int) *hubLink {
 type chainFirstHolder struct {
     chain  *hubLink
     hub    *fatHub
-    collab *closeOrderServiceB
+    collaborator *closeOrderServiceB
 }
 
 func (instance *chainFirstHolder) Close() error { return nil }
 
 type collaboratorFirstHolder struct {
-    collab *closeOrderServiceB
+    collaborator *closeOrderServiceB
     hub    *fatHub
     chain  *hubLink
 }
@@ -1151,11 +1151,11 @@ func TestHeldPointerIdentities_DoesNotWalkAWholeSubtreeAgainFromAShallowerPath(t
     heldIdentity, _ := pointerKeyOf(held)
     hub := &fatHub{}
 
-    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collab: held, hub: hub, chain: newHubChain(hub, 2)}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collaborator: held, hub: hub, chain: newHubChain(hub, 2)}), heldIdentity) {
         t.Fatalf("expected the collaborator declared first to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collab: held}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collaborator: held}), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a chain of links to one large object to be found as well")
     }
 }
@@ -1188,9 +1188,131 @@ func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
     }
 }
 
+/* cycleMemberLink, cycleMemberHead, cycleMemberTail and cycleMemberLeaf build the shape a cycle member's verdict must survive: through the chain the head is reached at a depth from which its leaf is cut, its tail's only way forward is the cycle back to the head, and the root reaches the tail directly as well, from a depth that has room */
+type cycleMemberLink struct {
+    next *cycleMemberLink
+    head *cycleMemberHead
+}
+
+type cycleMemberHead struct {
+    leaf *cycleMemberLeaf
+    tail *cycleMemberTail
+}
+
+type cycleMemberTail struct {
+    head *cycleMemberHead
+}
+
+type cycleMemberLeaf struct {
+    next   *cycleMemberLeaf
+    collaborator *closeOrderServiceB
+}
+
+type chainThenTailHolder struct {
+    chain *cycleMemberLink
+    tail  *cycleMemberTail
+}
+
+func (instance *chainThenTailHolder) Close() error { return nil }
+
+type tailThenChainHolder struct {
+    tail  *cycleMemberTail
+    chain *cycleMemberLink
+}
+
+func (instance *tailThenChainHolder) Close() error { return nil }
+
+func newCycleMemberShape(held *closeOrderServiceB) (*cycleMemberLink, *cycleMemberTail) {
+    head := &cycleMemberHead{leaf: &cycleMemberLeaf{next: &cycleMemberLeaf{next: &cycleMemberLeaf{collaborator: held}}}}
+    tail := &cycleMemberTail{head: head}
+    head.tail = tail
+
+    /* through the chain the head sits at depth six and the held pointer at fourteen, two past the limit; through the tail the head sits at four and the held pointer at twelve */
+    return &cycleMemberLink{next: &cycleMemberLink{head: head}}, tail
+}
+
+/* a member of a cycle whose only way forward is the way back to an ancestor that was CUT is not a subtree walked whole: recorded as complete on its own, it was refused entry from the shallower path that had room, and which field the root listed first decided again whether the held service was found. Its verdict waits on the root of its component. */
+func TestHeldPointerIdentities_ACycleMemberIsCutWithTheRootItReachesBackTo(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    chain, tail := newCycleMemberShape(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&tailThenChainHolder{tail: tail, chain: chain}), heldIdentity) {
+        t.Fatalf("expected the collaborator found through the short path declared first")
+    }
+
+    chain, tail = newCycleMemberShape(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&chainThenTailHolder{chain: chain, tail: tail}), heldIdentity) {
+        t.Fatalf("expected the collaborator found through the short path declared after the chain that cut it")
+    }
+}
+
+/* cyclicHub is the fat hub with one pointer back into the chain that leads to it: a member of a cycle whose walk was WHOLE. Recorded cut for being on a cycle, it was walked again from the shorter path, and the second walk spent the budget before the collaborator declared after it. */
+type cyclicHub struct {
+    cells [64][256]struct{ left, right *closeOrderServiceB }
+    back  *cyclicHubLink
+}
+
+type cyclicHubLink struct {
+    next *cyclicHubLink
+    hub  *cyclicHub
+}
+
+type chainFirstCyclicHubHolder struct {
+    chain  *cyclicHubLink
+    hub    *cyclicHub
+    collaborator *closeOrderServiceB
+}
+
+func (instance *chainFirstCyclicHubHolder) Close() error { return nil }
+
+func TestHeldPointerIdentities_DoesNotWalkAWholeCycleMemberAgainFromAShallowerPath(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    hub := &cyclicHub{}
+    tail := &cyclicHubLink{hub: hub}
+    head := &cyclicHubLink{next: tail, hub: hub}
+    hub.back = head
+
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}), heldIdentity) {
+        t.Fatalf("expected the collaborator declared after a cyclic hub walked whole once to be found")
+    }
+}
+
+type anyTableFirstCodec struct {
+    table [256][256]any
+    peer  *closeOrderServiceB
+}
+
+func (instance *anyTableFirstCodec) Close() error { return nil }
+
+type sliceTableFirstCodec struct {
+    table [256][256][]byte
+    peer  *closeOrderServiceB
+}
+
+func (instance *sliceTableFirstCodec) Close() error { return nil }
+
+/* an inline table of interfaces or slices is one node too: the walk enters neither, so counting each cell of it spent the whole budget before the pointer field declared after the table, exactly as a table of scalars did before it was counted as one node */
+func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&anyTableFirstCodec{peer: held}), heldIdentity) {
+        t.Fatalf("expected the peer declared after a table of interfaces to be found")
+    }
+
+    if false == holdsIdentity(heldPointerIdentities(&sliceTableFirstCodec{peer: held}), heldIdentity) {
+        t.Fatalf("expected the peer declared after a table of slices to be found")
+    }
+}
+
 type selfReferringHolder struct {
     self   *selfReferringHolder
-    collab *closeOrderServiceB
+    collaborator *closeOrderServiceB
 }
 
 func (instance *selfReferringHolder) Close() error { return nil }
@@ -1200,7 +1322,7 @@ func TestHeldPointerIdentities_ReadsAValuePointingAtItselfOnce(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    holder := &selfReferringHolder{collab: held}
+    holder := &selfReferringHolder{collaborator: held}
     holder.self = holder
 
     identities := heldPointerIdentities(holder)
@@ -1226,6 +1348,7 @@ type busListener struct {
     peak     *atomic.Int32
 }
 
+/* Close holds until the other listener has entered its own Close as well — read from the peak, which only rises — or until a bound that only a serialised close reaches: two closes that overlap meet inside the window whatever the machine's load, where a fixed sleep met only when the scheduler was quick enough */
 func (instance *busListener) Close() error {
     now := instance.inFlight.Add(1)
 
@@ -1236,7 +1359,10 @@ func (instance *busListener) Close() error {
         }
     }
 
-    time.Sleep(30 * time.Millisecond)
+    deadline := time.Now().Add(2 * time.Second)
+    for 2 > instance.peak.Load() && true == time.Now().Before(deadline) {
+        time.Sleep(time.Millisecond)
+    }
 
     instance.inFlight.Add(-1)
 

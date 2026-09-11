@@ -12,4 +12,8 @@ type TeardownPlanEntry struct {
     Dependencies []string
     /* SerialGroup is the group of services this one is closed one after the other WITH inside its wave, counting from one, and zero for a service in no group. Two services seen holding each other — or a ring of them — carry no edge, because no ordering between them is true, but they are not unrelated: a wave closes such a group one service at a time while the rest of the wave starts together. Without the figure the view read "same wave, no dependencies" for a pair the teardown deliberately keeps apart. */
     SerialGroup int
+    /* Aliases are the other node keys the same instance is filed under — a service registered under a name and resolved through its type, or two names handed one pointer — which the plan collapsed onto this node: the teardown meets the instance once, under NodeKey, and a reader asking by any of the aliases is asking about this entry. */
+    Aliases []string
+    /* Cycle reports that the service is left over by a dependency cycle the drain could not resolve: it is closed one service at a time with the rest of the remainder, in the remainder's own order, and the teardown reports the cycle. A cycle member's Dependencies are the edges it declared or the walk found, which is what makes it a cycle — the figure is what tells that reading from a proved order. */
+    Cycle bool
 }

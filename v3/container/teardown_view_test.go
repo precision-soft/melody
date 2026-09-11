@@ -7,6 +7,7 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 /* the view is the plan the teardown would run, read without running it: the dependencies of a node are listed sorted, and its wave is the one the drain gives it. */
@@ -151,6 +152,11 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
     armErr := serviceContainer.(interface{ ArmParallelTeardown() error }).ArmParallelTeardown()
     if false == errors.Is(armErr, ErrContainerClosed) {
         t.Fatalf("expected arming a closed container to be refused as closed, got %v", armErr)
+    }
+
+    /* the refusal names the door it refused, not a service in creation: the resolver's constructor has one slot, and "creatingKey: ArmParallelTeardown" read as a service of that name */
+    if "ArmParallelTeardown" != exception.LogContext(armErr)["door"] {
+        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(armErr))
     }
 
     concrete := serviceContainer.(*container)

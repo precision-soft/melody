@@ -51,7 +51,8 @@ func (instance *container) ArmParallelTeardown() error {
     defer instance.mutex.Unlock()
 
     if true == instance.isClosed {
-        return newContainerClosedError("ArmParallelTeardown")
+        /* the cause is the one Register answers, the context is this door's own: the resolver's constructor has one slot, the key being created, and "creatingKey: ArmParallelTeardown" read as a service of that name in creation */
+        return exception.NewError("container is closed", exceptioncontract.Context{"door": "ArmParallelTeardown"}, ErrContainerClosed)
     }
 
     if refusalErr := instance.refuseUnregisteredDeclaredTeardownEdgesLocked(); nil != refusalErr {
@@ -65,9 +66,11 @@ func (instance *container) ArmParallelTeardown() error {
     return nil
 }
 
-/* recordDeclaredTeardownEdgeLocked writes a hand-declared ordering into the same graph a resolution writes into, in the same key space, and keeps a note of it beside the graph. Both halves are needed: the teardown must read ONE graph or it can order two ways, and the refusal below must be able to name the spelling somebody wrote. */
+/* recordDeclaredTeardownEdgeLocked keeps a note of a hand-declared ordering beside the graph, and writes the NAME form into the same graph a resolution writes into, in the same key space, so the teardown reads one graph. The TYPE form is not written: what a type stands for is the plan's to expand, for one plan, and the raw edge towards "type:<T>" left in the graph outlived the expansion that dropped it — a declaration turned ambiguous by a second, non-strict registration under the type expanded to nothing, while the raw edge was translated through the alias of the first service the moment that type had been resolved through itself, and the close reported a cycle on the default path over a teardown in which every service closed. The refusal below still names the spelling somebody wrote, from the note. */
 func (instance *container) recordDeclaredTeardownEdgeLocked(serviceName string, dependencyNodeKey string, dependencySpelling string) {
-    instance.registerDependencyLocked(containerNameNodeKey(serviceName), dependencyNodeKey)
+    if true == strings.HasPrefix(dependencyNodeKey, containerNameNodeKeyPrefix) {
+        instance.registerDependencyLocked(containerNameNodeKey(serviceName), dependencyNodeKey)
+    }
 
     instance.declaredTeardownEdges = append(
         instance.declaredTeardownEdges,
@@ -284,6 +287,7 @@ type teardownPlan struct {
     valueOfNodeKey   map[string]any
     canonicalEdges   map[string]map[string]struct{}
     unorderedGroupOf map[string]int
+    aliasesOf        map[string][]string
 }
 
 /* teardownPlanLocked works out that plan from what the container holds right now. It is one computation with two readers — the teardown itself, and the operator's read-only view — for the same reason teardownCloseOrder is shared with the scope: two of these would be two chances to describe an order that is not the one that runs.
@@ -472,29 +476,14 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         assignRepresentative(nodeKey, value)
     }
 
-    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it. A declaration keyed by a type is expanded onto the name that type is registered under at the same moment, for this plan, and translated with the rest: after this the graph is one graph, and the walk reads it once */
-    expandedEdges := instance.expandedDeclaredTypeEdgesLocked()
-
-    /* what the providers HELD joins what they resolved in the graph the walk reads — the canonical one, merged below AFTER the translation, since that is the graph the drain runs over and the one place a second source of edges could otherwise silently do nothing. The inferences are this plan's and are not written into the container's graph, where the view would leave them to outlive the state they were drawn from. The pairs the walk could NOT order — held both ways, or around a ring — come back as canonical keys too, and are grouped so that a wave closes each group one service at a time */
-    inferredEdges, unorderedPairs := instance.teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey, representativeOf)
-
+    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it. A declaration keyed by a type is expanded onto the name that type is registered under at the same moment, for this plan, and translated with the rest: after this the graph is one graph, and it is built ONCE, here, before the walk reads it — the walk used to translate the raw graph a second time for its own ring check, and the expansion, being this plan's, never reached that copy: a pointer held back against a declaration keyed by a type was written as an inference over a declaration the ring check could not see, the plan carried both directions, and the armed close reported a cycle over a teardown in which every service closed. An edge that collapses onto itself — a resolution between two names of one instance — is no edge, and used to reach the plan as a service closed before itself */
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
-
-    for _, inferredEdge := range inferredEdges {
-        dependencies, exists := canonicalEdges[inferredEdge[0]]
-        if false == exists {
-            dependencies = make(map[string]struct{})
-            canonicalEdges[inferredEdge[0]] = dependencies
-        }
-
-        dependencies[inferredEdge[1]] = struct{}{}
-    }
 
     addCanonicalEdge := func(dependentKey string, dependencyKey string) {
         canonicalDependent, dependentCreated := representativeOf[dependentKey]
         canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
 
-        if false == dependentCreated || false == dependencyCreated {
+        if false == dependentCreated || false == dependencyCreated || canonicalDependent == canonicalDependency {
             return
         }
 
@@ -513,8 +502,21 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         }
     }
 
-    for _, expandedEdge := range expandedEdges {
+    for _, expandedEdge := range instance.expandedDeclaredTypeEdgesLocked() {
         addCanonicalEdge(expandedEdge[0], expandedEdge[1])
+    }
+
+    /* what the providers HELD joins what they resolved and declared, in the one canonical graph — merged AFTER the walk read it, since that is the graph the drain runs over and the one place a second source of edges could otherwise silently do nothing. The inferences are this plan's and are not written into the container's graph, where the view would leave them to outlive the state they were drawn from. The pairs the walk could NOT order — held both ways, or around a ring — come back as canonical keys too, and are grouped so that a wave closes each group one service at a time */
+    inferredEdges, unorderedPairs := instance.teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey, representativeOf, canonicalEdges)
+
+    for _, inferredEdge := range inferredEdges {
+        dependencies, exists := canonicalEdges[inferredEdge[0]]
+        if false == exists {
+            dependencies = make(map[string]struct{})
+            canonicalEdges[inferredEdge[0]] = dependencies
+        }
+
+        dependencies[inferredEdge[1]] = struct{}{}
     }
 
     /* an alias group is as old as its OLDEST member: the same instance filed under a name and under a type came into being once, and the stamp of the later filing would claim it was built after services that were in fact built from it */
@@ -551,6 +553,19 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         cycleWaveIndex = closeWaveIndexOf[cycleNodeKeys[0]]
     }
 
+    /* the aliases travel with the plan so that a reader asking by any spelling of one instance is answered about the node it was collapsed onto: without them the operator's view had no entry for a name the plan had folded away, and read that as a service never built */
+    aliasesOf := make(map[string][]string)
+
+    for nodeKey, canonicalNodeKey := range representativeOf {
+        if nodeKey != canonicalNodeKey {
+            aliasesOf[canonicalNodeKey] = append(aliasesOf[canonicalNodeKey], nodeKey)
+        }
+    }
+
+    for _, aliases := range aliasesOf {
+        sort.Strings(aliases)
+    }
+
     return teardownPlan{
         closeOrder:       closeOrder,
         closeWaveIndexOf: closeWaveIndexOf,
@@ -559,6 +574,7 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         valueOfNodeKey:   valueOfNodeKey,
         canonicalEdges:   canonicalEdges,
         unorderedGroupOf: unorderedGroupOf,
+        aliasesOf:        aliasesOf,
     }
 }
 
@@ -901,7 +917,8 @@ func teardownDeadlineContext(
     spentBy map[string]time.Duration,
     starved []string,
 ) exceptioncontract.Context {
-    if false == hasDeadline || false == finishedAt.After(deadline) {
+    if false == hasDeadline || false == finishedAt.After(deadline) || 0 == len(closeDurations) {
+        /* a teardown reached with the deadline already gone and nothing to close spent nothing on anything: a record here named nobody, and the journal called an empty teardown an overrun */
         return nil
     }
 

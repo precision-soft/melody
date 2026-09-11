@@ -28,7 +28,7 @@ const (
 
     defaultPublishReturnBuffer = 16
 
-    /* defaultPublishTimeout bounds the WRITE of one publish, the stretch the amqp client runs with the caller's context discarded; the confirmation wait after it observes the context as it always did. Sized like closeJoinTimeout, to a full amqp handshake, because a broker under a resource alarm legitimately holds publishers for seconds and a bound that fired inside that would fail sends the broker was about to accept. */
+    /* defaultPublishTimeout bounds EACH of the three stretches one Send spends time in — the wait for its turn, the WRITE the amqp client runs with the caller's context discarded, and the CONFIRMATION, which PublishTimeout describes. Sized like closeJoinTimeout, to a full amqp handshake, because a broker under a resource alarm legitimately holds publishers for seconds and a bound that fired inside that would fail sends the broker was about to accept. */
     defaultPublishTimeout = 30 * time.Second
 
     /* maxPrefetch caps the configured prefetch at the AMQP 0-9-1 prefetch-count wire limit. The field is encoded as uint16 by channel.Qos, so a larger value wraps on the wire — 65536 becomes 0, which RabbitMQ interprets as UNLIMITED prefetch, the exact opposite of the configured flow-control cap. */

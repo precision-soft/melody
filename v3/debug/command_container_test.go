@@ -1724,6 +1724,171 @@ func TestContainerCommand_TheJsonDocumentCarriesTheTeardownBesideEachBuiltServic
     }
 }
 
+type containerCommandAliasTestEnvelope struct {
+    Data struct {
+        Items []struct {
+            Name     string `json:"name"`
+            Lifetime string `json:"lifetime"`
+            Teardown *struct {
+                Wave     int    `json:"wave"`
+                Node     string `json:"node"`
+                Ordering string `json:"ordering"`
+            } `json:"teardown"`
+        } `json:"items"`
+    } `json:"data"`
+}
+
+/* a name the plan folded onto another — two names handed one pointer — answers with the item of the node it was collapsed onto, in the json document and in a listing windowed on that name alone: without it the alias carried no teardown key, which the document reserves for a service never built, and a window on the alias rendered no block at all */
+func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCollapsedOnto(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        "view.canonical",
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "shared"}, nil },
+        container.WithoutTypeRegistration(),
+    )
+
+    serviceContainer.MustRegister(
+        "view.alias",
+        func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
+            return container.FromResolver[*teardownViewStorage](resolver, "view.canonical")
+        },
+        container.WithoutTypeRegistration(),
+    )
+
+    if _, resolveErr := container.FromResolver[*teardownViewStorage](serviceContainer, "view.alias"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=json"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    var envelope containerCommandAliasTestEnvelope
+    if unmarshalErr := json.Unmarshal([]byte(rendered), &envelope); nil != unmarshalErr {
+        t.Fatalf("expected a json document, got %v over %q", unmarshalErr, rendered)
+    }
+
+    for _, item := range envelope.Data.Items {
+        if nil == item.Teardown {
+            t.Fatalf("expected %s to carry the teardown of the instance it names, got no key", item.Name)
+        }
+
+        if "service:view.alias" == item.Teardown.Node || "none" != item.Teardown.Ordering {
+            t.Fatalf("expected %s to answer with the node the plan collapsed the instance onto, unordered, got %+v", item.Name, item.Teardown)
+        }
+    }
+
+    rendered, runErr = runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=table", "--limit=1"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    rows := debugTableBlockRow(rendered, "TEARDOWN (SEQUENTIAL)")
+    if 1 != len(rows) || false == strings.Contains(rows[0][1], "service:view.alias") || false == strings.Contains(rows[0][1], "service:view.canonical") {
+        t.Fatalf("expected the one row of the window to name the node and its alias, got %v", rows)
+    }
+}
+
+/* a scoped registration allowed to share its name with a built container service carries no teardown item: it is built and closed by each scope and has no node in the container's plan, and handed the container service's item by the name alone it read as an unordered container service — sending the operator to declare an ordering the scoped door refuses */
+func TestContainerCommand_AScopedTwinOfABuiltServiceCarriesNoTeardown(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        "view.shared",
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "container"}, nil },
+        container.WithoutTypeRegistration(),
+    )
+
+    if _, resolveErr := container.FromResolver[*teardownViewStorage](serviceContainer, "view.shared"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    serviceContainer.MustRegisterScoped(
+        "view.shared",
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "scoped"}, nil },
+        container.WithoutTypeRegistration(),
+        container.Replacing(),
+    )
+
+    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=json"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    var envelope containerCommandAliasTestEnvelope
+    if unmarshalErr := json.Unmarshal([]byte(rendered), &envelope); nil != unmarshalErr {
+        t.Fatalf("expected a json document, got %v over %q", unmarshalErr, rendered)
+    }
+
+    seen := 0
+
+    for _, item := range envelope.Data.Items {
+        if "view.shared" != item.Name {
+            continue
+        }
+
+        seen = seen + 1
+
+        if containercontract.ServiceLifetimeScoped == item.Lifetime && nil != item.Teardown {
+            t.Fatalf("expected the scoped twin to carry no teardown, got %+v", item.Teardown)
+        }
+
+        if containercontract.ServiceLifetimeContainer == item.Lifetime && nil == item.Teardown {
+            t.Fatalf("expected the built container service to keep its teardown")
+        }
+    }
+
+    if 2 != seen {
+        t.Fatalf("expected both twins listed, got %d", seen)
+    }
+}
+
+/* the remainder of a dependency cycle — b declares a, a resolved b — is closed one service at a time and the teardown reports the cycle; the view rendered it as two proved rows in one wave, which reads as an order that holds, and a cycle is exactly what an operator has to see before arming */
+func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        "cycle.b",
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "b"}, nil },
+        container.WithoutTypeRegistration(),
+        container.WithTeardownDependency("cycle.a"),
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.a",
+        func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
+            if _, resolveErr := container.FromResolver[*teardownViewStorage](resolver, "cycle.b"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &teardownViewStorage{label: "a"}, nil
+        },
+        container.WithoutTypeRegistration(),
+    )
+
+    if _, resolveErr := container.FromResolver[*teardownViewStorage](serviceContainer, "cycle.a"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=table"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    rows := debugTableBlockRow(rendered, "TEARDOWN (SEQUENTIAL)")
+    if 2 != len(rows) {
+        t.Fatalf("expected the two members of the remainder, got %v", rows)
+    }
+
+    for _, row := range rows {
+        if "cycle" != row[3] {
+            t.Fatalf("expected the ordering of a cycle member to read cycle, got %v", row)
+        }
+    }
+}
+
 type viewPairA struct {
     other *viewPairB
 }
