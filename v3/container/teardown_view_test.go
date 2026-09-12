@@ -220,3 +220,47 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
         t.Fatalf("expected the pure dependency of a ring member not to be flagged as a cycle, got %v", flagged)
     }
 }
+
+/* a bridge between two rings — a service one ring member depends on, that depends on a member of the other ring — is on no ring: it is released once the first ring closes and closed before the second, in the order the graph proves, so it is not flagged */
+func TestTeardownPlan_ABridgeBetweenTwoRingsIsNotFlaggedAsACycle(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    for _, name := range []string{"ring.f", "ring.e", "bridge", "ring.b", "ring.a"} {
+        label := name
+
+        serviceContainer.MustRegister(
+            name,
+            func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: label}, nil },
+            WithoutTypeRegistration(),
+        )
+    }
+
+    for _, name := range []string{"ring.a", "ring.b", "bridge", "ring.e", "ring.f"} {
+        MustFromResolver[*poolDeclarerService](serviceContainer, name)
+    }
+
+    concrete := serviceContainer.(*container)
+    concrete.mutex.Lock()
+    concrete.registerDependencyLocked("service:ring.a", "service:ring.b")
+    concrete.registerDependencyLocked("service:ring.b", "service:ring.a")
+    concrete.registerDependencyLocked("service:ring.a", "service:bridge")
+    concrete.registerDependencyLocked("service:bridge", "service:ring.e")
+    concrete.registerDependencyLocked("service:ring.e", "service:ring.f")
+    concrete.registerDependencyLocked("service:ring.f", "service:ring.e")
+    concrete.mutex.Unlock()
+
+    flagged := make(map[string]bool)
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        flagged[entry.NodeKey] = entry.Cycle
+    }
+
+    for _, member := range []string{"service:ring.a", "service:ring.b", "service:ring.e", "service:ring.f"} {
+        if false == flagged[member] {
+            t.Fatalf("expected %s to be flagged as a ring member, got %v", member, flagged)
+        }
+    }
+
+    if true == flagged["service:bridge"] {
+        t.Fatalf("expected the bridge between the two rings not to be flagged, got %v", flagged)
+    }
+}

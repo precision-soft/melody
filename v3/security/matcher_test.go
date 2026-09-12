@@ -74,6 +74,24 @@ func TestPathPrefixMatcher_ATrailingSlashPrefixClaimsTheBareSpelling(t *testing.
     }
 }
 
+/* the matcher reads the spelling the router reads: "/admin%2Fusers" is one segment the router never routes under "/admin", so a firewall written for "/admin/" does not claim it, while "/admin/caf%C3%A9" reads "/admin/café" and is claimed */
+func TestPathPrefixMatcher_ReadsThePathTheRouterRoutes(t *testing.T) {
+    matcher := NewPathPrefixMatcher("/admin/")
+
+    for path, claimed := range map[string]bool{
+        "/admin%2Fusers":    false,
+        "/admin/caf%C3%A9":  true,
+        "/admin/users":      true,
+    } {
+        httpRequest, _ := nethttp.NewRequest("GET", "http://localhost"+path, nil)
+        request := http.NewRequest(httpRequest, nil, nil, nil)
+
+        if claimed != matcher.Matches(request) {
+            t.Fatalf("expected the prefix to claim %q: %v", path, claimed)
+        }
+    }
+}
+
 /* The request is an application-implementable contract, so a nil pointer of a request type reaches the
 matcher as a non-nil interface and HttpRequest() below dereferences it. The untyped literal the sibling
 probe passes is the only shape a bare comparison catches. */

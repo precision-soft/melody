@@ -14,6 +14,7 @@ import (
     "reflect"
     "strings"
     "syscall"
+    "unicode"
 
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
@@ -241,8 +242,13 @@ func splitNormalizedPath(value string) []string {
 
    A path that leading or trailing whitespace would be trimmed from — "/public ", the decoded form of "/public%20" or of a no-break space — is not canonical either: the router keeps the whitespace and the access-control matcher trims it, so the request routed under the sent spelling was authorized under the trimmed one's rule.
 
-   A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route "/admin", so it is normalized away here before the comparison rather than refused. A target that does not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and is left to the router to answer. */
+   A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route "/admin", so it is normalized away here before the comparison rather than refused. A target that does not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and is left to the router to answer; one that begins with whitespace is not such a target, it is the leading form of the padded path, and is refused. */
 func requestPathIsCanonical(path string) bool {
+    /* a path that BEGINS with whitespace is refused before the "/" test below lets it through as "not path-routed": Go's server refuses such a request line itself, but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix on "/api%20/public" — hands the kernel " /public", which the router routed as a segment of its own while the access-control matcher trimmed it and answered with the rule of "/public"; measured, the leading twin of the trailing grant */
+    if "" != path && strings.TrimLeftFunc(path, unicode.IsSpace) != path {
+        return false
+    }
+
     if false == strings.HasPrefix(path, "/") {
         return true
     }

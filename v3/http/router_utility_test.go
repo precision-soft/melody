@@ -1784,6 +1784,11 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/public\t",
         "/public\u00a0",
         "/ ",
+        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router routed as a segment of its own while the matcher trimmed it to "/public" */
+        " /public",
+        "\t/public",
+        "\u00a0/public",
+        " ",
     }
 
     for _, foldedPath := range foldedPaths {
@@ -1798,6 +1803,30 @@ func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
     for _, target := range []string{"*", "example.com:443", ""} {
         if false == requestPathIsCanonical(target) {
             t.Fatalf("expected non-path target %q to be left to the router", target)
+        }
+    }
+}
+
+func TestRequestPathAsRouted_KeepsAnEncodedSeparatorInsideItsSegmentAndDecodesTheRest(t *testing.T) {
+    for escapedPath, routed := range map[string]string{
+        "/":                    "/",
+        "/public":              "/public",
+        "/public/":             "/public/",
+        "/caf%C3%A9":           "/café",
+        "/a%20b/c":             "/a b/c",
+        "/a%25b":               "/a%b",
+        "/public%2F":           "/public%2F",
+        "/public%2f":           "/public%2F",
+        "/admin%2Fusers":       "/admin%2Fusers",
+        "/files/a%2Fb/c":       "/files/a%2Fb/c",
+        "/public%252F":         "/public%2F",
+        "/admin/users":         "/admin/users",
+        "*":                    "*",
+        "example.com:443":      "example.com:443",
+        "":                     "",
+    } {
+        if routed != RequestPathAsRouted(escapedPath) {
+            t.Fatalf("expected %q to be read as %q, got %q", escapedPath, routed, RequestPathAsRouted(escapedPath))
         }
     }
 }

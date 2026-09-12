@@ -2822,6 +2822,39 @@ func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T
     }
 }
 
+/* the LEADING twin of the padded path: Go's own server refuses a request line that does not begin with "/", but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix — hands the kernel " /public" for "/api%20/public", which the router routed as a segment of its own while the access-control matcher trimmed it and answered with the rule of "/public" */
+func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.T) {
+    for _, rawPath := range []string{"/api%20/public", "/api%09/public", "/api%C2%A0/public"} {
+        handlerRan := false
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/*path...",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                handlerRan = true
+                return TextResponse(nethttp.StatusOK, "public"), nil
+            },
+        )
+
+        serviceContainer := newHttpTestContainer()
+        handler := nethttp.StripPrefix("/api", NewKernel(router).ServeHttp(serviceContainer))
+
+        request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
+        recorder := httptest.NewRecorder()
+
+        handler.ServeHTTP(recorder, request)
+
+        if nethttp.StatusBadRequest != recorder.Code {
+            t.Fatalf("expected %q to be refused with %d once the prefix was stripped, got %d", rawPath, nethttp.StatusBadRequest, recorder.Code)
+        }
+
+        if true == handlerRan {
+            t.Fatalf("the handler ran for %q, which should have been refused before routing to it", rawPath)
+        }
+    }
+}
+
 func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     handlerRan := false
 

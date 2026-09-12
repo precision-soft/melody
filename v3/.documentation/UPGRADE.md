@@ -46,6 +46,8 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 **Remedy.** A handler that reassembles a storage key or a proxy target from the catch-all unescapes the value (`url.PathUnescape`) if it wants the literal slash; one whose paths never carry an encoded separator sees no change. A requirement that must admit the encoded spelling names it.
 
+The access-control matcher, the firewall path matcher and the kernel's canonical-path guard read that same spelling (`http.RequestPathAsRouted`), not the decoded `URL.Path`: `/public%2F` is the resource `public/`, distinct from `/public`, so an exact rule written for `/public` does not claim it — measured, read decoded it was folded onto the public rule of `/public` while the router served it through a protected catch-all handler, to an anonymous client — and a firewall or rule written for `/admin/` does not claim `/admin%2Fusers`, a one-segment resource the router never routes under `/admin`. A rule that means to claim a resource whose name carries a separator names it with `%2F`.
+
 Every entry below but the first is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left. The first entry is the exception and says so: nothing behaved wrongly, and what it removes is a vendor's API from melody's public surface.
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
@@ -533,7 +535,7 @@ debug.NewMiddlewareCommand(
 
 **What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — before it is routed or authorized, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
 
-**Symptom.** A client that sends a path ending in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler.
+**Symptom.** A client that sends a path ending, or beginning after a stripped prefix, in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler, or answered `404`.
 
 **Remedy.** Send the path without the padding; nothing legitimate names a resource by a trailing space. There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, which is the defect the refusal closes.
 

@@ -239,6 +239,56 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
     }
 }
 
+/* the listener reads the spelling the router routes: "/public%2F" is the one-segment resource "public/" for the router, served through the protected catch-all, and the decoded "/public/" it used to read was folded onto the exact public rule of "/public" — an anonymous request served the protected handler. Read as routed, the request is claimed by the closed rule and refused */
+func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
+    for path, denied := range map[string]bool{
+        "/public":       false,
+        "/public/":      false,
+        "/public%2F":    true,
+        "/public%2Fx":   true,
+        "/admin%2Fusers": true,
+        "/private":      true,
+    } {
+        kernel := newTestKernel()
+        runtimeInstance := newTestRuntime()
+
+        registry := NewFirewallRegistry(
+            NewCompiledConfiguration(nil, NewAccessControl(
+                NewAccessControlExactRule("/public", securitycontract.AttributePublicAccess),
+                NewAccessControlRuleWithSegmentPrefix("/", "ROLE_ADMIN"),
+            )),
+        )
+
+        deniedCount := 0
+        kernel.EventDispatcher().AddListener(
+            securitycontract.EventSecurityAuthorizationDenied,
+            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                deniedCount++
+                return nil
+            },
+            0,
+        )
+
+        RegisterKernelAccessControlListener(kernel, registry)
+
+        request := newSecurityTestRequest("GET", path, nil, runtimeInstance)
+        requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+        _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+        if nil != err {
+            t.Fatalf("unexpected error for %q: %v", path, err)
+        }
+
+        if denied != (1 == deniedCount) {
+            t.Fatalf("expected %q to be denied: %v, got %d denials", path, denied, deniedCount)
+        }
+
+        if denied != (nil != requestEvent.Response()) {
+            t.Fatalf("expected %q to carry a refusal response: %v", path, denied)
+        }
+    }
+}
+
 /* the security context is PUT on the runtime here, carrying a nil token. Without that the listener never reaches the token check at all — it answers from the missing-context branch above, which is a different refusal for a different reason, and the whole nil-token block could be deleted with this test still green. The reason is what tells the two apart, so it is what this asserts. */
 func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorizationDeniedAndSets401(t *testing.T) {
     kernel := newTestKernel()

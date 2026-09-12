@@ -6,7 +6,7 @@ import (
     "sync"
 )
 
-/* teardownWalkDepthLimit, teardownWalkElementLimit and teardownWalkNodeBudget bound the walk below. None touches CORRECTNESS: an edge the walk does not reach is an edge the graph does not gain, which leaves the pair exactly where the sequential teardown left it. They bound COST, and they are written as figures rather than left open because a service holding a large inline array of structs would otherwise pay for a walk whose answer is almost always the same one. The first two bound one level each; the budget bounds the whole, because a nesting of arrays multiplies the two per-level limits into a figure no per-level limit can hold — measured, a million inline cells cost thirty milliseconds under the container's write lock, once per filing. */
+/* teardownWalkDepthLimit, teardownWalkElementLimit and teardownWalkNodeBudget bound the walk below. None touches CORRECTNESS: an edge the walk does not reach is an edge the graph does not gain, which leaves the pair exactly where the sequential teardown left it. They bound COST, and they are written as figures rather than left open because a service holding a large inline array of structs would otherwise pay for a walk whose answer is almost always the same one. The first two bound one level each; the budget bounds the whole, because a nesting of arrays multiplies the two per-level limits into a figure no per-level limit can hold — measured, a million inline cells cost thirty milliseconds under the container's write lock, once per filing. The budget is charged when an item is QUEUED, not when it is taken: a breadth-first walk queues every child of a node before it takes any of them, so a budget charged at the taking bounded the nodes read and left the queue itself unbounded — measured, a table of four million pointer-holding cells cost 781 MB of queue and half a second where the depth-first walk before it cost nothing, with the answer unchanged. */
 const teardownWalkDepthLimit = 12
 
 const teardownWalkElementLimit = 256
@@ -37,7 +37,6 @@ type heldPointer struct {
 func heldPointerIdentities(root any) []heldPointer {
     found := make([]heldPointer, 0)
     seen := make(map[pointerIdentity]struct{})
-    visited := 0
 
     type walkItem struct {
         value reflect.Value
@@ -45,6 +44,17 @@ func heldPointerIdentities(root any) []heldPointer {
     }
 
     queue := []walkItem{{value: reflect.ValueOf(root), depth: 0}}
+    queued := 1
+
+    /* enqueue charges the budget for an item as it is queued and refuses the item once the budget is spent, so the queue can never hold more than the budget: the walk stops when the queue runs dry, which it does within the budget by construction */
+    enqueue := func(value reflect.Value, depth int) {
+        if queued >= teardownWalkNodeBudget {
+            return
+        }
+
+        queued = queued + 1
+        queue = append(queue, walkItem{value: value, depth: depth})
+    }
 
     for 0 < len(queue) {
         item := queue[0]
@@ -55,14 +65,8 @@ func heldPointerIdentities(root any) []heldPointer {
             continue
         }
 
-        if item.depth > teardownWalkDepthLimit {
-            continue
-        }
-
-        visited = visited + 1
-        if visited > teardownWalkNodeBudget {
-            break
-        }
+        /* the children of a node standing at the depth limit would all land one past it: they are not computed, not queued and not charged */
+        childrenInReach := item.depth < teardownWalkDepthLimit
 
         switch value.Kind() {
         case reflect.Pointer:
@@ -85,17 +89,34 @@ func heldPointerIdentities(root any) []heldPointer {
                 found = append(found, heldPointer{identity: identity, keepAlive: target})
             }
 
-            queue = append(queue, walkItem{value: target, depth: item.depth + 1})
+            if true == childrenInReach {
+                enqueue(target, item.depth+1)
+            }
         case reflect.Struct:
+            if false == childrenInReach {
+                continue
+            }
+
             fieldCount := value.NumField()
             if fieldCount > teardownWalkElementLimit {
                 fieldCount = teardownWalkElementLimit
             }
 
             for fieldIndex := 0; fieldIndex < fieldCount; fieldIndex = fieldIndex + 1 {
-                queue = append(queue, walkItem{value: value.Field(fieldIndex), depth: item.depth + 1})
+                field := value.Field(fieldIndex)
+
+                /* a field whose type can hold no identity is not queued, so a struct of scalars costs its own node and no more, exactly as an array of them does — charged field by field, a struct of two hundred and fifty-six structs of two hundred and fifty-six integers spent the whole budget before the pointer declared beside it one level down was reached */
+                if false == typeCanHoldIdentity(field.Type()) {
+                    continue
+                }
+
+                enqueue(field, item.depth+1)
             }
         case reflect.Array:
+            if false == childrenInReach {
+                continue
+            }
+
             /* an array of scalars is one node: its elements cannot name anything, and counting each of them against the budget is how a lookup table of sixty-four kibibytes spent the whole walk before the pointer field declared after it — measured, the collaborator found or lost by whether it came before or after the table */
             if false == typeCanHoldIdentity(value.Type().Elem()) {
                 continue
@@ -107,7 +128,7 @@ func heldPointerIdentities(root any) []heldPointer {
             }
 
             for elementIndex := 0; elementIndex < elementCount; elementIndex = elementIndex + 1 {
-                queue = append(queue, walkItem{value: value.Index(elementIndex), depth: item.depth + 1})
+                enqueue(value.Index(elementIndex), item.depth+1)
             }
         }
     }

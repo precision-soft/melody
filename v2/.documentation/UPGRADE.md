@@ -38,6 +38,15 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 **Remedy.** None.
 
+### HTTP: a request path padded with whitespace is refused with 400
+
+**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — and a path that begins with whitespace, which a handler mounted in front of the kernel that rewrites the path (the standard library's `StripPrefix` on `/api%20/public`) can hand it, before it is routed or authorized, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
+
+**Symptom.** A client that sends a path ending, or beginning after a stripped prefix, in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler.
+
+**Remedy.** Send the path without the padding; nothing legitimate names a resource by a trailing space. There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, which is the defect the refusal closes.
+
+
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
 
 Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, and none of them asks the upgrader for an action.
@@ -89,14 +98,6 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 **Symptom.** A client — typically a non-browser one, since browsers fold before sending — that sends a path containing `..`, `.` or `//` is answered `400 bad request` where the request was previously routed to a handler.
 
 **Remedy.** Send the canonical path: the folded form the `..`/`.`/`//` resolves to is the resource the client meant. Browsers already do this; a hand-written client or a proxy that forwards a raw target should fold the path itself (Go's `net/http.ServeMux` does the same by redirecting). There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, so it is a defect, not a preference.
-
-### HTTP: a request path padded with whitespace is refused with 400
-
-**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — before it is routed or authorized, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
-
-**Symptom.** A client that sends a path ending in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler.
-
-**Remedy.** Send the path without the padding; nothing legitimate names a resource by a trailing space. There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, which is the defect the refusal closes.
 
 ### Application: a shutdown that leaves request scopes open exits non-zero
 

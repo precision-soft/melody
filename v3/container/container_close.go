@@ -283,7 +283,7 @@ type teardownPlan struct {
     closeOrder       []string
     closeWaveIndexOf map[string]int
     cycleNodeKeys    []string
-    cycleWaveIndex   int
+    cycleWaveIndexes map[int]struct{}
     valueOfNodeKey   map[string]any
     canonicalEdges   map[string]map[string]struct{}
     unorderedGroupOf map[string]int
@@ -547,10 +547,10 @@ func (instance *container) teardownPlanLocked() teardownPlan {
 
     unorderedGroupOf := unorderedGroupsOf(sameWavePairs)
 
-    /* the wave the cycle remainder was given is the one wave that is closed one service at a time whatever the caller armed: its members constrain one another, so it is a set with an order and not a set without relations, and the drain's remainder order is the only order it has */
-    cycleWaveIndex := -1
-    if 0 < len(cycleNodeKeys) {
-        cycleWaveIndex = closeWaveIndexOf[cycleNodeKeys[0]]
+    /* the wave a ring was given is a wave closed one service at a time whatever the caller armed: its members constrain one another, so it is a set with an order and not a set without relations, and the ring's own order is the only order it has; a graph with two rings has two such waves */
+    cycleWaveIndexes := make(map[int]struct{})
+    for _, cycleNodeKey := range cycleNodeKeys {
+        cycleWaveIndexes[closeWaveIndexOf[cycleNodeKey]] = struct{}{}
     }
 
     /* the aliases travel with the plan so that a reader asking by any spelling of one instance is answered about the node it was collapsed onto: without them the operator's view had no entry for a name the plan had folded away, and read that as a service never built */
@@ -570,7 +570,7 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         closeOrder:       closeOrder,
         closeWaveIndexOf: closeWaveIndexOf,
         cycleNodeKeys:    cycleNodeKeys,
-        cycleWaveIndex:   cycleWaveIndex,
+        cycleWaveIndexes: cycleWaveIndexes,
         valueOfNodeKey:   valueOfNodeKey,
         canonicalEdges:   canonicalEdges,
         unorderedGroupOf: unorderedGroupOf,
@@ -804,8 +804,8 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 continue
             }
 
-            /* the cycle remainder is the one wave whose members are NOT unrelated: each of them waits on another, in a ring the drain could not open, and closing them at once is closing them in no order at all — measured, three services declared in a ring were all inside their Close at the same moment. They are closed one after the other, in the remainder's own order, as teardownCloseOrder promises; the waves before and after them are untouched */
-            if waveIndex == plan.cycleWaveIndex {
+            /* a ring's wave is a wave whose members are NOT unrelated: each of them waits on another, in a ring the drain could not open, and closing them at once is closing them in no order at all — measured, three services declared in a ring were all inside their Close at the same moment. They are closed one after the other, in the ring's own order, as teardownCloseOrder promises; the waves before and after them, and what the ring released into the waves after it, are untouched */
+            if _, ringWave := plan.cycleWaveIndexes[waveIndex]; true == ringWave {
                 for _, candidate := range wave {
                     closeOneCandidate(candidate)
                 }
@@ -1128,7 +1128,7 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
 
 /* teardownCloseOrder puts a set of created services into the order they have to be closed in: a dependent before everything it depends on, so nothing is torn down while something still using it is alive. Ties are broken by creation order, latest first — see closesBefore for why that and not the node key.
 
-   The edges are expected in the same key space as the nodes; an edge naming a node that was not created is dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately and appended last, so the caller can both close it and report it.
+   The edges are expected in the same key space as the nodes; an edge naming a node that was not created is dropped rather than followed, and a self-edge is ignored. A ring the drain cannot open — two or more nodes each waiting on another of them — is closed as one unit, its members one after the other in creation order, latest first, since no order among them is true; the drain then continues past it, so a pure dependency of a ring member is released by that close and closed after it, in the order the edge proves. The members of every ring are returned separately, so the caller can report them: they are the only nodes the graph could not order, and naming the pure dependencies beside them named services the order does honour — measured, a dependency created after its ring dependent was closed before it while the remainder was closed whole, and the operator's view read that dependency as proved.
 
    It also answers the WAVE each node belongs to: one past the last of its dependents, which makes a wave the set of nodes with no relation to one another at that moment. The wave falls out of this same drain rather than out of a second walk over the graph — two walks are two chances to order a teardown differently, which is the reason this function is shared in the first place — and the serial order is unchanged by its presence, so a caller that ignores the waves closes exactly what it closed before, in exactly that order.
 
@@ -1200,17 +1200,18 @@ func teardownCloseOrder(
         closeWaveIndexOf[nodeKey] = 0
     }
 
-    for 0 < availableHeap.Len() {
-        current := heap.Pop(availableHeap).(string)
-
-        closeOrder = append(closeOrder, current)
-
+    /* releasing a node lets go of its edges: each dependency lands one wave past it and, once its last dependent has let go, joins the drain. The members of a ring being released together do not release one another — their edges among themselves are the ring, which has no order to hand out */
+    releaseDependenciesOf := func(current string, ringMembers map[string]struct{}) {
         dependencies, exists := adjacency[current]
         if false == exists {
-            continue
+            return
         }
 
         for dependencyKey := range dependencies {
+            if _, inRing := ringMembers[dependencyKey]; true == inRing {
+                continue
+            }
+
             if closeWaveIndexOf[current]+1 > closeWaveIndexOf[dependencyKey] {
                 closeWaveIndexOf[dependencyKey] = closeWaveIndexOf[current] + 1
             }
@@ -1226,35 +1227,210 @@ func teardownCloseOrder(
     }
 
     cycleNodeKeys := make([]string, 0)
-    for nodeKey, degree := range inDegree {
-        if 0 < degree {
-            cycleNodeKeys = append(cycleNodeKeys, nodeKey)
+
+    for {
+        for 0 < availableHeap.Len() {
+            current := heap.Pop(availableHeap).(string)
+
+            closeOrder = append(closeOrder, current)
+
+            releaseDependenciesOf(current, nil)
         }
-    }
 
-    sort.Slice(
-        cycleNodeKeys,
-        func(leftIndex int, rightIndex int) bool {
-            return closesBefore(creationOrderOf, cycleNodeKeys[leftIndex], cycleNodeKeys[rightIndex])
-        },
-    )
-
-    closeOrder = append(closeOrder, cycleNodeKeys...)
-
-    /* what a cycle leaves behind has no wave that means anything, because its members constrain one another: it gets a wave of its own, past everything the drain proved, and a caller closing in waves runs that one serially. */
-    if 0 < len(cycleNodeKeys) {
-        cycleWaveIndex := 0
-
-        for _, waveIndex := range closeWaveIndexOf {
-            if waveIndex >= cycleWaveIndex {
-                cycleWaveIndex = waveIndex + 1
+        remaining := make(map[string]struct{})
+        for nodeKey, degree := range inDegree {
+            if 0 < degree {
+                remaining[nodeKey] = struct{}{}
             }
         }
 
-        for _, nodeKey := range cycleNodeKeys {
-            closeWaveIndexOf[nodeKey] = cycleWaveIndex
+        if 0 == len(remaining) {
+            break
+        }
+
+        /* the drain stalled: every node left waits on another node left, so what is left holds at least one ring. The ring nothing outside it still waits on is closed as one unit, its members one after the other in creation order — no order among them is true, so the tie-break is the order —, and the drain CONTINUES past it: a pure dependency of a ring member is released by that close and takes its place in the order the graph proves, where the remainder used to be closed whole in creation order and a dependency created after its ring dependent was closed before it, against the edge that said otherwise. */
+        ring := sourceRingAmong(remaining, adjacency, creationOrderOf)
+
+        /* the ring's wave is one past every wave assigned so far, so it is a wave of its own that a caller closing in waves runs one service at a time; what the ring releases lands one past it */
+        ringWaveIndex := 0
+        for _, waveIndex := range closeWaveIndexOf {
+            if waveIndex >= ringWaveIndex {
+                ringWaveIndex = waveIndex + 1
+            }
+        }
+
+        ringMembers := make(map[string]struct{}, len(ring))
+        for _, nodeKey := range ring {
+            ringMembers[nodeKey] = struct{}{}
+            closeWaveIndexOf[nodeKey] = ringWaveIndex
+            inDegree[nodeKey] = 0
+        }
+
+        for _, nodeKey := range ring {
+            closeOrder = append(closeOrder, nodeKey)
+            cycleNodeKeys = append(cycleNodeKeys, nodeKey)
+
+            releaseDependenciesOf(nodeKey, ringMembers)
         }
     }
 
     return closeOrder, closeWaveIndexOf, cycleNodeKeys
+}
+
+/* sourceRingAmong answers the ring among the stalled nodes that nothing else among them still waits on — the one the drain can close next — as its members in the order they close, creation order latest first. A ring is a strongly connected component of two or more nodes over the edges between the stalled nodes; a stalled node that is on no ring waits on a ring, and is released once that ring is closed. Where several rings qualify the one whose first member closes first is taken, so the order is a function of the graph and the creation order alone. */
+func sourceRingAmong(remaining map[string]struct{}, adjacency map[string]map[string]struct{}, creationOrderOf map[string]int) []string {
+    rings := stronglyConnectedRings(remaining, adjacency)
+
+    var chosen []string
+
+    for _, ring := range rings {
+        members := make(map[string]struct{}, len(ring))
+        for _, nodeKey := range ring {
+            members[nodeKey] = struct{}{}
+        }
+
+        waitedOn := false
+
+        for dependentKey := range remaining {
+            if _, inRing := members[dependentKey]; true == inRing {
+                continue
+            }
+
+            for dependencyKey := range adjacency[dependentKey] {
+                if _, inRing := members[dependencyKey]; true == inRing {
+                    waitedOn = true
+
+                    break
+                }
+            }
+
+            if true == waitedOn {
+                break
+            }
+        }
+
+        if true == waitedOn {
+            continue
+        }
+
+        sort.Slice(
+            ring,
+            func(leftIndex int, rightIndex int) bool {
+                return closesBefore(creationOrderOf, ring[leftIndex], ring[rightIndex])
+            },
+        )
+
+        if nil == chosen || true == closesBefore(creationOrderOf, ring[0], chosen[0]) {
+            chosen = ring
+        }
+    }
+
+    return chosen
+}
+
+/* stronglyConnectedRings answers the strongly connected components of two or more nodes over the given nodes, following only the edges between them — Tarjan's walk, iterative over an explicit stack so a long chain cannot deepen the goroutine's. A component of one node is not a ring: a self-edge is ignored by the drain, so such a node waits on somebody else and is released when they close. */
+func stronglyConnectedRings(nodes map[string]struct{}, adjacency map[string]map[string]struct{}) [][]string {
+    orderedNodes := make([]string, 0, len(nodes))
+    for nodeKey := range nodes {
+        orderedNodes = append(orderedNodes, nodeKey)
+    }
+
+    sort.Strings(orderedNodes)
+
+    neighboursOf := func(nodeKey string) []string {
+        neighbours := make([]string, 0, len(adjacency[nodeKey]))
+        for dependencyKey := range adjacency[nodeKey] {
+            if _, inNodes := nodes[dependencyKey]; true == inNodes && dependencyKey != nodeKey {
+                neighbours = append(neighbours, dependencyKey)
+            }
+        }
+
+        sort.Strings(neighbours)
+
+        return neighbours
+    }
+
+    type frame struct {
+        nodeKey    string
+        neighbours []string
+        next       int
+    }
+
+    index := 0
+    indexOf := make(map[string]int, len(nodes))
+    lowLinkOf := make(map[string]int, len(nodes))
+    onStack := make(map[string]struct{}, len(nodes))
+    stack := make([]string, 0, len(nodes))
+    rings := make([][]string, 0)
+
+    for _, root := range orderedNodes {
+        if _, visited := indexOf[root]; true == visited {
+            continue
+        }
+
+        frames := []frame{{nodeKey: root, neighbours: neighboursOf(root)}}
+        indexOf[root] = index
+        lowLinkOf[root] = index
+        index = index + 1
+        stack = append(stack, root)
+        onStack[root] = struct{}{}
+
+        for 0 < len(frames) {
+            current := &frames[len(frames)-1]
+
+            if current.next < len(current.neighbours) {
+                neighbour := current.neighbours[current.next]
+                current.next = current.next + 1
+
+                if _, visited := indexOf[neighbour]; false == visited {
+                    indexOf[neighbour] = index
+                    lowLinkOf[neighbour] = index
+                    index = index + 1
+                    stack = append(stack, neighbour)
+                    onStack[neighbour] = struct{}{}
+                    frames = append(frames, frame{nodeKey: neighbour, neighbours: neighboursOf(neighbour)})
+
+                    continue
+                }
+
+                if _, waiting := onStack[neighbour]; true == waiting && indexOf[neighbour] < lowLinkOf[current.nodeKey] {
+                    lowLinkOf[current.nodeKey] = indexOf[neighbour]
+                }
+
+                continue
+            }
+
+            finished := *current
+            frames = frames[:len(frames)-1]
+
+            if 0 < len(frames) {
+                parent := &frames[len(frames)-1]
+                if lowLinkOf[finished.nodeKey] < lowLinkOf[parent.nodeKey] {
+                    lowLinkOf[parent.nodeKey] = lowLinkOf[finished.nodeKey]
+                }
+            }
+
+            if lowLinkOf[finished.nodeKey] != indexOf[finished.nodeKey] {
+                continue
+            }
+
+            component := make([]string, 0)
+            for {
+                member := stack[len(stack)-1]
+                stack = stack[:len(stack)-1]
+                delete(onStack, member)
+                component = append(component, member)
+
+                if member == finished.nodeKey {
+                    break
+                }
+            }
+
+            if 1 < len(component) {
+                rings = append(rings, component)
+            }
+        }
+    }
+
+    return rings
 }

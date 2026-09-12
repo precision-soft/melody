@@ -15,6 +15,7 @@ import (
     "reflect"
     "strings"
     "syscall"
+    "unicode"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -231,6 +232,25 @@ func splitRequestPath(value string) []string {
     return segments
 }
 
+/* RequestPathAsRouted is the spelling of a request path the router reads, for every other consumer of that path to read the same: the escaped path is split on the separators the client actually sent and each segment is unescaped on its own, with a separator that was ENCODED inside a segment kept encoded, as "%2F". So "/caf%C3%A9" reads "/café" for the router, the canonical guard and the access-control matcher alike, and "/admin%2Fusers" stays the one segment the router matches — where the decoded URL.Path read "/admin/users", the two-segment resource the router does not serve for that spelling. Read on the decoded path, the access-control matcher folded "/public%2F" onto "/public" and answered with the exact public rule while the router carried the request to a protected catch-all handler — measured, an anonymous request served the protected handler — and it claimed "/admin%2Fusers" under a rule written for "/admin", a prefix the router never routed it to. A target that does not begin with "/" is not path-routed and is returned as it came. */
+func RequestPathAsRouted(escapedPath string) string {
+    if false == strings.HasPrefix(escapedPath, "/") {
+        return escapedPath
+    }
+
+    segments := strings.Split(escapedPath, "/")
+    for index, segment := range segments {
+        unescapedSegment, unescapeErr := url.PathUnescape(segment)
+        if nil != unescapeErr {
+            continue
+        }
+
+        segments[index] = strings.ReplaceAll(unescapedSegment, "/", "%2F")
+    }
+
+    return strings.Join(segments, "/")
+}
+
 func splitNormalizedPath(value string) []string {
     /* an empty path is the root, which is what every consumer of it means. Answered as [""] instead, the tree walk started with no segments to consume and reached only the tree root, where a route registered as "/" does not live — it lives under the empty static child — so a request whose target normalized to nothing 404'd even against an application that had registered "/". */
     if "" == value {
@@ -256,8 +276,13 @@ func splitNormalizedPath(value string) []string {
 
    A path that leading or trailing whitespace would be trimmed from — "/public ", the decoded form of "/public%20" or of a no-break space — is not canonical either: the router keeps the whitespace and the access-control matcher trims it, so the request routed under the sent spelling was authorized under the trimmed one's rule.
 
-   A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route "/admin", so it is normalized away here before the comparison rather than refused. A target that does not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and is left to the router to answer. */
+   A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route "/admin", so it is normalized away here before the comparison rather than refused. A target that does not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and is left to the router to answer; one that begins with whitespace is not such a target, it is the leading form of the padded path, and is refused. */
 func requestPathIsCanonical(path string) bool {
+    /* a path that BEGINS with whitespace is refused before the "/" test below lets it through as "not path-routed": Go's server refuses such a request line itself, but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix on "/api%20/public" — hands the kernel " /public", which the router routed as a segment of its own while the access-control matcher trimmed it and answered with the rule of "/public"; measured, the leading twin of the trailing grant */
+    if "" != path && strings.TrimLeftFunc(path, unicode.IsSpace) != path {
+        return false
+    }
+
     if false == strings.HasPrefix(path, "/") {
         return true
     }

@@ -2841,6 +2841,52 @@ func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T
     }
 }
 
+/* the canonical question is asked of the spelling the router reads: "/a%2F..%2Fb" is ONE segment naming "a/../b" for the router, and the guard reads it the same way instead of refusing the decoded "/a/../b" — while the real fold "/a/../b" is still refused, and "/public%2F" reaches the catch-all as the resource "public/" the router serves it as */
+func TestKernel_AsksTheCanonicalQuestionOfThePathAsSpelled(t *testing.T) {
+    for rawPath, expected := range map[string]struct {
+        code    int
+        catchAll bool
+    }{
+        "/a%2F..%2Fb": {code: nethttp.StatusOK, catchAll: true},
+        "/public%2F":  {code: nethttp.StatusOK, catchAll: true},
+        "/public":     {code: nethttp.StatusOK, catchAll: false},
+        "/a/../b":     {code: nethttp.StatusBadRequest, catchAll: false},
+    } {
+        reached := ""
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/public",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                reached = "public"
+                return TextResponse(nethttp.StatusOK, "public"), nil
+            },
+        )
+        router.Handle(
+            nethttp.MethodGet,
+            "/*path...",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                reached = "catch-all"
+                return TextResponse(nethttp.StatusOK, "catch-all"), nil
+            },
+        )
+
+        handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, rawPath, nil))
+
+        if expected.code != recorder.Code {
+            t.Fatalf("expected %q to answer %d, got %d", rawPath, expected.code, recorder.Code)
+        }
+
+        if expected.catchAll != ("catch-all" == reached) {
+            t.Fatalf("expected %q to reach the catch-all: %v, reached %q", rawPath, expected.catchAll, reached)
+        }
+    }
+}
+
 func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     handlerRan := false
 

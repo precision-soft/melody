@@ -947,16 +947,32 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     }
 
     /* a remainder between the floor and twice the floor keeps its DRAIN half — a save of half a millisecond that was finishing inside such a remainder was answered "budget already spent" when the floor was asked of the halves — and gives up its CANCELLATION half, which under a millisecond measures no reaction: given as a grace, a delegate that honoured its cancellation seven hundred microseconds later was reported to have ignored it, three hundred closes out of three hundred */
-    /* nineteen hundred microseconds, not fifteen: the remainder is re-read inside closeGracesWithin, and a scheduling stall of half a millisecond between the two reads — measured four times in twenty thousand, worst three milliseconds — took a remainder of fifteen hundred below the floor and read the halves as none */
-    narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1900*time.Microsecond)
-    defer cancelNarrow()
+    /* the remainder is re-read inside closeGracesWithin, and a scheduling stall between this deadline and that read moves it — measured four times in twenty thousand, worst three milliseconds, nineteen in twenty thousand under an oversubscribed machine — so the assertion is judged on the remainder as it stood AFTER the call, and only when that remainder still sat inside the window the case is about: a stall that pushed it below the floor is not this case, and the call is asked again */
+    for attempt := 0; ; attempt = attempt + 1 {
+        narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1900*time.Microsecond)
 
-    drainGrace, cancellationGrace = storage.closeGracesWithin(narrowContext)
-    if 0 >= drainGrace || asyncStorageCloseGraceFloor <= drainGrace {
-        t.Fatalf("expected a remainder above the floor but under twice it to keep a drain half under the floor, got %v", drainGrace)
-    }
+        drainGrace, cancellationGrace = storage.closeGracesWithin(narrowContext)
+        deadline, _ := narrowContext.Deadline()
+        remainderAfter := time.Until(deadline)
 
-    if 0 != cancellationGrace {
-        t.Fatalf("expected a remainder above the floor but under twice it to give up the cancellation half, got %v", cancellationGrace)
+        cancelNarrow()
+
+        if asyncStorageCloseGraceFloor > remainderAfter {
+            if 100 <= attempt {
+                t.Fatalf("the remainder never stayed inside the window across %d attempts", attempt)
+            }
+
+            continue
+        }
+
+        if 0 >= drainGrace || asyncStorageCloseGraceFloor <= drainGrace {
+            t.Fatalf("expected a remainder above the floor but under twice it to keep a drain half under the floor, got %v", drainGrace)
+        }
+
+        if 0 != cancellationGrace {
+            t.Fatalf("expected a remainder above the floor but under twice it to give up the cancellation half, got %v", cancellationGrace)
+        }
+
+        break
     }
 }

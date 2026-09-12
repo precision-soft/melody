@@ -3,6 +3,7 @@ package audit
 import (
     "context"
     "encoding/json"
+    "errors"
     "reflect"
     "sync"
     "time"
@@ -148,7 +149,10 @@ func (instance *Recorder) record(
     table := instance.registry.tableFor(entity)
 
     if saveErr := instance.storage.Save(ctx, table, entry); nil != saveErr {
-        instance.deadLetter(table, entry, saveErr)
+        /* an async storage that refused the entry — its queue full, or closed — dead-lettered it itself before returning, with the same change-set: a second record here journaled every dropped entry twice, exactly under the queue-full storm the dead-letter exists for. The sentinels it returns name that; any other refusal is dead-lettered here, once */
+        if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) && false == errors.Is(saveErr, ErrAsyncStorageClosed) {
+            instance.deadLetter(table, entry, saveErr)
+        }
 
         return saveErr
     }

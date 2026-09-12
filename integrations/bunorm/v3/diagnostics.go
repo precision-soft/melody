@@ -4,6 +4,7 @@ import (
     "io"
     "log"
     "os"
+    "reflect"
     "sync"
     "sync/atomic"
 
@@ -40,7 +41,7 @@ func RouteDiagnostics(logger loggingcontract.Logger) {
         return
     }
 
-    if live := bunDiagnosticsTarget.Load(); nil != live && logger == live.logger {
+    if live := bunDiagnosticsTarget.Load(); nil != live && true == isSameLogger(logger, live.logger) {
         return
     }
 
@@ -67,11 +68,24 @@ func ResetDiagnostics() {
 /* resetDiagnosticsRoutedTo hands bun's diagnostic channel back only when the live destination is the one routed to this logger. It is what a registry's Close calls: the process may hold two registries — two applications in one test binary, or a second registry wired beside the first — and a Close that reset the channel unconditionally took it away from the registry still running, whose diagnostics went to standard error until its next open routed them again. Two registries sharing one logger still share one channel, and the first to close hands it back for both; the next open of the other takes it again. */
 func resetDiagnosticsRoutedTo(logger loggingcontract.Logger) {
     live := bunDiagnosticsTarget.Load()
-    if nil == live || logger != live.logger {
+    if nil == live || false == isSameLogger(logger, live.logger) {
         return
     }
 
     bunDiagnosticsTarget.CompareAndSwap(live, nil)
+}
+
+/* isSameLogger answers whether two loggers are one value, without the panic a bare comparison of two interfaces carries: Logger is the most implemented contract melody has — a test double, an integrator's adapter — and a value whose dynamic type holds a slice, a map or a func is not comparable, so `logger == live.logger` was a runtime panic on the SECOND routing, or at the registry's Close through the hand-back, for a logger that had routed fine once. Such a value has no identity to compare, so it is compared by content, which is what lets the registry that routed it hand the channel back with the very value it routed. */
+func isSameLogger(left loggingcontract.Logger, right loggingcontract.Logger) bool {
+    if nil == left || nil == right {
+        return nil == left && nil == right
+    }
+
+    if true == reflect.ValueOf(left).Comparable() && true == reflect.ValueOf(right).Comparable() {
+        return left == right
+    }
+
+    return reflect.DeepEqual(left, right)
 }
 
 /* installBunDiagnostics performs the setting itself, apart from the once that guards it, so the destination can be proven without the guard standing in the way of a second proof. The once is never reset and never needs to be: what it installed is the forwarder, which reads the live destination at every record, so a routing after a hand-back reaches the journal again through the same forwarder — measured, a record after ResetDiagnostics and a fresh RouteDiagnostics arrives at the fresh logger. */

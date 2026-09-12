@@ -322,6 +322,7 @@ v3 ~ compatible ~ ./http.RegenerateRequestSession ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RequestAttributeScheme ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RequestContextFromResolver ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RequestContextMustFromResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RequestPathAsRouted ~ added ~ keep ~ the spelling of a request path the router reads, for the canonical-path guard, the access-control matcher and the firewall path matcher to read the same; decoded, /public%2F was folded onto the public rule of /public while the router served the catch-all handler behind it, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./http.RouteManifestEntry.Host ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RouteManifestEntry.Locales ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RouteManifestEntry.Priority ~ added ~ unclassified ~

@@ -136,6 +136,41 @@ func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
     }
 }
 
+/* an entry the async storage refused — its queue full — is dead-lettered by the storage itself, with the change-set, before the refusal is returned; the recorder used to dead-letter it a second time on the same logger, so every dropped entry was journaled twice, exactly under the queue-full storm the dead-letter exists for. One record per dropped entry, and the refusal still reaches the caller */
+func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettered(t *testing.T) {
+    delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
+    storage := NewAsyncStorage(delegate, 1)
+    logger := &fakeLogger{}
+    storage.WithLogger(logger)
+    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(logger)
+
+    /* the first save parks the worker inside the delegate, the second fills the buffer of one, the third is refused */
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "2", parityAccount{Id: 2}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "3", parityAccount{Id: 3})
+    if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
+        t.Fatalf("expected the refusal of a full queue to reach the caller, got %v", saveErr)
+    }
+
+    close(delegate.release)
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(logger.errorMessages) {
+        t.Fatalf("expected the dropped entry dead-lettered once, got %d records: %v", len(logger.errorMessages), logger.errorMessages)
+    }
+}
+
 func TestRecorder_WithLoggerRefusesATypedNilLogger(t *testing.T) {
     defer func() {
         recovered := recover()

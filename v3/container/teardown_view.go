@@ -21,31 +21,10 @@ func (instance *container) TeardownPlan() []containercontract.TeardownPlanEntry 
 
     entries := make([]containercontract.TeardownPlanEntry, 0, len(plan.closeOrder))
 
-    /* the remainder the drain leaves holds the ring AND the pure dependencies of its members — a dependency nobody on the ring lets go of keeps its in-degree — and the flag names the ring alone: a remainder node with no edge into the remainder is a leaf of it, and the leaves are pruned until only nodes that reach one another are left; the remainder is still what closes serially, the flag is what the operator reads as "on a ring" */
+    /* the members of every ring the drain could not open, and nothing else: a pure dependency of a ring member is released once the ring is closed and takes its place in the order the graph proves, so it is not flagged — flagged, the operator looked for a ring the dependency was not on; unflagged where the remainder was closed whole in creation order, the view read as proved an order the teardown did not honour */
     cycleMembers := make(map[string]struct{}, len(plan.cycleNodeKeys))
     for _, cycleNodeKey := range plan.cycleNodeKeys {
         cycleMembers[cycleNodeKey] = struct{}{}
-    }
-
-    for pruned := true; true == pruned; {
-        pruned = false
-
-        for member := range cycleMembers {
-            reachesTheRemainder := false
-
-            for dependencyKey := range plan.canonicalEdges[member] {
-                if _, inRemainder := cycleMembers[dependencyKey]; true == inRemainder && dependencyKey != member {
-                    reachesTheRemainder = true
-
-                    break
-                }
-            }
-
-            if false == reachesTheRemainder {
-                delete(cycleMembers, member)
-                pruned = true
-            }
-        }
     }
 
     for _, nodeKey := range plan.closeOrder {

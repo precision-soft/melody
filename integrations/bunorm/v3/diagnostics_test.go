@@ -181,3 +181,35 @@ func TestResetDiagnosticsRoutedTo_LeavesAnotherLoggersChannelAlone(t *testing.T)
         t.Fatalf("the hand-back for the live logger did not take the channel back: %d records", len(second.captured()))
     }
 }
+
+/* sliceCarryingLogger is a logger held by value whose dynamic type is not comparable — the shape of a test double or an integrator's adapter that keeps its records in a slice — so `==` between two Logger interfaces holding it panics at runtime */
+type sliceCarryingLogger struct {
+    records []string
+}
+
+func (instance sliceCarryingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {}
+func (instance sliceCarryingLogger) Debug(message string, context loggingcontract.Context)     {}
+func (instance sliceCarryingLogger) Info(message string, context loggingcontract.Context)      {}
+func (instance sliceCarryingLogger) Warning(message string, context loggingcontract.Context)   {}
+func (instance sliceCarryingLogger) Error(message string, context loggingcontract.Context)     {}
+func (instance sliceCarryingLogger) Emergency(message string, context loggingcontract.Context) {}
+
+/* routing bun's diagnostics to a logger whose dynamic type is not comparable panicked on the SECOND routing — the first found no live target to compare against — and at a registry's Close through the hand-back, for a logger that had routed fine once: a bare comparison of two interfaces is a runtime panic on an incomparable dynamic type */
+func TestRouteDiagnostics_ALoggerWhoseTypeIsNotComparableRoutesTwiceAndHandsBackWithoutAPanic(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    logger := sliceCarryingLogger{records: make([]string, 0)}
+
+    RouteDiagnostics(logger)
+    RouteDiagnostics(logger)
+
+    if nil == bunDiagnosticsTarget.Load() {
+        t.Fatal("expected the second routing to leave a live target")
+    }
+
+    resetDiagnosticsRoutedTo(logger)
+
+    if nil != bunDiagnosticsTarget.Load() {
+        t.Fatal("expected the hand-back to reach the target routed to a logger it cannot compare by identity")
+    }
+}

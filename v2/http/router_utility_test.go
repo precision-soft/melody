@@ -1743,6 +1743,11 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/public\t",
         "/public\u00a0",
         "/ ",
+        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router routed as a segment of its own while the matcher trimmed it to "/public" */
+        " /public",
+        "\t/public",
+        "\u00a0/public",
+        " ",
     }
 
     for _, foldedPath := range foldedPaths {

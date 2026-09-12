@@ -554,8 +554,8 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
 
-        /* a request path that folds to a different spelling is refused before the security dispatch below runs and before the handler: the router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule. Refused here — not routed, not authorized, not handled — the router, the firewall matchers and the access control never disagree about which resource this is. A trailing slash is not a fold and is not refused; requestPathIsCanonical states the boundary exactly. */
-        if false == requestPathIsCanonical(request.URL.Path) {
+        /* a request path that folds to a different spelling is refused before the security dispatch below runs and before the handler: the router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule. Refused here — not routed, not authorized, not handled — the router, the firewall matchers and the access control never disagree about which resource this is. A trailing slash is not a fold and is not refused; requestPathIsCanonical states the boundary exactly. The question is asked of the spelling the router reads — RequestPathAsRouted, where an encoded separator stays inside its segment — which is the spelling the access-control matcher reads too, so the three cannot disagree about a "%2F" the decoded path turned into a separator. */
+        if false == requestPathIsCanonical(RequestPathAsRouted(request.URL.EscapedPath())) {
             requestLogger.Warning(
                 "request path refused before the handler",
                 loggingcontract.Context{

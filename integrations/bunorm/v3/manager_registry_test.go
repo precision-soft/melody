@@ -2506,3 +2506,30 @@ func TestManagerRegistry_CloseWithContext_StopsWaitingForOpensStillInFlight(t *t
 
     close(pendingOpen.done)
 }
+
+/* an open that FINISHED is never counted abandoned, whatever the deadline says: under a budget already spent — the ordinary state under a shared teardown deadline — both channels of the wait were ready and a select picked at random, so the finished open was reported as still in flight every other close, an error the container filed as a failed close and the application turned into exit 1 on a shutdown that had released everything. A thousand closes over an open that ended before them report nothing */
+func TestManagerRegistry_CloseWithContext_AnOpenThatEndedIsNotCountedAbandonedUnderASpentDeadline(t *testing.T) {
+    for round := 0; round < 1000; round = round + 1 {
+        registry, registryErr := NewManagerRegistry(
+            &fakeLogger{},
+            ProviderDefinition{Name: "x", Provider: &fakeProvider{}, IsDefault: true},
+        )
+        if nil != registryErr {
+            t.Fatalf("unexpected error: %v", registryErr)
+        }
+
+        endedOpen := &managerOpen{done: make(chan struct{})}
+        close(endedOpen.done)
+
+        registry.lock.Lock()
+        registry.pendingOpenByName["x"] = endedOpen
+        registry.lock.Unlock()
+
+        spentContext, cancel := context.WithCancel(context.Background())
+        cancel()
+
+        if closeErr := registry.CloseWithContext(spentContext); nil != closeErr {
+            t.Fatalf("round %d: an open that had ended was reported as abandoned: %v", round, closeErr)
+        }
+    }
+}

@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "reflect"
+    "sort"
     "strings"
     "sync"
     "sync/atomic"
@@ -2333,6 +2334,105 @@ func TestTeardownCloseOrder_TheSerialOrderIsUnchangedByTheWaves(t *testing.T) {
     }
 }
 
+/* a ring the drain cannot open is closed as one unit and the drain CONTINUES past it: a pure dependency of a ring member — created after its dependent, so the creation-order tie-break put it first — is released by the ring's close and closed after it, as the edge says. Closed whole in creation order, the remainder closed that dependency FIRST, against the one edge that ordered it, and the remainder named it as if it were on the ring. */
+func TestTeardownCloseOrder_APureDependencyOfARingMemberClosesAfterTheRingAndIsNotARingMember(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:ring.dependency"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}, "service:ring.dependency": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a":          1,
+        "service:ring.b":          2,
+        "service:ring.dependency": 3,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:ring.dependency"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the ring closed first and its pure dependency after it, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    sort.Strings(ringMembers)
+    if false == reflect.DeepEqual([]string{"service:ring.a", "service:ring.b"}, ringMembers) {
+        t.Fatalf("expected the ring members alone to be reported, got %v", ringMembers)
+    }
+
+    if closeWaveIndexOf["service:ring.dependency"] <= closeWaveIndexOf["service:ring.a"] {
+        t.Fatalf("expected the pure dependency one wave past the ring, got ring %d dependency %d", closeWaveIndexOf["service:ring.a"], closeWaveIndexOf["service:ring.dependency"])
+    }
+}
+
+/* two rings joined by a bridge: the first ring closes, the bridge is released and closes, the second ring closes — the bridge is on no ring and is not reported as one, and the two rings take two waves of their own, each closed serially */
+func TestTeardownCloseOrder_TwoRingsJoinedByABridgeCloseInOrderAndTheBridgeIsNoRingMember(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:bridge", "service:ring.e", "service:ring.f"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}, "service:bridge": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}},
+        "service:bridge": {"service:ring.e": struct{}{}},
+        "service:ring.e": {"service:ring.f": struct{}{}},
+        "service:ring.f": {"service:ring.e": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a": 1,
+        "service:ring.b": 2,
+        "service:bridge": 3,
+        "service:ring.e": 4,
+        "service:ring.f": 5,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:bridge", "service:ring.f", "service:ring.e"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the first ring, the bridge, then the second ring, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    sort.Strings(ringMembers)
+    if false == reflect.DeepEqual([]string{"service:ring.a", "service:ring.b", "service:ring.e", "service:ring.f"}, ringMembers) {
+        t.Fatalf("expected the four ring members alone to be reported, got %v", ringMembers)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] != closeWaveIndexOf["service:ring.b"] || closeWaveIndexOf["service:ring.e"] != closeWaveIndexOf["service:ring.f"] {
+        t.Fatalf("expected each ring in one wave of its own, got %v", closeWaveIndexOf)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] >= closeWaveIndexOf["service:bridge"] || closeWaveIndexOf["service:bridge"] >= closeWaveIndexOf["service:ring.e"] {
+        t.Fatalf("expected the waves ring, bridge, ring in that order, got %v", closeWaveIndexOf)
+    }
+}
+
+/* a ring's wave is one of its own, past every wave the drain assigned so far: a ring sharing its index with a drained, unrelated node would have that node closed one at a time with the ring's members under an armed teardown, for no reason the graph gives */
+func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
+    nodeKeys := []string{"service:lone.dependent", "service:lone.dependency", "service:ring.a", "service:ring.b"}
+
+    edges := map[string]map[string]struct{}{
+        "service:lone.dependent": {"service:lone.dependency": struct{}{}},
+        "service:ring.a":         {"service:ring.b": struct{}{}},
+        "service:ring.b":         {"service:ring.a": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:lone.dependent":  1,
+        "service:lone.dependency": 2,
+        "service:ring.a":          3,
+        "service:ring.b":          4,
+    }
+
+    _, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    for _, loneKey := range []string{"service:lone.dependent", "service:lone.dependency"} {
+        if closeWaveIndexOf[loneKey] == closeWaveIndexOf["service:ring.a"] {
+            t.Fatalf("expected the ring in a wave no unrelated node shares, got %v", closeWaveIndexOf)
+        }
+    }
+}
+
 /* arming is the moment the application says its teardown graph is complete, so it is the moment a declared edge naming a service nobody registered stops being a tolerated no-op and becomes the ordering that is not there. */
 func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
     serviceContainer := NewContainer()
@@ -2661,6 +2761,97 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
 
     if 1 != peak.Load() {
         t.Fatalf("expected the cycle remainder to close one service at a time, got %d at once", peak.Load())
+    }
+}
+
+/* two rings — each a pair declaring one another — are two waves closed one service at a time, not one: a teardown keyed on a single ring wave closed the second ring's members at once */
+func TestContainer_Close_ArmedEachRingClosesOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var running, peak atomic.Int64
+
+    for _, pair := range [][2]string{{"ring.a", "ring.b"}, {"ring.b", "ring.a"}, {"ring.e", "ring.f"}, {"ring.f", "ring.e"}} {
+        if registerErr := serviceContainer.Register(
+            pair[0],
+            func(_ containercontract.Resolver) (*concurrentCloser, error) {
+                return &concurrentCloser{running: &running, peak: &peak}, nil
+            },
+            WithoutTypeRegistration(),
+            WithTeardownDependency(pair[1]),
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+    }
+
+    armParallelTeardown(t, serviceContainer)
+
+    buildEveryRegisteredService(t, serviceContainer, "ring.a", "ring.b", "ring.e", "ring.f")
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
+        t.Fatalf("expected the two declared rings to be reported, got %v", closeErr)
+    }
+
+    if 1 != peak.Load() {
+        t.Fatalf("expected each ring to close one service at a time, got %d at once", peak.Load())
+    }
+}
+
+/* the close report names the members of the ring alone: the pure dependency a ring member resolves is closed after the ring, in the order the graph proves, and naming it beside the ring sent the operator looking for a ring it is not on — while the operator's view already left it unflagged */
+func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "cycle.c",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "c"}, nil },
+        WithoutTypeRegistration(),
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.b",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            if _, resolveErr := resolver.Get("cycle.c"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &poolDeclarerService{label: "b"}, nil
+        },
+        WithoutTypeRegistration(),
+        WithTeardownDependency("cycle.a"),
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.a",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            if _, resolveErr := resolver.Get("cycle.b"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &poolDeclarerService{label: "a"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+
+    MustFromResolver[*poolDeclarerService](serviceContainer, "cycle.a")
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the ring to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    nodes, areNodes := typedError.Context()["nodes"].([]string)
+    if false == areNodes {
+        t.Fatalf("expected the ring members in the close error context, got %v", typedError.Context())
+    }
+
+    sort.Strings(nodes)
+    if false == reflect.DeepEqual([]string{"service:cycle.a", "service:cycle.b"}, nodes) {
+        t.Fatalf("expected the ring members alone to be named, got %v", nodes)
     }
 }
 
