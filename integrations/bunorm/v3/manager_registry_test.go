@@ -2367,6 +2367,51 @@ func TestManagerRegistry_SetLoggerTakesBunsDiagnosticChannelWithIt(t *testing.T)
     }
 }
 
+/* a logger held by value with a func inside has no identity, so the Close could not recognise the destination it had routed and left bun's channel on the closed registry's logger; the registry keeps the destination SetLogger routed and hands exactly that one back */
+func TestManagerRegistry_CloseHandsBackTheDestinationItRoutedForALoggerWithoutIdentity(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    logger := funcCarryingLogger{sink: func(string) {}}
+    if setErr := registry.SetLogger(logger); nil != setErr {
+        t.Fatalf("unexpected error: %v", setErr)
+    }
+
+    if nil == bunDiagnosticsTarget.Load() {
+        t.Fatal("expected the replacement to route bun's diagnostics")
+    }
+
+    if closeErr := registry.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if nil != bunDiagnosticsTarget.Load() {
+        t.Fatal("expected the close to hand bun's channel back through the destination it routed")
+    }
+}
+
+/* funcCarryingLogger is a logger held by value whose dynamic type carries a func — not comparable, and not equal to itself by content either, since a func is deeply equal to nothing but nil */
+type funcCarryingLogger struct {
+    sink func(string)
+}
+
+func (instance funcCarryingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.sink(message)
+}
+
+func (instance funcCarryingLogger) Debug(message string, context loggingcontract.Context)     { instance.sink(message) }
+func (instance funcCarryingLogger) Info(message string, context loggingcontract.Context)      { instance.sink(message) }
+func (instance funcCarryingLogger) Warning(message string, context loggingcontract.Context)   { instance.sink(message) }
+func (instance funcCarryingLogger) Error(message string, context loggingcontract.Context)     { instance.sink(message) }
+func (instance funcCarryingLogger) Emergency(message string, context loggingcontract.Context) { instance.sink(message) }
+
 /* a nil logger, and a typed nil holding no value, are refused: they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
 func TestManagerRegistry_SetLoggerRefusesTheAbsentLogger(t *testing.T) {
     provider := &loggerRecordingProvider{}

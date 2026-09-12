@@ -37,6 +37,36 @@ func TestApiCreateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     }
 }
 
+/* a username longer than the 255-byte column, and than the cache key grammar admits once escaped, is turned away at the door as the caller's mistake instead of landing as a driver error, or as a row the lookup doors could never ask the cache about */
+func TestApiCreateHandlerRefusesAUsernameTheTableCannotHold(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    longUsername := strings.Repeat("a", 256)
+
+    statusCode, body := callDoor(
+        t,
+        runtimeInstance,
+        ApiCreateHandler(),
+        nethttp.MethodPost,
+        "/users/api/create/",
+        nil,
+        `{"username":"`+longUsername+`","password":"a-password","roles":["`+entity.RoleUser+`"]}`,
+    )
+
+    if nethttp.StatusBadRequest != statusCode {
+        t.Fatalf("the oversized username answered %d: %s", statusCode, body)
+    }
+
+    if false == strings.Contains(body, "within 255 bytes") {
+        t.Fatalf("the refusal did not name the reason: %s", body)
+    }
+
+    if _, exists, _ := userRepository.FindByUsername(context.Background(), longUsername); true == exists {
+        t.Fatal("the refused account reached the directory anyway")
+    }
+}
+
 /* the same door accepts a plain role list, so the refusal above is the comma and not the door */
 func TestApiCreateHandlerAcceptsAPlainRoleList(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))

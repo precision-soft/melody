@@ -677,7 +677,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         )
     }
 
-    /* the replaced instances belong past everything the graph proved, the cycle remainder included: they carry no edges anymore, so nothing can be said about what they still hold — of one another either, which is why each of them is a wave of its own rather than one wave shared, closed in the order they were evicted */
+    /* the replaced instances belong past everything the graph proved, the rings included: they carry no edges anymore, so nothing can be said about what they still hold — of one another either, which is why each of them is a wave of its own rather than one wave shared, closed in the order they were evicted */
     replacedWaveIndex := 0
 
     for _, waveIndex := range closeWaveIndexOf {
@@ -1200,14 +1200,26 @@ func teardownCloseOrder(
         closeWaveIndexOf[nodeKey] = 0
     }
 
-    /* releasing a node lets go of its edges: each dependency lands one wave past it and, once its last dependent has let go, joins the drain. The members of a ring being released together do not release one another — their edges among themselves are the ring, which has no order to hand out */
+    /* the rings of the stalled nodes, found once at the first stall — closing a ring or releasing a stalled node removes a whole component and changes no edge among the rest, so the components left are the components found —, each with the count of stalled nodes outside it that depend on it; the count is kept as nodes close, so the ring the drain can close next is read off the counts instead of off the graph. Found and scanned again at every stall, a teardown of a thousand rings spent a hundred seconds where the sequential close spent milliseconds. */
+    var rings [][]string
+    ringIndexOf := make(map[string]int)
+    var outsideDependentsOf []int
+    var ringClosed []bool
+
+    /* releasing a node lets go of its edges: each dependency lands one wave past it and, once its last dependent has let go, joins the drain. The members of a ring being released together do not release one another — their edges among themselves are the ring, which has no order to hand out — but a member's edge into ANOTHER ring is let go of like any other, which is how that ring stops being depended on */
     releaseDependenciesOf := func(current string, ringMembers map[string]struct{}) {
         dependencies, exists := adjacency[current]
         if false == exists {
             return
         }
 
+        currentRingIndex, currentOnRing := ringIndexOf[current]
+
         for dependencyKey := range dependencies {
+            if dependencyRingIndex, onRing := ringIndexOf[dependencyKey]; true == onRing && (false == currentOnRing || currentRingIndex != dependencyRingIndex) {
+                outsideDependentsOf[dependencyRingIndex] = outsideDependentsOf[dependencyRingIndex] - 1
+            }
+
             if _, inRing := ringMembers[dependencyKey]; true == inRing {
                 continue
             }
@@ -1228,36 +1240,68 @@ func teardownCloseOrder(
 
     cycleNodeKeys := make([]string, 0)
 
+    /* the last wave a node actually closed in, which is what a ring's wave is one past: one past every wave ASSIGNED so far counted the provisional waves of nodes still stalled, so the wave indexes had holes the operator's view printed */
+    lastClosedWaveIndex := -1
+
     for {
         for 0 < availableHeap.Len() {
             current := heap.Pop(availableHeap).(string)
 
             closeOrder = append(closeOrder, current)
+            if closeWaveIndexOf[current] > lastClosedWaveIndex {
+                lastClosedWaveIndex = closeWaveIndexOf[current]
+            }
 
             releaseDependenciesOf(current, nil)
         }
 
-        remaining := make(map[string]struct{})
-        for nodeKey, degree := range inDegree {
-            if 0 < degree {
-                remaining[nodeKey] = struct{}{}
-            }
-        }
-
-        if 0 == len(remaining) {
+        if len(closeOrder) == len(inDegree) {
             break
         }
 
-        /* the drain stalled: every node left waits on another node left, so what is left holds at least one ring. The ring nothing outside it still waits on is closed as one unit, its members one after the other in creation order — no order among them is true, so the tie-break is the order —, and the drain CONTINUES past it: a pure dependency of a ring member is released by that close and takes its place in the order the graph proves, where the remainder used to be closed whole in creation order and a dependency created after its ring dependent was closed before it, against the edge that said otherwise. */
-        ring := sourceRingAmong(remaining, adjacency, creationOrderOf)
+        /* the drain stalled: every node left waits on another node left, so what is left holds at least one ring. The ring no stalled node outside it depends on is closed as one unit, its members one after the other in creation order — no order among them is true, so the tie-break is the order —, and the drain CONTINUES past it: a pure dependency of a ring member is released by that close and takes its place in the order the graph proves, where the remainder used to be closed whole in creation order and a dependency created after its ring dependent was closed before it, against the edge that said otherwise. */
+        if nil == rings {
+            remaining := make(map[string]struct{})
+            for nodeKey, degree := range inDegree {
+                if 0 < degree {
+                    remaining[nodeKey] = struct{}{}
+                }
+            }
 
-        /* the ring's wave is one past every wave assigned so far, so it is a wave of its own that a caller closing in waves runs one service at a time; what the ring releases lands one past it */
-        ringWaveIndex := 0
-        for _, waveIndex := range closeWaveIndexOf {
-            if waveIndex >= ringWaveIndex {
-                ringWaveIndex = waveIndex + 1
+            rings = stronglyConnectedRings(remaining, adjacency)
+            outsideDependentsOf = make([]int, len(rings))
+            ringClosed = make([]bool, len(rings))
+
+            for ringIndex, ring := range rings {
+                sort.Slice(
+                    ring,
+                    func(leftIndex int, rightIndex int) bool {
+                        return closesBefore(creationOrderOf, ring[leftIndex], ring[rightIndex])
+                    },
+                )
+
+                for _, nodeKey := range ring {
+                    ringIndexOf[nodeKey] = ringIndex
+                }
+            }
+
+            for dependentKey := range remaining {
+                dependentRingIndex, dependentOnRing := ringIndexOf[dependentKey]
+
+                for dependencyKey := range adjacency[dependentKey] {
+                    if dependencyRingIndex, onRing := ringIndexOf[dependencyKey]; true == onRing && (false == dependentOnRing || dependentRingIndex != dependencyRingIndex) {
+                        outsideDependentsOf[dependencyRingIndex] = outsideDependentsOf[dependencyRingIndex] + 1
+                    }
+                }
             }
         }
+
+        ringIndex := sourceRingAmong(rings, ringClosed, outsideDependentsOf, creationOrderOf)
+        ring := rings[ringIndex]
+        ringClosed[ringIndex] = true
+
+        /* the ring's wave is one past the last wave that closed, so it is a wave of its own that a caller closing in waves runs one service at a time; what the ring releases lands one past it */
+        ringWaveIndex := lastClosedWaveIndex + 1
 
         ringMembers := make(map[string]struct{}, len(ring))
         for _, nodeKey := range ring {
@@ -1265,6 +1309,8 @@ func teardownCloseOrder(
             closeWaveIndexOf[nodeKey] = ringWaveIndex
             inDegree[nodeKey] = 0
         }
+
+        lastClosedWaveIndex = ringWaveIndex
 
         for _, nodeKey := range ring {
             closeOrder = append(closeOrder, nodeKey)
@@ -1277,51 +1323,17 @@ func teardownCloseOrder(
     return closeOrder, closeWaveIndexOf, cycleNodeKeys
 }
 
-/* sourceRingAmong answers the ring among the stalled nodes that nothing else among them still waits on — the one the drain can close next — as its members in the order they close, creation order latest first. A ring is a strongly connected component of two or more nodes over the edges between the stalled nodes; a stalled node that is on no ring waits on a ring, and is released once that ring is closed. Where several rings qualify the one whose first member closes first is taken, so the order is a function of the graph and the creation order alone. */
-func sourceRingAmong(remaining map[string]struct{}, adjacency map[string]map[string]struct{}, creationOrderOf map[string]int) []string {
-    rings := stronglyConnectedRings(remaining, adjacency)
+/* sourceRingAmong answers the index of the ring the drain can close next: one still open that no stalled node outside it depends on — a ring is a strongly connected component of two or more nodes over the edges between the stalled nodes, and a stalled node that is on no ring depends on a ring and is released once that ring is closed. Where several rings qualify the one whose first member closes first is taken — the members are already in the order they close, creation order latest first —, so the order is a function of the graph and the creation order alone. A stall always has such a ring: every stalled node is depended on by a stalled node, so the components the stalled nodes form have a source, and a source component of one node would be a node depending on itself, which the drain ignores. */
+func sourceRingAmong(rings [][]string, ringClosed []bool, outsideDependentsOf []int, creationOrderOf map[string]int) int {
+    chosen := -1
 
-    var chosen []string
-
-    for _, ring := range rings {
-        members := make(map[string]struct{}, len(ring))
-        for _, nodeKey := range ring {
-            members[nodeKey] = struct{}{}
-        }
-
-        waitedOn := false
-
-        for dependentKey := range remaining {
-            if _, inRing := members[dependentKey]; true == inRing {
-                continue
-            }
-
-            for dependencyKey := range adjacency[dependentKey] {
-                if _, inRing := members[dependencyKey]; true == inRing {
-                    waitedOn = true
-
-                    break
-                }
-            }
-
-            if true == waitedOn {
-                break
-            }
-        }
-
-        if true == waitedOn {
+    for ringIndex, ring := range rings {
+        if true == ringClosed[ringIndex] || 0 < outsideDependentsOf[ringIndex] {
             continue
         }
 
-        sort.Slice(
-            ring,
-            func(leftIndex int, rightIndex int) bool {
-                return closesBefore(creationOrderOf, ring[leftIndex], ring[rightIndex])
-            },
-        )
-
-        if nil == chosen || true == closesBefore(creationOrderOf, ring[0], chosen[0]) {
-            chosen = ring
+        if -1 == chosen || true == closesBefore(creationOrderOf, ring[0], rings[chosen][0]) {
+            chosen = ringIndex
         }
     }
 

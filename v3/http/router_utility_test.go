@@ -1821,12 +1821,33 @@ func TestRequestPathAsRouted_KeepsAnEncodedSeparatorInsideItsSegmentAndDecodesTh
         "/files/a%2Fb/c":       "/files/a%2Fb/c",
         "/public%252F":         "/public%2F",
         "/admin/users":         "/admin/users",
+        "/a+b":                 "/a+b",
+        "/a%zz/b":              "/a%zz/b",
+        "/a%2/b":               "/a%2/b",
         "*":                    "*",
         "example.com:443":      "example.com:443",
         "":                     "",
     } {
         if routed != RequestPathAsRouted(escapedPath) {
             t.Fatalf("expected %q to be read as %q, got %q", escapedPath, routed, RequestPathAsRouted(escapedPath))
+        }
+    }
+}
+
+/* the routed spelling is the router's own reading joined back: each segment is the one splitRequestPath binds, with a separator the segment carries put back as "%2F" — a plus sign is not a space here, and a malformed escape is left as sent, exactly as the router leaves it */
+func TestRequestPathAsRouted_AgreesWithTheRoutersOwnSegments(t *testing.T) {
+    for _, escapedPath := range []string{"/caf%C3%A9", "/a%20b/c", "/a+b", "/a%zz/b", "/files/a%2Fb/c", "/public%252F", "/x/%2E%2E/y", "/a%00b"} {
+        routedSegments := strings.Split(RequestPathAsRouted(escapedPath), "/")
+        routerSegments := splitRequestPath(escapedPath)
+
+        if len(routedSegments) != len(routerSegments) {
+            t.Fatalf("expected %q to have the router's %d segments, got %d: %q", escapedPath, len(routerSegments), len(routedSegments), routedSegments)
+        }
+
+        for index, routerSegment := range routerSegments {
+            if strings.ReplaceAll(routerSegment, "/", "%2F") != routedSegments[index] {
+                t.Fatalf("expected segment %d of %q to read %q as the router does, got %q", index, escapedPath, routerSegment, routedSegments[index])
+            }
         }
     }
 }

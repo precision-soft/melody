@@ -63,6 +63,11 @@ func (instance *UserService) List() ([]*entity.User, error) {
 }
 
 func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
+    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyUserById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
@@ -98,8 +103,9 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 }
 
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
+    /* CacheSafeIdentifier also refuses the empty spelling, so the blank-username answer travels through the same door; a name longer than the user table holds is a name this application does not have, answered as absent on the anonymous login door instead of as a 500 from a cache key over its ceiling */
     normalizedUsername := repository.NormalizedUsername(username)
-    if "" == normalizedUsername {
+    if false == CacheSafeIdentifier(normalizedUsername) {
         return nil, false, nil
     }
 

@@ -14,6 +14,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
@@ -255,7 +256,9 @@ func (instance *FileServer) resolveAndOpen(
         return nil, false
     }
 
-    requestPath := request.HttpRequest().URL.Path
+    /* the spelling the router matched, not the decoded URL.Path: net/http decodes "%2F" into a separator, so "/static/private%2Fsecret.txt" was "/static/private/secret.txt" here — the file under a protected prefix, served — while the access-control matcher read the one segment "private%2Fsecret.txt" under the public rule of "/static"; measured, an anonymous request read the protected file. Read as routed, the request names a file whose name literally carries "%2F", which the disk does not hold. */
+    routedPath := melodyhttp.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
+    requestPath := routedPath
 
     if true == hasExcludedPathPrefix(requestPath, instance.config.excludedPathList) {
         logger.Debug(
@@ -318,11 +321,11 @@ func (instance *FileServer) resolveAndOpen(
         /* the spellings that fold into the root are refused on the ground the branch below states and until now alone carried: the matchers in front of the application compare the raw path, so "/open/.." is a url no rule on this mount ever saw, and answering it serves the mount's index page from behind whatever rule that other prefix carries. The index file is named by configuration and never by the request, so the target cannot be aimed elsewhere — the exposure of that one page can. Canonical is the mount root itself, with or without its trailing slash. */
         canonicalRoot := strings.TrimSuffix(instance.config.stripPrefix, "/")
 
-        if canonicalRoot != request.HttpRequest().URL.Path && canonicalRoot+"/" != request.HttpRequest().URL.Path {
+        if canonicalRoot != routedPath && canonicalRoot+"/" != routedPath {
             logger.Warning(
                 "static serve non canonical path",
                 loggingcontract.Context{
-                    "path":          request.HttpRequest().URL.Path,
+                    "path":          routedPath,
                     "canonicalPath": canonicalRoot + "/",
                 },
             )
@@ -348,11 +351,11 @@ func (instance *FileServer) resolveAndOpen(
         /* the file has to sit at exactly the path that was received. path.Clean folds "..", "//", "/./" and a trailing slash away, and serving the folded target under the received spelling puts the file behind a URL access control never saw: the matchers in front of the application compare the raw path, so a rule on "/internal/" does not fire for "/open/../internal/secret.json". A refusal is the only answer that keeps the two views of the request in agreement — a redirect would still teach the client a spelling that reaches the file while sidestepping the rule. The strip prefix is configuration rather than client input, so the comparison rebuilds the whole path around it: comparing only the remainder would let a doubled slash at the prefix boundary be absorbed by the strip and pass unnoticed. */
         canonicalPath := strings.TrimSuffix(instance.config.stripPrefix, "/") + cleanedPath
 
-        if canonicalPath != request.HttpRequest().URL.Path {
+        if canonicalPath != routedPath {
             logger.Warning(
                 "static serve non canonical path",
                 loggingcontract.Context{
-                    "path":          request.HttpRequest().URL.Path,
+                    "path":          routedPath,
                     "canonicalPath": canonicalPath,
                 },
             )

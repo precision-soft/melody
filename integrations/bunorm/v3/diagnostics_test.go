@@ -3,6 +3,7 @@ package bunorm
 import (
     "fmt"
     "strings"
+    "sync"
     "testing"
 
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -165,7 +166,7 @@ func TestResetDiagnosticsRoutedTo_LeavesAnotherLoggersChannelAlone(t *testing.T)
     RouteDiagnostics(first)
     RouteDiagnostics(second)
 
-    resetDiagnosticsRoutedTo(first)
+    resetDiagnosticsRoutedTo(first, nil)
 
     _ = schema.SafeQuery("SELECT 1", []any{42})
 
@@ -173,7 +174,7 @@ func TestResetDiagnosticsRoutedTo_LeavesAnotherLoggersChannelAlone(t *testing.T)
         t.Fatalf("the hand-back for the first logger took the channel away from the second: %d records", len(second.captured()))
     }
 
-    resetDiagnosticsRoutedTo(second)
+    resetDiagnosticsRoutedTo(second, nil)
 
     _ = schema.SafeQuery("SELECT 1", []any{42})
 
@@ -194,22 +195,97 @@ func (instance sliceCarryingLogger) Warning(message string, context loggingcontr
 func (instance sliceCarryingLogger) Error(message string, context loggingcontract.Context)     {}
 func (instance sliceCarryingLogger) Emergency(message string, context loggingcontract.Context) {}
 
-/* routing bun's diagnostics to a logger whose dynamic type is not comparable panicked on the SECOND routing — the first found no live target to compare against — and at a registry's Close through the hand-back, for a logger that had routed fine once: a bare comparison of two interfaces is a runtime panic on an incomparable dynamic type */
-func TestRouteDiagnostics_ALoggerWhoseTypeIsNotComparableRoutesTwiceAndHandsBackWithoutAPanic(t *testing.T) {
+/* routing bun's diagnostics to a logger whose dynamic type is not comparable panicked on the SECOND routing — the first found no live target to compare against — and at a registry's Close through the hand-back, for a logger that had routed fine once: a bare comparison of two interfaces is a runtime panic on an incomparable dynamic type. Such a logger has no identity, so the hand-back goes through the destination the routing answered */
+func TestRouteDiagnostics_ALoggerWhoseTypeIsNotComparableRoutesTwiceAndHandsBackThroughTheDestinationItRouted(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
     logger := sliceCarryingLogger{records: make([]string, 0)}
 
     RouteDiagnostics(logger)
-    RouteDiagnostics(logger)
+    routed := routeDiagnosticsTo(logger)
 
-    if nil == bunDiagnosticsTarget.Load() {
-        t.Fatal("expected the second routing to leave a live target")
+    if nil == routed || routed != bunDiagnosticsTarget.Load() {
+        t.Fatal("expected the second routing to answer the live target")
     }
 
-    resetDiagnosticsRoutedTo(logger)
+    resetDiagnosticsRoutedTo(logger, routed)
 
     if nil != bunDiagnosticsTarget.Load() {
-        t.Fatal("expected the hand-back to reach the target routed to a logger it cannot compare by identity")
+        t.Fatal("expected the hand-back to reach the destination the routing answered")
     }
+}
+
+/* two distinct loggers of equal content, both without identity, are two loggers: read by content they were one, so the Close of the registry holding the second took the channel the first had routed */
+func TestResetDiagnosticsRoutedTo_TwoValueLoggersOfEqualContentAreNotOneLogger(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    first := sliceCarryingLogger{records: make([]string, 0)}
+    second := sliceCarryingLogger{records: make([]string, 0)}
+
+    routedFirst := routeDiagnosticsTo(first)
+    routedSecond := routeDiagnosticsTo(second)
+
+    if routedFirst == routedSecond {
+        t.Fatal("expected a logger without identity to be routed afresh rather than deduplicated against another of equal content")
+    }
+
+    resetDiagnosticsRoutedTo(first, routedFirst)
+
+    if routedSecond != bunDiagnosticsTarget.Load() {
+        t.Fatal("the hand-back for the first logger took the channel away from the second, which holds it")
+    }
+}
+
+/* mapCarryingLogger writes its own map under its own mutex on every record — the shape of a logger that keeps counters — so a comparison that read its content would read the map under no lock while a record is being written */
+type mapCarryingLogger struct {
+    mutex  *sync.Mutex
+    counts map[string]int
+}
+
+func (instance mapCarryingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.counts[message]++
+}
+
+func (instance mapCarryingLogger) Debug(message string, context loggingcontract.Context)   { instance.Log(loggingcontract.LevelDebug, message, context) }
+func (instance mapCarryingLogger) Info(message string, context loggingcontract.Context)    { instance.Log(loggingcontract.LevelInfo, message, context) }
+func (instance mapCarryingLogger) Warning(message string, context loggingcontract.Context) { instance.Log(loggingcontract.LevelWarning, message, context) }
+func (instance mapCarryingLogger) Error(message string, context loggingcontract.Context)   { instance.Log(loggingcontract.LevelError, message, context) }
+func (instance mapCarryingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+/* a routing and a hand-back on a logger without identity read none of its content: read by content, the comparison walked the logger's map while its own Log was writing it, a data race the detector reported on every run. Proven under -race, the shape a mutation cannot separate. */
+func TestRouteDiagnostics_ALoggerWithoutIdentityIsNeverReadWhileItWrites(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    logger := mapCarryingLogger{mutex: &sync.Mutex{}, counts: make(map[string]int)}
+    routed := routeDiagnosticsTo(logger)
+
+    var writers sync.WaitGroup
+    stop := make(chan struct{})
+
+    writers.Add(1)
+    go func() {
+        defer writers.Done()
+
+        for {
+            select {
+            case <-stop:
+                return
+            default:
+                logger.Warning("bun diagnostic", nil)
+            }
+        }
+    }()
+
+    for round := 0; round < 200; round++ {
+        routeDiagnosticsTo(logger)
+        resetDiagnosticsRoutedTo(logger, routed)
+    }
+
+    close(stop)
+    writers.Wait()
 }

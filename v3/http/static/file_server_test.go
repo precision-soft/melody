@@ -743,6 +743,59 @@ func TestFileServer_Filesystem_RefusesANonCanonicalPath(t *testing.T) {
 }
 
 /* the strip prefix is configuration, so the spelling has to be judged against the whole path: the doubled slash of "/static//a.txt" is swallowed by the strip and would leave a canonical-looking remainder behind */
+/* the file is resolved from the spelling the router matched, not from the decoded URL.Path: decoded, "/static/private%2Fsecret.txt" was "/static/private/secret.txt" here — the file under a protected prefix, served — while the access-control matcher read the one segment "private%2Fsecret.txt" under the rule of "/static" alone; measured, an anonymous request read the protected file. Routed, the request names a file whose name literally carries "%2F", which the disk does not hold */
+func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "private/secret.txt": &fstest.MapFile{Data: []byte("TOP SECRET")},
+        "caf\u00e9.txt":       &fstest.MapFile{Data: []byte("café")},
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "/static/",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    _, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private%2Fsecret.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected the encoded separator not to reach the file beneath it, got body %q", string(body))
+    }
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private/secret.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served || http.StatusOK != statusCode || "TOP SECRET" != string(body) {
+        t.Fatalf("expected the plain spelling to stay reachable, got served=%v status=%d body=%q", served, statusCode, string(body))
+    }
+
+    statusCode, _, body, served = server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/caf%C3%A9.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served || http.StatusOK != statusCode || "café" != string(body) {
+        t.Fatalf("expected a segment that decodes to no separator to resolve by its decoded spelling, got served=%v status=%d body=%q", served, statusCode, string(body))
+    }
+}
+
 func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
     fileSystem := fstest.MapFS{
         "index.html": &fstest.MapFile{

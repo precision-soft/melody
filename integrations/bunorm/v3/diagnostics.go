@@ -37,17 +37,26 @@ type diagnosticsTarget struct {
 
    It does not reach the one line the mysql dialect writes when it cannot read the server version. That line goes through the standard library's own default logger, not through bun's, so routing it means taking log.SetOutput for the whole process — every dependency and the application's own log calls with it — which is the application's decision to make and not this package's. See the mysql readme. */
 func RouteDiagnostics(logger loggingcontract.Logger) {
+    routeDiagnosticsTo(logger)
+}
+
+/* routeDiagnosticsTo is RouteDiagnostics answering the destination it left live — the one already installed for this logger, or the one it installed — so a registry can keep the destination it routed and hand exactly that one back at its Close, whether or not its logger can be compared. A logger whose dynamic type carries no identity — held by value with a slice, a map or a func inside — is routed afresh on every call, a writer per open for the same journal, which is the cost of not reading its content; nil, and a typed nil, route nothing and answer nil. */
+func routeDiagnosticsTo(logger loggingcontract.Logger) *diagnosticsTarget {
     if nil == logger || true == isNilInterface(logger) {
-        return
+        return nil
     }
 
     if live := bunDiagnosticsTarget.Load(); nil != live && true == isSameLogger(logger, live.logger) {
-        return
+        return live
     }
 
-    bunDiagnosticsTarget.Store(newDiagnosticsTarget(logger))
+    target := newDiagnosticsTarget(logger)
+
+    bunDiagnosticsTarget.Store(target)
 
     bunDiagnosticsOnce.Do(installBunDiagnostics)
+
+    return target
 }
 
 /* newDiagnosticsTarget builds the destination one routing installs. The writer is built once per routing rather than per record, and it is logging.NewStandardErrorLogger's own, so the record shape stays the framework's and is not spelled a second time here. */
@@ -65,27 +74,31 @@ func ResetDiagnostics() {
     bunDiagnosticsTarget.Store(nil)
 }
 
-/* resetDiagnosticsRoutedTo hands bun's diagnostic channel back only when the live destination is the one routed to this logger. It is what a registry's Close calls: the process may hold two registries — two applications in one test binary, or a second registry wired beside the first — and a Close that reset the channel unconditionally took it away from the registry still running, whose diagnostics went to standard error until its next open routed them again. Two registries sharing one logger still share one channel, and the first to close hands it back for both; the next open of the other takes it again. */
-func resetDiagnosticsRoutedTo(logger loggingcontract.Logger) {
+/* resetDiagnosticsRoutedTo hands bun's diagnostic channel back only when the live destination is the one routed to this logger, or the very destination the caller routed. It is what a registry's Close calls: the process may hold two registries — two applications in one test binary, or a second registry wired beside the first — and a Close that reset the channel unconditionally took it away from the registry still running, whose diagnostics went to standard error until its next open routed them again. Two registries sharing one logger still share one channel, and the first to close hands it back for both; the next open of the other takes it again. The destination the caller routed is asked of by identity because a logger held by value with a slice, a map or a func inside has none: read by content instead, two distinct doubles of equal content were one logger, so the Close of one registry took the channel of another, and the read itself walked the logger's fields under no lock, a data race with the logger's own Log — measured, both. What such a logger costs is written on routeDiagnosticsTo: a destination a provider routed afresh for a copy of it is not the one the registry kept, and stays routed after its Close. */
+func resetDiagnosticsRoutedTo(logger loggingcontract.Logger, routed *diagnosticsTarget) {
     live := bunDiagnosticsTarget.Load()
-    if nil == live || false == isSameLogger(logger, live.logger) {
+    if nil == live {
+        return
+    }
+
+    if live != routed && false == isSameLogger(logger, live.logger) {
         return
     }
 
     bunDiagnosticsTarget.CompareAndSwap(live, nil)
 }
 
-/* isSameLogger answers whether two loggers are one value, without the panic a bare comparison of two interfaces carries: Logger is the most implemented contract melody has — a test double, an integrator's adapter — and a value whose dynamic type holds a slice, a map or a func is not comparable, so `logger == live.logger` was a runtime panic on the SECOND routing, or at the registry's Close through the hand-back, for a logger that had routed fine once. Such a value has no identity to compare, so it is compared by content, which is what lets the registry that routed it hand the channel back with the very value it routed. */
+/* isSameLogger answers whether two loggers are one value, without the panic a bare comparison of two interfaces carries: Logger is the most implemented contract melody has — a test double, an integrator's adapter — and a value whose dynamic type holds a slice, a map or a func is not comparable, so `logger == live.logger` was a runtime panic on the SECOND routing, or at the registry's Close through the hand-back, for a logger that had routed fine once. Such a value has no identity to answer for, and none is invented for it: two of them are never the same, so a routing on one is never deduplicated and a hand-back on one goes through the destination the caller kept. */
 func isSameLogger(left loggingcontract.Logger, right loggingcontract.Logger) bool {
     if nil == left || nil == right {
         return nil == left && nil == right
     }
 
-    if true == reflect.ValueOf(left).Comparable() && true == reflect.ValueOf(right).Comparable() {
-        return left == right
+    if false == reflect.ValueOf(left).Comparable() || false == reflect.ValueOf(right).Comparable() {
+        return false
     }
 
-    return reflect.DeepEqual(left, right)
+    return left == right
 }
 
 /* installBunDiagnostics performs the setting itself, apart from the once that guards it, so the destination can be proven without the guard standing in the way of a second proof. The once is never reset and never needs to be: what it installed is the forwarder, which reads the live destination at every record, so a routing after a hand-back reaches the journal again through the same forwarder — measured, a record after ResetDiagnostics and a fresh RouteDiagnostics arrives at the fresh logger. */

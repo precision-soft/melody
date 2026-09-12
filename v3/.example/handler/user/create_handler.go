@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -29,6 +30,11 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
         normalizedUsername := strings.TrimSpace(dto.Username)
         if "" == normalizedUsername {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username is required"), nil
+        }
+
+        /* the username becomes a cache key component and a 255-byte column, so a spelling longer than either holds is turned away before the row lands */
+        if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must stay within 255 bytes"), nil
         }
 
         normalizedPassword := strings.TrimSpace(dto.Password)

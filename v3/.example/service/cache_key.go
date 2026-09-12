@@ -19,6 +19,18 @@ const (
     cacheKeyUserByUsernamePrefix = "example-user-by-username"
 )
 
+/* cacheSafeIdentifierMaximumBytes bounds a caller-supplied identifier so the composed key stays under the backends' 1024-byte key ceiling with room for every prefix above and for the escape below, which can triple a byte: the widest column such an identifier is stored in is 255 bytes, so a longer one names a row no write door admits. */
+const cacheSafeIdentifierMaximumBytes = 255
+
+/* CacheSafeIdentifier reports whether a caller-supplied identifier can be embedded in a cache key: the escape below keeps a space or a newline out of the key, but the key grammar also bounds its length, and an identifier long enough to breach it once escaped names a row that no write door admits — a lookup answers not-found instead of asking the cache a question it would refuse, which surfaced as a 500 on the anonymous login door for a name the user table cannot hold, and on the read of an id that simply does not exist. */
+func CacheSafeIdentifier(identifier string) bool {
+    if "" == identifier {
+        return false
+    }
+
+    return cacheSafeIdentifierMaximumBytes >= len(identifier)
+}
+
 /* cacheKeyPart escapes the one part of a key that comes from outside.
 
    The cache contract states a key grammar — non-empty, no spaces, no newlines — and both backends refuse a

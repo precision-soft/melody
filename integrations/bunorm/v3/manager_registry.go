@@ -16,6 +16,8 @@ import (
 
 type ManagerRegistry struct {
     logger loggingcontract.Logger
+    /* the destination SetLogger routed bun's diagnostics to, kept so Close hands back exactly that one even for a logger that has no identity to be recognised by */
+    routedDiagnostics *diagnosticsTarget
     /* openContext bounds the lazy opens of providers that implement ContextOpener, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole retry budget. */
     openContext context.Context
 
@@ -465,9 +467,8 @@ func (instance *ManagerRegistry) SetLogger(logger loggingcontract.Logger) error 
 
     instance.lock.Lock()
     instance.logger = logger
+    instance.routedDiagnostics = routeDiagnosticsTo(logger)
     instance.lock.Unlock()
-
-    RouteDiagnostics(logger)
 
     return nil
 }
@@ -634,7 +635,11 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
     }
 
     /* bun's diagnostic channel is handed back LAST, while the logger this registry reports through is still alive: the container closes the registry before the logging service, because the registry resolves it. Everything above — a pool close that provokes a bun warning, an open finishing against the closed flag — still reaches the journal; what comes after belongs on standard error. It is handed back only when it is this registry's: a second registry in the same process, routed to its own logger, keeps its channel through this teardown. */
-    resetDiagnosticsRoutedTo(instance.currentLogger())
+    instance.lock.Lock()
+    closingLogger, routedDiagnostics := instance.logger, instance.routedDiagnostics
+    instance.lock.Unlock()
+
+    resetDiagnosticsRoutedTo(closingLogger, routedDiagnostics)
 
     /* teardown diagnostics must name every pool that failed to close, not the first alone: the caller gets one error, so the other failures would otherwise leave no trace anywhere */
     if 1 < len(failedNames) {

@@ -2433,6 +2433,80 @@ func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
     }
 }
 
+/* a ring's wave is one past the last wave that CLOSED, not one past every wave assigned: a stalled node that a closed chain had pushed to a provisional wave three put the ring at four and itself at five, and the operator's view printed a wave nothing closed in */
+func TestTeardownCloseOrder_TheWaveIndexesHaveNoHole(t *testing.T) {
+    nodeKeys := []string{"service:chain.0", "service:chain.1", "service:chain.2", "service:dep", "service:ring.a", "service:ring.b"}
+
+    edges := map[string]map[string]struct{}{
+        "service:chain.0": {"service:chain.1": struct{}{}},
+        "service:chain.1": {"service:chain.2": struct{}{}},
+        "service:chain.2": {"service:dep": struct{}{}},
+        "service:ring.a":  {"service:ring.b": struct{}{}, "service:dep": struct{}{}},
+        "service:ring.b":  {"service:ring.a": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:chain.0": 1,
+        "service:chain.1": 2,
+        "service:chain.2": 3,
+        "service:dep":     4,
+        "service:ring.a":  5,
+        "service:ring.b":  6,
+    }
+
+    _, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    highest := 0
+    populated := make(map[int]struct{})
+    for _, waveIndex := range closeWaveIndexOf {
+        populated[waveIndex] = struct{}{}
+        if waveIndex > highest {
+            highest = waveIndex
+        }
+    }
+
+    for waveIndex := 0; waveIndex <= highest; waveIndex++ {
+        if _, closesSomething := populated[waveIndex]; false == closesSomething {
+            t.Fatalf("expected every wave up to %d to close something, wave %d closes nothing: %v", highest, waveIndex, closeWaveIndexOf)
+        }
+    }
+
+    if closeWaveIndexOf["service:dep"] <= closeWaveIndexOf["service:ring.a"] {
+        t.Fatalf("expected the dependency the ring releases to close after the ring, got %v", closeWaveIndexOf)
+    }
+}
+
+/* the rings are found once and the count of what depends on each is kept as nodes close, so a stall reads the next ring off the counts: found and scanned again at every stall, a teardown of hundreds of disjoint rings spent seconds where the sequential close spent milliseconds — measured, four hundred rings closed in seven milliseconds this way — twenty under the race detector — and in two seconds the other; the bound is a twentieth of the retired form's figure and five times the honest one under the detector */
+func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
+    const ringCount = 400
+
+    nodeKeys := make([]string, 0, 2*ringCount)
+    edges := make(map[string]map[string]struct{}, 2*ringCount)
+    creationOrderOf := make(map[string]int, 2*ringCount)
+
+    for ringIndex := 0; ringIndex < ringCount; ringIndex++ {
+        first := fmt.Sprintf("service:ring.%d.a", ringIndex)
+        second := fmt.Sprintf("service:ring.%d.b", ringIndex)
+        nodeKeys = append(nodeKeys, first, second)
+        edges[first] = map[string]struct{}{second: {}}
+        edges[second] = map[string]struct{}{first: {}}
+        creationOrderOf[first] = 2 * ringIndex
+        creationOrderOf[second] = 2*ringIndex + 1
+    }
+
+    startedAt := time.Now()
+    closeOrder, _, cycleNodeKeys := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+    elapsed := time.Since(startedAt)
+
+    if 2*ringCount != len(closeOrder) || 2*ringCount != len(cycleNodeKeys) {
+        t.Fatalf("expected every ring member closed and reported, got %d closed and %d reported", len(closeOrder), len(cycleNodeKeys))
+    }
+
+    if 100*time.Millisecond < elapsed {
+        t.Fatalf("expected %d rings to drain within 100ms, took %s", ringCount, elapsed)
+    }
+}
+
 /* arming is the moment the application says its teardown graph is complete, so it is the moment a declared edge naming a service nobody registered stops being a tolerated no-op and becomes the ordering that is not there. */
 func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
     serviceContainer := NewContainer()

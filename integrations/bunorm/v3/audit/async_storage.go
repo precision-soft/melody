@@ -83,7 +83,7 @@ func (instance *AsyncStorage) WithLogger(logger loggingcontract.Logger) *AsyncSt
     return instance
 }
 
-/* Save queues the entries for the worker and returns without waiting for the delegate. An entry the queue cannot take — the buffer is full, or the storage is closed — is dead-lettered and reported to the caller as ErrAsyncStorageQueueFull or ErrAsyncStorageClosed, because the caller is the one party still present when that entry is lost: the request path is protected from the delegate's latency, not from knowing that its audit record was dropped. Every entry of the call is attempted and the first refusal is what comes back. */
+/* Save queues the entries for the worker and returns without waiting for the delegate. An entry the queue cannot take — the buffer is full, or the storage is closed — is dead-lettered and reported to the caller as ErrAsyncStorageQueueFull or ErrAsyncStorageClosed, because the caller is the one party still present when that entry is lost: the request path is protected from the delegate's latency, not from knowing that its audit record was dropped. Every entry of the call is attempted and the first refusal is what comes back; it names the logger the entry was dead-lettered through, so a Recorder journals the loss itself unless that logger is its own. */
 func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ...Entry) error {
     /* a context carrying a database binding is a caller's statement that the audit rows must ride that transaction — a Tracker's unit of work, or a WithDatabase caller. Queued, the entry would be written by the worker outside and possibly AFTER the transaction, so a rollback left a row in the trail for a change that never happened. Those saves go through the delegate synchronously, on the caller's context; the queue serves the unbound path, which is the one with a request latency to protect. */
     if bound, isBound := ctx.Value(databaseContextKey{}).(*boundDatabase); true == isBound && nil != bound && nil != bound.handle {
@@ -103,7 +103,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
             return nil
         }
 
-        return exception.NewError("async audit storage is closed, dropped the entries", map[string]any{"table": table, "dropped": len(entries)}, ErrAsyncStorageClosed)
+        return &journaledRefusal{error: exception.NewError("async audit storage is closed, dropped the entries", map[string]any{"table": table, "dropped": len(entries)}, ErrAsyncStorageClosed), journal: instance.deadLetterLogger()}
     }
 
     var refused int
@@ -122,7 +122,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
         return nil
     }
 
-    return exception.NewError("async audit queue is full, dropped the entries", map[string]any{"table": table, "dropped": refused}, ErrAsyncStorageQueueFull)
+    return &journaledRefusal{error: exception.NewError("async audit queue is full, dropped the entries", map[string]any{"table": table, "dropped": refused}, ErrAsyncStorageQueueFull), journal: instance.deadLetterLogger()}
 }
 
 func (instance *AsyncStorage) Dropped() uint64 {
@@ -293,10 +293,16 @@ func (instance *AsyncStorage) saveItem(item asyncEntry) {
     }
 }
 
-func (instance *AsyncStorage) deadLetter(table string, entry Entry, saveErr error) {
+/* deadLetterLogger reads the logger a dead-letter goes through, under the lock WithLogger writes it under */
+func (instance *AsyncStorage) deadLetterLogger() loggingcontract.Logger {
     instance.loggerMutex.RLock()
-    logger := instance.logger
-    instance.loggerMutex.RUnlock()
+    defer instance.loggerMutex.RUnlock()
+
+    return instance.logger
+}
+
+func (instance *AsyncStorage) deadLetter(table string, entry Entry, saveErr error) {
+    logger := instance.deadLetterLogger()
 
     if nil == logger {
         return
