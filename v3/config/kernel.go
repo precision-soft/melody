@@ -9,11 +9,9 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* DefaultTeardownTimeout is how long a process shutting down cleanly may spend releasing what it holds before the teardown is abandoned and the process exits non-zero, when MELODY_TEARDOWN_TIMEOUT says nothing. It is the budget the whole ordered teardown spends, not one per service, because a supervisor budgets for the process rather than for its parts — which stays true when an application arms the container's dependency waves, since the waves change who waits for whom and not what the whole is allowed to spend.
+/* DefaultTeardownTimeout bounds the whole process teardown, including dependency waves, when MELODY_TEARDOWN_TIMEOUT is unset. Exhausting the budget abandons the wait and exits non-zero. Configure it to fit the deployment supervisor's shutdown allowance.
 
-   Ten seconds is deliberately far below what a stalled dependency can cost, and the figure it is below was measured rather than estimated: one amqp transport whose broker has stopped reading takes 29.5 seconds to close at framework defaults, because the close handshake waits out a publish timeout that never gets its reply, and a second transport doubles that. The default is what the commonest supervisor grants before it escalates to SIGKILL, so raising it past that would trade an abandoned teardown for a killed one; a deployment whose supervisor grants longer raises this to match, and gets a teardown that runs to its end and names the service that failed instead of one line saying the shutdown was given up on. That naming is the whole return on the parameter: with the budget too small the failure is never reported at all, because the step that would have reported it was abandoned before it got there.
-
-   Zero is a value rather than an absence: it asks for NO deadline, and the teardown is then waited out for as long as its slowest component needs. It is the honest answer for a deployment whose supervisor grants an open-ended stop, and it trades the guarantee that the process ends for the guarantee that nothing is left unreleased and every failure is named. A negative duration means neither and fails the boot. */
+   An explicit zero disables the deadline; a negative duration fails boot. */
 const DefaultTeardownTimeout = 10 * time.Second
 
 func newKernelConfiguration(

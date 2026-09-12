@@ -2,6 +2,7 @@ package rueidis
 
 import (
     "context"
+    "errors"
     "strconv"
     "strings"
     "testing"
@@ -15,6 +16,18 @@ import (
 )
 
 func TestRedisTokenStore_PutThenLookupRoundTrips(t *testing.T) {
+    /* Preserve the cause of an unexpected store panic in live-test output. */
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            if cause, ok := recovered.(error); ok {
+                for depth := 0; nil != cause && depth < 16; depth++ {
+                    t.Logf("store panic cause[%d]: %T: %v", depth, cause, cause)
+                    cause = errors.Unwrap(cause)
+                }
+            }
+            panic(recovered)
+        }
+    }()
     client := newTokenStoreClient(t)
     store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:roundtrip"))
 

@@ -18,13 +18,9 @@ import (
 
 const databaseResetFlagForce = "force"
 
-/* DatabaseResetCommand brings this example's database back to the state a fresh volume would be in: the tables its migration set owns are dropped, the bun bookkeeping is dropped and recreated with them, the single schema migration is applied again, the audit trail is emptied and the nomenclature is reseeded.
+/* DatabaseResetCommand rebuilds this example's migration-owned schema and Bun bookkeeping, clears application audit rows, and reseeds the catalogue. It requires --force and belongs to the example application, not the migration module.
 
-   It exists because this application has no history. An example is not a project with a past — it has one state, the present one — so it carries no migration that repairs its own history and no changelog that records it. A database left in an older shape is answered HERE, by a command an operator runs deliberately, rather than by code every process pays for at boot.
-
-   It is a command of the APPLICATION rather than of the bunorm/migrate module. Dropping an application's whole schema is not an operator door a published module should grow, and the two frozen majors carry the same command for the same reason: an example is not a published module, so this costs no public surface anywhere.
-
-   The audit trail is emptied even though the migration set does not own its table, and the distinction is the point: the SCHEMA belongs to the module that opens it — the registry creates it through its own door and it survives a rollback of the set — while the ROWS belong to this application, which wrote them. A trail left standing across a reset names entities that no longer exist, over identifiers this application mints as the highest suffix plus one and therefore recycles: the next user-4 would inherit the history of the last one. The outbox is deliberately left alone: its module publishes no purge door, growing one on a published module is not a patch-size change, and its rows are messages waiting to be delivered rather than a picture of a state this command is restoring. */
+   Audit schema belongs to its module, but old audit rows must not survive reuse of example entity identifiers. Pending outbox messages are retained; this command does not purge them. */
 type DatabaseResetCommand struct{}
 
 func NewDatabaseResetCommand() *DatabaseResetCommand {

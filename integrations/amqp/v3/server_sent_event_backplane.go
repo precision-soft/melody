@@ -188,20 +188,12 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
     writeInFlight := 0 < instance.writesInFlight.Load()
 
     if true == ownsConnection && nil != connection {
-        /* read with the transport's: the two carry one mechanism and the sentences below are the same sentences. A write this close could not join is CUT, deliberately, and whatever the client answers about it is the record of that cut; every other close is given what is left of the caller's budget. */
-        cutWedgedWrite := false == publishJoined && true == writeInFlight
-
-        closeStretch := time.Duration(0)
-        if false == cutWedgedWrite {
-            closeStretch = teardownStretchWithin(closeContext, instance.resolvedCallTimeout())
-        }
-
-        connectionCloseErr := ignoringAlreadyClosed(connection.CloseDeadline(time.Now().Add(closeStretch)))
-
-        /* a close the caller gave NO time is not a close that FAILED. The stretch is zero on every teardown whose budget an earlier component already spent, and the client then cuts the closing handshake at a deadline already behind it and answers an i/o timeout — over a live connection the broker was reading. Reported, it named this connection for a budget somebody else spent, and the teardown's own record already names that budget. A stretch that was POSITIVE and still ran out says something different, and so does the cut above: both are reported. */
-        if true == cutWedgedWrite || 0 < closeStretch {
-            closeErrs = append(closeErrs, connectionCloseErr)
-        }
+        closeErrs = append(closeErrs, closeOwnedConnectionWithin(
+            closeContext,
+            connection,
+            instance.resolvedCallTimeout(),
+            false == publishJoined && true == writeInFlight,
+        ))
     }
 
     switch {

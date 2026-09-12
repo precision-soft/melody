@@ -178,11 +178,9 @@ const (
     lockAcquireExtended = int64(2)
 )
 
-/* releaseAmbiguousAcquire gives back a lease one acquisition may have taken without ever learning that it did. An acquire that ends in an error ends AMBIGUOUSLY: the call is bounded, so a store that answers late — or a connection that drops after the server ran the script — leaves the compare-and-set executed and the key holding that acquisition's token for its whole ttl, while the caller is told it did not get the lock. Nothing else can clear it: every later acquisition mints a fresh token, so the compare-and-delete refuses all of them until the ttl lapses with nobody holding the lock — measured on a live store, a one-second budget bought a twenty-nine-second lockout.
+/* releaseAmbiguousAcquire best-effort deletes only this failed attempt's token, which the server may have stored before its reply was lost. Extensions retain the incumbent token, and later acquisitions use fresh tokens, so neither can be deleted by this cleanup.
 
-   It deletes the token of THAT acquisition and nothing else, which is what makes it safe with no state to consult. A re-acquisition by a handle that already holds the lease never writes its token — the script extends the stored value instead of replacing it — so when the ambiguous attempt was a re-acquisition this delete matches nothing and the lease the caller is still inside is untouched. When it was a fresh take, the token it deletes is exactly the lease nobody believes they hold. No door of this handle can ever adopt that token: every acquisition mints its own and offers only what the handle HOLDS as the incumbent, so the delete can never take a lease a later acquire was granted.
-
-   It runs DETACHED, on a goroutine and on a context of its own, for two reasons that pull the same way: the caller's context is often the very thing that ended the acquire, and a caller that carries a deadline TIGHTER than the call timeout must keep it — charging it a second round trip would take an acquire refused in ten milliseconds to a full budget. A failure is silent, and a process that exits before it lands leaves exactly the lease a crash would leave, which is what the ttl is documented to cover. */
+   Cleanup runs asynchronously with its own callTimeout budget to preserve the caller's deadline. Errors and panics are ignored; if cleanup fails or the process exits first, the lease expires by TTL. */
 func (instance *redisLock) releaseAmbiguousAcquire(acquisitionToken string) {
     go func() {
         /* a panic on a bare goroutine takes the process down with it, and this one runs for a caller that has already been answered */

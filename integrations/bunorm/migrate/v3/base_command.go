@@ -83,13 +83,9 @@ func (instance *baseCommand) resolveRegistry(resolver containercontract.Resolver
     return container.FromResolver[*bunorm.ManagerRegistry](resolver, instance.options.ManagerRegistryServiceId)
 }
 
-/* resolveDatabase answers the connection this command runs on, the label the output names it by, and the RELEASE its caller must defer.
+/* resolveDatabase returns the database, its output label, and a release function the caller must defer. Release closes a dedicated migration connection, whose relaxed timeouts are unsuitable for a long-lived request pool. It leaves ordinary pooled connections alone and is safe when no migration connection was opened.
 
-   The release ends the dedicated migration connection. That connection is not a request pool and must not live like one: it deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle. The registry memoizes it until the registry itself closes, so a single migration run inside a process that goes on to serve requests left a deadline-less connection open against the database for the life of that process.
-
-   It is handed back as a value rather than left to each command to remember, because a forgotten call compiles and a changed signature does not: every command had to be visited to keep building. It is safe on every path — a command whose provider offers no migration capability ran on the ordinary pool, which this never touches, and one that failed before opening has nothing to end.
-
-   The command's output is taken so the release has somewhere to REPORT. The registry forgets the handle before it closes it, so its own teardown no longer covers what the close leaves behind, and a release with nowhere to speak dropped that failure entirely. It is a warning and not the command's verdict: the close is a COM_QUIT on a connection whose work is already done and it is not retryable, so the value is the record. The release runs before the json document is rendered — every command defers finish FIRST and this SECOND, and defers are last-in-first-out — so the warning reaches the document rather than corrupting it. */
+   A release failure is a warning: migration work has already finished and closing the connection is not retryable. Defer release after finishRun so that its warning is recorded before the JSON document is rendered. */
 func (instance *baseCommand) resolveDatabase(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,

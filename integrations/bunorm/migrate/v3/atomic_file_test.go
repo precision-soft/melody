@@ -96,9 +96,19 @@ func TestFinishFileAtomically_LeavesNoTemporaryBehindWhenTheRenameFails(t *testi
         t.Fatalf("could not seed a directory at the destination: %v", mkdirErr)
     }
 
+    sentinel := filepath.Join(destination, "operator-owned")
+    if writeErr := os.WriteFile(sentinel, []byte("keep this content"), 0o600); nil != writeErr {
+        t.Fatal(writeErr)
+    }
+
     finishErr := finishFileAtomically(destination, []byte("package migrations\n"))
     if nil == finishErr {
         t.Fatal("expected a refusal when the destination cannot be renamed over")
+    }
+
+    retained, readErr := os.ReadFile(sentinel)
+    if nil != readErr || "keep this content" != string(retained) {
+        t.Fatalf("failed finalization changed the destination: content=%q error=%v", retained, readErr)
     }
 
     if false == strings.Contains(finishErr.Error(), "rename") {

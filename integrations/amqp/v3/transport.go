@@ -300,20 +300,12 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
     writeInFlight := 0 < instance.writesInFlight.Load()
 
     if true == ownsConnection && nil != connection {
-        /* a write this close could not join is CUT: the deadline is now, deliberately, and whatever the client answers about it is the record of that cut. Every other close is given what is left of the caller's budget. */
-        cutWedgedWrite := false == publishJoined && true == writeInFlight
-
-        closeStretch := time.Duration(0)
-        if false == cutWedgedWrite {
-            closeStretch = teardownStretchWithin(closeContext, instance.resolvedPublishTimeout())
-        }
-
-        connectionCloseErr := ignoringAlreadyClosed(connection.CloseDeadline(time.Now().Add(closeStretch)))
-
-        /* a close the caller gave NO time is not a close that FAILED. The stretch is zero on every teardown whose budget an earlier component already spent, and the client then cuts the closing handshake at a deadline already behind it and answers an i/o timeout — over a live connection the broker was reading, measured 20 times out of 20, where the same connection closed clean with no deadline at all. Reported, it named this connection for a budget somebody else spent, and the teardown's own record already names that budget. A stretch that was POSITIVE and still ran out says something different, and so does the cut above: both are reported. */
-        if true == cutWedgedWrite || 0 < closeStretch {
-            closeErrs = append(closeErrs, connectionCloseErr)
-        }
+        closeErrs = append(closeErrs, closeOwnedConnectionWithin(
+            closeContext,
+            connection,
+            instance.resolvedPublishTimeout(),
+            false == publishJoined && true == writeInFlight,
+        ))
     }
 
     switch {
@@ -1800,11 +1792,22 @@ func (instance *Transport) logError(runtimeInstance runtimecontract.Runtime, mes
     logger.Error(message, exception.LogContext(err))
 }
 
-/* teardownStretchWithin answers how long one stretch of a close may take: the SMALLER of what is left of the caller's deadline and the package's own bound for that stretch. Each stretch asks again rather than dividing the budget up front, because the stretches are serial and the ones that end in microseconds — a healthy consume join, a channel close over a live socket — must not have spent a share they never needed on behalf of the one that wedges.
+/* closeOwnedConnectionWithin cuts a wedged write immediately; otherwise it grants the smaller of the remaining caller budget and the handshake bound. A deliberately zero-budget handshake is not reported as a failure, but a cut write or an exhausted positive allowance is. */
+func closeOwnedConnectionWithin(closeContext context.Context, connection *amqp091.Connection, handshakeBound time.Duration, cutWedgedWrite bool) error {
+    closeStretch := time.Duration(0)
+    if false == cutWedgedWrite {
+        closeStretch = teardownStretchWithin(closeContext, handshakeBound)
+    }
 
-   The package bound stays the ceiling of each stretch and the caller's deadline the ceiling of the TOTAL, which is the pair of promises an operator who declares a budget is making: one hour for the whole teardown, not one hour for the first stretch that wedges. Handing the remainder through unclamped read the declaration backwards — a MORE generous budget made every stretch LONGER than the constant that used to bound it, taking a thirty-second consume join to fifty-nine minutes and a five-second audit drain to thirty.
+    closeErr := ignoringAlreadyClosed(connection.CloseDeadline(time.Now().Add(closeStretch)))
+    if true == cutWedgedWrite || 0 < closeStretch {
+        return closeErr
+    }
 
-   A deadline already spent, or a context already cancelled, answers zero, which every waiter below reads as "do not wait": the connection is still cut and the channels are still closed, because those are the operations the teardown exists to perform, and only the WAITING is what the budget was about. The cancellation is read as well as the deadline because a context carrying one without the other is a live shape of this door — nothing in the framework hands one down, every caller passes context.Background or a deadline, but CloseWithContext is reached by an application through a type assertion — and the registry closed beside these transports already abandons on exactly that signal. Two components of one teardown reading the same cancellation opposite ways is the defect, not the figure either of them chose. */
+    return nil
+}
+
+/* teardownStretchWithin returns the smaller of the package bound and the remaining caller deadline, recalculated for each serial teardown stretch. Without a deadline it returns the package bound; cancellation or an expired deadline returns zero. Zero skips waiting without skipping resource cleanup. */
 func teardownStretchWithin(closeContext context.Context, packageBound time.Duration) time.Duration {
     if nil != closeContext.Err() {
         return 0
