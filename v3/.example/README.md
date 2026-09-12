@@ -134,8 +134,7 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
-The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose: everything else in the example falls under the
-`^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate would be answered with a redirect to the login page instead of the readiness of the process.
+The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose, so a probe that had to authenticate is not answered with a redirect to the login page instead of the readiness of the process. The other public rules of [`config/security.go`](./config/security.go) are the login and logout doors, the frontend bundle (`/`, `/index.html`, `/assets`, `/favicon`, `/i18n`, `/routes`), `/metrics`, `/openapi.json` and the cipher round-trip probe, which reads nothing from the caller; every other route carries a role — a door that writes through the example into a backend (the object storage, the outbox, the message bus) carries the write role the catalogue writes carry, and what no rule names falls under the `^/` catch-all, which requires a signed-in user.
 
 > The committed [`.env`](./.env) points the integration endpoints at the dev compose service names (`redis:6379`, `mysql`, …), so the fully-wired experience is [`./dc up:all --build`](#running-fully-against-containers), which runs this same app inside the dev container where those names resolve. A bare host `go run .` needs those services reachable (override the endpoints to the mapped host ports, [see below](#running-the-binary-directly-against-mapped-ports)) — or remove their lines from `.env` to boot with the in-process fallbacks and zero infrastructure.
 

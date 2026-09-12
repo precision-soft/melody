@@ -132,6 +132,30 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
         )
     }
     pass("example rate limit enforced the shared budget through the load balancer (429 past the budget)")
+
+    /* the balancer APPENDS the peer it saw to the chain the client sent, so a client that sends its own X-Forwarded-For arrives as "<what it sent>, <its address>". With the whole private space trusted, the address the balancer appended — this harness's container, and the docker gateway for every host client — read as one more hop, and the client's own entry became the key: a fresh budget per call. Trusting the balancer alone, the appended address is the client the balancer attested, and what the client wrote to its left is never read. */
+    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
+
+    balancerSpoofSpentAt := 0
+    for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
+        status := requestThrottledWrite(client, loadBalancerUrl, exampleHostHeader, fmt.Sprintf("203.0.113.%d", attempt))
+        if http.StatusTooManyRequests == status {
+            balancerSpoofSpentAt = attempt
+            break
+        }
+        if http.StatusUnauthorized == status || http.StatusForbidden == status {
+            fail("example http: load balancer call %d with a spoofed header returned %d — the section reached the firewall, not the limiter", attempt, status)
+        }
+    }
+
+    if exampleRateLimitBudget+1 != balancerSpoofSpentAt {
+        fail(
+            "example http: through the load balancer a spoofed X-Forwarded-For was believed — the budget was exhausted at call %d, wanted %d (the address the balancer appended was read as a trusted hop)",
+            balancerSpoofSpentAt,
+            exampleRateLimitBudget+1,
+        )
+    }
+    pass("example rate limit ignored a spoofed X-Forwarded-For sent through the load balancer (budget spent once)")
 }
 
 /* exampleHostHeader is the virtual host the load balancer serves the example under. */

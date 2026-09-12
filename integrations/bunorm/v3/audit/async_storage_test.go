@@ -976,3 +976,42 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
         break
     }
 }
+
+/* swappingLogger installs another logger on the storage from inside its own Error, which is the narrowest window a WithLogger can land in: between the dead-letter and the refusal that names the journal. The refusal must name the logger the record went to. */
+type swappingLogger struct {
+    capturingLogger
+    storage *AsyncStorage
+    next    loggingcontract.Logger
+}
+
+func (instance *swappingLogger) Error(message string, context loggingcontract.Context) {
+    instance.capturingLogger.Error(message, context)
+    instance.storage.WithLogger(instance.next)
+}
+
+func TestAsyncStorage_TheRefusalNamesTheJournalTheEntryWasDeadLetteredThrough(t *testing.T) {
+    delegate := newRecordingStorage()
+    close(delegate.release)
+
+    storage := NewAsyncStorage(delegate, 4)
+    first := &swappingLogger{storage: storage, next: &capturingLogger{}}
+    storage.WithLogger(first)
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "late", Operation: "insert"})
+
+    if 1 != first.count() {
+        t.Fatalf("expected the record to land in the first logger, got %d", first.count())
+    }
+
+    if false == journaledThrough(saveErr, first) {
+        t.Fatal("expected the refusal to name the logger the record went to, not the one installed after it")
+    }
+
+    if true == journaledThrough(saveErr, first.next) {
+        t.Fatal("expected the refusal not to name the logger installed after the record was written")
+    }
+}

@@ -71,7 +71,12 @@ func (instance *Module) registerRatesHttpClientService(registrar melodyapplicati
    operator configures, host included, so this client carries NO base: a based client judges the resolved
    url against its own origin and would refuse the endpoint the moment it named a different host, which is
    exactly the configuration an operator is entitled to write. The caller therefore hands it the absolute
-   url, the only spelling a baseless client accepts. */
+   url, the only spelling a baseless client accepts.
+
+   It does not follow a redirect either: a POST answered 301, 302 or 303 is re-sent by net/http as a GET
+   without its body, so a sink that moved — or a proxy in front of it that answers with its login page —
+   would have the export read the 200 of a page nothing was stored at as "someone received it". The 3xx
+   reaches the exporter, which refuses it by name. */
 func (instance *Module) registerReportExportHttpClientService(registrar melodyapplicationcontract.ServiceRegistrar) {
     if "" == instance.environmentValue(parameterReportExportEndpoint) {
         return
@@ -87,7 +92,7 @@ func (instance *Module) registerReportExportHttpClientService(registrar melodyap
                     map[string]string{
                         "accept": "application/json",
                     },
-                ),
+                ).WithoutRedirects(),
             ), nil
         },
         outboundClientRegisterOptions()...,

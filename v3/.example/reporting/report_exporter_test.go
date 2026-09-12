@@ -1,6 +1,7 @@
 package reporting
 
 import (
+    "strings"
     "context"
     "encoding/json"
     "io"
@@ -57,7 +58,8 @@ func exportRuntime(t *testing.T) melodyruntimecontract.Runtime {
         containerInstance,
         service.ServiceReportExportHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
-            return httpclient.NewHttpClient(httpclient.NewHttpClientConfig("", 2*time.Second, nil)), nil
+            /* built the way the composition root builds it: a client that hands a redirect back rather than following it, which is what lets the exporter see the 3xx at all */
+            return httpclient.NewHttpClient(httpclient.NewHttpClientConfig("", 2*time.Second, nil).WithoutRedirects()), nil
         },
         melodycontainer.WithoutTypeRegistration(),
     )
@@ -146,5 +148,42 @@ func TestCatalogReportExporterExport_SendsNothingWithNoEndpointConfigured(t *tes
 
     if int64(0) != sink.requests.Load() {
         t.Errorf("the sink was given %d requests with no endpoint configured", sink.requests.Load())
+    }
+}
+
+/* a sink that moved, or a proxy in front of it that sends the caller to a login page, answers the POST with a redirect. Followed, net/http re-sends the POST as a GET without its body, and the 200 of the page it lands on used to read as "the sink received the reading" — exported=true over a sink that stored nothing. The export refuses the redirect by name, and the page is never asked. */
+func TestCatalogReportExporterExport_RefusesASinkThatRedirectsInsteadOfReceiving(t *testing.T) {
+    sinkPosts := atomic.Int64{}
+    pageGets := atomic.Int64{}
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        if "/v1/report-sink" == request.URL.Path {
+            sinkPosts.Add(1)
+            http.Redirect(writer, request, "/login", http.StatusFound)
+
+            return
+        }
+
+        pageGets.Add(1)
+        writer.WriteHeader(http.StatusOK)
+    }))
+    t.Cleanup(server.Close)
+
+    exported, err := NewCatalogReportExporter(server.URL+"/v1/report-sink").
+        Export(exportRuntime(t), exportReading())
+    if nil == err {
+        t.Fatal("a sink that redirected the export was reported as having accepted it")
+    }
+
+    if false == strings.Contains(err.Error(), "redirected the export") {
+        t.Fatalf("expected the refusal to name the redirect, got %q", err.Error())
+    }
+
+    if true == exported {
+        t.Error("a redirected export reported that it sent something")
+    }
+
+    if int64(1) != sinkPosts.Load() || int64(0) != pageGets.Load() {
+        t.Errorf("the sink was posted %d times and the page read %d times, wanted one post and no read", sinkPosts.Load(), pageGets.Load())
     }
 }

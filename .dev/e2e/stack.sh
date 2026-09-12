@@ -18,12 +18,12 @@
 #                        being consumed as the runtime process role
 #   - LAZY SERVICE       example:grant:role resolves its user service through the container.Lazy handle at
 #                        first run — the lazy-resolution marker and the grant line print from one invocation
-#   - OUTBOX FACTORIES   /outbox/enqueue on the dev-supervised example writes through the lazily-resolved
-#                        store, melody:outbox:relay publishes it from a separate process and /outbox/status
-#                        shows the sent count grow
-#   - MESSAGE BUS        POST /messagebus/dispatch on the dev-supervised example hands the message to the async
-#                        transport instead of handling it inline, and melody:messagebus:consume handles it
-#                        from a separate process — exactly one message, on a queue drained first
+#   - OUTBOX FACTORIES   /outbox/enqueue on the dev-supervised example, signed in as the seeded editor, writes
+#                        through the lazily-resolved store, melody:outbox:relay publishes it from a separate
+#                        process and /outbox/status shows the sent count grow; anonymous, the doors answer 401
+#   - MESSAGE BUS        POST /messagebus/dispatch on the dev-supervised example, signed in, hands the message to
+#                        the async transport instead of handling it inline, and melody:messagebus:consume handles
+#                        it from a separate process — exactly one message, on a queue drained first; anonymous 401
 #   - ENCRYPT FACTORY    melody:encrypt:database resolves its database through the module factory at the
 #                        first run and bulk-encrypts the two-factor columns
 #   - CRON RUNNER FLAG   product:list reads its declared --limit default when the flag is not passed and
@@ -107,7 +107,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=143
+EXPECTED_CHECK_COUNT_INTEGER=147
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -468,6 +468,29 @@ fi
 check_section_end "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# a session on the dev-supervised example for the sections whose routes carry a role — the outbox and
+# message bus doors write into a backend, so they sit behind ROLE_EDITOR like the catalogue writes. The
+# http client the dev image ships is busybox wget, which has no cookie jar: the sign-in captures the
+# Set-Cookie header the login door answers (-S prints the server headers on stderr) and every call of the
+# section presents it back through --header. The snippets are container-side bash, spliced verbatim into
+# the run_in_dev_capture scripts below, hence the quoted here-documents: nothing in them expands here.
+# ---------------------------------------------------------------------------------------------------
+
+read -r -d '' EXAMPLE_SIGN_IN_SNIPPET <<'SNIPPET' || true
+    SESSION_COOKIE_VALUE=$(wget -q -S -O /dev/null --post-data='username=editor&password=editor' --header='Accept: application/json' "${EXAMPLE_BASE_URL}/login/" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
+    if [ -z "${SESSION_COOKIE_VALUE}" ]; then
+        echo example_session=0
+    else
+        echo example_session=1
+    fi
+    SESSION_COOKIE_HEADER="Cookie: ${SESSION_COOKIE_VALUE}"
+SNIPPET
+
+read -r -d '' EXAMPLE_SIGN_OUT_SNIPPET <<'SNIPPET' || true
+    wget -q -O /dev/null --header="${SESSION_COOKIE_HEADER}" "${EXAMPLE_BASE_URL}/logout/" 2>/dev/null || true
+SNIPPET
+
+# ---------------------------------------------------------------------------------------------------
 # OUTBOX FACTORIES END-TO-END — http enqueue on the supervised app, relay from a separate cli process
 # ---------------------------------------------------------------------------------------------------
 
@@ -478,23 +501,27 @@ check_section_start "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
 # half is a separate cli process, so store and relay factories are exercised across process boundaries.
 # The sent count is read before and after: /outbox/status going green on rows sent by EARLIER runs would
 # be a vacuous pass, so the assertion is that the count GREW, not that it exists
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "STATUS_BODY=\$(wget -q -O- \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>/dev/null || true)
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "ANONYMOUS_STATUS=\$(wget -q -S -O /dev/null \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)
+    echo \"anonymous_status=\${ANONYMOUS_STATUS:-none}\"
+${EXAMPLE_SIGN_IN_SNIPPET}
+    STATUS_BODY=\$(wget -q -O- --header=\"\${SESSION_COOKIE_HEADER}\" \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>/dev/null || true)
     case \"\${STATUS_BODY}\" in
         *'\"success\":true'*) echo outbox_reachable=1 ;;
         *) echo outbox_reachable=0 ;;
     esac
     BEFORE_SENT=\$(printf '%s' \"\${STATUS_BODY}\" | grep -o '\"sent\":[0-9]*' | head -1 | cut -d: -f2)
     echo \"before_sent=\${BEFORE_SENT:-0}\"
-    wget -q -O- --post-data='' \"\${EXAMPLE_BASE_URL}/outbox/enqueue?reference=stack-e2e\" 2>/dev/null || true
+    wget -q -O- --post-data='' --header=\"\${SESSION_COOKIE_HEADER}\" \"\${EXAMPLE_BASE_URL}/outbox/enqueue?reference=stack-e2e\" 2>/dev/null || true
     echo ''
     # the outbox available_at has second precision, so the relay claims the row only once it is a full second old
     sleep 2
     go run . melody:outbox:relay --limit 1 >/tmp/outbox-relay.log 2>&1
     echo \"relay_status=\$?\"
-    AFTER_BODY=\$(wget -q -O- \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>/dev/null || true)
+    AFTER_BODY=\$(wget -q -O- --header=\"\${SESSION_COOKIE_HEADER}\" \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>/dev/null || true)
     printf '%s\n' \"\${AFTER_BODY}\"
     AFTER_SENT=\$(printf '%s' \"\${AFTER_BODY}\" | grep -o '\"sent\":[0-9]*' | head -1 | cut -d: -f2)
-    echo \"after_sent=\${AFTER_SENT:-0}\""
+    echo \"after_sent=\${AFTER_SENT:-0}\"
+${EXAMPLE_SIGN_OUT_SNIPPET}"
 OUTBOX_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 printf '%s\n' "${OUTBOX_OUTPUT_STRING}"
@@ -507,6 +534,20 @@ if ! printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q 'outbox_reachable=1'; then
     check_fail "the dev-supervised example on EXAMPLE_BASE_URL is unreachable or lacks the outbox routes (stale supervised binary? reflex restarts it on .go/.env changes; ./dc restart dev forces a resync) — the outbox factories were not exercised"
     check_section_end "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
 else
+
+# the doors carry ROLE_EDITOR: the anonymous read is the arm that keeps them off the public rule table, and the
+# session is what the rest of the section drives them through — without it every number below is a 401 body
+if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q 'anonymous_status=401'; then
+    check_pass "GET /outbox/status refuses an anonymous client with 401"
+else
+    check_fail "GET /outbox/status did not answer 401 to an anonymous client ($(printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -o 'anonymous_status=[a-z0-9]*' | head -1)) — the outbox doors are public"
+fi
+
+if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q 'example_session=1'; then
+    check_pass "the seeded editor signed in on the supervised example and the section carries its session"
+else
+    check_fail "the seeded editor could not sign in on the supervised example — the outbox doors were driven without a session"
+fi
 
 if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q '"enqueued":true'; then
     check_pass "the http enqueue wrote through the lazily-resolved outbox store"
@@ -591,8 +632,12 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "STATUS_BODY=\$(wget -q -O- \"\
     wait \${DRAIN_PID} 2>/dev/null || true
     BEFORE_HANDLED=\$(grep -c 'welcome email sent' var/log/dev.log 2>/dev/null || true)
     echo \"before_handled=\${BEFORE_HANDLED:-0}\"
-    wget -q -O- --post-data='' \"\${EXAMPLE_BASE_URL}/messagebus/dispatch\" 2>/dev/null || true
+    ANONYMOUS_STATUS=\$(wget -q -S -O /dev/null --post-data='' \"\${EXAMPLE_BASE_URL}/messagebus/dispatch\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)
+    echo \"anonymous_status=\${ANONYMOUS_STATUS:-none}\"
+${EXAMPLE_SIGN_IN_SNIPPET}
+    wget -q -O- --post-data='' --header=\"\${SESSION_COOKIE_HEADER}\" \"\${EXAMPLE_BASE_URL}/messagebus/dispatch\" 2>/dev/null || true
     echo ''
+${EXAMPLE_SIGN_OUT_SNIPPET}
     sleep 2
     INLINE_HANDLED=\$(grep -c 'welcome email sent' var/log/dev.log 2>/dev/null || true)
     echo \"inline_handled=\${INLINE_HANDLED:-0}\"
@@ -635,6 +680,20 @@ elif printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q 'consume_timeout=1'; t
     check_fail "melody:messagebus:consume --limit 1 never exited within the wait budget — it received no message to consume, so the async delivery could not be observed"
     check_section_end "MESSAGE BUS ASYNC TRANSPORT" "${TAG_VALIDATE}" "e2e"
 else
+
+# the dispatch door sends a mail per call, so it carries ROLE_EDITOR: the anonymous arm keeps it off the public rule
+# table, and the session is what the dispatch below goes through
+if printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q 'anonymous_status=401'; then
+    check_pass "POST /messagebus/dispatch refuses an anonymous client with 401"
+else
+    check_fail "POST /messagebus/dispatch did not answer 401 to an anonymous client ($(printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -o 'anonymous_status=[a-z0-9]*' | head -1)) — the dispatch door is public"
+fi
+
+if printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q 'example_session=1'; then
+    check_pass "the seeded editor signed in on the supervised example and the dispatch carries its session"
+else
+    check_fail "the seeded editor could not sign in on the supervised example — the dispatch was sent without a session"
+fi
 
 if printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -q '"status":"dispatched"'; then
     check_pass "POST /messagebus/dispatch dispatched the message on the supervised application"
@@ -1523,11 +1582,11 @@ else
     check_fail "two concurrent refreshes added ${V3_ARCHIVE_CONCURRENT_DELTA_INTEGER} readings, wanted exactly 1"
 fi
 
-# the read half. Only the anonymous arm is driven here: this script's http client is wget with no cookie
-# jar, and an authenticated flow belongs where the sign-in helpers live — the Go harness drives the
-# listing itself, its limit and its refusals. What this arm states is the one thing a section of this
-# script can state on its own, and it is worth stating: the archive carries the catalogue's history, so a
-# door onto it that answered an anonymous caller would publish what the listings are gated for.
+# the read half. Only the anonymous arm is driven here: the authenticated flow belongs where the Go
+# harness drives the listing itself, its limit and its refusals (the session snippet above serves the
+# sections that have no Go twin). What this arm states is worth stating on its own: the archive carries
+# the catalogue's history, so a door onto it that answered an anonymous caller would publish what the
+# listings are gated for.
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -S -O /dev/null \"\${EXAMPLE_BASE_URL}/reports/api/history/\" 2>&1 | grep -m1 'HTTP/' || true"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q '401'; then
     check_pass "an anonymous caller is refused the archive listing"

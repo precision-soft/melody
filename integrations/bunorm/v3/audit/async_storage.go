@@ -93,17 +93,20 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
+    /* read once for the whole call: the dead-letter and the refusal that names the journal must agree, and a WithLogger landing between two reads would have the refusal name a logger that never received the record */
+    logger := instance.deadLetterLogger()
+
     if true == instance.closed {
         for _, entry := range entries {
             instance.dropped.Add(1)
-            instance.deadLetter(table, entry, exception.NewError("async audit storage is closed, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageClosed))
+            instance.deadLetterThrough(logger, table, entry, exception.NewError("async audit storage is closed, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageClosed))
         }
 
         if 0 == len(entries) {
             return nil
         }
 
-        return &journaledRefusal{error: exception.NewError("async audit storage is closed, dropped the entries", map[string]any{"table": table, "dropped": len(entries)}, ErrAsyncStorageClosed), journal: instance.deadLetterLogger()}
+        return exception.NewError("async audit storage is closed, dropped the entries", map[string]any{"table": table, "dropped": len(entries)}, &journaledRefusal{sentinel: ErrAsyncStorageClosed, journal: logger})
     }
 
     var refused int
@@ -114,7 +117,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
         default:
             refused++
             instance.dropped.Add(1)
-            instance.deadLetter(table, entry, exception.NewError("async audit queue is full, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageQueueFull))
+            instance.deadLetterThrough(logger, table, entry, exception.NewError("async audit queue is full, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageQueueFull))
         }
     }
 
@@ -122,7 +125,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
         return nil
     }
 
-    return &journaledRefusal{error: exception.NewError("async audit queue is full, dropped the entries", map[string]any{"table": table, "dropped": refused}, ErrAsyncStorageQueueFull), journal: instance.deadLetterLogger()}
+    return exception.NewError("async audit queue is full, dropped the entries", map[string]any{"table": table, "dropped": refused}, &journaledRefusal{sentinel: ErrAsyncStorageQueueFull, journal: logger})
 }
 
 func (instance *AsyncStorage) Dropped() uint64 {
@@ -302,8 +305,11 @@ func (instance *AsyncStorage) deadLetterLogger() loggingcontract.Logger {
 }
 
 func (instance *AsyncStorage) deadLetter(table string, entry Entry, saveErr error) {
-    logger := instance.deadLetterLogger()
+    instance.deadLetterThrough(instance.deadLetterLogger(), table, entry, saveErr)
+}
 
+/* deadLetterThrough is deadLetter with the journal chosen by the caller, for the refusal that has to name the same one. */
+func (instance *AsyncStorage) deadLetterThrough(logger loggingcontract.Logger, table string, entry Entry, saveErr error) {
     if nil == logger {
         return
     }

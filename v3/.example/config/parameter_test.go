@@ -1,0 +1,74 @@
+package config
+
+import (
+    "testing"
+)
+
+/* recordingParameterRegistrar keeps what RegisterParameters declared and marked, which is the whole question here: the marks are what debug:parameters redacts by. */
+type recordingParameterRegistrar struct {
+    registered map[string]any
+    marked     []string
+}
+
+func newRecordingParameterRegistrar() *recordingParameterRegistrar {
+    return &recordingParameterRegistrar{registered: map[string]any{}}
+}
+
+func (instance *recordingParameterRegistrar) RegisterParameter(name string, value any) {
+    instance.registered[name] = value
+}
+
+func (instance *recordingParameterRegistrar) RegisterSecretParameter(name string, value any) {
+    instance.registered[name] = value
+    instance.marked = append(instance.marked, name)
+}
+
+func (instance *recordingParameterRegistrar) MarkParameterSecret(name string) {
+    instance.marked = append(instance.marked, name)
+}
+
+func (instance *recordingParameterRegistrar) isMarked(name string) bool {
+    for _, marked := range instance.marked {
+        if name == marked {
+            return true
+        }
+    }
+
+    return false
+}
+
+/* the two outbound urls can carry a credential in their userinfo — the shape the amqp dsn is marked for — and then debug:parameters printed it in clear, twice: under the key and under the parameter that reads it. Marked as written, the mark propagates to that parameter through its template. */
+func TestRegisterParameters_MarksAnOutboundUrlSecretWhenItCarriesAUserinfo(t *testing.T) {
+    registrar := newRecordingParameterRegistrar()
+
+    moduleWithEnvironment(t, map[string]string{
+        environmentKeyRatesBaseUrl:         "http://rates:ratespass@rates.example.test/v1/",
+        environmentKeyReportExportEndpoint: "http://sink:sinkpass@sink.example.test/v1/report-sink",
+    }).RegisterParameters(registrar)
+
+    for _, key := range []string{environmentKeyRatesBaseUrl, environmentKeyReportExportEndpoint} {
+        if false == registrar.isMarked(key) {
+            t.Fatalf("expected %s to be marked secret when it carries a userinfo, marked: %v", key, registrar.marked)
+        }
+    }
+}
+
+/* the sister case, so the mark is a measurement of the value and not a blanket: the shipped urls carry no credential, and an operator reads them in debug:parameters to see where the process points. */
+func TestRegisterParameters_LeavesAnOutboundUrlWithoutAUserinfoReadable(t *testing.T) {
+    registrar := newRecordingParameterRegistrar()
+
+    moduleWithEnvironment(t, map[string]string{
+        environmentKeyRatesBaseUrl:         "http://rates.melody.localhost.precision-soft.com/v1/",
+        environmentKeyReportExportEndpoint: "http://rates.melody.localhost.precision-soft.com/v1/report-sink",
+    }).RegisterParameters(registrar)
+
+    for _, key := range []string{environmentKeyRatesBaseUrl, environmentKeyReportExportEndpoint} {
+        if true == registrar.isMarked(key) {
+            t.Fatalf("expected %s to stay readable without a userinfo, marked: %v", key, registrar.marked)
+        }
+    }
+
+    if false == registrar.isMarked("MYSQL_PASSWORD") {
+        t.Fatalf("expected the credentials to stay marked, marked: %v", registrar.marked)
+    }
+}

@@ -3,6 +3,7 @@ package service
 import (
     "context"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -211,5 +212,69 @@ func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
        which is what an unbounded entry is spelled as — would read as correct. */
     if time.Minute != writes[0].ttl {
         t.Fatalf("expected the door to bound the absence to a minute, got %s", writes[0].ttl)
+    }
+}
+
+/* a loader that parks until it is released puts twenty readers of one key in flight together, so Remember coalesces them onto one loader; what is then counted is who writes the found value unbounded: the reader that loaded it once, and no waiter — a waiter's write landed after the leader's and re-installed, unbounded, whatever a listener had cleared in between, so the absence of every waiter's write is the whole repair. */
+func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *testing.T) {
+    cacheInstance := newTtlRecordingCache()
+
+    readers := 20
+    release := make(chan struct{})
+    loaderRuns := atomic.Int64{}
+
+    started := sync.WaitGroup{}
+    finished := sync.WaitGroup{}
+    for index := 0; index < readers; index++ {
+        started.Add(1)
+        finished.Add(1)
+
+        go func() {
+            defer finished.Done()
+
+            started.Done()
+
+            value, rememberErr := rememberEntityOrAbsence(
+                cacheInstance,
+                "coalesced-key",
+                func(ctx context.Context) (any, error) {
+                    loaderRuns.Add(1)
+                    <-release
+
+                    return "entity", nil
+                },
+            )
+            if nil != rememberErr || "entity" != value {
+                t.Errorf("expected every reader to receive the entity, got %v %v", value, rememberErr)
+            }
+        }()
+    }
+
+    started.Wait()
+
+    /* the readers are started, and the one whose loader is running is parked at the gate; the others wait on it inside Remember. The gate opens once the leader's loader has been entered, which the run counter shows. */
+    deadline := time.Now().Add(2 * time.Second)
+    for 1 > loaderRuns.Load() && time.Now().Before(deadline) {
+        time.Sleep(time.Millisecond)
+    }
+    time.Sleep(20 * time.Millisecond)
+    close(release)
+
+    finished.Wait()
+
+    if 1 != loaderRuns.Load() {
+        t.Fatalf("expected one loader run for the coalesced readers, got %d — the probe did not coalesce and cannot separate the writers", loaderRuns.Load())
+    }
+
+    writes := cacheInstance.writesFor("coalesced-key")
+    unbounded := 0
+    for _, write := range writes {
+        if entityCacheTtl == write.ttl {
+            unbounded = unbounded + 1
+        }
+    }
+
+    if 1 != unbounded {
+        t.Fatalf("expected the found value to be written unbounded exactly once, by the reader that loaded it, got %d unbounded writes among %d", unbounded, len(writes))
     }
 }

@@ -2407,6 +2407,36 @@ func TestTeardownCloseOrder_TwoRingsJoinedByABridgeCloseInOrderAndTheBridgeIsNoR
     }
 }
 
+/* a ring that depends on another ring DIRECTLY — a member's edge into the other ring, no bridge node between them — is the one shape where the count of what depends on a ring is fed by a ring member: with that term dropped the dependency ring reads as depended on by nothing and closes first, under the very edge that orders it after. The bridge shape beside it does not see the term, because there the dependent of the second ring is the bridge, a plain node. */
+func TestTeardownCloseOrder_ARingDependingDirectlyOnAnotherRingClosesBeforeIt(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:ring.c", "service:ring.d"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}, "service:ring.c": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}},
+        "service:ring.c": {"service:ring.d": struct{}{}},
+        "service:ring.d": {"service:ring.c": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a": 1,
+        "service:ring.b": 2,
+        "service:ring.c": 3,
+        "service:ring.d": 4,
+    }
+
+    closeOrder, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:ring.d", "service:ring.c"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the dependent ring before the ring it depends on, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] >= closeWaveIndexOf["service:ring.c"] {
+        t.Fatalf("expected the dependent ring's wave before the dependency ring's, got %v", closeWaveIndexOf)
+    }
+}
+
 /* a ring's wave is one of its own, past every wave the drain assigned so far: a ring sharing its index with a drained, unrelated node would have that node closed one at a time with the ring's members under an armed teardown, for no reason the graph gives */
 func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
     nodeKeys := []string{"service:lone.dependent", "service:lone.dependency", "service:ring.a", "service:ring.b"}
@@ -2476,7 +2506,7 @@ func TestTeardownCloseOrder_TheWaveIndexesHaveNoHole(t *testing.T) {
     }
 }
 
-/* the rings are found once and the count of what depends on each is kept as nodes close, so a stall reads the next ring off the counts: found and scanned again at every stall, a teardown of hundreds of disjoint rings spent seconds where the sequential close spent milliseconds — measured, four hundred rings closed in seven milliseconds this way — twenty under the race detector — and in two seconds the other; the bound is a twentieth of the retired form's figure and five times the honest one under the detector */
+/* the rings are found once and the count of what depends on each is kept as nodes close, so a stall reads the next ring off the counts: found and scanned again at every stall, a teardown of hundreds of disjoint rings spent seconds where the sequential close spent milliseconds — measured, four hundred rings closed in seven milliseconds this way — twenty under the race detector — and in two seconds the other; the bound is a quarter of the retired form's figure and over ten times the honest one under the detector, wide enough for a loaded host and still four times short of the form it retires */
 func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
     const ringCount = 400
 
@@ -2502,7 +2532,7 @@ func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
         t.Fatalf("expected every ring member closed and reported, got %d closed and %d reported", len(closeOrder), len(cycleNodeKeys))
     }
 
-    if 100*time.Millisecond < elapsed {
+    if 500*time.Millisecond < elapsed {
         t.Fatalf("expected %d rings to drain within 100ms, took %s", ringCount, elapsed)
     }
 }

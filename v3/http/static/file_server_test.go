@@ -3519,3 +3519,49 @@ func TestFileServer_Embedded_RefusesAnEntryThatIsNotARegularFile(t *testing.T) {
         t.Fatalf("expected the mode refusal to be recorded, got info %v", logger.infoMessages)
     }
 }
+
+/* the exclusion list reads the spelling the router matched, as its GoDoc promises beside the firewall matcher: an entry for "/static/assets/" declines the directory, and "/static/assets%2Fx.txt" — one segment, a file whose name literally carries "%2F" — is not under it. Read decoded, that request was "/static/assets/x.txt", declined by the entry and never resolved, so the two consumers of one entry selected different requests. */
+func TestFileServer_ExclusionListReadsTheSpellingTheRouterRoutes(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "assets%2Fx.txt": &fstest.MapFile{Data: []byte("ONE SEGMENT")},
+        "assets/y.txt":   &fstest.MapFile{Data: []byte("UNDER THE DIRECTORY")},
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "/static/",
+        false,
+        0,
+        false,
+    )
+
+    config.SetExcludedPathList([]string{"/static/assets/"})
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/assets%2Fx.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served || http.StatusOK != statusCode || "ONE SEGMENT" != string(body) {
+        t.Fatalf("expected the one-segment resource outside the excluded directory to be served, got served=%v status=%d body=%q", served, statusCode, string(body))
+    }
+
+    _, _, _, served = server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/assets/y.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatal("expected the file under the excluded directory to be declined")
+    }
+}

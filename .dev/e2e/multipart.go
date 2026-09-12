@@ -41,9 +41,13 @@ be refused before the bucket is touched, and the object already at the key must 
 objectstorage.go, which drives the awss3 Put directly and can therefore lie about the size — something no http
 client can do, since the framework derives the length from the body it actually read. The two must never grow into
 the same coverage: this one is about what the FRAMEWORK leaves in the body, that one is about what the STORAGE layer
-does with a size it was handed. */
+does with a size it was handed.
+
+The storage doors write into the bucket and read any key back, so they carry the catalogue's write role: the section signs in as the seeded editor, the way every section that drives a route behind a role does, and the anonymous arm below is what proves the doors are not public. */
 func runMultipartCheck(baseUrl string) {
-    client := newLiveExampleClient(baseUrl)
+    assertMultipartAnonymousPutRefused(baseUrl)
+
+    client := newSignedInLiveExampleClient(baseUrl, exampleHttpEditorUsername, exampleHttpEditorPassword)
 
     assertMultipartBodyReachesHandlerIntact(client)
     assertUrlEncodedBodyIsRestoredAfterParsing(client)
@@ -220,4 +224,29 @@ func buildMultipartEnvelope(fields map[string]string, fileField string, fileName
     }
 
     return buffer.Bytes(), writer.FormDataContentType()
+}
+
+/* assertMultipartAnonymousPutRefused is the arm that keeps the storage doors off the public rule table: anonymous, the put stored the body under any key of the bucket and the get read any object back. The firewall answers before any handler runs, so the body never reaches the store; a 200 here would mean the rule moved back to public. */
+func assertMultipartAnonymousPutRefused(baseUrl string) {
+    client := newLiveExampleClient(baseUrl)
+    key := liveExampleUnique("e2e-multipart-anonymous")
+
+    envelope, contentType := buildMultipartEnvelope(map[string]string{"label": "anonymous"}, "attachment", "payload.bin", []byte("must not land"))
+
+    response := client.call(multipartLabel, liveExampleRequest{
+        method:      "POST",
+        path:        multipartRoute + "?key=" + url.QueryEscape(key),
+        contentType: contentType,
+        body:        envelope,
+    })
+
+    if http.StatusUnauthorized != response.statusCode {
+        fail("%s: an anonymous put on the storage door answered %d, wanted 401 — the door is public again: %s", multipartLabel, response.statusCode, exampleTruncate(response.bodyText()))
+    }
+
+    response = client.get(multipartLabel, multipartRoute+"?key="+url.QueryEscape(key))
+
+    if http.StatusUnauthorized != response.statusCode {
+        fail("%s: an anonymous get on the storage door answered %d, wanted 401 — the door is public again: %s", multipartLabel, response.statusCode, exampleTruncate(response.bodyText()))
+    }
 }

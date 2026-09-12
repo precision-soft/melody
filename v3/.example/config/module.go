@@ -133,6 +133,9 @@ const (
 
     environmentKeyCorsAllowOrigins     = "APP_CORS_ALLOW_ORIGINS"
     environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
+    environmentKeyTrustedProxyList     = "APP_TRUSTED_PROXY_LIST"
+    environmentKeyRatesBaseUrl         = "RATES_BASE_URL"
+    environmentKeyReportExportEndpoint = "APP_REPORTING_EXPORT_ENDPOINT"
 
 )
 

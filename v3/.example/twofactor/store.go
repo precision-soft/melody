@@ -86,6 +86,31 @@ func (instance *Store) enrollmentUpsert(enrollment *Enrollment) *bun.InsertQuery
         Set("created_at = VALUES(created_at)")
 }
 
+/* DeleteEnrollment removes the second factor an account was enrolled with — the secret and the recovery codes together, since both answer for the same account. The example mints identifiers as the highest suffix plus one, so a deleted account's identifier is the next account's: an enrollment left behind would have started that account enrolled, with the secret and the recovery codes of whoever held the previous one. Deleting nothing is not a failure — an account without a second factor has no row. */
+func (instance *Store) DeleteEnrollment(
+    runtimeInstance melodyruntimecontract.Runtime,
+    userIdentifier string,
+) (bool, error) {
+    result, deleteErr := instance.enrollmentDelete(userIdentifier).Exec(runtimeInstance.Context())
+    if nil != deleteErr {
+        return false, deleteErr
+    }
+
+    affected, affectedErr := result.RowsAffected()
+    if nil != affectedErr {
+        return false, affectedErr
+    }
+
+    return 0 < affected, nil
+}
+
+func (instance *Store) enrollmentDelete(userIdentifier string) *bun.DeleteQuery {
+    return instance.database.
+        NewDelete().
+        Model((*Enrollment)(nil)).
+        Where("user_identifier = ?", userIdentifier)
+}
+
 /* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the stored secret transparently through EncryptedString. */
 func (instance *Store) FindTotpSecret(
     runtimeInstance melodyruntimecontract.Runtime,

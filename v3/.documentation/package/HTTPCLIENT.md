@@ -135,6 +135,8 @@ func main() {
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go)
     - [`NewHttpClientConfig(baseUrl string, timeout time.Duration, headers map[string]string) *HttpClientConfig`](../../httpclient/http_client_config.go)
     - [`WithTransport(transport *TransportConfig) *HttpClientConfig`](../../httpclient/http_client_config.go) — the door a transport comes through
+    - [`WithoutRedirects() *HttpClientConfig`](../../httpclient/http_client_config.go) — the client hands a redirect back as the response it is, status and `Location` included, instead of following it; a `POST` answered 301, 302 or 303 is otherwise re-sent by `net/http` as a `GET` without its body
+    - [`FollowsRedirects() bool`](../../httpclient/http_client_config.go) — reads the policy back
 - [`type TransportConfig`](../../httpclient/transport_config.go) — pointer fields: nil inherits the default, a set value reaches `net/http` verbatim
     - [`DefaultTransportConfig() *TransportConfig`](../../httpclient/transport_config.go)
     - [`TransportDuration(value time.Duration) *time.Duration`](../../httpclient/transport_config.go) — keeps a configuration literal a literal

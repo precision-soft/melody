@@ -1,6 +1,9 @@
 package config
 
 import (
+    "net/url"
+    "strings"
+
     melodycron "github.com/precision-soft/melody/integrations/cron/v3"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
 )
@@ -33,8 +36,15 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
        does not use. The distinction matters because a constructor argument BOUND to a parameter reads it
        through MustGet, which panics on a parameter that was never registered — an auto-registered .env key
        disappears with its line, a parameter declared here does not. */
-    registrar.RegisterParameter(parameterReportExportEndpoint, "%env(default::APP_REPORTING_EXPORT_ENDPOINT)%")
-    registrar.RegisterParameter(parameterRatesBaseUrl, "%env(default::RATES_BASE_URL)%")
+    registrar.RegisterParameter(parameterReportExportEndpoint, "%env(default::"+environmentKeyReportExportEndpoint+")%")
+    registrar.RegisterParameter(parameterRatesBaseUrl, "%env(default::"+environmentKeyRatesBaseUrl+")%")
+
+    /* the two outbound urls are where the process points, which an operator reads in debug:parameters, so they are not redacted as a rule; written with a userinfo — the shape the amqp dsn is marked for, and one the client sends as a credential — the url IS a credential, and the mark covers it together with the parameter whose template reads it. The value is read raw here, before resolution: a .env key is a literal, and the userinfo is in the literal or nowhere. */
+    for _, environmentKey := range []string{environmentKeyRatesBaseUrl, environmentKeyReportExportEndpoint} {
+        if true == urlCarriesUserinfo(instance.environmentValue(environmentKey)) {
+            registrar.MarkParameterSecret(environmentKey)
+        }
+    }
 
     /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them. AMQP_DSN is on the list because it carries its credentials INLINE: unlike the database dsn, assembled from the marked password so the mark propagates to it, the amqp credentials sit whole in this one key and no marked source exists to propagate from. */
     registrar.MarkParameterSecret("MYSQL_PASSWORD")
@@ -50,3 +60,13 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
 }
 
 var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)
+
+/* urlCarriesUserinfo answers whether a url names a credential in its authority, "scheme://user:secret@host"; a value that does not parse carries none the client would send. */
+func urlCarriesUserinfo(value string) bool {
+    parsed, parseErr := url.Parse(strings.TrimSpace(value))
+    if nil != parseErr {
+        return false
+    }
+
+    return nil != parsed.User
+}
