@@ -21,7 +21,7 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontr
 
 /* NewTimingMiddleware measures how long a request took and reports it in a header.
 
-The clock is injected rather than read from the wall, which is what makes the header assertable: a frozen clock advanced by the handler under it lets a test state the exact duration the header must carry, and no test can state that against time.Now. */
+   The clock is injected rather than read from the wall, which is what makes the header assertable: a frozen clock advanced by the handler under it lets a test state the exact duration the header must carry, and no test can state that against time.Now. */
 func NewTimingMiddleware(clockInstance melodyclockcontract.Clock) melodyhttpcontract.Middleware {
     return func(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
         return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {

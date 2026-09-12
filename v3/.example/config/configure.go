@@ -4,6 +4,7 @@ import (
     "time"
 
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
+    bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     melodycron "github.com/precision-soft/melody/integrations/cron/v3"
     melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v3"
@@ -12,6 +13,7 @@ import (
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
     melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v3"
+    "github.com/precision-soft/melody/v3/.example/migration"
     melodyapplication "github.com/precision-soft/melody/v3/application"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
@@ -19,7 +21,7 @@ import (
 func Configure(app *melodyapplication.Application) {
     moduleInstance := NewExampleModule(app.Configuration())
 
-    /* @info observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
+    /* observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
     app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{
         Middlewares:      []melodyhttpcontract.Middleware{moduleInstance.metricsMiddleware},
         MetricsHandler:   moduleInstance.metricsHandler,
@@ -29,9 +31,7 @@ func Configure(app *melodyapplication.Application) {
 
     app.RegisterModule(moduleInstance)
 
-    /* @info opt-in OTLP tracing: when OTEL_EXPORTER_OTLP_ENDPOINT is set (see .env) the otlp module builds
-       a TracerProvider, adds the tracing middleware and flushes spans on shutdown — plug-and-play, exactly
-       like the other integration module facades. Unset ⇒ no tracing, no OTLP dependency cost at runtime. */
+    /* opt-in OTLP tracing: when OTEL_EXPORTER_OTLP_ENDPOINT is set (see .env) the otlp module builds a TracerProvider, adds the tracing middleware and flushes spans on shutdown — plug-and-play, exactly like the other integration module facades. Unset ⇒ no tracing, no OTLP dependency cost at runtime. */
     if otelEndpoint := moduleInstance.environmentValue(environmentKeyOtelExporterEndpoint); "" != otelEndpoint {
         app.RegisterModule(melodyotlp.NewModule(melodyotlp.ModuleConfig{
             Config: melodyotlp.Config{
@@ -44,17 +44,13 @@ func Configure(app *melodyapplication.Application) {
         }))
     }
 
-    /* @info the encrypt bulk command resolves its database through the factory at the first run — after
-       Boot — so registering the command costs nothing in http or worker mode, and a boot without MYSQL_HOST
-       stays clean (the first run then reports the missing database service). */
+    /* the encrypt bulk command resolves its database through the factory at the first run — after Boot — so registering the command costs nothing in http or worker mode, and a boot without MYSQL_HOST stays clean (the first run then reports the missing database service). */
     app.RegisterModule(melodyencrypt.NewModule(melodyencrypt.ModuleConfig{
         DatabaseFactory: moduleInstance.encryptDatabaseFactory,
         Cipher:          moduleInstance.cipher,
     }))
 
-    /* @info transactional-outbox module in the factory shape: the store and relay are registered as service
-       providers that resolve the shared *bun.DB from the container at first use, and the module contributes
-       the melody:outbox:relay command over the same lazily-resolved relay. */
+    /* transactional-outbox module in the factory shape: the store and relay are registered as service providers that resolve the shared *bun.DB from the container at first use, and the module contributes the melody:outbox:relay command over the same lazily-resolved relay. */
     if nil != moduleInstance.database {
         app.RegisterModule(melodyoutbox.NewModule(melodyoutbox.ModuleConfig{
             StoreFactory: moduleInstance.outboxStoreFactory,
@@ -62,23 +58,45 @@ func Configure(app *melodyapplication.Application) {
         }))
     }
 
-    /* @info cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
+    /* the db:* family is registered whether or not a database is configured, so the command surface does not change between environments; without one every db:* command fails at Run with the container refusal naming the registry service.
+
+       There are TWO families, because this application holds two databases: the unprefixed db:* over the catalogue on mysql, and db:archive:* over the reading archive on postgres. The second is declared as a CONTEXT rather than as a second module registration, which is what pins each family to one manager — a context targets the manager named after it, so db:archive:migrate can only ever reach the archive.
+
+       The base family PINS its manager too, and that is a correctness matter rather than symmetry. Without the pin it takes the registry's default, and "the default" and "the catalogue" are the same connection only while the catalogue is wired: in an environment that armed the archive alone, an unqualified db:migrate would find the archive as the only definition and aim the catalogue's mysql DDL at postgres. Pinned, it refuses by name instead. */
+    app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
+        Migrations: migration.Migrations,
+        Contexts: []bunormmigrate.ContextConfig{
+            {
+                Name:       databaseArchiveManagerName,
+                Migrations: migration.ArchiveMigrations,
+            },
+        },
+        Options: bunormmigrate.Options{
+            ManagerRegistryServiceId: serviceDatabaseRegistry,
+            ManagerName:              databaseManagerName,
+        },
+    }))
+
+    /* cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
     app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
         ConfigurationFactory: newCronConfiguration,
         RunnerCommands:       cronRunnerCommands(),
     }))
 
-    /* the SSE stream and the websocket handler both block on this hub; http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so without closing the hub a single connected client holds the whole shutdown timeout and is then cut mid-flight */
+    /* the SSE stream and the websocket handler both block on this hub; http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so without closing the hub a single connected client holds the whole shutdown timeout and is then cut mid-flight.
+
+       This is also the only close the redis backplane needs: Shutdown takes the reference the hub holds, drains the publishes already inside it and closes it, and the shipped backplanes clear themselves from the hub as the first step of their own Close. A second close issued from here is not harmless duplication — the http shutdown hooks run on their own goroutines, so whichever won decided where that drain happened, and the loser then closed a backplane that was already closed. One owner, one close.
+
+       The hub itself is reached twice on purpose, and that pair is idempotent through its own closed flag: this hook releases the streaming handlers the moment shutdown begins, and the container's ordered teardown closes it again through the Close it carries — which is the only one a process that never ran an http server reaches at all. */
     app.OnHttpShutdown(moduleInstance.serverSentEventHub.Shutdown)
 
     app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
         Hub:       moduleInstance.serverSentEventHub,
         Path:      "/ws",
         RouteName: "example.websocket",
-        /* @info IdleTimeout is required: the keepalive ping is the only thing that reaps a browser tab that went away without a fin, and 30s is a comfortable interval for one. */
+        /* IdleTimeout is required: the keepalive ping is the only thing that reaps a browser tab that went away without a fin, and 30s is a comfortable interval for one. OriginPatterns stays unset on purpose — the upgrade authenticates through the session cookie, which a browser attaches cross-site too, so the library's same-origin default is what stops a foreign page from riding a signed-in visitor's session onto the feed; a client that sends no Origin header (a script, the e2e band) is not origin-checked at all. */
         Options: melodywebsocket.Options{
-            OriginPatterns: []string{"*"},
-            IdleTimeout:    30 * time.Second,
+            IdleTimeout: 30 * time.Second,
         },
     }))
 
@@ -92,6 +110,7 @@ func Configure(app *melodyapplication.Application) {
     if nil != moduleInstance.redisClient {
         app.RegisterModule(melodyrueidis.NewModule(melodyrueidis.ModuleConfig{
             Client:       moduleInstance.redisClient,
+            Connection:   moduleInstance.redisConnection,
             AsTokenStore: true,
             TokenStoreOptions: []melodyrueidis.TokenStoreOption{
                 melodyrueidis.WithTokenStorePrefix(redisTokenStoreKeyPrefix),
@@ -101,6 +120,10 @@ func Configure(app *melodyapplication.Application) {
         app.RegisterModule(melodyrueidiscache.NewModule(melodyrueidiscache.ModuleConfig{
             Client: moduleInstance.redisClient,
             Prefix: redisCacheKeyPrefix,
+            /* the backend's context-less doors run unbounded without this; a store that stops answering would hold a request-path read for good */
+            BackendOptions: []melodyrueidiscache.BackendOption{
+                melodyrueidiscache.WithCommandTimeout(time.Second),
+            },
         }))
     }
 }

@@ -23,8 +23,7 @@ func (instance *Module) buildRedis() {
         return
     }
 
-    /* retry the initial connection with backoff so a cold-start race against the redis container does not
-       hard-fail the boot, mirroring the database wiring. Only transient errors (connection refused) retry. */
+    /* retry the initial connection with backoff so a cold-start race against the redis container does not hard-fail the boot, mirroring the database wiring. Only transient errors (connection refused) retry. */
     provider := melodyrueidis.NewProvider(
         melodyrueidis.WithRetryConfig(melodyrueidis.NewRetryConfig(10, time.Second, 5*time.Second, 2.0)),
     )
@@ -35,5 +34,9 @@ func (instance *Module) buildRedis() {
     }
 
     instance.redisClient = client
-    instance.serverSentEventBackplane = melodyrueidis.NewServerSentEventBackplane(client, instance.serverSentEventHub)
+
+    /* the raw client's Close returns nothing, so on its own it can never join the container's ordered teardown; the Connection wrapper is registered through the rueidis module as the service that owns it, and the first resolved client-backed service (the token store, the cache backend, the locker) records the edge that closes the connection after it */
+    instance.redisConnection = melodyrueidis.NewConnection(client)
+    /* the constructor installs the backplane on the hub and that installation is its whole effect here: the hub is the only holder, and its Shutdown is what drains the publishes in flight and closes the backplane's listen goroutine and subscription. The composition root keeps no reference of its own, because a second holder is a second closer. */
+    melodyrueidis.NewServerSentEventBackplane(client, instance.serverSentEventHub)
 }

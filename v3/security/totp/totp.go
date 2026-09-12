@@ -20,6 +20,7 @@ const (
     defaultDigits        = 6
     defaultSkew          = 1
     maxSkew              = 10
+    maxPeriod            = 24 * 60 * 60
     defaultSecretBytes   = 20
     defaultRecoveryCount = 10
 )
@@ -40,7 +41,8 @@ func (instance Config) Resolve() Config {
 
 func (instance Config) withDefaults() Config {
     resolved := instance
-    if 0 == resolved.Period {
+    /* clamp the period alongside the zero default: base = at.Unix() / int64(Period), so a Period past the int64 range (a uint at or above 1<<63) converts to a non-positive int64 — 1<<63 becomes math.MinInt64, freezing base at 0 so one counter's code, derived from the secret alone, verifies at every instant forever. maxPeriod covers every realistic authenticator step; anything larger is a misconfiguration and falls back to the default, mirroring the skew clamp below. */
+    if 0 == resolved.Period || maxPeriod < resolved.Period {
         resolved.Period = defaultPeriod
     }
 
@@ -69,7 +71,7 @@ func GenerateSecret() (string, error) {
     return base32NoPadding.EncodeToString(raw), nil
 }
 
-/* Verify reports whether code is a valid TOTP for secret at the current time, accepting codes within the configured step skew on either side. */
+/* Verify reports whether code is a valid TOTP for secret at the current time, accepting codes within the configured step skew on either side. It reads the system clock by design — a convenience door for direct callers; a caller under an injected clock (the framework's TotpSecondFactorAuthenticator among them) verifies through VerifyAt with its own clock's instant. */
 func Verify(secret string, code string, config Config) (bool, error) {
     return VerifyAt(secret, code, time.Now(), config)
 }

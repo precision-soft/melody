@@ -159,7 +159,8 @@ func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
         t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
     }
 
-    configuration.RegisterRuntime("app.tag", "%env(APP_TAG)%")
+    /* a plain value, not a template: a pre-boot templated registration is deferred and refuses to be read until boot, so it cannot exercise the value/valueMutex race this test measures — Resolve still rewrites this parameter's value under the write lock, which is the write side the read races. */
+    configuration.RegisterRuntime("app.tag", "tag")
 
     parameter := configuration.Get("app.tag")
     if nil == parameter {

@@ -1,6 +1,10 @@
 package security
 
-import "testing"
+import (
+    "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
+)
 
 func TestNewToken_PanicsOnNil(t *testing.T) {
     defer func() {
@@ -84,4 +88,12 @@ func TestToken_ScopeAndAttributesAreCopied(t *testing.T) {
     if "engineering" != user.attributes["department"] {
         t.Fatalf("mutating the returned Attributes corrupted the underlying token attributes")
     }
+}
+
+func TestNewToken_TypedNilPanics(t *testing.T) {
+    var typedNilToken *AuthenticatedToken
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewToken(typedNilToken)
+    }, "can not create a security token from nil")
 }

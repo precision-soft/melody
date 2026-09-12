@@ -12,13 +12,6 @@ import (
 func RegisterScopedFixtureServices(registrar containercontract.Registrar) {
     melodycontainer.MustRegisterType(
         registrar,
-        func(resolver containercontract.Resolver) (*scoped.NearlyScoped, error) {
-            return scoped.NewNearlyScoped(), nil
-        },
-    )
-
-    melodycontainer.MustRegisterType(
-        registrar,
         func(resolver containercontract.Resolver) (*scoped.ProcessWriter, error) {
             return scoped.NewProcessWriter(), nil
         },

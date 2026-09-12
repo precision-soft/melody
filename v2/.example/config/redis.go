@@ -31,7 +31,7 @@ const (
 
 /* buildRedis opens the client while the modules are wired, because the rate-limit middleware is handed a live limiter at the moment a route is declared and refuses a nil one.
 
-An unreachable endpoint is a warning rather than a boot failure. The shipped .env points at the docker-compose service names, which do not resolve outside that network, so panicking here would make `go run .` on a laptop — and every command-line invocation on a machine without the stack — die at boot. The nomenclature simply runs uncached and unthrottled, and the end-to-end harness turns the soft failure back into a hard one where it knows redis is up. */
+   An unreachable endpoint is a warning rather than a boot failure. The shipped .env points at the docker-compose service names, which do not resolve outside that network, so panicking here would make `go run .` on a laptop — and every command-line invocation on a machine without the stack — die at boot. The nomenclature simply runs uncached and unthrottled, and the end-to-end harness turns the soft failure back into a hard one where it knows redis is up. */
 func (instance *Module) buildRedis(kernelInstance melodykernelcontract.Kernel) {
     address := parameterValue(kernelInstance, ParameterRedisAddress)
     if "" == address {

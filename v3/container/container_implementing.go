@@ -74,7 +74,7 @@ type prioritizedReference struct {
 
 /* sortServiceReferences puts gathered references into the order a collection is dispatched in: descending collection priority, then type, then name. It is the one implementation for the container and the scope, so a collection gathered on a scope cannot order its members differently from the same collection gathered on the container.
 
-The type comparison goes through String() and falls through to the name on a tie: comparing type identity first would make two distinct types that share a String() — same-named packages — mutually unordered against each other yet name-ordered against their own kind, which breaks the strict weak ordering sort requires and lets map iteration leak into the result. */
+   The type comparison goes through String() and falls through to the name on a tie: comparing type identity first would make two distinct types that share a String() — same-named packages — mutually unordered against each other yet name-ordered against their own kind, which breaks the strict weak ordering sort requires and lets map iteration leak into the result. */
 func sortServiceReferences(references []prioritizedReference) []containercontract.ServiceReference {
     sort.Slice(references, func(first int, second int) bool {
         if references[first].priority != references[second].priority {

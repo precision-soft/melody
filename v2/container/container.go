@@ -153,7 +153,7 @@ func (instance *container) HasType(targetType reflect.Type) bool {
 
 /* OverrideInstance installs a value under a registered name, and the container CLOSES what was installed into it — unlike a scope, whose overrides belong to whoever installed them unless the installer says otherwise with ClosedWithScope. The two defaults are opposite because the two lifetimes are: a scope ends while its installer goes on running, and the http kernel that installs the request logger keeps using it to report the scope's own close failure, so a scope closing its overrides would close them under their owner. A container ends when the process does, and there is nobody left to hand the value to.
 
-The one case where that reasoning does not hold is a value shared with a SECOND container in the same process — a test suite that boots the application repeatedly and reuses one client across every boot, or a host embedding melody that closes its own handles. There this container's teardown closes it for all of them, and there is no opt-out. Install a wrapper whose Close does nothing, and keep the real handle where it belongs. */
+   The one case where that reasoning does not hold is a value shared with a SECOND container in the same process — a test suite that boots the application repeatedly and reuses one client across every boot, or a host embedding melody that closes its own handles. There this container's teardown closes it for all of them, and there is no opt-out. Install a wrapper whose Close does nothing, and keep the real handle where it belongs. */
 func (instance *container) OverrideInstance(serviceName string, value any) error {
     if "" == serviceName {
         return exception.NewError(
@@ -285,11 +285,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     instance.instances[serviceName] = value
     instance.recordCreationOrderLocked("service:" + serviceName)
 
-    if _, typeRegistered := instance.typeRegistrationNamesByType[canonicalType]; true == typeRegistered {
-        instance.typeInstances[canonicalType] = value
-        instance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalType))
-    }
-
+    /* the override propagates only to the types this NAME is registered under, by the loop below: the previous block also wrote it under the override value's own canonical type whenever that type was registered by ANY service, so overriding one name answered a different service's GetByType with this value. A canonical type this name owns is already reached by the loop; a type another service owns must not learn this override; and a free type is deliberately left out here (unlike the scope, which exposes it) because a container value-type service filed under a second, uncollapsed node closes twice at teardown. */
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName == registeredServiceName {
@@ -323,6 +319,14 @@ func (instance *container) NewScope() containercontract.Scope {
 }
 
 /* registeredTypesForServiceName answers every type the name is registered under, for the scope override that propagates to them; the scope calls it before taking its own lock, container-then-scope being the only order the two locks are ever taken in. */
+/* serviceNamesForRegisteredType lists the service names a type is registered under, so a caller deciding whether a type is free can see who, if anyone, already claims it. */
+func (instance *container) serviceNamesForRegisteredType(canonicalType reflect.Type) []string {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.typeRegistrationNamesByType[canonicalType]
+}
+
 func (instance *container) registeredTypesForServiceName(serviceName string) []reflect.Type {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()

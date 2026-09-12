@@ -6,25 +6,23 @@ import (
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
+/* the guard exists to replace the raw dereference with a refusal that names the pattern, so an unqualified recover is satisfied by the very crash it was written to remove. */
 func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     group := NewRouteGroup(nil, "/api")
 
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    group.HandleWithOptions(
-        "/x",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            return EmptyResponse(200), nil
-        },
-        NewRouteOptions("a", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
-    )
+    testhelper.AssertPanicsWithError(t, func() {
+        group.HandleWithOptions(
+            "/x",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return EmptyResponse(200), nil
+            },
+            NewRouteOptions("a", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        )
+    }, "router is nil")
 }
 
 /* nil options read as the default options, the router's own answer for the same input: the group was the one registration surface that refused what its sibling accepts. The route carries the group's prefix and answers every method, exactly what the defaults mean. */

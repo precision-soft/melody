@@ -20,6 +20,9 @@ const (
     deterministicNonceLabel = "melody/encrypt/deterministic-nonce/v1"
 
     minNonceSize = 12
+
+    /* gcmTagOverhead is what gcm.Seal appends beyond the plaintext: a stored payload is nonce + ciphertext + tag, so anything shorter than nonce + tag cannot be a seal of even the empty string — a shortfall there is structural damage, not an authentication failure to be blamed on a key */
+    gcmTagOverhead = 16
 )
 
 var markerPrefix = encryptionMarker + markerGlue + formatGcmV1 + markerGlue
@@ -69,19 +72,67 @@ func (instance *aes256Cipher) EncryptWithKeyId(plaintext string, keyId string) (
 }
 
 func (instance *aes256Cipher) EncryptDeterministic(plaintext string) (string, error) {
-    if true == instance.isPassThroughCiphertext(plaintext) {
-        return plaintext, nil
-    }
-
-    return instance.seal(plaintext, instance.keys.CurrentKeyId(), true)
+    return instance.sealDeterministic(plaintext, instance.keys.CurrentKeyId())
 }
 
 func (instance *aes256Cipher) EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error) {
-    if true == instance.isPassThroughCiphertext(plaintext) {
+    return instance.sealDeterministic(plaintext, keyId)
+}
+
+/* sealDeterministic is the deterministic doors' pass-through, which asks one question more than the random doors' isPassThroughCiphertext: not only "does this value authenticate under a key in the set" but "is its nonce the deterministic one for its own plaintext under its own key". A random-nonce seal handed to a deterministic column authenticates all the same, and passing it through stored a value CiphertextCandidates can never produce, so the equality lookup answered no rows for a row whose plaintext it held. Such a seal is converted in place — its plaintext sealed deterministically under the key id it already carries, never under the door's key, so the conversion is not a key rotation — which is the rule the bulk migration already applies to a stored column; a seal that is deterministic already passes through whatever key it carries, so a retired key's ciphertexts survive until re-encryption, exactly as on the random doors. */
+func (instance *aes256Cipher) sealDeterministic(plaintext string, keyId string) (string, error) {
+    opened, sealed := instance.authenticatedSeal(plaintext)
+    if false == sealed {
+        return instance.seal(plaintext, keyId, true)
+    }
+
+    if true == opened.deterministic {
         return plaintext, nil
     }
 
-    return instance.seal(plaintext, keyId, true)
+    return instance.seal(opened.plaintext, opened.keyId, true)
+}
+
+/* openedSeal is what a value this cipher wrote yields once opened: the plaintext, the key id it carries and whether the nonce it was sealed with is the deterministic one for that plaintext under that key. */
+type openedSeal struct {
+    plaintext     string
+    keyId         string
+    deterministic bool
+}
+
+/* authenticatedSeal classifies a value for the write side: it answers whether the value is a seal this cipher can open under a key still in the set, and what that seal holds. Every failure — no marker, a body that does not parse, an unknown key id, a payload that does not authenticate — answers "not a seal", which is the write side's lenient reading of a marker-shaped string as application data (see isPassThroughCiphertext). */
+func (instance *aes256Cipher) authenticatedSeal(value string) (openedSeal, bool) {
+    if false == hasEncryptionMarker(value) {
+        return openedSeal{}, false
+    }
+
+    keyId, payload, decodeErr := decodeEncrypted(value)
+    if nil != decodeErr {
+        return openedSeal{}, false
+    }
+
+    key, keyErr := instance.keys.Key(keyId)
+    if nil != keyErr {
+        return openedSeal{}, false
+    }
+
+    gcm, gcmErr := gcmForKey(key, keyId)
+    if nil != gcmErr {
+        return openedSeal{}, false
+    }
+
+    nonce := payload[:gcm.NonceSize()]
+
+    plaintext, openErr := gcm.Open(nil, nonce, payload[gcm.NonceSize():], nil)
+    if nil != openErr {
+        return openedSeal{}, false
+    }
+
+    return openedSeal{
+        plaintext:     string(plaintext),
+        keyId:         keyId,
+        deterministic: hmac.Equal(nonce, deterministicNonce(key, string(plaintext), gcm.NonceSize())),
+    }, true
 }
 
 func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, error) {
@@ -102,7 +153,7 @@ func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, 
 
 /* Decrypt returns the plaintext of a value this cipher sealed, and passes a value that carries no marker straight through: a column is converted one write at a time, so the rows not yet sealed must keep reading, and that pass-through is what makes an incremental migration possible.
 
-A value that DOES carry the marker is not eligible for that pass-through. The marker is written by seal and by nothing else, so its presence is the framework's own claim that the value was encrypted here; a body behind it that no longer parses is damage. The way it happens in practice is a column too narrow for the ciphertext under a non-strict sql_mode, where MySQL truncates the value the UPDATE wrote and reports a warning instead of failing. Handing the caller that fragment as though the application had stored it is silent corruption — the row reads as a marker, a key id and half a base64 blob, and every later write and comparison builds on it. It is an error instead. */
+   A value that DOES carry the marker is not eligible for that pass-through. The marker is written by seal and by nothing else, so its presence is the framework's own claim that the value was encrypted here; a body behind it that no longer parses is damage. The way it happens in practice is a column too narrow for the ciphertext under a non-strict sql_mode, where MySQL truncates the value the UPDATE wrote and reports a warning instead of failing. Handing the caller that fragment as though the application had stored it is silent corruption — the row reads as a marker, a key id and half a base64 blob, and every later write and comparison builds on it. It is an error instead. */
 func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     if false == hasEncryptionMarker(encoded) {
         return encoded, nil
@@ -123,10 +174,7 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
         return "", gcmErr
     }
 
-    if len(payload) < gcm.NonceSize() {
-        return "", exception.NewError("encrypted value is too short", nil, nil)
-    }
-
+    /* no length re-check here: decodeEncrypted floors the payload at nonce + tag, and gcmForKey pins the nonce at exactly minNonceSize, so a second floor on the nonce alone was a dead branch no test could ever reach */
     nonce := payload[:gcm.NonceSize()]
     ciphertext := payload[gcm.NonceSize():]
 
@@ -138,9 +186,11 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     return string(plaintext), nil
 }
 
-/* @important a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a key currently in the key set. A retired key stays in the set (still decryptable) until re-encryption completes and is only then removed, so a value sealed under it is not destroyed by double encryption; a marker-shaped value bearing an unknown key id, or one whose payload does not parse at all, is treated as ordinary plaintext and sealed under the current key instead of being stored verbatim.
+/* a marker-shaped plaintext must not be stored as-is: it would poison every later Scan/Decrypt. Pass through only values that authenticate under a key currently in the key set. A retired key stays in the set (still decryptable) until re-encryption completes and is only then removed, so a value sealed under it is not destroyed by double encryption; a marker-shaped value bearing an unknown key id, or one whose payload does not parse at all, is treated as ordinary plaintext and sealed under the current key instead of being stored verbatim.
 
-This is the write side, and it is deliberately the lenient one: what arrives here is application data, and an application is free to hold a string that merely looks like a marker. Sealing it is the safe answer. Reading is the strict side — a marker that comes back OUT of the database was put there by this cipher, so a payload that no longer parses is reported rather than passed off as plaintext. */
+   This is the write side, and it is deliberately the lenient one: what arrives here is application data, and an application is free to hold a string that merely looks like a marker. Sealing it is the safe answer. Reading is the strict side — a marker that comes back OUT of the database was put there by this cipher, so a payload that no longer parses is reported rather than passed off as plaintext.
+
+   This is the random doors' question, and it is the whole of it: a seal that authenticates is confidential whichever nonce it was sealed with. The deterministic doors ask one question more, in sealDeterministic, because for them a random-nonce seal is a value the equality lookup can never find. */
 func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
     if false == hasEncryptionMarker(value) {
         return false
@@ -152,6 +202,11 @@ func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
 }
 
 func (instance *aes256Cipher) seal(plaintext string, keyId string, deterministic bool) (string, error) {
+    /* the key id is written into the stored value in front of a ":" separator, so its grammar is part of the wire format: an empty id, or one carrying a colon, produces a value decodeEncrypted can never split back apart — the write succeeds and the loss surfaces only at the next read, permanently. StaticKeyProvider enforces this grammar at construction, but KeyProvider is a public interface and a custom provider's id reaches this door unchecked. */
+    if false == keyIdPattern.MatchString(keyId) {
+        return "", exception.NewError("encryption key id must match "+keyIdPattern.String(), map[string]any{"keyId": keyId}, nil)
+    }
+
     key, keyErr := instance.keys.Key(keyId)
     if nil != keyErr {
         return "", keyErr
@@ -231,7 +286,7 @@ func hasEncryptionMarker(value string) bool {
 
 /* decodeEncrypted splits the body behind the marker into its key id and its raw payload, and refuses a body that is no longer one.
 
-The caller must have established the marker first: this reads the body positionally and says nothing about values that carry no marker, which are ordinary plaintext and belong to no key. Every failure here means the same thing — a value this cipher wrote came back changed — so each is reported rather than absorbed. The length floor is the nonce: a payload shorter than one cannot even be split into nonce and ciphertext, so a shortfall is structural damage and not an authentication failure to be blamed on a key. */
+   The caller must have established the marker first: this reads the body positionally and says nothing about values that carry no marker, which are ordinary plaintext and belong to no key. Every failure here means the same thing — a value this cipher wrote came back changed — so each is reported rather than absorbed. The length floor is the nonce plus the authentication tag: a seal of even the empty string is never shorter, so a shortfall is structural damage and not an authentication failure to be blamed on a key. */
 func decodeEncrypted(value string) (string, []byte, error) {
     body := value[len(markerPrefix):]
 
@@ -242,12 +297,13 @@ func decodeEncrypted(value string) (string, []byte, error) {
 
     keyId := body[:separator]
 
-    payload, decodeErr := base64.RawStdEncoding.DecodeString(body[separator+1:])
+    /* Strict rejects a final base64 quantum with non-zero discarded bits: the lenient decoder maps several spellings onto the same bytes, so an altered last character still authenticated while CiphertextCandidates only ever emits the canonical spelling — a deterministic equality lookup missed a row whose plaintext it held. Everything seal writes is canonical, so Strict refuses only what this cipher never produced. */
+    payload, decodeErr := base64.RawStdEncoding.Strict().DecodeString(body[separator+1:])
     if nil != decodeErr {
         return "", nil, exception.NewError("encrypted value is not valid base64", map[string]any{"keyId": keyId}, decodeErr)
     }
 
-    if len(payload) < minNonceSize {
+    if len(payload) < minNonceSize+gcmTagOverhead {
         return "", nil, exception.NewError(
             "encrypted value is too short",
             map[string]any{"keyId": keyId, "payloadBytes": len(payload)},
@@ -257,3 +313,5 @@ func decodeEncrypted(value string) (string, []byte, error) {
 
     return keyId, payload, nil
 }
+
+var _ Cipher = (*aes256Cipher)(nil)

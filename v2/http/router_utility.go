@@ -14,6 +14,7 @@ import (
     "reflect"
     "strings"
     "syscall"
+    "unicode"
 
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
@@ -237,23 +238,24 @@ func splitNormalizedPath(value string) []string {
     return strings.Split(normalizedPath, "/")
 }
 
-/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer
-reads the same. The router matches the path as sent — splitNormalizedPath drops trailing slashes but
-folds no dot or empty segment — while the access-control matcher folds "..", "." and "//" through
-path.Clean before it selects a rule, and the firewall matcher reads the raw path with neither fold.
-A path that folds to a different spelling therefore routes to one handler and is authorized against
-another rule, so a request that reaches a protected handler under its sent spelling can be granted the
-attributes of the folded spelling's rule — a different, possibly public one, or none at all. The
-static file server already refuses a non-canonical path for exactly this reason; refusing at the
-kernel keeps the router, the firewall matchers and the access control reading one spelling.
+/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer reads the same. The router matches the path as sent — splitNormalizedPath drops trailing slashes but folds no dot or empty segment — while the access-control matcher folds "..", "." and "//" through path.Clean before it selects a rule, and the firewall matcher reads the raw path with neither fold. A path that folds to a different spelling therefore routes to one handler and is authorized against another rule, so a request that reaches a protected handler under its sent spelling can be granted the attributes of the folded spelling's rule — a different, possibly public one, or none at all. The static file server already refuses a non-canonical path for exactly this reason; refusing at the kernel keeps the router, the firewall matchers and the access control reading one spelling.
 
-A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route
-"/admin", so it is normalized away here before the comparison rather than refused. A target that does
-not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and
-is left to the router to answer. */
+   A path that leading or trailing whitespace would be trimmed from — "/public ", the decoded form of "/public%20" or of a no-break space — is not canonical either: the router keeps the whitespace and the access-control matcher trims it, so the request routed under the sent spelling was authorized under the trimmed one's rule.
+
+   A trailing slash is not a fold: the router and the matchers already agree "/admin/" names the route "/admin", so it is normalized away here before the comparison rather than refused. A target that does not begin with "/" — the asterisk-form of OPTIONS, an authority-form CONNECT — is not path-routed and is left to the router to answer; one that begins with whitespace is not such a target, it is the leading form of the padded path, and is refused. */
 func requestPathIsCanonical(path string) bool {
+    /* a path that BEGINS with whitespace is refused before the "/" test below lets it through as "not path-routed": Go's server refuses such a request line itself, but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix on "/api%20/public" — hands the kernel " /public", which the router routed as a segment of its own while the access-control matcher trimmed it and answered with the rule of "/public"; measured, the leading twin of the trailing grant */
+    if "" != path && strings.TrimLeftFunc(path, unicode.IsSpace) != path {
+        return false
+    }
+
     if false == strings.HasPrefix(path, "/") {
         return true
+    }
+
+    /* leading or trailing whitespace is the third fold the consumers do not read alike: the router keeps it, so "/public " is a segment of its own and reaches the catch-all, while the access-control matcher trims it and answers with the rule of "/public" — a public one, granting the protected handler to an anonymous request; measured, on the two frozen majors as released. The trim is not removed from the matcher, because a matcher without it leaves the whitespace spelling with no rule at all, which is a grant too; the spelling is refused here, where every consumer is still reading one string */
+    if strings.TrimSpace(path) != path {
+        return false
     }
 
     trimmedPath := path
@@ -297,6 +299,9 @@ func writeResponse(
                 },
             )
         }
+
+        /* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response leaves its *os.File open for the life of the process, one descriptor per request that reached here. The save-failure branch below discards a response the same way and closes it the same way. */
+        closeDiscardedResponseBody(response, logger)
 
         response = renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, "internal server error", nil)
     }
@@ -426,7 +431,7 @@ func writeResponse(
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             writeLogContext := exceptioncontract.Context{}
-            if nil != request && nil != request.HttpRequest() {
+            if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
                 writeLogContext["method"] = request.HttpRequest().Method
                 writeLogContext["path"] = request.HttpRequest().URL.Path
             }
@@ -470,7 +475,7 @@ func closeResponseBodySafely(closer io.Closer) (closeErr error) {
 
 /* isClientAbortWriteError classifies a response-write failure the client caused rather than the server: the request context net/http cancels the moment the peer disconnects, and the broken-pipe and connection-reset errors a write to a gone peer answers with. Everything else stays a server-side write failure. */
 func isClientAbortWriteError(request httpcontract.Request, err error) bool {
-    if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().Context().Err() {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() && nil != request.HttpRequest().Context().Err() {
         return true
     }
 
@@ -491,7 +496,7 @@ func republishedSession(
 }
 
 func sessionFromRequestAttribute(request httpcontract.Request) sessioncontract.Session {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return nil
     }
 
@@ -514,7 +519,7 @@ func sessionFromRequestAttribute(request httpcontract.Request) sessioncontract.S
 }
 
 func requestNamesSession(request httpcontract.Request, sessionId string) bool {
-    if nil == request || "" == sessionId {
+    if true == internal.IsNilInterface(request) || "" == sessionId {
         return false
     }
 
@@ -561,7 +566,7 @@ func resolveSessionCookieSecure(
         return false
     }
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return false
     }
 
@@ -570,9 +575,9 @@ func resolveSessionCookieSecure(
 
 /* logSessionPersistenceEvent records what the response path did with the session, at the level the event deserves and with the coordinates that let it be found again.
 
-The level is a parameter because one of the three is not a failure at all: a session another request ended while this one was running is the session ending — the contract says so in as many words, and so does the branch that answers it — while the other two are storage outages. Filed at error alongside them, a user who logged out in a second tab produced one indistinguishable "failed to save session" per concurrent request, against a perfectly healthy backend.
+   The level is a parameter because one of the three is not a failure at all: a session another request ended while this one was running is the session ending — the contract says so in as many words, and so does the branch that answers it — while the other two are storage outages. Filed at error alongside them, a user who logged out in a second tab produced one indistinguishable "failed to save session" per concurrent request, against a perfectly healthy backend.
 
-The coordinates travel because only the middle record ever named the session, and that by accident: it carries sessionId through the cause's own context. None of the three named the route, so a record that did arrive could not be tied to the request that produced it. The level switch goes through the named methods rather than Log, because that is the door a substituted logger overrides. */
+   The coordinates travel because only the middle record ever named the session, and that by accident: it carries sessionId through the cause's own context. None of the three named the route, so a record that did arrive could not be tied to the request that produced it. The level switch goes through the named methods rather than Log, because that is the door a substituted logger overrides. */
 func logSessionPersistenceEvent(
     runtimeInstance runtimecontract.Runtime,
     level loggingcontract.Level,
@@ -593,7 +598,7 @@ func logSessionPersistenceEvent(
         recordContext["sessionRef"] = sessionIdLogReference(sessionId)
     }
 
-    if nil != request && nil != request.HttpRequest() {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
         recordContext["method"] = request.HttpRequest().Method
         recordContext["path"] = request.HttpRequest().URL.Path
     }
@@ -618,8 +623,9 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
         return
     }
 
-    existing := headers.Get("Cache-Control")
-    if "" == existing {
+    /* every field line is read, not just the first: Cache-Control is a list header, a response may carry it on several lines, and Get answers with one of them while the Set below replaces them all — so reading Get alone deleted whatever the other lines directed while reporting that it had only added private. */
+    existingLines := headers.Values("Cache-Control")
+    if 0 == len(existingLines) {
         headers.Set("Cache-Control", "private")
 
         return
@@ -629,24 +635,27 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
     hasPrivate := false
     hasNoStore := false
 
-    for _, token := range strings.Split(existing, ",") {
-        trimmed := strings.TrimSpace(token)
-        if "" == trimmed {
-            continue
-        }
+    for _, existing := range existingLines {
+        /* a directive may carry a quoted field-name list — no-cache="X-One, Public, X-Two" — and a bare comma cuts through it: the fragment left holding a field name spelled like a directive was then dropped as if it were one, deleting a name out of the middle of somebody else's list. */
+        for _, token := range internal.SplitOutsideQuotes(existing, ',') {
+            trimmed := strings.TrimSpace(token)
+            if "" == trimmed {
+                continue
+            }
 
-        lower := strings.ToLower(trimmed)
-        if "public" == lower {
-            continue
-        }
-        if "private" == lower {
-            hasPrivate = true
-        }
-        if "no-store" == lower {
-            hasNoStore = true
-        }
+            lower := strings.ToLower(trimmed)
+            if "public" == lower {
+                continue
+            }
+            if "private" == lower {
+                hasPrivate = true
+            }
+            if "no-store" == lower {
+                hasNoStore = true
+            }
 
-        rebuilt = append(rebuilt, trimmed)
+            rebuilt = append(rebuilt, trimmed)
+        }
     }
 
     if false == hasPrivate && false == hasNoStore {

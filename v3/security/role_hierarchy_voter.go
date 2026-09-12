@@ -1,6 +1,7 @@
 package security
 
 import (
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/exception"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -34,18 +35,20 @@ func (instance *RoleHierarchyVoter) Supports(attribute string, subject any) bool
 }
 
 func (instance *RoleHierarchyVoter) Vote(token securitycontract.Token, attribute string, subject any) securitycontract.VoteResult {
-    if nil == token {
+    /* the token comes from the application's token source, and a nil pointer of its own token type
+    reaches here as a non-nil interface: a bare comparison takes it for a live token, IsAuthenticated
+    answers true without touching the receiver, and the Roles() call below dereferences the nil */
+    if true == internal.IsNilInterface(token) {
+        return securitycontract.VoteDenied
+    }
+
+    if false == token.IsAuthenticated() {
         return securitycontract.VoteDenied
     }
 
     expandedRoles := instance.roleHierarchy.ExpandRoles(token.Roles())
 
-    expandedToken := NewAuthenticatedToken(token.UserIdentifier(), expandedRoles)
-    if false == token.IsAuthenticated() {
-        expandedToken = NewAuthenticatedToken("", expandedRoles)
-    }
-
-    return instance.delegate.Vote(expandedToken, attribute, subject)
+    return instance.delegate.Vote(NewAuthenticatedToken(token.UserIdentifier(), expandedRoles), attribute, subject)
 }
 
 var _ securitycontract.Voter = (*RoleHierarchyVoter)(nil)

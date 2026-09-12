@@ -1,9 +1,11 @@
 package http
 
 import (
+    "encoding/json"
     "errors"
     "io"
     "net/http/httptest"
+    "reflect"
     "strings"
     "testing"
 
@@ -13,6 +15,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    "github.com/precision-soft/melody/v3/validation"
 )
 
 func TestExceptionListener_HtmlResponse_EscapesXss(t *testing.T) {
@@ -319,4 +322,540 @@ func readResponseBody(t *testing.T, response httpcontract.Response) string {
     }
 
     return string(data)
+}
+
+/* the validationErrors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the client of a failed validation received only the flat message */
+func TestExceptionListener_ValidationErrorsContextReachesTheJsonBody(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpErr := exception.BadRequest("validation failed")
+    httpErr.SetContext(map[string]any{
+        "validationErrors": []map[string]any{
+            {"field": "name", "message": "this field is required", "code": "isBlank"},
+        },
+    })
+
+    request := httptest.NewRequest("POST", "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected response to be set")
+    }
+
+    body := readResponseBody(t, response)
+
+    if false == strings.Contains(body, "\"validationErrors\"") || false == strings.Contains(body, "isBlank") {
+        t.Fatalf("expected the validationErrors context in the json body, got %s", body)
+    }
+
+    if false == strings.Contains(body, "validation failed") {
+        t.Fatalf("expected the flat message to remain, got %s", body)
+    }
+}
+
+/* an http exception without the validationErrors key keeps today's body: the exposure is opt-in per context key, not a blanket context dump */
+func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpErr := exception.BadRequest("bad request")
+    httpErr.SetContext(map[string]any{
+        "internalDetail": "must not leak",
+    })
+
+    request := httptest.NewRequest("POST", "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected response to be set")
+    }
+
+    body := readResponseBody(t, response)
+
+    /* the body reader is allowed to be absent, and the helper answers "" for that, so a negative assertion on its own reports success for a response that carries nothing at all. The flat message is what says the envelope was rendered and the refusal below is a real one. */
+    if false == strings.Contains(body, "bad request") {
+        t.Fatalf("expected the flat message to be rendered, got %s", body)
+    }
+
+    if true == strings.Contains(body, "must not leak") {
+        t.Fatalf("expected non-validationErrors context to stay out of the body, got %s", body)
+    }
+}
+
+/* the standardized error envelope names the answer inside the body the way the header names it outside: status and requestId beside the error object, so every consumer of a framework error reads one shape */
+func TestExceptionListener_TheErrorEnvelopeCarriesStatusRequestIdAndErrorObject(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "order not found"))
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    envelope := struct {
+        Status    int    `json:"status"`
+        RequestId string `json:"requestId"`
+        Time      string `json:"time"`
+        Error     struct {
+            Message string `json:"message"`
+        } `json:"error"`
+    }{}
+
+    body := readResponseBody(t, exceptionEvent.Response())
+    if unmarshalErr := json.Unmarshal([]byte(body), &envelope); nil != unmarshalErr {
+        t.Fatalf("expected the standardized error envelope, got %s (%v)", body, unmarshalErr)
+    }
+
+    if 404 != envelope.Status {
+        t.Fatalf("expected the envelope to name the status, got %d in %s", envelope.Status, body)
+    }
+
+    if "test" != envelope.RequestId {
+        t.Fatalf("expected the envelope to carry the request id, got %q in %s", envelope.RequestId, body)
+    }
+
+    if "order not found" != envelope.Error.Message {
+        t.Fatalf("expected the error object to carry the message, got %q in %s", envelope.Error.Message, body)
+    }
+
+    if "" == envelope.Time {
+        t.Fatalf("expected the envelope to date the answer, got %s", body)
+    }
+}
+
+/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight off the result dereferenced it; the package's own door refuses the typed nil with the plain one, and the same call three lines below already used it. */
+func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    var unassignedHttpException *exception.HttpException
+
+    request := httptest.NewRequest("GET", "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, unassignedHttpException)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected a response to be set")
+    }
+
+    if 500 != response.StatusCode() {
+        t.Fatalf("expected the generic 500 a typed nil carries no status for, got %d", response.StatusCode())
+    }
+}
+
+func TestExceptionListener_UnmarkedError_LogsOneRecordAndMarksIt(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    err := exception.NewError("first failure", nil, nil)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.errorCalls {
+        t.Fatalf("expected exactly one record for an unmarked error, got %d", capture.errorCalls)
+    }
+
+    if false == exception.IsAlreadyLogged(err) {
+        t.Fatalf("expected the listener to mark the error it logged")
+    }
+
+    if nil == exceptionEvent.Response() {
+        t.Fatalf("expected a response to be set")
+    }
+}
+
+func TestExceptionListener_AlreadyLoggedError_WritesNoSecondRecord(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    err := exception.NewError("logged upstream", nil, nil)
+    _ = exception.MarkLogged(err)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 0 != capture.errorCalls {
+        t.Fatalf("expected no second record for an already-logged error, got %d", capture.errorCalls)
+    }
+
+    if nil == exceptionEvent.Response() {
+        t.Fatalf("expected the response to be built even when the record is suppressed")
+    }
+}
+
+func TestExceptionListener_AlreadyLoggedError_AttachesRequestCoordinatesWithoutOverwriting(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    err := exception.NewError(
+        "logged upstream",
+        map[string]any{
+            "method": "UPSTREAM",
+        },
+        nil,
+    )
+    _ = exception.MarkLogged(err)
+
+    request := httptest.NewRequest("DELETE", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    attachedContext := err.Context()
+
+    if "/orders/7" != attachedContext["path"] {
+        t.Fatalf("expected the path to be attached to the already-logged error, got %v", attachedContext["path"])
+    }
+
+    if "test" != attachedContext["requestId"] {
+        t.Fatalf("expected the request id to be attached to the already-logged error, got %v", attachedContext["requestId"])
+    }
+
+    if "UPSTREAM" != attachedContext["method"] {
+        t.Fatalf("expected the caller's own method value to be kept, got %v", attachedContext["method"])
+    }
+}
+
+func TestExceptionListener_AlreadyLoggedErrorWithoutARequest_AttachesNoEmptyCoordinates(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    err := exception.NewError("logged upstream", nil, nil)
+    _ = exception.MarkLogged(err)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, nil, err)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    attachedContext := err.Context()
+
+    for _, key := range []string{"requestId", "method", "path"} {
+        if _, exists := attachedContext[key]; true == exists {
+            t.Fatalf("expected no empty %s coordinate to be attached, got %v", key, attachedContext[key])
+        }
+    }
+}
+
+func TestExceptionListener_ADeliberate4xxIsRecordedAtWarning(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "order not found"))
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning record and no error record for a 4xx, got %d warning / %d error", capture.warningCalls, capture.errorCalls)
+    }
+}
+
+func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(502, "upstream failed"))
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error record and no warning record for a 5xx, got %d error / %d warning", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+/* a struct tag naming a rule that does not exist is a program failure wearing a 400: it refuses every request that route will ever serve, and no input a client can send produces it. At warning it sat in the dashboard among the users who mistyped their address, with the route permanently broken and nothing saying so. */
+func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsARoutineFourHundred(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "validationErrors": validation.ValidationErrors{
+            validation.NewValidationError("email", "unknown validation rule", validation.ErrorUnknownRule, map[string]any{"rule": "reqiured"}),
+        },
+    })
+
+    request := httptest.NewRequest("POST", "/api/subscribe", nil)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error and no warning for the wiring fault, got %d errors %d warnings", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+/* a genuine field refusal keeps the warning level a deliberate 4xx earns: raising every 400 would put the users who mistyped their address back among the incidents, which is the mirror of the defect. */
+func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "validationErrors": validation.ValidationErrors{
+            validation.NewValidationError("email", "this field is required", validation.ConstraintNotBlankErrorIsBlank, nil),
+        },
+    })
+
+    request := httptest.NewRequest("POST", "/api/subscribe", nil)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning and no error for a genuine field refusal, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}
+
+/* the context of a wiring fault names the developer's typo, the parameters the constraint refused and its reason: the operator's material, not the client's. It stays in the record and leaves the response body. */
+func TestExceptionListener_AWiringFaultKeepsItsContextInTheRecordAndOutOfTheResponse(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "validationErrors": validation.ValidationErrors{
+            validation.NewValidationError("email", "unknown validation rule", validation.ErrorUnknownRule, map[string]any{"rule": "reqiured"}),
+            validation.NewValidationError("age", "value is too small", validation.ConstraintGreaterThanErrorSmallerThan, map[string]any{"bound": 18}),
+        },
+    })
+
+    request := httptest.NewRequest("POST", "/api/subscribe", nil)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    body := readResponseBody(t, exceptionEvent.Response())
+
+    if true == strings.Contains(body, "reqiured") {
+        t.Fatalf("expected the developer's own typo to stay out of the client's body, got %s", body)
+    }
+
+    if false == strings.Contains(body, "unknownRule") {
+        t.Fatalf("expected the code to still name the refusal, got %s", body)
+    }
+
+    /* a genuine field refusal keeps the context the client needs to correct its request */
+    if false == strings.Contains(body, "bound") {
+        t.Fatalf("expected an ordinary validation error to keep its context, got %s", body)
+    }
+
+    recordErrors, hasErrors := capture.lastErrorContext["validationErrors"]
+    if false == hasErrors {
+        t.Fatalf("expected the record to carry the per-field errors, got %v", capture.lastErrorContext)
+    }
+
+    recordBytes, marshalErr := json.Marshal(recordErrors)
+    if nil != marshalErr {
+        t.Fatalf("unexpected marshal error: %v", marshalErr)
+    }
+
+    if false == strings.Contains(string(recordBytes), "reqiured") {
+        t.Fatalf("expected the record to keep the rule that was misspelled, got %s", recordBytes)
+    }
+}
+
+/* an application that put its own shape under the public key owns it: the projection hands back what it cannot read rather than dropping it. */
+func TestExceptionListener_AForeignValidationErrorsPayloadIsHandedBackUntouched(t *testing.T) {
+    foreign := []map[string]string{{"field": "email", "detail": "custom"}}
+
+    if projected := clientVisibleValidationErrors(foreign); false == reflect.DeepEqual(foreign, projected) {
+        t.Fatalf("expected a foreign payload to travel unchanged, got %#v", projected)
+    }
+}
+
+/* the debug-mode rendering of the error text runs under the containment its siblings received: a panic value whose own Error() dereferences exactly the nil that produced the panic raised a second panic while the listener was rendering the first, and the dispatcher absorbed it one level up — at the price of the whole debug payload, so the client received the kernel's fallback body instead of the degraded page the listener exists to serve. */
+func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, true)
+
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, &nilMapPanickingError{})
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("expected the listener to complete rather than panic, got %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected the listener to serve a response instead of dying of the failure it was rendering")
+    }
+
+    body := readResponseBody(t, response)
+    if false == strings.Contains(body, "error message panicked") {
+        t.Fatalf("expected the contained rendering failure to be named in the body, got %s", body)
+    }
+}
+
+/* the same containment covers the cause the debug payload carries: the cause is a second error, rendered by a second call, and only one of the two being contained leaves the same hole. */
+func TestExceptionListener_DebugModeOn_APanickingCauseTextIsContained(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, true)
+
+    wrapped := exception.NewError("the outer failure", nil, &nilMapPanickingError{})
+
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, wrapped)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("expected the listener to complete rather than panic, got %v", dispatchErr)
+    }
+
+    response := exceptionEvent.Response()
+    if nil == response {
+        t.Fatalf("expected the listener to serve a response instead of dying of the cause it was rendering")
+    }
+
+    body := readResponseBody(t, response)
+    if false == strings.Contains(body, "the outer failure") {
+        t.Fatalf("expected the outer message to be served, got %s", body)
+    }
+
+    if false == strings.Contains(body, "error message panicked") {
+        t.Fatalf("expected the contained cause rendering to be named in the body, got %s", body)
+    }
+}
+
+/* nilMapPanickingError is the shape a recovery boundary actually meets: an error whose Error() dereferences the very nil that produced the panic */
+type nilMapPanickingError struct {
+    values map[string]string
+}
+
+func (instance *nilMapPanickingError) Error() string {
+    instance.values["key"] = "value"
+
+    return "unreachable"
 }

@@ -7,10 +7,7 @@ import (
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
 )
 
-/* runRateLimitCheck exercises the redis-backed fixed-window rate limiter against a live redis: the shared
-counter admits exactly the configured budget and denies the next call, a fresh window restores the budget,
-Reset drops the counter, and — the behaviour a fake backend cannot prove — a store outage follows the
-configured failure mode, denying by default and admitting only when the caller opts into fail-open. */
+/* runRateLimitCheck exercises the redis-backed fixed-window rate limiter against a live redis: the shared counter admits exactly the configured budget and denies the next call, a fresh window restores the budget, Reset drops the counter, and — the behaviour a fake backend cannot prove — a store outage follows the configured failure mode, denying by default and admitting only when the caller opts into fail-open. */
 func runRateLimitCheck(address string) {
     provider := melodyrueidis.NewProvider()
 

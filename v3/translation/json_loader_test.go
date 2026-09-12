@@ -1,6 +1,7 @@
 package translation
 
 import (
+    "strings"
     "os"
     "path/filepath"
     "testing"
@@ -64,11 +65,10 @@ func TestJsonDirectoryLoader_LoadsDomainsAndLocales(t *testing.T) {
     }
 }
 
-func TestJsonDirectoryLoader_IgnoresNonJsonAndUnparseableNames(t *testing.T) {
+func TestJsonDirectoryLoader_IgnoresNonJsonFilesAndDirectories(t *testing.T) {
     directory := t.TempDir()
     writeCatalogFile(t, directory, "messages.en.json", `{"greeting": "Hello"}`)
     writeCatalogFile(t, directory, "readme.txt", "not a catalog")
-    writeCatalogFile(t, directory, "en.json", `{"orphan": "no domain"}`)
     if mkdirErr := os.Mkdir(filepath.Join(directory, "nested.en.json"), 0o750); nil != mkdirErr {
         t.Fatalf("could not create directory entry: %v", mkdirErr)
     }
@@ -85,9 +85,21 @@ func TestJsonDirectoryLoader_IgnoresNonJsonAndUnparseableNames(t *testing.T) {
     if "en" != catalogs[0].Locale() {
         t.Fatalf("unexpected locale: %q", catalogs[0].Locale())
     }
+}
 
-    if _, found := catalogs[0].Get("orphan", "en"); true == found {
-        t.Fatalf("domainless file should have been skipped")
+func TestJsonDirectoryLoader_MisnamedJsonFileIsAHardError(t *testing.T) {
+    directory := t.TempDir()
+    writeCatalogFile(t, directory, "messages.en.json", `{"greeting": "Hello"}`)
+    writeCatalogFile(t, directory, "en.json", `{"orphan": "no domain"}`)
+
+    /* the misnamed file used to be skipped with the load reporting success, so a naming typo shipped a translator answering raw message ids with nothing pointing at the file; the refusal names it */
+    _, loadErr := NewJsonDirectoryLoader(directory).Load()
+    if nil == loadErr {
+        t.Fatalf("expected a hard error for a .json file that does not parse as <domain>.<locale>.json")
+    }
+
+    if false == strings.Contains(loadErr.Error(), "translation file name does not match") {
+        t.Fatalf("expected the refusal to name the naming rule, got: %v", loadErr)
     }
 }
 

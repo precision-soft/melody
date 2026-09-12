@@ -23,10 +23,6 @@ type inMemoryCatalogJournalRepository struct {
     totalCount int
 }
 
-func (instance *inMemoryCatalogJournalRepository) EnsureSchema(ctx context.Context) error {
-    return nil
-}
-
 func (instance *inMemoryCatalogJournalRepository) Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error) {
     validationErr := validateCatalogJournalEntry(entry)
     if nil != validationErr {

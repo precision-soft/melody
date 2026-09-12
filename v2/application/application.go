@@ -5,6 +5,7 @@ import (
     "errors"
     "io/fs"
     "os"
+    "sync"
     "sync/atomic"
 
     applicationcontract "github.com/precision-soft/melody/v2/application/contract"
@@ -48,6 +49,10 @@ type Application struct {
     defaultInMemorySessionStorage bool
     /* claimed by the one close that performs the teardown: the container's own closedness cannot answer "was it me", because two concurrent closes both probe it open before either enters Close, and both would then report the single failure as their own incident */
     closePerformerClaimed atomic.Bool
+
+    /* closed by the performer once its teardown has finished, so a losing sibling can wait for the whole teardown instead of racing the container's own Close: a sibling that entered the container first USED to be the one whose call ran the actual teardown, and the performer then read the closedness probe as "somebody else's close" and suppressed the report — the one failure reported by nobody, and an exit path proceeding over it. Lazily built, because tests construct the Application by literal. */
+    closeDoneOnce sync.Once
+    closeDone     chan struct{}
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -216,7 +221,7 @@ func (instance *Application) registerParameter(
 
 /* ProcessRole is the resolved process role (config.RoleWeb, config.RoleWorker or config.RoleAll): an explicit --role flag wins over the MELODY_PROCESS_ROLE parameter, which defaults to all. Melody gates nothing on it — wiring code queries it to decide whether to register background runners (outbox relays, consumers) on this process; services resolve the same value through ServiceProcessRole.
 
-Nothing in this major waits for those runners: when Run returns, the container closes immediately, so a goroutine still draining loses its services under it. A runner that must finish its work observes the run context and completes its drain before the handler that received the context returns. */
+   Nothing in this major waits for those runners: when Run returns, the container closes immediately, so a goroutine still draining loses its services under it. A runner that must finish its work observes the run context and completes its drain before the handler that received the context returns. */
 func (instance *Application) ProcessRole() string {
     return instance.runtimeFlags.Role()
 }
@@ -416,7 +421,7 @@ var shieldedCloseStep = logging.RunShieldedStep
 
 /* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call itself discovered turns into a non-zero exit, so a supervisor sees a shutdown that lost something — a failed flush, a close that errored — instead of recording a clean exit 0 whose only trace was one stderr line. A close somebody else already performed reported its failure through its own channel and keeps its own exit code.
 
-The teardown runs under the same shield the panic path has had since the exit-step budget was installed, and for the same reason: the loop is strictly sequential with no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone, a session file on a vanished mount — parks every service behind it and the process with them. The healthy shutdown was the one without an escape while the dying one had ten seconds. An abandoned teardown exits non-zero, because a process that could not release what it held did not shut down cleanly however quiet it was; and the error the step was writing is deliberately not read on that branch, since the step is still running on its own goroutine. */
+   The teardown runs under the same shield the panic path has had since the exit-step budget was installed, and for the same reason: the loop is strictly sequential with no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone, a session file on a vanished mount — parks every service behind it and the process with them. The healthy shutdown was the one without an escape while the dying one had ten seconds. An abandoned teardown exits non-zero, because a process that could not release what it held did not shut down cleanly however quiet it was; and the error the step was writing is deliberately not read on that branch, since the step is still running on its own goroutine. */
 func (instance *Application) closeAndExitOnFailure() {
     var closeErr error
 

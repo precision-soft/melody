@@ -5,6 +5,8 @@ import (
     "fmt"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 type crmCipherRef struct{}
@@ -162,15 +164,14 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
     }
 }
 
-/* emptyNameCipherRef is the misuse the compartment marker must refuse: an empty name is the default cipher's
-reserved registry entry, not a compartment. */
+/* emptyNameCipherRef is the misuse the compartment marker must refuse: an empty name is the default cipher's reserved registry entry, not a compartment. */
 type emptyNameCipherRef struct{}
 
 func (instance emptyNameCipherRef) CipherName() string {
     return ""
 }
 
-/* @info A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
+/* A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
 func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     UseCipher(NewFakeCipher())
     defer UseCipher(nil)
@@ -187,7 +188,7 @@ func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     }
 }
 
-/* @info fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
+/* fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
 func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
     const plaintext = "RO49-SECRET-IBAN"
 
@@ -201,6 +202,77 @@ func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
     for _, rendering := range renderings {
         if true == strings.Contains(rendering, plaintext) {
             t.Fatalf("the plaintext leaked through %%#v: %s", rendering)
+        }
+    }
+}
+
+type pointerFormRef struct{}
+
+func (instance pointerFormRef) CipherName() string {
+    return "pointer-form"
+}
+
+/* the pointer form compiles whenever the value form does, and its zero value is a nil pointer whose CipherName() dereferences nil from inside database/sql; it must answer as an error naming the marker */
+func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
+    column := EncryptedStringFor[*pointerFormRef]("plaintext")
+
+    _, valueErr := column.Value()
+    if nil == valueErr {
+        t.Fatalf("expected the pointer-form marker to be refused")
+    }
+
+    if false == strings.Contains(valueErr.Error(), "pointer type") {
+        t.Fatalf("expected the refusal to name the pointer form, got: %v", valueErr)
+    }
+}
+
+/* the compartment-bound column carries the EncryptedColumn marker its non-generic sibling carries, which is what the auto-redaction type walk recognises it by. The assertion lives here rather than beside the type because instantiating a generic column needs a CipherRef marker, and the package deliberately ships none — a marker is the integrator's, minted per compartment. */
+var _ EncryptedColumn = EncryptedStringFor[crmCipherRef]("")
+
+func TestEncryptedStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
+    payload, marshalErr := json.Marshal(EncryptedStringFor[crmCipherRef]("super-secret"))
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    decoded := EncryptedStringFor[crmCipherRef]("untouched")
+    unmarshalErr := json.Unmarshal(payload, &decoded)
+    if nil == unmarshalErr {
+        t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
+    }
+
+    if false == strings.Contains(fmt.Sprint(exception.LogContext(unmarshalErr)["type"]), "encrypt.EncryptedStringFor[") {
+        t.Fatalf("expected the refusal to name the column type, got: %v", exception.LogContext(unmarshalErr))
+    }
+
+    if "untouched" != string(decoded) {
+        t.Fatalf("expected the refused document to leave the value untouched, got %q", string(decoded))
+    }
+}
+
+func TestEncryptedStringFor_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
+    var decoded EncryptedStringFor[crmCipherRef]
+    if unmarshalErr := json.Unmarshal([]byte(`"hello"`), &decoded); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if "hello" != string(decoded) {
+        t.Fatalf("expected the plaintext to decode, got %q", string(decoded))
+    }
+}
+
+/* the generic instantiation cannot be asserted in the source file, because the package ships no marker of its own on purpose: the marker is the integrator's, one per compartment */
+var _ json.Unmarshaler = (*EncryptedStringFor[crmCipherRef])(nil)
+
+func TestEncryptedStringFor_FormatRedactsNumericVerbs(t *testing.T) {
+    secret := "top-secret-plaintext"
+    for _, verb := range []string{"%d", "%o", "%b", "%c", "%U"} {
+        rendered := fmt.Sprintf(verb, EncryptedStringFor[crmCipherRef](secret))
+        if true == strings.Contains(rendered, secret) {
+            t.Fatalf("verb %s leaked the plaintext through the badverb form: %s", verb, rendered)
+        }
+        if redactedPlaceholder != rendered {
+            t.Fatalf("verb %s expected the redacted placeholder, got %q", verb, rendered)
         }
     }
 }

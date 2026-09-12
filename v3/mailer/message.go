@@ -35,7 +35,7 @@ var reservedHeaders = map[string]struct{}{
     "content-disposition":       {},
 }
 
-/* @important RFC 2047 §5 forbids encoded-words inside the msg-id/addr tokens of these structured headers; Q-encoding them would corrupt the value and silently break mail threading, so they are emitted intact (still CRLF-stripped and folded by writeHeader) rather than routed through encodeHeaderText */
+/* RFC 2047 §5 forbids encoded-words inside the msg-id/addr tokens of these structured headers; Q-encoding them would corrupt the value and silently break mail threading, so they are emitted intact (still CRLF-stripped and folded by writeHeader) rather than routed through encodeHeaderText */
 var structuredIdentifierHeaders = map[string]struct{}{
     "message-id":  {},
     "in-reply-to": {},
@@ -102,7 +102,7 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     }
 
     if 0 == len(regularAttachments) {
-        /* @info only inline attachments: the multipart/related part is the whole message body */
+        /* only inline attachments: the multipart/related part is the whole message body */
         writeRelatedEntity(&builder, message, inlineAttachments)
 
         return []byte(builder.String()), nil
@@ -148,7 +148,7 @@ func partitionAttachments(attachments []mailercontract.Attachment) ([]mailercont
     return inline, regular
 }
 
-/* @info writes a multipart/related entity (RFC 2387) wrapping the message body followed by the inline attachments; the Content-Type line doubles as the message header when this entity is the top-level body, or as the part header when nested inside multipart/mixed. The required type parameter mirrors the media type of the root (first) part so it matches what writeBodyEntity actually emits */
+/* writes a multipart/related entity (RFC 2387) wrapping the message body followed by the inline attachments; the Content-Type line doubles as the message header when this entity is the top-level body, or as the part header when nested inside multipart/mixed. The required type parameter mirrors the media type of the root (first) part so it matches what writeBodyEntity actually emits */
 func writeRelatedEntity(builder *strings.Builder, message mailercontract.Message, inlineAttachments []mailercontract.Attachment) {
     boundary := newBoundary()
     builder.WriteString("Content-Type: multipart/related; type=\"" + bodyEntityRootType(message) + "\"; boundary=\"" + boundary + "\"" + lineBreak)
@@ -169,7 +169,7 @@ func hasBody(message mailercontract.Message) bool {
     return "" != message.Text || "" != message.Html
 }
 
-/* @info the media type of the entity writeBodyEntity emits, used as the multipart/related root type parameter */
+/* the media type of the entity writeBodyEntity emits, used as the multipart/related root type parameter */
 func bodyEntityRootType(message mailercontract.Message) string {
     hasHtml := "" != message.Html
     hasText := "" != message.Text
@@ -483,7 +483,7 @@ func writeAttachment(builder *strings.Builder, attachment mailercontract.Attachm
     builder.WriteString(lineBreak)
 }
 
-/* @important the Message-ID, In-Reply-To, References and Content-ID headers a caller supplies through the Headers map are sequences of msg-id tokens emitted intact (RFC 2047 §5 forbids Q-encoding them). Two corruption channels are rejected here, mirroring validateInlineContentId for inline Content-IDs. First, any control character: writeHeader strips CR and LF but leaves TAB, DEL and the other C0 bytes, which survive into the value and either invalidate it or get re-read as folding whitespace that splits a token on unfold; the only legitimate whitespace is the single space that separates tokens, so every other whitespace/control rune is refused. Second, length: foldHeaderLine wraps at the spaces between tokens, but a single token longer than a continuation line is hard-split mid-token, injecting whitespace that corrupts the identifier on unfold and silently breaks mail threading, so a token too long to fit on a continuation line (one leading space plus the token) is rejected rather than mangled. */
+/* the Message-ID, In-Reply-To, References and Content-ID headers a caller supplies through the Headers map are sequences of msg-id tokens emitted intact (RFC 2047 §5 forbids Q-encoding them). Two corruption channels are rejected here, mirroring validateInlineContentId for inline Content-IDs. First, any control character: writeHeader strips CR and LF but leaves TAB, DEL and the other C0 bytes, which survive into the value and either invalidate it or get re-read as folding whitespace that splits a token on unfold; the only legitimate whitespace is the single space that separates tokens, so every other whitespace/control rune is refused. Second, length: foldHeaderLine wraps at the spaces between tokens, but a single token longer than a continuation line is hard-split mid-token, injecting whitespace that corrupts the identifier on unfold and silently breaks mail threading, so a token too long to fit on a continuation line (one leading space plus the token) is rejected rather than mangled. */
 func validateStructuredIdentifierHeader(name string, value string) error {
     for _, runeValue := range value {
         if '\t' == runeValue || '\r' == runeValue || '\n' == runeValue || runeValue < 0x20 || 0x7F == runeValue {
@@ -500,7 +500,7 @@ func validateStructuredIdentifierHeader(name string, value string) error {
     return nil
 }
 
-/* @info a Content-ID is a single msg-id token: it may carry no whitespace or control character (either would make the emitted Content-ID header invalid), and folding it would inject whitespace that corrupts the identifier on unfold (RFC 2047 §5 also forbids Q-encoding it), so an id too long to fit on a single 998-octet header line is rejected rather than silently mangled. A continuation line carries one leading space, so the limit is reached when the bracketed value plus that space exceeds maxHardHeaderLineLength */
+/* a Content-ID is a single msg-id token: it may carry no whitespace or control character (either would make the emitted Content-ID header invalid), and folding it would inject whitespace that corrupts the identifier on unfold (RFC 2047 §5 also forbids Q-encoding it), so an id too long to fit on a single 998-octet header line is rejected rather than silently mangled. A continuation line carries one leading space, so the limit is reached when the bracketed value plus that space exceeds maxHardHeaderLineLength */
 func validateInlineContentId(contentId string) error {
     for _, runeValue := range contentId {
         if ' ' == runeValue || '\t' == runeValue || '\r' == runeValue || '\n' == runeValue || runeValue < 0x20 || 0x7F == runeValue {
@@ -508,7 +508,7 @@ func validateInlineContentId(contentId string) error {
         }
     }
 
-    /* @info angle brackets are valid only as a single matched leading-'<'/trailing-'>' pair the caller may already have applied; an interior, unmatched or empty-bracket value would make bracketContentId emit a malformed Content-ID such as <>x<>, so it is rejected rather than wrapped */
+    /* angle brackets are valid only as a single matched leading-'<'/trailing-'>' pair the caller may already have applied; an interior, unmatched or empty-bracket value would make bracketContentId emit a malformed Content-ID such as <>x<>, so it is rejected rather than wrapped */
     unbracketed := contentId
     if true == strings.HasPrefix(unbracketed, "<") && true == strings.HasSuffix(unbracketed, ">") && 2 <= len(unbracketed) {
         unbracketed = unbracketed[1 : len(unbracketed)-1]
@@ -524,7 +524,7 @@ func validateInlineContentId(contentId string) error {
     return nil
 }
 
-/* @info Content-ID values are msg-id tokens and must be wrapped in angle brackets; a caller-supplied value that already carries them is left untouched */
+/* Content-ID values are msg-id tokens and must be wrapped in angle brackets; a caller-supplied value that already carries them is left untouched */
 func bracketContentId(contentId string) string {
     bracketed := contentId
 

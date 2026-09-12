@@ -2,6 +2,7 @@ package middleware
 
 import (
     "context"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -11,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v2/container"
     "github.com/precision-soft/melody/v2/event"
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
+    "github.com/precision-soft/melody/v2/exception"
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
     "github.com/precision-soft/melody/v2/internal/testhelper"
@@ -63,6 +65,39 @@ func TestRegisterRateLimitRequestListener_AnswersTooManyRequestsOnceTheBudgetIsG
     response := secondEvent.Response()
     if nil == response || nethttp.StatusTooManyRequests != response.StatusCode() {
         t.Fatalf("expected the exhausted budget to answer 429, got %#v", response)
+    }
+}
+
+/* OnLimitExceeded is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the refused request is served unmetered — the guard must read it through IsNilInterface and serve the 429 fallback */
+func TestRegisterRateLimitRequestListener_ATypedNilLimitResponseStillAnswers429(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewRateLimitConfig(
+            NewFixedWindowLimiter(1, time.Minute),
+            nil,
+            func(request httpcontract.Request) (httpcontract.Response, error) {
+                return (*http.Response)(nil), nil
+            },
+        ),
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    firstEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, firstErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, firstEvent); nil != firstErr {
+        t.Fatalf("unexpected dispatch error: %v", firstErr)
+    }
+
+    secondEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, secondErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, secondEvent); nil != secondErr {
+        t.Fatalf("expected the refusal to be a response rather than a dispatch error, got %v", secondErr)
+    }
+
+    response := secondEvent.Response()
+    if nil == response || nethttp.StatusTooManyRequests != response.StatusCode() {
+        t.Fatalf("expected the typed-nil limit response to fall through to the 429 fallback, got %#v", response)
     }
 }
 
@@ -192,5 +227,90 @@ func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarni
 
     if 1 != capture.warningCalls || 0 != capture.errorCalls {
         t.Fatalf("expected one warning and no error for the cancelled call, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil),
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    requestEvent := http.NewKernelRequestEvent(runtimeInstance, unassignedRequest)
+
+    _, err := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected no response for a request the listener cannot read")
+    }
+}
+
+/* the refusal is rendered through kernel.exception rather than returned to the caller, because returning it would abort the kernel.request dispatch onto the fail-closed 500 page and a deliberate 429 would come out a 500. Every other probe here reaches the hardcoded fallback below that dispatch, so the half the comment is written for — an application's exception listener answering the refusal — is the one nothing exercises: with the dispatch removed the fallback answers 429 all the same and every one of them stays green. */
+func TestRegisterRateLimitRequestListener_TheRefusalIsRenderedThroughTheExceptionEvent(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exceptionEvent, ok := eventValue.Payload().(*http.KernelExceptionEvent)
+            if false == ok {
+                return nil
+            }
+
+            exceptionEvent.SetResponse(http.TextResponse(nethttp.StatusTooManyRequests, "rendered by the application"))
+
+            return nil
+        },
+        0,
+    )
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewRateLimitConfig(
+            NewFixedWindowLimiter(1, time.Minute),
+            nil,
+            func(request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, exception.TooManyRequests("slow down")
+            },
+        ),
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    firstEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, firstErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, firstEvent); nil != firstErr {
+        t.Fatalf("unexpected dispatch error: %v", firstErr)
+    }
+
+    secondEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, secondErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, secondEvent); nil != secondErr {
+        t.Fatalf("expected the refusal to be a response rather than a dispatch error, got %v", secondErr)
+    }
+
+    response := secondEvent.Response()
+    if nil == response {
+        t.Fatalf("expected the exhausted budget to be answered")
+    }
+
+    body, readErr := io.ReadAll(response.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read body: %v", readErr)
+    }
+
+    /* the fallback below the dispatch answers 429 too, so the status alone cannot say which of the two produced this — the body names the listener */
+    if "rendered by the application" != string(body) {
+        t.Fatalf("expected the exception listener to render the refusal, got %q", string(body))
     }
 }

@@ -234,16 +234,7 @@ func TestCompile_WithoutInheritanceKeepsOnlyTheLocalRules(t *testing.T) {
     }
 }
 
-/*
-TestCompile_ForeignDecisionManagerReceivesTheRoleHierarchy pins the door the
-hierarchy travels through. The compilation used to assert on the concrete
-*security.AccessDecisionManager, so a manager of the integrator's own — a
-wrapper that only delegated, to log or cache decisions — skipped the whole
-upgrade without a word: ROLE_ADMIN: [ROLE_USER] stopped applying on the
-enforcement path while security.IsGranted, which expands the hierarchy straight
-from the compiled firewall, kept answering true for the same request. One door
-granted and the other answered 403, with no record on either.
-*/
+/* TestCompile_ForeignDecisionManagerReceivesTheRoleHierarchy pins the door the hierarchy travels through. The compilation used to assert on the concrete *security.AccessDecisionManager, so a manager of the integrator's own — a wrapper that only delegated, to log or cache decisions — skipped the whole upgrade without a word: ROLE_ADMIN: [ROLE_USER] stopped applying on the enforcement path while security.IsGranted, which expands the hierarchy straight from the compiled firewall, kept answering true for the same request. One door granted and the other answered 403, with no record on either. */
 func TestCompile_ForeignDecisionManagerReceivesTheRoleHierarchy(t *testing.T) {
     roleHierarchy := security.NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
     decisionManager := &hierarchyAwareAccessDecisionManager{}
@@ -274,13 +265,7 @@ func TestCompile_ForeignDecisionManagerReceivesTheRoleHierarchy(t *testing.T) {
     }
 }
 
-/*
-TestCompile_RefusesADecisionManagerThatCannotApplyTheRoleHierarchy pins the
-other half: a manager without the capability, handed a hierarchy, is refused by
-name at compilation rather than compiled into a firewall that enforces without
-it. The refusal names the firewall and the capability so the wiring fault is
-readable where it was written.
-*/
+/* TestCompile_RefusesADecisionManagerThatCannotApplyTheRoleHierarchy pins the other half: a manager without the capability, handed a hierarchy, is refused by name at compilation rather than compiled into a firewall that enforces without it. The refusal names the firewall and the capability so the wiring fault is readable where it was written. */
 func TestCompile_RefusesADecisionManagerThatCannotApplyTheRoleHierarchy(t *testing.T) {
     builder := NewBuilder()
 
@@ -324,12 +309,7 @@ func TestCompile_RefusesADecisionManagerThatCannotApplyTheRoleHierarchy(t *testi
     }
 }
 
-/*
-TestCompile_RefusesADecisionManagerThatAnswersNoManager pins the guard over the
-capability's own answer: a manager that implements the door and hands back
-nothing would otherwise be installed as the firewall's decision manager, and
-every request it decides would dereference it.
-*/
+/* TestCompile_RefusesADecisionManagerThatAnswersNoManager pins the guard over the capability's own answer: a manager that implements the door and hands back nothing would otherwise be installed as the firewall's decision manager, and every request it decides would dereference it. */
 func TestCompile_RefusesADecisionManagerThatAnswersNoManager(t *testing.T) {
     builder := NewBuilder()
 
@@ -427,17 +407,7 @@ func (instance *compileTypedNilDeniedHandler) Handle(runtimeInstance runtimecont
     return instance.response, nil
 }
 
-/*
-TestCompile_RefusesATypedNilOverrideDependency pins the three interfaces the
-override carries and the loop did not judge. A typed nil reads as declared to
-the plain comparison beside it, so the fallback to the global one is skipped,
-the firewall compiles green, the declared role hierarchy is dropped in silence
-— the capability check reads the typed nil correctly and skips the whole block
-— and the first request behind the firewall dereferences a nil receiver. The
-matcher, the token source and the login and logout handlers were already
-refused by name in this same loop; these three were not, and one of them
-decides access.
-*/
+/* TestCompile_RefusesATypedNilOverrideDependency pins the three interfaces the override carries and the loop did not judge. A typed nil reads as declared to the plain comparison beside it, so the fallback to the global one is skipped, the firewall compiles green, the declared role hierarchy is dropped in silence — the capability check reads the typed nil correctly and skips the whole block — and the first request behind the firewall dereferences a nil receiver. The matcher, the token source and the login and logout handlers were already refused by name in this same loop; these three were not, and one of them decides access. */
 func TestCompile_RefusesATypedNilOverrideDependency(t *testing.T) {
     var typedNilManager *compileTypedNilDecisionManager
     var typedNilEntryPoint *compileTypedNilEntryPoint

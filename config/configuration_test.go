@@ -166,6 +166,45 @@ func TestConfigurationRegisterRuntime_SuccessfullyRegisters(t *testing.T) {
     }
 }
 
+func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{"APP_URL": "https://example.test"}}
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.callback", "%env(APP_URL)%/callback")
+
+    parameter := configuration.Get("app.callback")
+    if nil == parameter {
+        t.Fatalf("expected parameter to exist after RegisterRuntime")
+    }
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected a pre-boot read of a templated runtime parameter to refuse, not serve the raw template")
+            }
+        }()
+
+        _ = parameter.String()
+    }()
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if "https://example.test/callback" != parameter.String() {
+        t.Fatalf("expected the resolved value after boot, got: %s", parameter.String())
+    }
+}
+
 func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
@@ -515,6 +554,40 @@ func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T)
     }
 }
 
+/* the late mark reaches a reader spelled with the kernel.* alias of the marked MELODY_* key: the aliased pair is one parameter under two names, so the propagation seeds every spelling — a scan over the marked spelling alone left the alias-spelled reader printing the derived value in full */
+func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
+    environment := &Environment{values: map[string]string{
+        LogPathKey: "/var/log/app.log",
+    }}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("observability.sink", "file://%kernel.log_path%")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if true == configuration.MustGet("observability.sink").IsSecret() {
+        t.Fatalf("expected the alias-spelled reader to start unmarked")
+    }
+
+    if false == configuration.MarkSecret(LogPathKey) {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet(KernelLogPath).IsSecret() {
+        t.Fatalf("expected the kernel spelling of the marked key to be marked")
+    }
+
+    if false == configuration.MustGet("observability.sink").IsSecret() {
+        t.Fatalf("expected the late marking to reach the reader through the kernel alias")
+    }
+}
+
 /* a runtime registration that fails to resolve leaves nothing behind: publishing before resolving served the raw template to every reader that outlived the recovered panic and burnt the name for the corrected retry */
 func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
@@ -610,16 +683,13 @@ func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     }
 }
 
-/* TestMain silences the standard logger for the whole package: the configuration reports through it on
-several paths, and the output belongs to the code under test rather than to the test run. */
+/* TestMain silences the standard logger for the whole package: the configuration reports through it on several paths, and the output belongs to the code under test rather than to the test run. */
 func TestMain(mainInstance *testing.M) {
     log.SetOutput(io.Discard)
     os.Exit(mainInstance.Run())
 }
 
-/* newResolvedConfiguration builds a configuration over a fixed environment, lets the caller declare its
-parameters and resolves them, which is the shape almost every test of this file and of the resolve path
-needs before it can assert anything. */
+/* newResolvedConfiguration builds a configuration over a fixed environment, lets the caller declare its parameters and resolves them, which is the shape almost every test of this file and of the resolve path needs before it can assert anything. */
 func newResolvedConfiguration(
     t *testing.T,
     environmentValues map[string]string,

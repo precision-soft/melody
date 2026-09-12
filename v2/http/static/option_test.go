@@ -71,6 +71,21 @@ func TestFileServerConfig_SetExcludedPathListOfNilExcludesNothing(t *testing.T) 
     }
 }
 
+/* an entry without a leading slash is compared as a prefix against a request path that always begins with one, so it could never match and silently excluded nothing — the setter normalizes it to the shape that matches */
+func TestFileServerConfig_SetExcludedPathListNormalizesAMissingLeadingSlash(t *testing.T) {
+    config := newTestFileServerConfig()
+
+    config.SetExcludedPathList([]string{"admin", "/api"})
+
+    if 2 != len(config.excludedPathList) || "/admin" != config.excludedPathList[0] || "/api" != config.excludedPathList[1] {
+        t.Fatalf("expected the missing leading slash normalized and the slashed entry kept, got: %v", config.excludedPathList)
+    }
+
+    if false == hasExcludedPathPrefix("/admin/panel", config.excludedPathList) {
+        t.Fatalf("expected the normalized entry to exclude the path it names")
+    }
+}
+
 func TestNewFileServerConfig_AllowsTheWellKnownDirectoryAndNothingElse(t *testing.T) {
     config := newTestFileServerConfig()
 

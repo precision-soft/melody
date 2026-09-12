@@ -1,8 +1,6 @@
 package security
 
 import (
-    "crypto/subtle"
-
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -45,10 +43,7 @@ func (instance *ApiKeyHeaderAuthenticator) Supports(request httpcontract.Request
 func (instance *ApiKeyHeaderAuthenticator) Authenticate(request httpcontract.Request) (securitycontract.Token, error) {
     headerValue := request.Header(instance.headerName)
 
-    expectedBytes := []byte(instance.expectedValue)
-    headerBytes := []byte(headerValue)
-
-    if 1 != subtle.ConstantTimeCompare(expectedBytes, headerBytes) {
+    if false == constantTimeSecretEquals(instance.expectedValue, headerValue) {
         return NewAnonymousToken(), nil
     }
 

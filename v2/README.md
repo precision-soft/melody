@@ -4,8 +4,8 @@
 
 # Melody (v2)
 
-> **v2 is stabilized and feature-frozen.** New features land on **v3**; what still arrives here is
-> security work and critical correctness fixes. For new projects use [`../v3/`](../v3/) and its
+> **v2 is stabilized and feature-frozen.** New features land on **v3**; what still arrives here, until
+> v4 is released, is patch-level defect fixes and security work. For new projects use [`../v3/`](../v3/) and its
 > [example](../v3/.example/); an application moving off v2 starts at the "Migrating to v3" section of
 > [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md). See the repository
 > [`README.md`](../README.md#versions--project-status) for the versioning rationale.

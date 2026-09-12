@@ -4,13 +4,17 @@ import (
     "context"
     "sync"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* @info every repository is a process-wide singleton and net/http serves each request on its own
-goroutine, so a listing request and a deleting request overlap; the writer here always removes a
-non-terminal element, which is what makes DeleteById compact the backing array under the reader */
+/* the probes below are about concurrent access, not about quotes, so every currency they create carries the
+   same fixed instant: a quote that moved between two of them would be a second variable in a test that has
+   one subject. */
+var currencyProbeQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
+
+/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
 
 func TestInMemoryCurrencyRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -43,13 +47,13 @@ func TestInMemoryCurrencyRepositoryConcurrentReadAndDelete(t *testing.T) {
         defer waitGroup.Done()
 
         for round := 0; round < concurrentRounds; round++ {
-            createErr := repositoryInstance.Create(ctx, entity.NewCurrency("cur-first", "AAA", "first"))
+            createErr := repositoryInstance.Create(ctx, entity.NewCurrency("cur-first", "AAA", "first", 1, currencyProbeQuoteInstant))
             if nil != createErr {
                 t.Errorf("create first: %v", createErr)
                 return
             }
 
-            createErr = repositoryInstance.Create(ctx, entity.NewCurrency("cur-second", "BBB", "second"))
+            createErr = repositoryInstance.Create(ctx, entity.NewCurrency("cur-second", "BBB", "second", 2, currencyProbeQuoteInstant))
             if nil != createErr {
                 t.Errorf("create second: %v", createErr)
                 return

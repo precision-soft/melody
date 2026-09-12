@@ -6,6 +6,7 @@ import (
     "errors"
     "fmt"
     "strings"
+    "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/uptrace/bun"
@@ -15,21 +16,25 @@ import (
 type currencyRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_currency,alias:currency"`
 
-    Id   string `bun:"id,pk"`
-    Code string `bun:"code,notnull"`
-    Name string `bun:"name,notnull"`
+    Id       string    `bun:"id,pk"`
+    Code     string    `bun:"code,notnull"`
+    Name     string    `bun:"name,notnull"`
+    Rate     float64   `bun:"rate,notnull"`
+    RateAsOf time.Time `bun:"rate_as_of,notnull"`
 }
 
 func newCurrencyRow(currency *entity.Currency) *currencyRow {
     return &currencyRow{
-        Id:   currency.Id,
-        Code: currency.Code,
-        Name: currency.Name,
+        Id:       currency.Id,
+        Code:     currency.Code,
+        Name:     currency.Name,
+        Rate:     currency.Rate,
+        RateAsOf: currency.RateAsOf,
     }
 }
 
 func (instance *currencyRow) toEntity() *entity.Currency {
-    return entity.NewCurrency(instance.Id, instance.Code, instance.Name)
+    return entity.NewCurrency(instance.Id, instance.Code, instance.Name, instance.Rate, instance.RateAsOf)
 }
 
 func newBunCurrencyRepository(database *bun.DB) *bunCurrencyRepository {
@@ -40,17 +45,8 @@ type bunCurrencyRepository struct {
     database *bun.DB
 }
 
-/* EnsureSchema creates the table when it is absent and writes the opening nomenclature into it when it is empty. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
-func (instance *bunCurrencyRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*currencyRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
-    }
-
+/* seedIfEmpty writes the opening nomenclature into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
+func (instance *bunCurrencyRepository) seedIfEmpty(ctx context.Context) error {
     count, countErr := instance.database.
         NewSelect().
         Model((*currencyRow)(nil)).

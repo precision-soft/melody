@@ -4,12 +4,13 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 func NewFirewall(rules ...securitycontract.Rule) *Firewall {
     for index, rule := range rules {
-        if nil == rule {
+        if true == internal.IsNilInterface(rule) {
             exception.Panic(
                 exception.NewError(
                     "security firewall rule is nil",
@@ -23,7 +24,7 @@ func NewFirewall(rules ...securitycontract.Rule) *Firewall {
     }
 
     return &Firewall{
-        rules: rules,
+        rules: append([]securitycontract.Rule{}, rules...),
     }
 }
 

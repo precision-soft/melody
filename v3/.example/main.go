@@ -20,5 +20,19 @@ func main() {
 
     config.Configure(app)
 
+    /* the wiring is done, which is where the parallel teardown is armed: arming validates every declared teardown edge, so it needs the registrations. The boot has built services by then — the logger, the transports closer, whatever a module resolves while wiring — and arming walks those as the published memory they are, pointer words and layouts only; everything built from here on is walked where it is built.
+
+       What this application asserts by arming it: every ordering its services need is written down. Measured on this wiring, the graph is thin — most of these services hold nothing of each other and none of them logs while closing — which is exactly why the teardown of the one that takes thirty seconds must not be what the tracer provider waits behind. `debug:container` prints the plan, including the services nothing orders. */
+    kernel := app.Boot()
+
+    if armable, isArmable := kernel.ServiceContainer().(interface{ ArmParallelTeardown() error }); true == isArmable {
+        if armErr := armable.ArmParallelTeardown(); nil != armErr {
+            /* a panic raised here is outside Run, so no exit handler tears the booted container down on the way out: the logger's file, the pools and the broker connection the boot opened would go with the process unreleased. The application is closed first, and the refusal still ends the process the way a wiring mistake should. This close runs under no teardown budget and no shield — the configured budget is read by Run, which this path never reaches — so a closer that hangs here hangs the boot, which is the one place a wiring mistake is meant to be seen. */
+            app.Close()
+
+            panic(armErr)
+        }
+    }
+
     app.Run()
 }

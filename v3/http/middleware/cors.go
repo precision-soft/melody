@@ -105,6 +105,11 @@ func RestrictiveCorsConfig(allowedOrigins []string) *CorsConfig {
 
 /* Deprecated: use github.com/precision-soft/melody/v3/http/cors.Middleware instead. */
 func CorsMiddleware(config *CorsConfig) httpcontract.Middleware {
+    /* nil reads as the default service, the reading the replacement door gives the same absence — dereferencing it below answered the shorthand with a raw panic on the deprecated spelling of the exact call the canonical door accepts */
+    if nil == config {
+        return cors.Middleware(cors.DefaultService())
+    }
+
     service := cors.NewService(cors.Config{
         AllowOrigins:     config.allowOrigins,
         AllowMethods:     config.allowMethods,

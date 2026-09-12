@@ -47,7 +47,6 @@ func (instance *recordingScopedService) Close() error {
     return nil
 }
 
-/* @info One registration yields one instance per scope: shared by everything inside one request, shared by nothing between two. Anything less makes a scoped service either a singleton in disguise or a fresh object per lookup, and neither is what a request-lifetime service means. */
 func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -97,9 +96,7 @@ func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
     }
 }
 
-/* @info Two scopes resolving one scoped name must contend on nothing: each holds its own creation guard, so neither ever waits on the other's build and neither inherits the other's failure.
-
-@info The two resolutions are forced to overlap rather than merely started together. A shared guard is invisible to resolutions that happen to run one after the other — the second finds no creation in flight and simply builds its own — so a test that only launches two goroutines stays green with the guard pointed at the container. Holding both providers inside the creation at once is what makes the sharing observable: under a shared guard the second provider never runs at all. */
+/* the two resolutions are forced to overlap rather than merely started together: a shared guard is invisible to resolutions that run one after the other, since the second finds no creation in flight and builds its own. Holding both providers inside the creation at once is what makes the sharing observable. */
 func TestScope_TwoConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -171,7 +168,6 @@ func TestScope_TwoConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
     }
 }
 
-/* @info The container is blind to what its scopes own. A scoped service reaching the root container would outlive the request it was built for and be handed, holding that request's substitutes, to every request that follows. */
 func TestScope_TheRootContainerNeverSeesAScopedService(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -206,7 +202,6 @@ func TestScope_TheRootContainerNeverSeesAScopedService(t *testing.T) {
     }
 }
 
-/* @info A scoped service is the request, so it reads both levels: the scope's own substitutes and the container's process-wide singletons. Suspending the scope for it — the rule that keeps container providers request-agnostic — would hide from it the very entries it exists to consume. */
 func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -261,7 +256,6 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
     }
 }
 
-/* @info A container provider stays request-agnostic even while a scoped service is being built around it: it is a process singleton and a value assembled out of one request would be handed to every other one. The refusal is the same "not registered" a wiring mistake gets anywhere else, reported where the mistake is. */
 func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -304,7 +298,6 @@ func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
     }
 }
 
-/* @info A container singleton resolved from inside a scoped provider is still one instance for the whole process. Suspension is per creation and restored afterwards, so the scoped service around it keeps seeing its scope while the singleton inside it never did. */
 func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -371,7 +364,6 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
     }
 }
 
-/* @info A scoped service that resolves its own name re-enters itself, and the repeat has to be reported rather than waited on: the creation guard for that name is already held by this very resolution, so waiting would hang the request instead of naming the wiring mistake. */
 func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -403,7 +395,6 @@ func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T
     }
 }
 
-/* @info A scoped registration answers Has before anything is built. Has reports what the scope can produce, not what it happens to hold, or every caller would have to resolve a service just to find out whether it exists. */
 func TestScope_HasAnswersTrueForAScopedRegistrationBeforeItIsBuilt(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -428,7 +419,6 @@ func TestScope_HasAnswersTrueForAScopedRegistrationBeforeItIsBuilt(t *testing.T)
     }
 }
 
-/* @info A scoped service registered by type and reached by type must be the same instance the name yields, so the type resolves through the name it was registered under rather than building a second one beside it. */
 func TestScope_GetByTypeResolvesAScopedRegistrationThroughItsName(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -467,7 +457,6 @@ func TestScope_GetByTypeResolvesAScopedRegistrationThroughItsName(t *testing.T) 
     }
 }
 
-/* @info What the scope built, the scope closes: it holds that request's substitutes and has nobody else to close it. */
 func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -501,7 +490,7 @@ func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
     }
 }
 
-/* @info A scoped repository holding a scoped transaction is the ordinary shape now that a scope owns registrations, and closing the two by name would be a coin flip: the dependent has to go first, or it is torn down against a collaborator that is already gone. The names here are chosen so the descending-name fallback would produce the opposite order, which is what makes the graph the thing being tested. */
+/* the names are chosen so the node-key fallback would produce the opposite order. That fallback no longer decides: it survives only as the last tie-break between two nodes carrying the same creation stamp, and what holds this order is the creation-order tie-break — a dependency built during its dependent is the older node, so latest-first reaches the dependent first with or without the edge. This fixture therefore pins that scoped dependents close before their dependencies, not that the graph is what decides it: cutting the graph leaves it green. */
 func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -553,5 +542,201 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
 
     if "dependent" != recorded[0] || "dependency" != recorded[1] {
         t.Fatalf("expected the dependent to be closed before its dependency, got %v", recorded)
+    }
+}
+
+/* the names are chosen so the node-key fallback would close the dependency first. That fallback no longer decides: it survives only as the last tie-break between two nodes carrying the same creation stamp, and the order here is held by the creation-order tie-break, which closes the later-created dependent first. So this pins that an early answer still records its edge, not that the edge outranks the tie-break: cutting the graph leaves it green. */
+func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &scopedCloseRecorder{}
+
+    registerDependencyErr := serviceContainer.RegisterScoped(
+        "app.zzz.dependency",
+        func(resolver containercontract.Resolver) (*recordingScopedService, error) {
+            return &recordingScopedService{name: "dependency", recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerDependencyErr {
+        t.Fatalf("unexpected register error: %v", registerDependencyErr)
+    }
+
+    registerDependentErr := serviceContainer.RegisterScoped(
+        "app.aaa.dependent",
+        func(resolver containercontract.Resolver) (*recordingScopedService, error) {
+            _, getErr := resolver.Get("app.zzz.dependency")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &recordingScopedService{name: "dependent", recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerDependentErr {
+        t.Fatalf("unexpected register error: %v", registerDependentErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.zzz.dependency"); nil != getErr {
+        t.Fatalf("unexpected direct dependency resolution error: %v", getErr)
+    }
+
+    if _, getErr := scopeInstance.Get("app.aaa.dependent"); nil != getErr {
+        t.Fatalf("unexpected dependent resolution error: %v", getErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    recorded := recorder.recorded()
+    if 2 != len(recorded) {
+        t.Fatalf("expected exactly two closes, got %v", recorded)
+    }
+
+    if "dependent" != recorded[0] || "dependency" != recorded[1] {
+        t.Fatalf("expected the dependent to be closed before its already-created dependency, got %v", recorded)
+    }
+}
+
+type scopedTypeOnlyProbe struct {
+    value  string
+    closed *int
+}
+
+func (instance *scopedTypeOnlyProbe) Close() error {
+    *instance.closed = *instance.closed + 1
+
+    return nil
+}
+
+/* no public door can produce the state this exercises: every registrar writes the type provider and the type-to-name index in the same two lines, so the name index always answers first and this path is never taken. The state is built by hand because the point is what the path does if it ever IS taken. */
+func TestScopedServiceByType_BuildsATypeOnlyScopedServiceAndClosesItWithTheScope(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    scopeInstance := serviceContainer.NewScope().(*scope)
+
+    canonicalType := canonicalServiceType(reflect.TypeOf((*scopedTypeOnlyProbe)(nil)))
+
+    buildCount := 0
+    closeCount := 0
+
+    scopeInstance.mutex.Lock()
+    scopeInstance.ownTypeProviders[canonicalType] = func(resolver containercontract.Resolver) (any, error) {
+        buildCount = buildCount + 1
+
+        return &scopedTypeOnlyProbe{value: "type only", closed: &closeCount}, nil
+    }
+    scopeInstance.mutex.Unlock()
+
+    firstValue, firstErr := scopeInstance.GetByType(canonicalType)
+    if nil != firstErr {
+        t.Fatalf("unexpected get by type error: %v", firstErr)
+    }
+
+    firstProbe, isProbe := firstValue.(*scopedTypeOnlyProbe)
+    if false == isProbe || "type only" != firstProbe.value {
+        t.Fatalf("unexpected resolved value: %#v", firstValue)
+    }
+
+    secondValue, secondErr := scopeInstance.GetByType(canonicalType)
+    if nil != secondErr {
+        t.Fatalf("unexpected second get by type error: %v", secondErr)
+    }
+
+    if firstValue != secondValue {
+        t.Fatalf("expected the type-only scoped service to be memoized within its scope")
+    }
+
+    if 1 != buildCount {
+        t.Fatalf("expected the provider to run exactly once, got %d", buildCount)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != closeCount {
+        t.Fatalf("expected the type-only scoped service to be closed exactly once with its scope, got %d", closeCount)
+    }
+}
+
+type keptResolverHolder struct {
+    resolver containercontract.Resolver
+    recorder *scopedCloseRecorder
+}
+
+func (instance *keptResolverHolder) Close() error {
+    instance.recorder.record("holder")
+
+    return nil
+}
+
+/* the sibling above cannot tell the edge from the creation-order tie-break: a dependency that is ALREADY held was necessarily created before its dependent, so latest-first closes the dependent first whether the edge exists or not. Here the two disagree. The holder is created first and keeps the resolver it was handed; the scoped entry it later reaches for is installed AFTER it, so the tie-break alone would close that entry first — out from under the holder that is still open. The edge recorded on the already-held path is the only thing that puts them back in order. */
+func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    recorder := &scopedCloseRecorder{}
+
+    if registerErr := serviceContainer.RegisterScoped(
+        "app.aaa.keptholder",
+        func(resolver containercontract.Resolver) (*keptResolverHolder, error) {
+            return &keptResolverHolder{resolver: resolver, recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    /* the name carries a scoped registration of its own, which is what makes it a SCOPED node: the provider never runs, because the override installed below answers before anything is built */
+    if registerErr := serviceContainer.RegisterScoped(
+        "app.zzz.late",
+        func(resolver containercontract.Resolver) (*recordingScopedService, error) {
+            return &recordingScopedService{name: "unbuilt", recorder: recorder}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    holderValue, getErr := scopeInstance.Get("app.aaa.keptholder")
+    if nil != getErr {
+        t.Fatalf("unexpected holder resolution error: %v", getErr)
+    }
+
+    holder, isHolder := holderValue.(*keptResolverHolder)
+    if false == isHolder {
+        t.Fatalf("expected the holder, got %#v", holderValue)
+    }
+
+    /* installed AFTER the holder was created, so its creation stamp is the later of the two */
+    if overrideErr := scopeInstance.(containercontract.OverrideServiceWithOptions).OverrideInstanceWithOptions(
+        "app.zzz.late",
+        &recordingScopedService{name: "late", recorder: recorder},
+        ClosedWithScope(),
+    ); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if _, lateErr := holder.resolver.Get("app.zzz.late"); nil != lateErr {
+        t.Fatalf("unexpected late resolution error: %v", lateErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    recorded := recorder.recorded()
+    if 2 != len(recorded) {
+        t.Fatalf("expected exactly two closes, got %v", recorded)
+    }
+
+    if "holder" != recorded[0] || "late" != recorded[1] {
+        t.Fatalf("expected the holder to close before the entry it reached through its kept resolver, got %v", recorded)
     }
 }

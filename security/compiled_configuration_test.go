@@ -3,6 +3,7 @@ package security
 import (
     "context"
     "errors"
+    "fmt"
     "strings"
     "testing"
 
@@ -11,6 +12,7 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/event"
     eventcontract "github.com/precision-soft/melody/event/contract"
+    "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -718,5 +720,140 @@ func TestNewCompiledConfiguration_CopiesTheCallersFirewalls(t *testing.T) {
 
     if nil == configuration.Firewalls()[0] {
         t.Fatalf("expected the configuration to keep its own copy of the firewalls")
+    }
+}
+
+type compiledFirewallFailingLoginHandler struct{}
+
+func (instance *compiledFirewallFailingLoginHandler) Login(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LoginInput,
+) (*securitycontract.LoginResult, error) {
+    return nil, errors.New("the credentials were refused")
+}
+
+var _ securitycontract.LoginHandler = (*compiledFirewallFailingLoginHandler)(nil)
+
+/* the dispatch failure travels as an error rather than as its own rendered text: the dispatcher answers a wrapper whose Error() is the bare "event listener returned error", while the listener's name, the event and the listener's own cause all live in that error's CONTEXT. Flattened into a context slot, the record named neither the broken listener nor why it broke. */
+func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "matcher",
+        []securitycontract.Rule{},
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        &compiledFirewallFailingLoginHandler{},
+        nil,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    listenerFailure := errors.New("the audit sink refused the record")
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLoginFailure,
+        func(listenerRuntime runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return listenerFailure
+        },
+        0,
+    )
+
+    _, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
+    if nil == loginErr {
+        t.Fatalf("expected the dispatch failure to be reported")
+    }
+
+    if false == errors.Is(loginErr, listenerFailure) {
+        t.Fatalf("expected the listener's own failure to be reachable, got: %v", loginErr)
+    }
+
+    logContext := exception.LogContext(loginErr)
+    rendered := fmt.Sprintf("%v", logContext)
+
+    if false == strings.Contains(rendered, "the credentials were refused") {
+        t.Fatalf("expected the login failure to stay in the record, got %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "the audit sink refused the record") {
+        t.Fatalf("expected the broken listener's own cause in the record, got %s", rendered)
+    }
+}
+
+type compiledFirewallFailingLogoutHandler struct{}
+
+func (instance *compiledFirewallFailingLogoutHandler) Logout(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LogoutInput,
+) (*securitycontract.LogoutResult, error) {
+    return nil, errors.New("the session store refused the logout")
+}
+
+var _ securitycontract.LogoutHandler = (*compiledFirewallFailingLogoutHandler)(nil)
+
+/* the logout door carries the same repair as its login twin two functions above, and a class repaired at one door and not asserted at the other is a door nobody proved */
+func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "matcher",
+        []securitycontract.Rule{},
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        &compiledFirewallFailingLogoutHandler{},
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+        SourceNone,
+    )
+
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    listenerFailure := errors.New("the audit sink refused the record")
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLogoutFailure,
+        func(listenerRuntime runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return listenerFailure
+        },
+        0,
+    )
+
+    _, logoutErr := firewall.Logout(runtimeInstance, nil, securitycontract.LogoutInput{})
+    if nil == logoutErr {
+        t.Fatalf("expected the dispatch failure to be reported")
+    }
+
+    if false == errors.Is(logoutErr, listenerFailure) {
+        t.Fatalf("expected the listener's own failure to be reachable, got: %v", logoutErr)
+    }
+
+    rendered := fmt.Sprintf("%v", exception.LogContext(logoutErr))
+
+    if false == strings.Contains(rendered, "the session store refused the logout") {
+        t.Fatalf("expected the logout failure to stay in the record, got %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "the audit sink refused the record") {
+        t.Fatalf("expected the broken listener's own cause in the record, got %s", rendered)
     }
 }

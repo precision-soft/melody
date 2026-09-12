@@ -1243,8 +1243,7 @@ func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T)
     }
 }
 
-/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a typed nil dereferenced on
-BodyReader is a second panic after recover has already run and ServeHttp answers nothing at all. */
+/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a typed nil dereferenced on BodyReader is a second panic after recover has already run and ServeHttp answers nothing at all. */
 func TestCloseDiscardedResponseBody_ReadsATypedNilResponseAsAbsent(t *testing.T) {
     var unassignedResponse *Response
 
@@ -1718,6 +1717,9 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/admin//",
         "/.well-known/acme-challenge/token",
         "/assets/app.css",
+        /* whitespace INSIDE the path is a spelling the router and the matcher read alike — neither trims it — so it is not refused */
+        "/public /",
+        "/a b/c",
     }
 
     for _, canonicalPath := range canonicalPaths {
@@ -1726,8 +1728,7 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         }
     }
 
-    /* the folds the router does not apply but the access-control matcher does: each must be refused
-       here, before the two can disagree about which rule answers the request */
+    /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request. The whitespace spellings are the decoded forms of "/public%20", "/public%09" and "/public%C2%A0": the router keeps the whitespace and the matcher trims it */
     foldedPaths := []string{
         "/admin/x/../../login",
         "/admin/..",
@@ -1738,6 +1739,15 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/./login",
         "/admin/.",
         "/../etc/passwd",
+        "/public ",
+        "/public\t",
+        "/public\u00a0",
+        "/ ",
+        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router routed as a segment of its own while the matcher trimmed it to "/public" */
+        " /public",
+        "\t/public",
+        "\u00a0/public",
+        " ",
     }
 
     for _, foldedPath := range foldedPaths {
@@ -1748,8 +1758,7 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
 }
 
 func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
-    /* the asterisk-form of OPTIONS and an authority-form CONNECT do not begin with "/" and are not
-       path-routed, so the fold guard must not answer for them */
+    /* the asterisk-form of OPTIONS and an authority-form CONNECT do not begin with "/" and are not path-routed, so the fold guard must not answer for them */
     for _, target := range []string{"*", "example.com:443", ""} {
         if false == requestPathIsCanonical(target) {
             t.Fatalf("expected non-path target %q to be left to the router", target)
@@ -1788,4 +1797,77 @@ func TestMarkResponsePrivateForSessionCookie(t *testing.T) {
             }
         })
     }
+}
+
+type closeTrackingResponseBodyReader struct {
+    reader *strings.Reader
+    closed bool
+}
+
+func (instance *closeTrackingResponseBodyReader) Read(destination []byte) (int, error) {
+    return instance.reader.Read(destination)
+}
+
+func (instance *closeTrackingResponseBodyReader) Close() error {
+    instance.closed = true
+
+    return nil
+}
+
+/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response left its *os.File open for the life of the process, one descriptor per request whose status landed outside the range net/http accepts */
+func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T) {
+    bodyReader := &closeTrackingResponseBodyReader{reader: strings.NewReader("file bytes")}
+
+    response := NewResponse(nethttp.StatusOK, nil)
+    response.SetBodyReader(bodyReader)
+    response.SetStatusCode(1200)
+
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
+
+    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{})
+
+    if nethttp.StatusInternalServerError != written.StatusCode() {
+        t.Fatalf("expected the rendered 500, got %d", written.StatusCode())
+    }
+
+    if false == bodyReader.closed {
+        t.Fatal("expected the discarded response body to be closed")
+    }
+}
+
+
+/* Cache-Control is a list header a response may carry on several field lines, and its directives may carry quoted field-name lists. Reading only the first line loses every directive on the ones behind it, and splitting on a bare comma cuts through the quotes — both rewrite a header the guard was only supposed to add "private" to. */
+func TestMarkResponsePrivateForSessionCookie_KeepsEveryFieldLineAndQuotedList(t *testing.T) {
+    t.Run("directives on a second field line survive", func(t *testing.T) {
+        response := NewResponse(nethttp.StatusOK, nil)
+        response.Headers().Add("Cache-Control", "public")
+        response.Headers().Add("Cache-Control", "max-age=60")
+
+        markResponsePrivateForSessionCookie(response)
+
+        got := response.Headers().Get("Cache-Control")
+        if false == strings.Contains(got, "max-age=60") {
+            t.Fatalf("expected the second field line's directive to survive, got %q", got)
+        }
+
+        if true == strings.Contains(strings.ToLower(got), "public") {
+            t.Fatalf("a session-cookie response must never stay publicly cacheable, got %q", got)
+        }
+
+        if false == strings.Contains(got, "private") {
+            t.Fatalf("expected the response to be marked private, got %q", got)
+        }
+    })
+
+    t.Run("a quoted field-name list is not cut", func(t *testing.T) {
+        response := NewResponse(nethttp.StatusOK, nil)
+        response.Headers().Set("Cache-Control", `no-cache="X-One, Public, X-Two", max-age=60`)
+
+        markResponsePrivateForSessionCookie(response)
+
+        got := response.Headers().Get("Cache-Control")
+        if false == strings.Contains(got, `no-cache="X-One, Public, X-Two"`) {
+            t.Fatalf("expected the quoted field-name list to survive whole, got %q", got)
+        }
+    })
 }

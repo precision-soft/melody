@@ -1,5 +1,9 @@
 package http
 
+import (
+    "github.com/precision-soft/melody/v3/exception"
+)
+
 const (
     ConstraintAlphaLowercase = "^[a-z]+$"
     ConstraintAlpha          = "^[a-zA-Z]+$"
@@ -27,16 +31,63 @@ func (instance *Requirement) Pattern() string {
     return instance.pattern
 }
 
-func NewRequirements(requirements ...Requirement) map[string]string {
+/* NewRequirements collects the declared requirements into the map a route option takes. It refuses what it used to drop, because both drops failed OPEN: a requirement missing its pattern — a constant that was never filled in, a pattern read from configuration that resolved to "" — left the parameter with NO constraint at all, so a path segment the developer declared numeric matched anything, and a name declared twice kept whichever entry the argument order happened to put last while the other declaration vanished. The router refuses an uncompilable pattern by name at registration; an absent one is the same class of mistake and is refused here, where the declaration is.
+
+   It takes the pointers the Require* helpers return: the helpers were unusable with the value form, since every call site had to dereference them by hand for a signature that could just as well accept what they hand back. */
+func NewRequirements(requirements ...*Requirement) map[string]string {
     result := map[string]string{}
 
-    for _, requirement := range requirements {
+    for index, requirement := range requirements {
+        if nil == requirement {
+            exception.Panic(
+                exception.NewError(
+                    "route requirement may not be nil",
+                    map[string]any{
+                        "index": index,
+                    },
+                    nil,
+                ),
+            )
+        }
+
         if "" == requirement.parameterName {
-            continue
+            exception.Panic(
+                exception.NewError(
+                    "route requirement parameter name may not be empty",
+                    map[string]any{
+                        "index":   index,
+                        "pattern": requirement.pattern,
+                    },
+                    nil,
+                ),
+            )
         }
 
         if "" == requirement.pattern {
-            continue
+            exception.Panic(
+                exception.NewError(
+                    "route requirement pattern may not be empty",
+                    map[string]any{
+                        "index":         index,
+                        "parameterName": requirement.parameterName,
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        if existingPattern, exists := result[requirement.parameterName]; true == exists {
+            exception.Panic(
+                exception.NewError(
+                    "route requirement declared twice for one parameter",
+                    map[string]any{
+                        "parameterName":   requirement.parameterName,
+                        "existingPattern": existingPattern,
+                        "pattern":         requirement.pattern,
+                    },
+                    nil,
+                ),
+            )
         }
 
         result[requirement.parameterName] = requirement.pattern

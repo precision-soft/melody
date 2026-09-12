@@ -19,16 +19,11 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* recordingJournalRepository counts the batches that reached it, which is what makes the ordering between
-the handler and the flush observable from a test. */
+/* recordingJournalRepository counts the batches that reached it, which is what makes the ordering between the handler and the flush observable from a test. */
 type recordingJournalRepository struct {
     batchCount int
     entryCount int
     appendErr  error
-}
-
-func (instance *recordingJournalRepository) EnsureSchema(ctx context.Context) error {
-    return nil
 }
 
 func (instance *recordingJournalRepository) Append(ctx context.Context, entry *repository.CatalogJournalEntry) (*repository.CatalogJournalEntry, error) {
@@ -56,8 +51,7 @@ func (instance *recordingJournalRepository) Count(ctx context.Context) (int, err
 
 var _ repository.CatalogJournalRepository = (*recordingJournalRepository)(nil)
 
-/* newTrailRuntime builds the two levels the http kernel builds: a container holding the scoped
-registration, and a scope carrying the request context that only a request has. */
+/* newTrailRuntime builds the two levels the http kernel builds: a container holding the scoped registration, and a scope carrying the request context that only a request has. */
 func newTrailRuntime(t *testing.T, journalRepository repository.CatalogJournalRepository, requestId string) melodyruntimecontract.Runtime {
     t.Helper()
 
@@ -118,9 +112,7 @@ func runFlushMiddleware(
     return NewCatalogJournalFlushMiddleware()(next)(runtimeInstance, httptest.NewRecorder(), request)
 }
 
-/* @info the flush has to happen AFTER the handler ran and BEFORE the response leaves. The scope's own
-Close runs from a deferred call in the http kernel, which is after the response has already gone to the
-client, so a caller reading the journal on receipt of its 201 would be racing the write */
+/* the flush has to happen AFTER the handler ran and BEFORE the response leaves. The scope's own Close runs from a deferred call in the http kernel, which is after the response has already gone to the client, so a caller reading the journal on receipt of its 201 would be racing the write */
 
 func TestCatalogJournalFlushMiddlewareWritesAfterTheHandlerAndBeforeTheResponse(t *testing.T) {
     journalRepository := &recordingJournalRepository{}
@@ -169,9 +161,7 @@ func TestCatalogJournalFlushMiddlewareWritesAfterTheHandlerAndBeforeTheResponse(
     }
 }
 
-/* @info the middleware and the event listeners must reach the SAME instance. Were they not the same, the
-middleware would flush a trail nobody wrote to and the journal would stay empty while every response still
-looked correct — which is the whole claim the scoped registration makes */
+/* the middleware and the event listeners must reach the SAME instance. Were they not the same, the middleware would flush a trail nobody wrote to and the journal would stay empty while every response still looked correct — which is the whole claim the scoped registration makes */
 
 func TestCatalogJournalFlushMiddlewareSharesTheTrailWithTheHandler(t *testing.T) {
     journalRepository := &recordingJournalRepository{}
@@ -204,8 +194,7 @@ func TestCatalogJournalFlushMiddlewareSharesTheTrailWithTheHandler(t *testing.T)
     }
 }
 
-/* @info a request that changed nothing must not pay a query. A read is the common case and it resolves
-the trail too */
+/* a request that changed nothing must not pay a query. A read is the common case and it resolves the trail too */
 
 func TestCatalogJournalFlushMiddlewareWritesNothingForARequestThatChangedNothing(t *testing.T) {
     journalRepository := &recordingJournalRepository{}
@@ -231,8 +220,7 @@ func TestCatalogJournalFlushMiddlewareWritesNothingForARequestThatChangedNothing
     }
 }
 
-/* @info a journal write that fails has to fail the REQUEST. The change to the nomenclature already
-happened; a caller told it succeeded while the record of it was lost has been told something untrue */
+/* a journal write that fails has to fail the REQUEST. The change to the nomenclature already happened; a caller told it succeeded while the record of it was lost has been told something untrue */
 
 func TestCatalogJournalFlushMiddlewareFailsTheRequestWhenTheJournalWriteFails(t *testing.T) {
     journalRepository := &recordingJournalRepository{appendErr: fmt.Errorf("database is gone")}

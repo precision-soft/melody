@@ -141,7 +141,7 @@ app melody:messagebus:consume --transport=async --limit=100
 app melody:messagebus:consume --transport=async --concurrency=8
 ```
 
-The consumer loops over the transport, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled. The transport's lifecycle is owned by the application, not the consumer — the consumer does **not** call `Close` on exit, so a transport shared between the dispatcher and the consumer in the same process keeps working after the consume command returns (the process exit releases a durable transport's connections). If the delivery channel closes without a cancelled context (for example a lost broker connection), the consumer returns an error rather than reporting a clean exit, so a supervisor can tell a crash from a graceful stop.
+The consumer loops over the transport, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled. The transport's lifecycle is owned by the container's ordered teardown, not the consumer — the consumer does **not** call `Close` on exit, so a transport shared between the dispatcher and the consumer in the same process keeps working after the consume command returns; `RegisterTransports` registers a `TransportsCloser` beside the map, resolved as a dependency of it, so the teardown closes every registered transport after everything that depends on the map, in deterministic name order. If the delivery channel closes without a cancelled context (for example a lost broker connection), the consumer returns an error rather than reporting a clean exit, so a supervisor can tell a crash from a graceful stop.
 
 By default the consumer handles one message at a time (so the broker's prefetch only buffers). Pass `--concurrency=N` to run N worker goroutines reading the same transport; per-transport `Ack`/`Nack` stay serialized, so this is safe. On shutdown the consumer waits a bounded grace period (default 30s, set with `ConsumeCommand.WithShutdownGrace`) for in-flight handlers to drain, then returns even if a handler is still running — handlers are not context-aware, so this stops a wedged handler from blocking shutdown forever. Messages already received but not yet acked are redelivered on the next run (at-least-once), so handlers must be idempotent.
 
@@ -159,7 +159,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go) stops the stack after a successful send, so handle middleware placed after it does not run for routed messages. This is the intended synchronous/asynchronous split.
 - The consumer dispatches one message at a time per invocation; run multiple consumers for parallelism.
 - Retries are **at-least-once**: a durable transport that carries the redelivery count by re-publishing (the AMQP binding) can, on a crash between the re-publish and the original's ack, redeliver the original alongside the re-published copy. Handlers must be idempotent. The redelivery count stamped on an exhausted/dead-lettered message is the number of *redeliveries*, which is one less than the number of handler *attempts*.
-- The retry backoff is capped and overflow-safe. [`InMemoryTransport`](../../messagebus/transport_in_memory.go) honors a `DelayStamp` by re-pushing after the delay (it no longer hot-retries), and drops a requeue if its buffer is full or the transport is closed — acceptable for a dev transport, but another reason to use a durable transport in production.
+- The retry backoff is capped and overflow-safe. [`InMemoryTransport`](../../messagebus/transport_in_memory.go) honors a `DelayStamp` by re-pushing after the delay (it no longer hot-retries), and drops a requeue if its buffer is full or the transport is closed — acceptable for a dev transport, but another reason to use a durable transport in production. A delayed requeue that gets dropped is logged through the logger of the runtime the `Nack` was called with, so the loss has a record even though the `Nack` already answered success before the delay elapsed.
 
 ## Userland API
 
@@ -192,7 +192,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`type Manager`](../../messagebus/manager.go)
     - [`NewManager(name string, middlewares ...messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go)
 - [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go)
-- [`type HandleOptions`](../../messagebus/middleware_handle.go) (`RequireHandler bool`)
+- [`type HandleOptions`](../../messagebus/middleware_handle.go) (`AllowMissingHandler bool`) — the default REFUSES a message with no registered handler, because on the consume path a pass-through is immediately Acked and the queue drains; `AllowMissingHandler: true` restores the pass-through with a warning
     - [`NewHandleMessageMiddlewareWithOptions(locator messagebuscontract.HandlerLocator, options HandleOptions) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go)
 - [`type TransportRouting`](../../messagebus/middleware_send.go)
     - [`NewSendMessageMiddleware(routingByType map[reflect.Type]TransportRouting) messagebuscontract.Middleware`](../../messagebus/middleware_send.go)
@@ -217,3 +217,5 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`BusMustFromResolver(containercontract.Resolver) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
 - [`HandlerLocatorMustFromContainer(containercontract.Container) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
 - [`HandlerLocatorMustFromResolver(containercontract.Resolver) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
+- [`const ServiceTransportsCloser`](../../messagebus/service_resolver.go)
+- [`type TransportsCloser`](../../messagebus/service_resolver.go) — owns the shutdown of every transport `RegisterTransports` registered; its `Close() error` is what the container's ordered teardown reaches, closing the transports in name order and joining failures with the transport named in each

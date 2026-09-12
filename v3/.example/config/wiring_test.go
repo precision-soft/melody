@@ -31,7 +31,7 @@ func generateWiring(t *testing.T) (string, *melodywiring.GenerateReport) {
     return source, report
 }
 
-/* @info the committed file is what the application registers, so it has to stay what the generator produces; without this check a constructor gains an argument and the wiring silently keeps building the old one */
+/* the committed file is what the application registers, so it has to stay what the generator produces; without this check a constructor gains an argument and the wiring silently keeps building the old one */
 func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
     source, _ := generateWiring(t)
 
@@ -49,11 +49,16 @@ func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
     }
 }
 
+/* the two assertions carry different properties and neither implies the other. The skip list is "nothing the
+   scan found was left out"; the count is "the scan still finds what it used to", which is the half that
+   notices a package silently dropping out of the bind set — that loses constructors with nothing skipped.
+   The report offers counts and not names, so the count is as specific as this can be: it moves whenever a
+   constructor is added or removed, deliberately, and the number is updated in the same edit that does it. */
 func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
     _, report := generateWiring(t)
 
-    if 12 != report.ConstructorCount {
-        t.Fatalf("expected every scanned constructor to be wired, got %d", report.ConstructorCount)
+    if 15 != report.ConstructorCount {
+        t.Fatalf("the scan found %d constructors, wanted 15 — add or remove one and update this number with it", report.ConstructorCount)
     }
 
     if 0 != len(report.Skipped) {
@@ -61,7 +66,7 @@ func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
     }
 }
 
-/* @info a bind that matches nothing is the misspelling this reporting exists to catch, and it must stay empty for the example */
+/* a bind that matches nothing is the misspelling this reporting exists to catch, and it must stay empty for the example */
 func TestWiring_DeclaresNoUnusedBinds(t *testing.T) {
     _, report := generateWiring(t)
 

@@ -10,7 +10,7 @@ import (
 
 /* scopePlan is the set of scoped registrations a scope is created against. It is built once and never written to afterwards, so every scope holds a reference to the same value instead of a copy of the maps: creating a scope is a pointer load, whatever the size of the plan.
 
-A registration made after a scope already exists rebuilds the plan for the scopes created next; the ones already running keep the plan they were created with. That is the only reading under which a scope's contents do not change under its own feet halfway through a request. */
+   A registration made after a scope already exists rebuilds the plan for the scopes created next; the ones already running keep the plan they were created with. That is the only reading under which a scope's contents do not change under its own feet halfway through a request. */
 type scopePlan struct {
     providers                   map[string]providerAny
     typeProviders               map[reflect.Type]providerAny
@@ -85,7 +85,7 @@ func (instance *container) MustRegisterScoped(
 
 /* registerScoped records a provider the scopes of this container own. The registration is refused when the container already holds the name, unless the caller declared Replacing: a name that answers with a process singleton outside a scope and with a per-request service inside one is exactly the ambiguity the two lifetimes exist to keep apart, and it must be admitted deliberately rather than fall out of the order the modules registered in.
 
-There is no hard seal after boot. A late registration invalidates the published plan and the scopes created next see it, while the ones already running keep the plan they were created with — which is what lets a test register a scoped service on a container it has just built. */
+   There is no hard seal after boot. A late registration invalidates the published plan and the scopes created next see it, while the ones already running keep the plan they were created with — which is what lets a test register a scoped service on a container it has just built. */
 func (instance *container) registerScoped(
     serviceName string,
     serviceType reflect.Type,

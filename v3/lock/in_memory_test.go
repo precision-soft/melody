@@ -152,7 +152,7 @@ func TestInMemoryLocker_ReacquireIsReentrantForSameLock(t *testing.T) {
     }
 }
 
-/* @info counter must be an alignment-safe atomic so CreateLock's 64-bit atomic increment does not panic on 32-bit builds (GOARCH=386/arm/mips). */
+/* counter must be an alignment-safe atomic so CreateLock's 64-bit atomic increment does not panic on 32-bit builds (GOARCH=386/arm/mips). */
 func TestInMemoryLocker_CounterIsAlignmentSafeAtomic(t *testing.T) {
     counterField, exists := reflect.TypeOf(InMemoryLocker{}).FieldByName("counter")
     if false == exists {

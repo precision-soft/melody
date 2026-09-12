@@ -4,9 +4,11 @@ import (
     "context"
     "errors"
     "fmt"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
+    "strings"
     "time"
 
     melodyconfig "github.com/precision-soft/melody/config"
@@ -15,6 +17,7 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/container/contract"
     melodyhttp "github.com/precision-soft/melody/http"
     melodyruntime "github.com/precision-soft/melody/runtime"
+    melodyhttpcontract "github.com/precision-soft/melody/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/serializer"
     melodyserializercontract "github.com/precision-soft/melody/serializer/contract"
@@ -66,7 +69,10 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
 
-func TestBuildApiResponseHonoursAnExplicitRefusal(t *testing.T) {
+/* runtimeRefusingEveryMediaType builds a request whose Accept header refuses every type the manager can produce — the only header that reaches ErrNotAcceptable, since a type the header simply does not name is a preference rather than a refusal. */
+func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
+    t.Helper()
+
     containerInstance := melodycontainer.NewContainer()
 
     registerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
@@ -91,13 +97,106 @@ func TestBuildApiResponseHonoursAnExplicitRefusal(t *testing.T) {
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
 
-    response := buildApiResponse(runtimeInstance, request, nethttp.StatusForbidden, apiResponse{Success: false})
+    return runtimeInstance, request
+}
+
+/* requestAcceptingLines builds a request whose Accept field is spelled over several lines, the way a client that adds the header rather than replacing it sends it. */
+func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, acceptLineList ...string) melodyhttpcontract.Request {
+    t.Helper()
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
+    for _, acceptLine := range acceptLineList {
+        httpRequest.Header.Add("Accept", acceptLine)
+    }
+
+    return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+}
+
+/* the Accept field is list-typed and a client may spell it over several lines; Header.Get answers only the first, so a blanket refusal sent on line one used to hide an available type named on line two. The probe drives the SUCCESS path deliberately: it is the only path where a refused negotiation still shows, because a refusal keeps the status it earned whatever the header says, and therefore cannot tell the two readings apart. The first line has to REFUSE rather than merely miss — an unmatched type falls back to the default serializer, so a pair like "application/xml" then "application/json" would pass under either reading. */
+func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
+    runtimeInstance, _ := runtimeRefusingEveryMediaType(t)
+
+    request := requestAcceptingLines(t, runtimeInstance, "*/*;q=0", "application/json")
+
+    response := buildApiResponse(
+        runtimeInstance,
+        request,
+        nethttp.StatusOK,
+        apiResponse{Success: true, Payload: "payload", Errors: []string{}},
+    )
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    if nethttp.StatusNotAcceptable == response.StatusCode() {
+        t.Fatalf("a client that named an available type on its second Accept line was answered 406")
+    }
+
+    if nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the success path to serve the type named on the second line, got %d", response.StatusCode())
+    }
+}
+
+func responseBodyOf(t *testing.T, response melodyhttpcontract.Response) string {
+    t.Helper()
+
+    reader := response.BodyReader()
+    if nil == reader {
+        return ""
+    }
+
+    body, readErr := io.ReadAll(reader)
+    if nil != readErr {
+        t.Fatalf("read body: %v", readErr)
+    }
+
+    return string(body)
+}
+
+/* the success path and the error path answer an unreadable Accept header differently, and each direction needs a probe of its own: on a success there is nothing to say except in a representation the client rejected, while a refusal that answered 406 would hide the status it earned — the framework's own error renderer states the same asymmetry and falls back for every resolution failure alike. */
+
+func TestBuildApiResponseKeepsTheStatusOfARefusalTheClientRefusesToRead(t *testing.T) {
+    runtimeInstance, request := runtimeRefusingEveryMediaType(t)
+
+    response := buildApiResponse(
+        runtimeInstance,
+        request,
+        nethttp.StatusForbidden,
+        apiResponse{Success: false, Errors: []string{"forbidden"}},
+    )
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    if nethttp.StatusForbidden != response.StatusCode() {
+        t.Fatalf("expected the refusal to keep its own status, got %d", response.StatusCode())
+    }
+
+    body := responseBodyOf(t, response)
+    if false == strings.Contains(body, "forbidden") {
+        t.Fatalf("expected the refusal to name itself in the body, got %q", body)
+    }
+}
+
+func TestBuildApiResponseAnswersNotAcceptableOnTheSuccessPath(t *testing.T) {
+    runtimeInstance, request := runtimeRefusingEveryMediaType(t)
+
+    response := buildApiResponse(
+        runtimeInstance,
+        request,
+        nethttp.StatusOK,
+        apiResponse{Success: true, Payload: "payload", Errors: []string{}},
+    )
     if nil == response {
         t.Fatalf("expected a response")
     }
 
     if nethttp.StatusNotAcceptable != response.StatusCode() {
-        t.Fatalf("expected the explicit refusal to be answered 406 on the error path, got %d", response.StatusCode())
+        t.Fatalf("expected the success path to answer 406, got %d", response.StatusCode())
+    }
+
+    if "" != responseBodyOf(t, response) {
+        t.Fatalf("expected an empty body, got %q", responseBodyOf(t, response))
     }
 }
 

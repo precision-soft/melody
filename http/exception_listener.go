@@ -7,6 +7,7 @@ import (
     eventcontract "github.com/precision-soft/melody/event/contract"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    "github.com/precision-soft/melody/internal"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -48,11 +49,11 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                     path := ""
                     method := ""
 
-                    if nil != exceptionEvent.Request() && nil != exceptionEvent.Request().RequestContext() {
+                    if false == internal.IsNilInterface(exceptionEvent.Request()) && nil != exceptionEvent.Request().RequestContext() {
                         requestId = exceptionEvent.Request().RequestContext().RequestId()
                     }
 
-                    if nil != exceptionEvent.Request() && nil != exceptionEvent.Request().HttpRequest() {
+                    if false == internal.IsNilInterface(exceptionEvent.Request()) && nil != exceptionEvent.Request().HttpRequest() {
                         method = exceptionEvent.Request().HttpRequest().Method
                         if nil != exceptionEvent.Request().HttpRequest().URL {
                             path = exceptionEvent.Request().HttpRequest().URL.Path

@@ -1,302 +1,36 @@
 package security
 
 import (
-    "regexp"
-    "strings"
-
-    "github.com/precision-soft/melody/v3/exception"
-    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
-    securitycontract "github.com/precision-soft/melody/v3/security/contract"
+    "github.com/precision-soft/melody/v3/security/accesscontrol"
 )
 
-func normalizeAccessControlAttributes(attributes []string) []string {
-    normalizedAttributes := make([]string, 0, len(attributes))
-    publicAccess := false
-    for _, attribute := range attributes {
-        normalizedAttribute := strings.TrimSpace(attribute)
-        if "" == normalizedAttribute {
-            continue
-        }
+/* AccessControlRule is an alias for accesscontrol.Rule, which owns the type since the access control vocabulary moved to its own package. Existing code that names security.AccessControlRule keeps compiling and keeps holding the same type. */
+type AccessControlRule = accesscontrol.Rule
 
-        if securitycontract.AttributePublicAccess == normalizedAttribute {
-            publicAccess = true
-        }
+/* AccessControl is an alias for accesscontrol.Control. */
+type AccessControl = accesscontrol.Control
 
-        normalizedAttributes = append(normalizedAttributes, normalizedAttribute)
-    }
-
-    if true == publicAccess && 1 < len(normalizedAttributes) {
-        exception.Panic(
-            exception.NewError("access control PUBLIC_ACCESS may not be combined with other attributes", nil, nil),
-        )
-    }
-
-    /* @important a rule whose attributes all normalize away still matches its path, and an empty attribute list grants every authenticated principal while shadowing any longer-prefixed rule that would have denied; the blank attribute is refused here rather than degrading the guard silently */
-    if 0 == len(normalizedAttributes) {
-        exception.Panic(
-            exception.NewError("access control rule requires at least one attribute", nil, nil),
-        )
-    }
-
-    return normalizedAttributes
-}
-
-func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
-    normalizedPrefix := normalizePathPrefix(pathPrefix)
-
-    normalizedAttributes := normalizeAccessControlAttributes(attributes)
-
-    return AccessControlRule{
-        pathPrefix:      normalizedPrefix,
-        attributes:      normalizedAttributes,
-        isExact:         false,
-        isRegex:         false,
-        isSegmentPrefix: false,
-    }
-}
-
-func NewAccessControlExactRule(path string, attributes ...string) AccessControlRule {
-    normalizedPath := strings.TrimSpace(path)
-    if "" == normalizedPath {
-        exception.Panic(
-            exception.NewError("access control exact path may not be empty", nil, nil),
-        )
-    }
-
-    if "/" != normalizedPath {
-        normalizedPath = strings.TrimSuffix(normalizedPath, "/")
-    }
-
-    rule := NewAccessControlRule("", attributes...)
-    rule.pathPrefix = normalizedPath
-    rule.isExact = true
-
-    return rule
-}
-
-func NewAccessControlRegexRule(pattern string, attributes ...string) AccessControlRule {
-    normalizedPattern := strings.TrimSpace(pattern)
-    if "" == normalizedPattern {
-        exception.Panic(
-            exception.NewError("access control regex pattern may not be empty", nil, nil),
-        )
-    }
-
-    compiled, compileErr := regexp.Compile(normalizedPattern)
-    if nil != compileErr {
-        exception.Panic(
-            exception.NewError(
-                "invalid access control regex pattern",
-                exceptioncontract.Context{
-                    "pattern": normalizedPattern,
-                },
-                compileErr,
-            ),
-        )
-    }
-
-    rule := NewAccessControlRule("", attributes...)
-    rule.regexPattern = normalizedPattern
-    rule.regexCompiled = compiled
-    rule.isRegex = true
-
-    return rule
-}
-
-func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string) AccessControlRule {
-    normalizedPrefix := normalizePathPrefix(pathPrefix)
-
-    /* @important reject an empty segment prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so AllowAnonymous("") would silently open every unmatched path to anonymous access. A genuinely public service declares an explicit "/" prefix. */
-    if "" == normalizedPrefix {
-        exception.Panic(
-            exception.NewError("access control segment prefix may not be empty", nil, nil),
-        )
-    }
-
-    if "/" != normalizedPrefix && true == strings.HasSuffix(normalizedPrefix, "/") {
-        normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
-    }
-
-    normalizedAttributes := normalizeAccessControlAttributes(attributes)
-
-    return AccessControlRule{
-        pathPrefix:      normalizedPrefix,
-        attributes:      normalizedAttributes,
-        isExact:         false,
-        isRegex:         false,
-        isSegmentPrefix: true,
-    }
-}
-
-type AccessControlRule struct {
-    pathPrefix      string
-    regexPattern    string
-    regexCompiled   *regexp.Regexp
-    attributes      []string
-    isExact         bool
-    isRegex         bool
-    isSegmentPrefix bool
-}
-
+/* NewAccessControl collects the rules a request is resolved against. */
 func NewAccessControl(rules ...AccessControlRule) *AccessControl {
-    normalizedRules := make([]AccessControlRule, 0, len(rules))
-
-    for _, rule := range rules {
-        if true == rule.isRegex {
-            normalizedRules = append(normalizedRules, rule)
-            continue
-        }
-
-        if true == rule.isExact {
-            normalizedRule := NewAccessControlExactRule(rule.pathPrefix, rule.attributes...)
-            normalizedRules = append(normalizedRules, normalizedRule)
-            continue
-        }
-
-        if true == rule.isSegmentPrefix {
-            normalizedRules = append(
-                normalizedRules,
-                NewAccessControlRuleWithSegmentPrefix(rule.pathPrefix, rule.attributes...),
-            )
-            continue
-        }
-
-        normalizedRules = append(
-            normalizedRules,
-            NewAccessControlRule(rule.pathPrefix, rule.attributes...),
-        )
-    }
-
-    return &AccessControl{
-        rules: normalizedRules,
-    }
+    return accesscontrol.NewControl(rules...)
 }
 
-type AccessControl struct {
-    rules []AccessControlRule
+/* Deprecated: use github.com/precision-soft/melody/v3/security/accesscontrol.NewRawPrefixRule instead, which names the reach in the constructor and takes its attributes in a config struct. This constructor is removed in v4. */
+func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
+    return accesscontrol.NewRawPrefixRule(pathPrefix, accesscontrol.RuleConfig{Attributes: attributes})
 }
 
-func (instance *AccessControl) Rules() []AccessControlRule {
-    return append([]AccessControlRule{}, instance.rules...)
+/* Deprecated: use github.com/precision-soft/melody/v3/security/accesscontrol.NewSegmentPrefixRule instead. This constructor is removed in v4. */
+func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string) AccessControlRule {
+    return accesscontrol.NewSegmentPrefixRule(pathPrefix, accesscontrol.RuleConfig{Attributes: attributes})
 }
 
-func (instance *AccessControl) Match(path string) ([]string, bool) {
-    matchedIndex, matched := instance.matchRuleIndex(path)
-    if false == matched {
-        return []string{}, false
-    }
-
-    return append([]string{}, instance.rules[matchedIndex].attributes...), true
+/* Deprecated: use github.com/precision-soft/melody/v3/security/accesscontrol.NewExactRule instead. This constructor is removed in v4. */
+func NewAccessControlExactRule(path string, attributes ...string) AccessControlRule {
+    return accesscontrol.NewExactRule(path, accesscontrol.RuleConfig{Attributes: attributes})
 }
 
-func (instance *AccessControl) matchRuleIndex(path string) (int, bool) {
-    normalizedPath := strings.TrimSpace(path)
-    if "" == normalizedPath {
-        normalizedPath = "/"
-    }
-
-    if "/" != normalizedPath {
-        normalizedPath = strings.TrimRight(normalizedPath, "/")
-        if "" == normalizedPath {
-            normalizedPath = "/"
-        }
-    }
-
-    for index, rule := range instance.rules {
-        if true == rule.isExact {
-            if normalizedPath == rule.pathPrefix {
-                return index, true
-            }
-        }
-    }
-
-    bestIndex := -1
-    bestPrefixLength := -1
-
-    fallbackIndex := -1
-
-    for index, rule := range instance.rules {
-        if true == rule.isRegex || true == rule.isExact {
-            continue
-        }
-
-        if "" == rule.pathPrefix {
-            if -1 == fallbackIndex {
-                fallbackIndex = index
-            }
-            continue
-        }
-
-        isPrefixMatch := false
-
-        if true == strings.HasPrefix(normalizedPath, rule.pathPrefix) {
-            if false == rule.isSegmentPrefix {
-                isPrefixMatch = true
-            } else {
-                if "/" == rule.pathPrefix {
-                    isPrefixMatch = true
-                } else {
-                    prefixLength := len(rule.pathPrefix)
-
-                    if len(normalizedPath) == prefixLength {
-                        isPrefixMatch = true
-                    } else {
-                        if prefixLength < len(normalizedPath) && '/' == normalizedPath[prefixLength] {
-                            isPrefixMatch = true
-                        }
-                    }
-                }
-            }
-        }
-
-        if true == isPrefixMatch {
-            currentLength := len(rule.pathPrefix)
-
-            if bestPrefixLength < currentLength {
-                bestPrefixLength = currentLength
-                bestIndex = index
-            }
-
-            continue
-        }
-    }
-
-    if -1 != bestIndex {
-        return bestIndex, true
-    }
-
-    for index, rule := range instance.rules {
-        if false == rule.isRegex {
-            continue
-        }
-
-        if nil == rule.regexCompiled {
-            continue
-        }
-
-        if true == rule.regexCompiled.MatchString(normalizedPath) {
-            return index, true
-        }
-    }
-
-    if -1 != fallbackIndex {
-        return fallbackIndex, true
-    }
-
-    return -1, false
-}
-
-func normalizePathPrefix(pathPrefix string) string {
-    normalizedPrefix := strings.TrimSpace(pathPrefix)
-    if "" == normalizedPrefix {
-        return ""
-    }
-
-    if "/" == normalizedPrefix {
-        return "/"
-    }
-
-    normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
-
-    return normalizedPrefix
+/* Deprecated: use github.com/precision-soft/melody/v3/security/accesscontrol.NewRegexRule instead. This constructor is removed in v4. */
+func NewAccessControlRegexRule(pattern string, attributes ...string) AccessControlRule {
+    return accesscontrol.NewRegexRule(pattern, accesscontrol.RuleConfig{Attributes: attributes})
 }

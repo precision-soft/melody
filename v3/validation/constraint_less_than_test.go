@@ -155,3 +155,31 @@ func TestLessThan_RejectsNaN(t *testing.T) {
         t.Fatalf("expected NaN to be rejected by lessThan, but it passed validation")
     }
 }
+
+func TestLessThan_RefusesAParameterThatIsNotAnIntegerInItsEntirety(t *testing.T) {
+    constraint := NewLessThan(0)
+
+    for _, refusedValue := range []string{"10a", "1e3", "-0.5", "", " ", "0x10", "1 2"} {
+        built, buildErr := constraint.WithParams(map[string]string{"value": refusedValue})
+        if nil == buildErr {
+            t.Fatalf("expected %q to be refused as a bound, got %#v", refusedValue, built)
+        }
+
+        if "invalid less than parameter" != buildErr.Error() {
+            t.Fatalf("unexpected refusal for %q: %v", refusedValue, buildErr)
+        }
+
+        if nil != built {
+            t.Fatalf("expected no constraint to be built from %q, got %#v", refusedValue, built)
+        }
+    }
+
+    built, buildErr := constraint.WithParams(map[string]string{"value": "-5"})
+    if nil != buildErr {
+        t.Fatalf("expected a negative integer bound to be accepted, got %v", buildErr)
+    }
+
+    if -5 != built.(*LessThan).Max() {
+        t.Fatalf("expected the parsed bound to be carried, got %d", built.(*LessThan).Max())
+    }
+}

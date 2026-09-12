@@ -1,12 +1,15 @@
 package security
 
 import (
+    "fmt"
     "net/http/httptest"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -226,5 +229,64 @@ func TestImpersonation_AnonymousCanNotSwitch(t *testing.T) {
 
     if _, present := ImpersonatorFromToken(token); true == present {
         t.Fatal("expected no impersonation for an anonymous principal")
+    }
+}
+
+/* the resolver's error used to be dropped: the journal said only "could not resolve", indistinguishable from a mistyped target, and the failure's cause survived nowhere. */
+func TestImpersonation_ResolverErrorCarriesItsCauseIntoTheJournal(t *testing.T) {
+    admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch})
+    source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
+        Inner: &fixedTokenSource{token: admin},
+        Users: &mapUserResolver{usersById: map[string]securitycontract.Token{}},
+    })
+
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(runtimeInstance, switchRequest("ghost"))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if true == token.IsAuthenticated() {
+        t.Fatal("a failed target resolution must fail closed to anonymous")
+    }
+
+    infoRecords := logger.recordsAtLevel(loggingcontract.LevelInfo)
+    if 1 != len(infoRecords) {
+        t.Fatalf("a resolver error is a denial by contract and must be filed once at Info, got %d records", len(infoRecords))
+    }
+
+    rendered := fmt.Sprintf("%v", infoRecords[0].context)
+    if false == strings.Contains(rendered, "user not found") {
+        t.Fatalf("the resolver's own error must travel with the record, got: %s", rendered)
+    }
+}
+
+/* failingUserResolver answers a marked infrastructure failure — the user store being down, not a denial. */
+type failingUserResolver struct{}
+
+func (instance *failingUserResolver) ResolveImpersonatedUser(
+    _ runtimecontract.Runtime,
+    _ string,
+) (securitycontract.Token, error) {
+    return nil, exception.NewError("user store query failed", nil, markInfrastructureFailure(exception.NewError("store is down", nil, nil)))
+}
+
+func TestImpersonation_MarkedResolverFailureLogsAtError(t *testing.T) {
+    admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch})
+    source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
+        Inner: &fixedTokenSource{token: admin},
+        Users: &failingUserResolver{},
+    })
+
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(runtimeInstance, switchRequest("anyone"))
+    if nil != resolveErr || true == token.IsAuthenticated() {
+        t.Fatalf("a failed resolution must fail closed to anonymous: authenticated=%v err=%v", token.IsAuthenticated(), resolveErr)
+    }
+
+    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatal("a resolver failure carrying the infrastructure mark degrades every impersonated request to anonymous and must be filed at Error")
     }
 }

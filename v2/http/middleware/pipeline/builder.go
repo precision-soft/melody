@@ -277,9 +277,9 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
 
 /* validateReferenceGating refuses a before or after reference whose target is not active everywhere the referring definition is active. selectDefinitions drops a definition whose environment or group gating does not match; orderDefinitions then sees the surviving reference as a name no node carries and reports it as missing, and Build turns that into the error the application boots on. A pipeline where an always-on middleware orders itself against a dev-only one therefore starts in dev and refuses to start in prod, which is the one place the failure must not be discovered.
 
-The declared sets are compared, never the environment being booted, so the same reference is refused in every environment rather than only in the one that happens to drop the target. An empty set is the universal one — a definition that names no environments runs in all of them — so an always-on definition may only reference another always-on definition, while a dev-only definition may reference a dev-only or an always-on one. Groups are not compared as sets: they pre-filter which definitions this build weighs at all, so only the environment gating can make a reference unsatisfiable.
+   The declared sets are compared, never the environment being booted, so the same reference is refused in every environment rather than only in the one that happens to drop the target. An empty set is the universal one — a definition that names no environments runs in all of them — so an always-on definition may only reference another always-on definition, while a dev-only definition may reference a dev-only or an always-on one. Groups are not compared as sets: they pre-filter which definitions this build weighs at all, so only the environment gating can make a reference unsatisfiable.
 
-A name no definition carries at all is left alone: that is an ordinary missing reference, and the ordering pass reports every one of them together. */
+   A name no definition carries at all is left alone: that is an ordinary missing reference, and the ordering pass reports every one of them together. */
 func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group string) error {
     if 0 == len(definitions) {
         return nil
@@ -401,7 +401,7 @@ func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareD
 
 /* unionOfDeclaredSets merges the environment sets of every registration under one name, and reports the merge as universal — the empty slice the rest of this file reads as "everywhere" — when it names every environment a melody process is allowed to run in.
 
-That last step is what makes the union answer an always-on referrer at all. The environment is not free-form: config.validateEnvironment refuses to boot on anything that is not `dev` or `prod`, so a name registered for both is registered for every environment that can exist, and treating the merge as merely `{dev, prod}` would refuse a configuration no process can ever fall outside of. The list is duplicated here rather than imported to keep the pipeline free of a dependency on config; supportedEnvironments carries the guard against the two drifting apart. */
+   That last step is what makes the union answer an always-on referrer at all. The environment is not free-form: config.validateEnvironment refuses to boot on anything that is not `dev` or `prod`, so a name registered for both is registered for every environment that can exist, and treating the merge as merely `{dev, prod}` would refuse a configuration no process can ever fall outside of. The list is duplicated here rather than imported to keep the pipeline free of a dependency on config; supportedEnvironments carries the guard against the two drifting apart. */
 func unionOfDeclaredSets(definitions []*HttpMiddlewareDefinition) []string {
     merged := make([]string, 0, len(definitions))
     seen := make(map[string]bool, len(definitions))

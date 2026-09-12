@@ -296,3 +296,84 @@ func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *
         t.Fatalf("a raw control byte reached the terminal:\n%s", rendered)
     }
 }
+
+/* the empty and the success lines of a run carry the migration name, which the runner did not write, and they were the two lines of the printer that let it through as sent while the executing, completed and failed lines escaped it; the name is escaped on all five, in both colour modes */
+func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        buffer := &bytes.Buffer{}
+        printer := &migrationPrinter{writer: buffer, noColor: noColor}
+
+        printer.printEmpty("up", "2024\r0101_forged")
+        printer.printSuccess("up", "2024\r0101_forged", 1)
+
+        rendered := buffer.String()
+
+        if 2 != strings.Count(rendered, `2024\r0101_forged`) {
+            t.Fatalf("noColor=%v: expected the escaped name on both lines, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: a raw carriage return survived: %q", noColor, rendered)
+        }
+    }
+}
+
+/* the option a command puts on the context is the one a run prints under, ahead of the process-wide fallback: the fallback is one value for the whole process, and a run reading it printed under whichever command had installed it last */
+func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var fallback bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &fallback, NoColor: true})
+
+    var carried bytes.Buffer
+    ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &carried, NoColor: true})
+
+    if runErr := RunQueries(ctx, nil, "up", "20240101000000_probe", nil); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if false == strings.Contains(carried.String(), "20240101000000_probe") {
+        t.Fatalf("expected the run to print on the writer the context carries, got %q", carried.String())
+    }
+
+    if "" != fallback.String() {
+        t.Fatalf("expected nothing on the process-wide fallback, got %q", fallback.String())
+    }
+}
+
+/* a command puts its posture back on the way out, and only when its own value is still the live one: the value installed for the run does not survive the run, and a command that finished while a later one still runs leaves that one's value where it is */
+func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var host bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    var first bytes.Buffer
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+
+    if &first != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the swap to install the command's value for the length of its run")
+    }
+
+    var second bytes.Buffer
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the first command's restore to leave the later command's value in place")
+    }
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if firstInstalled != processRunnerOption.Load() {
+        t.Fatal("expected the second command's restore to put back what it found, the first command's value")
+    }
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}

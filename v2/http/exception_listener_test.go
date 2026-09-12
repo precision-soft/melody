@@ -401,14 +401,17 @@ func TestExceptionListener_ContextWithoutErrorsKeyStaysPrivate(t *testing.T) {
 
     body := readResponseBody(t, response)
 
+    /* the body reader is allowed to be absent, and the helper answers "" for that, so a negative assertion on its own reports success for a response that carries nothing at all. The flat message is what says the envelope was rendered and the refusal below is a real one. */
+    if false == strings.Contains(body, "bad request") {
+        t.Fatalf("expected the flat message to be rendered, got %s", body)
+    }
+
     if true == strings.Contains(body, "must not leak") {
         t.Fatalf("expected non-errors context to stay out of the body, got %s", body)
     }
 }
 
-/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight
-off the result dereferenced it; the package's own door refuses the typed nil with the plain one, and the
-same call three lines below already used it. */
+/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight off the result dereferenced it; the package's own door refuses the typed nil with the plain one, and the same call three lines below already used it. */
 func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)

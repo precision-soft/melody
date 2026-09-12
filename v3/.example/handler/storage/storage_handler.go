@@ -12,8 +12,7 @@ import (
     storagecontract "github.com/precision-soft/melody/v3/storage/contract"
 )
 
-/* PutHandler stores the request body under the given key in the object store (localstack S3 in dev),
-demonstrating the awss3 integration's Put over real HTTP. */
+/* PutHandler stores the request body under the given key in the object store (localstack S3 in dev), demonstrating the awss3 integration's Put over real HTTP. */
 func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         key := queryString(request, "key")

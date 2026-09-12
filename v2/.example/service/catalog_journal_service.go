@@ -23,7 +23,7 @@ const (
 
 /* CatalogJournalService records what happened to the nomenclature and who did it.
 
-The repository is optional: without a database there is nowhere to keep a journal, and the example goes on working without one rather than refusing every write. Recording is therefore something the application does when it can, and the absence is visible in the report rather than in a failure. */
+   The repository is optional: without a database there is nowhere to keep a journal, and the example goes on working without one rather than refusing every write. Recording is therefore something the application does when it can, and the absence is visible in the report rather than in a failure. */
 type CatalogJournalService struct {
     journalRepository repository.CatalogJournalRepository
     clock             melodyclockcontract.Clock

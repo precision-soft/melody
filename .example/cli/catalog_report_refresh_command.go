@@ -34,7 +34,7 @@ type catalogReportPayload struct {
 
 /* Run is what the schedule calls. The report is cheap enough to compute inside a request, but the request that finds a cold cache is the one that pays for it, so the catalogue is read on a timer instead and every request finds a warm answer.
 
-Without a cache backend the reading is still taken and printed: the command reports the state of the catalogue whether or not there is anywhere to leave the answer. */
+   Without a cache backend the reading is still taken and printed: the command reports the state of the catalogue whether or not there is anywhere to leave the answer. */
 func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     startedAt := time.Now()
 

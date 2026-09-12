@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/handler"
     "github.com/precision-soft/melody/v3/.example/handler/accesstoken"
     handlercategory "github.com/precision-soft/melody/v3/.example/handler/category"
+    handlerreport "github.com/precision-soft/melody/v3/.example/handler/report"
     handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
     handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
     handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
@@ -33,7 +34,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
 
-    /* @info the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
+    /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
     router.HandleWithOptions(
         "/health",
         handler.HealthHandler(),
@@ -50,7 +51,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed("example.messagebus.dispatch", "POST", "/messagebus/dispatch", handler.WelcomeEmailDispatchHandler())
 
-    /* @info the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
+    /* the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
 
     router.HandleNamed("example.encrypt.roundtrip", "GET", "/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher))
 
@@ -65,9 +66,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
 
-    /* @info login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the
-       frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the
-       nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
+    /* login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
     router.HandleWithOptions(
         route.LoginSubmitPattern,
         handler.LoginHandler(),
@@ -90,9 +89,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(instance.twoFactorStore))
     }
 
-    /* @info the outbox handlers hold container.Lazy handles built at route-registration time: the store and
-       relay services (provided by the outbox module's factories, see configure.go) are resolved at the first
-       request, so registering the routes never touches the outbox schema or the transport. */
+    /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and relay services (provided by the outbox module's factories, see configure.go) are resolved at the first request, so registering the routes never touches the outbox schema or the transport. */
     if nil != instance.database {
         outboxStore := melodycontainer.Lazy[*outboxintegration.Store](kernelInstance.ServiceContainer(), outboxintegration.ServiceStore)
         outboxRelay := melodycontainer.Lazy[*outboxintegration.Relay](kernelInstance.ServiceContainer(), outboxintegration.ServiceRelay)
@@ -109,13 +106,12 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.I18nGreetingName, "GET", route.I18nGreetingPattern, handleri18n.GreetingHandler())
 
-    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler(instance.serverSentEventHub))
-    router.HandleNamed(route.EventsPublishName, "GET", route.EventsPublishPattern, handlerevent.PublishHandler(instance.messageBusDispatch))
+    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler())
+    router.HandleNamed(route.EventsPublishName, "POST", route.EventsPublishPattern, handlerevent.PublishHandler(instance.messageBusDispatch))
 
-    /* @info every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of
-       their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make
-       the client throw "unknown route". */
+    /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */
     router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
+    router.HandleWithOptions(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
 
     router.HandleWithOptions(route.CurrenciesApiReadAllPattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllName, "GET"))
 
@@ -138,8 +134,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleWithOptions(route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()), frontendRoute(route.UsersApiDeleteName, "DELETE"))
 }
 
-/* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the
-   route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
+/* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
 func frontendRoute(name string, method string) melodyhttpcontract.RouteOptions {
     return melodyhttp.NewRouteOptions(name, []string{method}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend))
 }
@@ -148,10 +143,7 @@ var _ melodyapplicationcontract.HttpModule = (*Module)(nil)
 
 /* buildCatalogWriteThrottle prepares the shared budget the nomenclature's write endpoints sit behind.
 
-The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the
-client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is
-used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored.
-With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
+   The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored. With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
 func (instance *Module) buildCatalogWriteThrottle() {
     rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
         melodyrueidis.NewRateLimiter(
@@ -164,20 +156,30 @@ func (instance *Module) buildCatalogWriteThrottle() {
         nil,
     )
 
-    rateLimitConfig.SetClientIpResolver(melodyhttpmiddleware.NewForwardedClientIpResolver(melodyhttpcontract.ForwardedHeadersPolicy{
-        TrustForwardedHeaders: true,
-        TrustedProxyList:      []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
-    }))
+    rateLimitConfig.SetClientIpResolver(forwardedClientIpResolver())
 
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
 }
 
-/* throttledWrite puts an endpoint that changes the nomenclature behind the shared per-address budget. The
-reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway
-script turns into damage.
+/* forwardedClientIpResolver reads which client a request came from, the way every budget of this example
+   has to read it: behind the compose load balancer the X-Forwarded-For client, on a direct hit the peer
+   address, and a header sent by a peer outside the trusted ranges ignored rather than believed.
 
-Without redis there is no limiter and the handler is returned untouched, which is the same rule the rest of
-the example follows — an integration the environment did not give it is absent rather than broken. */
+   Both budgets share it because they are two halves of one policy and the trusted ranges must not drift
+   apart: this one meters the writes that reach a handler, the request budget in event.go meters every
+   request ahead of authentication. Left on the peer address, that one charged the whole world to the
+   proxy — measured through the compose stack, the key was the balancer's own 172.18.0.9 — so one client
+   could spend everyone's hour. */
+func forwardedClientIpResolver() melodyhttpmiddleware.ClientIpResolver {
+    return melodyhttpmiddleware.NewForwardedClientIpResolver(melodyhttpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+    })
+}
+
+/* throttledWrite puts an endpoint that changes the nomenclature behind the shared per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage.
+
+   Without redis there is no limiter and the handler is returned untouched, which is the same rule the rest of the example follows — an integration the environment did not give it is absent rather than broken. */
 func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
     if nil == instance.catalogWriteThrottle {
         return next

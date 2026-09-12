@@ -9,8 +9,7 @@ import (
     "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
 
-/* crmCipherRef and billingCipherRef are the zero-size markers that bind a column type to a key compartment;
-each names a cipher installed with encrypt.UseCipherNamed. */
+/* crmCipherRef and billingCipherRef are the zero-size markers that bind a column type to a key compartment; each names a cipher installed with encrypt.UseCipherNamed. */
 type crmCipherRef struct{}
 
 func (instance crmCipherRef) CipherName() string {
@@ -29,11 +28,7 @@ func (instance unregisteredCipherRef) CipherName() string {
     return "unregistered"
 }
 
-/* runEncryptCompartmentCheck exercises the named-cipher registry: two compartments each own their key
-provider, so a column bound to one compartment round-trips through it and its ciphertext is undecryptable by
-the other — the isolation guarantee that merging every key into one provider would silently lose. It also
-asserts the value never leaks in a Stringer, log or JSON rendering, and that an unregistered compartment
-errors rather than falling back to the default cipher. */
+/* runEncryptCompartmentCheck exercises the named-cipher registry: two compartments each own their key provider, so a column bound to one compartment round-trips through it and its ciphertext is undecryptable by the other — the isolation guarantee that merging every key into one provider would silently lose. It also asserts the value never leaks in a Stringer, log or JSON rendering, and that an unregistered compartment errors rather than falling back to the default cipher. */
 func runEncryptCompartmentCheck() {
     crmCipher := encrypt.NewCipher(encrypt.NewStaticKeyProvider("crm-v1", map[string][]byte{
         "crm-v1": []byte("0123456789abcdef0123456789abcdef"),
@@ -128,9 +123,7 @@ func runEncryptCompartmentCheck() {
     pass("encrypt refuses to encrypt for an unregistered compartment")
 }
 
-/* driverValueString renders what a column hands the driver, whichever concrete type it chose: the encrypted
-columns store their ciphertext as bytes, and a Stringer-free []byte would otherwise have to be asserted at
-every call site. */
+/* driverValueString renders what a column hands the driver, whichever concrete type it chose: the encrypted columns store their ciphertext as bytes, and a Stringer-free []byte would otherwise have to be asserted at every call site. */
 func driverValueString(value driver.Value, valueErr error) string {
     if nil != valueErr {
         fail("encrypt: column Value: %v", valueErr)

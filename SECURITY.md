@@ -2,15 +2,11 @@
 
 ## Supported versions
 
-Melody is developed as three parallel module lines. **v3 is the actively maintained version**; v1 and v2 are in maintenance mode but still receive security fixes.
+Melody is developed as parallel module lines. **v3 is the actively maintained version**; v1 and v2 are in maintenance mode and receive security fixes and patch-level defect fixes through 2027-08-17 and 2027-09-08 respectively — eighteen months from the release of the major that replaced each, the rule and the dates being in the table below.
 
-| Version line                                 | Status                   | Security fixes |
-|----------------------------------------------|--------------------------|----------------|
-| v3.x (`github.com/precision-soft/melody/v3`) | Actively maintained      | Yes            |
-| v2.x (`github.com/precision-soft/melody/v2`) | Maintenance (fixes only) | Yes            |
-| v1.x (`github.com/precision-soft/melody`)    | Maintenance (fixes only) | Yes            |
+**Every supported line receives security fixes**, whether it is actively maintained or feature-frozen; that is what the maintenance mode is for. Which lines those are, when each was released and which event ends its support is one table, in [`README.md`](./README.md#versions--project-status) — it is not repeated here, so the two cannot drift apart.
 
-Security fixes are applied to all three lines. Other bug fixes and all new features land on v3 only (see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
+Security fixes are applied to every line still inside its support window. Other defect fixes are back-ported to v1 and v2 when they fit a patch release; new features land on v3 only (see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
 
 ## Reporting a vulnerability
 

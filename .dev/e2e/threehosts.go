@@ -9,14 +9,12 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* the hostnames the load balancer serves the three example applications under. They are the whole point of the
-section: one development stack, three majors reachable at once, each under a name that says which it is. */
+/* the hostnames the load balancer serves the three example applications under. They are the whole point of the section: one development stack, three majors reachable at once, each under a name that says which it is. */
 var threeHostCatalog = []struct {
     label    string
     hostName string
     table    string
-    /* the major whose database holds that table: the three examples share the development mysql and no longer
-       share a database in it, so each host's catalogue is read through a connection of its own */
+    /* the major whose database holds that table: the three examples share the development mysql and no longer share a database in it, so each host's catalogue is read through a connection of its own */
     major int
 }{
     {label: "v1", hostName: "v1-example.melody.localhost.precision-soft.com", table: "melody_example_v1_product", major: 1},
@@ -24,22 +22,14 @@ var threeHostCatalog = []struct {
     {label: "v3", hostName: "example.melody.localhost.precision-soft.com", table: exampleV3ProductTable, major: 3},
 }
 
-/* the probe name carries the host it was written through, because the three majors number their products
-independently: each seeded catalogue ends at prod-5, so all three hand out prod-6 next and an identifier alone
-cannot say which application wrote a row. */
+/* the probe name carries the host it was written through, because the three majors number their products independently: each seeded catalogue ends at prod-5, so all three hand out prod-6 next and an identifier alone cannot say which application wrote a row. */
 func threeHostProbeName(label string) string {
     return "e2e three-host probe " + label
 }
 
-/* runThreeHostsCheck proves the load balancer routes each hostname to a different application, and does it
-where a status code cannot: all three answer 200 on every shared route, and v1 and v2 are the same application
-on different framework majors, so nothing in the http surface tells them apart.
+/* runThreeHostsCheck proves the load balancer routes each hostname to a different application, and does it where a status code cannot: all three answer 200 on every shared route, and v1 and v2 are the same application on different framework majors, so nothing in the http surface tells them apart.
 
-What does tell them apart is where their writes land. Each host is asked to create a product, and the harness
-then reads the three catalogue tables straight out of mysql: the row must be in that major's table and in
-neither of the others. A vhost pointed at the wrong upstream — or a load balancer still serving the
-configuration it started with, which is what a mounted file that changed under a running nginx looks like —
-fails here and passes every reachability check. */
+   What does tell them apart is where their writes land. Each host is asked to create a product, and the harness then reads the three catalogue tables straight out of mysql: the row must be in that major's table and in neither of the others. A vhost pointed at the wrong upstream — or a load balancer still serving the configuration it started with, which is what a mounted file that changed under a running nginx looks like — fails here and passes every reachability check. */
 func runThreeHostsCheck(loadBalancerUrl string, mysqlDsn string, redisAddress string) {
     if "" == mysqlDsn {
         skip("three hosts: MYSQL_DSN is cleared, so which application answered cannot be told apart out of band")
@@ -53,9 +43,7 @@ func runThreeHostsCheck(loadBalancerUrl string, mysqlDsn string, redisAddress st
         return
     }
 
-    /* one connection per major, because one dsn no longer reaches all three catalogues. The cross-check below
-       gets stronger for it: a row must be in its own major's database AND absent from the other two databases,
-       where before it only had to be absent from two other tables of one. */
+    /* one connection per major, because one dsn no longer reaches all three catalogues. The cross-check below gets stronger for it: a row must be in its own major's database AND absent from the other two databases, where before it only had to be absent from two other tables of one. */
     databaseByLabel := map[string]*bun.DB{}
     for _, host := range threeHostCatalog {
         major, exists := exampleMajorByNumber(host.major)
@@ -71,8 +59,7 @@ func runThreeHostsCheck(loadBalancerUrl string, mysqlDsn string, redisAddress st
         databaseByLabel[host.label] = database
     }
 
-    /* a run that failed midway leaves its probe behind, and the assertion below is about which catalogue a row
-       is in — so every catalogue starts clean rather than carrying somebody else's answer */
+    /* a run that failed midway leaves its probe behind, and the assertion below is about which catalogue a row is in — so every catalogue starts clean rather than carrying somebody else's answer */
     for _, host := range threeHostCatalog {
         for _, other := range threeHostCatalog {
             removeThreeHostProbe(databaseByLabel[other.label], other.table, host.label)
@@ -80,9 +67,7 @@ func runThreeHostsCheck(loadBalancerUrl string, mysqlDsn string, redisAddress st
     }
 
     for _, host := range threeHostCatalog {
-        /* EXAMPLE OVER HTTP measures an exact exhaustion point of the v3 write budget just before this
-           section runs, and it measures it through this same load balancer from this same address. Each
-           host therefore starts from a budget of its own rather than from whatever is left of one. */
+        /* EXAMPLE OVER HTTP measures an exact exhaustion point of the v3 write budget just before this section runs, and it measures it through this same load balancer from this same address. Each host therefore starts from a budget of its own rather than from whatever is left of one. */
         resetExampleRateLimitCounters("three hosts", redisAddress, "melody-example-"+host.label+":rate_limit:")
 
         client := newExampleHttpClient()
@@ -161,9 +146,7 @@ func createThreeHostProbe(client *http.Client, loadBalancerUrl string, hostName 
     return created.Id
 }
 
-/* threeHostProbeExists answers whether the probe landed in one particular major's catalogue. A table that does
-not exist holds nothing — that is the state of a major nobody has written to yet on a freshly created database,
-and it is a correct answer to "is the row here" rather than a reason to fail. */
+/* threeHostProbeExists answers whether the probe landed in one particular major's catalogue. A table that does not exist holds nothing — that is the state of a major nobody has written to yet on a freshly created database, and it is a correct answer to "is the row here" rather than a reason to fail. */
 func threeHostProbeExists(database *bun.DB, table string, productId string, label string) bool {
     if false == exampleTableExists("three hosts", database, table) {
         return false
@@ -182,9 +165,7 @@ func threeHostProbeExists(database *bun.DB, table string, productId string, labe
     return 0 < count
 }
 
-/* removeThreeHostProbe removes the probe row and, in the v3 catalogue, everything the application recorded
-about it. The v3 write is journalled and audited, and the example hands a freed identifier to the next probe, so
-records left here would turn up in a later section reading "the trail of prod-6" as somebody else's history. */
+/* removeThreeHostProbe removes the probe row and, in the v3 catalogue, everything the application recorded about it. The v3 write is journalled and audited, and the example hands a freed identifier to the next probe, so records left here would turn up in a later section reading "the trail of prod-6" as somebody else's history. */
 func removeThreeHostProbe(database *bun.DB, table string, label string) {
     if exampleV3ProductTable == table {
         removeExampleV3ProductProbes("three hosts", database, []string{threeHostProbeName(label)})

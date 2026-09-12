@@ -19,10 +19,21 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-func TestModule_RegisterCliCommandsReturnsNilWithoutMigrations(t *testing.T) {
-    if commands := NewModule(ModuleConfig{}).RegisterCliCommands(nil); nil != commands {
-        t.Fatalf("expected no commands without migrations, got %d", len(commands))
-    }
+/* the empty configuration is refused at registration by name: registering the commands is this module's only purpose, so an empty config is a wiring mistake with no legal reading — accepted, the operator discovered it as "unknown command" at the first db:migrate. */
+func TestModule_RegisterCliCommandsRefusesTheEmptyConfigurationByName(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatal("expected the empty configuration to be refused at registration")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError || false == strings.Contains(recoveredErr.Error(), "requires migrations or contexts") {
+            t.Fatalf("expected the refusal to name the rule, got %v", recoveredValue)
+        }
+    }()
+
+    NewModule(ModuleConfig{}).RegisterCliCommands(nil)
 }
 
 func TestModule_RegisterCliCommandsExposesMigrationCommands(t *testing.T) {

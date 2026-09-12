@@ -72,12 +72,16 @@ func (instance *ProductService) List() ([]*entity.Product, error) {
 }
 
 func (instance *ProductService) FindById(id string) (*entity.Product, bool, error) {
+    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyProductById(id)
 
-    cached, rememberErr := cache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             product, found, findErr := instance.productRepository.FindById(ctx, id)
             if nil != findErr {
@@ -90,7 +94,6 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
 
             return product, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -170,15 +173,17 @@ func (instance *ProductService) Update(
         return nil, false, nil
     }
 
-    product.Name = name
-    product.Description = description
-    product.CategoryId = categoryId
-    product.Price = price
-    product.CurrencyId = currencyId
-    product.Stock = stock
-    product.UpdatedAt = instance.clock.Now()
+    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: a refused update leaves the stored entity exactly as it was, and no reader is served a half-written one mid-assignment */
+    modified := *product
+    modified.Name = name
+    modified.Description = description
+    modified.CategoryId = categoryId
+    modified.Price = price
+    modified.CurrencyId = currencyId
+    modified.Stock = stock
+    modified.UpdatedAt = instance.clock.Now()
 
-    updated, updateErr := instance.productRepository.Update(ctx, product)
+    updated, updateErr := instance.productRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -186,7 +191,7 @@ func (instance *ProductService) Update(
         return nil, false, nil
     }
 
-    productUpdatedEvent := event.NewProductUpdatedEvent(product)
+    productUpdatedEvent := event.NewProductUpdatedEvent(&modified)
 
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
@@ -197,7 +202,7 @@ func (instance *ProductService) Update(
         return nil, true, dispatchErr
     }
 
-    return product, true, nil
+    return &modified, true, nil
 }
 
 func (instance *ProductService) DeleteById(

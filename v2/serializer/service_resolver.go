@@ -9,21 +9,9 @@ import (
     serializercontract "github.com/precision-soft/melody/v2/serializer/contract"
 )
 
-/*
-ServiceSerializer is the default serializer — the json one, registered by the
-application boot behind a Has gate so an application or module registering it
-first substitutes it. It is what SerializerMustFromRuntime and
-SerializerFromRuntime answer.
+/* ServiceSerializer is the default serializer — the json one, registered by the application boot behind a Has gate so an application or module registering it first substitutes it. It is what SerializerMustFromRuntime and SerializerFromRuntime answer.
 
-ServiceSerializerManager is what content negotiation reads: the media type a
-response is served under is chosen by the manager from the request's Accept
-header. Registering a serializer under ServiceSerializer therefore changes what
-the two resolvers hand a caller, and what a request is served only on the
-fallback path the result handler takes when the manager is absent or the
-negotiation itself failed — to add a media type, register
-ServiceSerializerManager with a manager built by NewSerializerManager carrying
-the wider map.
-*/
+   ServiceSerializerManager is what content negotiation reads: the media type a response is served under is chosen by the manager from the request's Accept header. Registering a serializer under ServiceSerializer therefore changes what the two resolvers hand a caller, and what a request is served only on the fallback path the result handler takes when the manager is absent or the negotiation itself failed — to add a media type, register ServiceSerializerManager with a manager built by NewSerializerManager carrying the wider map. */
 const (
     ServiceSerializer        = "service.serializer"
     ServiceSerializerManager = "service.serializer.manager"

@@ -78,7 +78,7 @@ func bodyOf(t *testing.T, response httpcontract.Response) string {
 
 /* The manifest is spliced into a SINGLE-QUOTED JavaScript literal — window.melodyRoutes = JSON.parse('…') — so a route name or pattern carrying a quote would otherwise close the literal and let whatever follows it be read as script. json.Marshal escapes the angle brackets, the ampersand and the line separators, but it leaves a single quote bare, so this function is the only thing standing between a route spelling and the page's scripting.
 
-The negative is the assertion that matters, and it is what pins the ORDER of the two replacements: escaping the quote FIRST produces a backslash that the backslash pass then doubles, turning \' into \\' — an escaped backslash followed by a LIVE quote, which closes the literal exactly as the bare one would. A route name carrying only a backslash cannot see that mistake, because both orders answer identically for it; only an input carrying a quote separates them. */
+   The negative is the assertion that matters, and it is what pins the ORDER of the two replacements: escaping the quote FIRST produces a backslash that the backslash pass then doubles, turning \' into \\' — an escaped backslash followed by a LIVE quote, which closes the literal exactly as the bare one would. A route name carrying only a backslash cannot see that mistake, because both orders answer identically for it; only an input carrying a quote separates them. */
 func TestHtmlEscapesAQuoteOutOfTheScriptLiteral(t *testing.T) {
     runtimeInstance := runtimeServingRoute(t, "example.it's", "/injected/")
 

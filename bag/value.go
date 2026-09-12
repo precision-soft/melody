@@ -38,7 +38,8 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         )
     }
 
-    return "", true
+    /* a present value that is neither a string nor a string slice — an int, a bool, a float — reports absent rather than present-but-empty: returning ("", true) defeated StringOrDefault, which substitutes the default only when the value is absent, so an int parameter read through it came back "" instead of the default. Absent is the honest answer for "there is no string here", and it restores the default-fallback contract the sibling accessors keep. */
+    return "", false
 }
 
 func StringOrDefault(parameterBag bagcontract.ParameterBag, name string, defaultValue string) string {

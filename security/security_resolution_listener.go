@@ -31,7 +31,9 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            if nil == requestEvent || nil == requestEvent.Request() {
+            /* IsNilInterface on the request and not `nil ==`: a nil pointer of a request type is a non-nil
+            interface a bare check reads as a live request, and the firewall walk below dereferences it. */
+            if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 

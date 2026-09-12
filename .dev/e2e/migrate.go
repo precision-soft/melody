@@ -7,9 +7,7 @@ import (
     bunmigrate "github.com/uptrace/bun/migrate"
 )
 
-/* runMigrateCheck drives the bunorm migrate runner against live postgres: an up migration that creates
-and seeds a table, a read-back to prove it landed, then a down migration that rolls it away — the real
-schema mutation a fake database cannot exercise. */
+/* runMigrateCheck drives the bunorm migrate runner against live postgres: an up migration that creates and seeds a table, a read-back to prove it landed, then a down migration that rolls it away — the real schema mutation a fake database cannot exercise. */
 func runMigrateCheck(dsn string) {
     ctx := context.Background()
 
@@ -63,11 +61,7 @@ func runMigrateCheck(dsn string) {
     runMigrateContextCheck()
 }
 
-/* runMigrateContextCheck asserts a multi-database binary gets one command family per migration context: each
-context carries its own command prefix, so db:crm:migrate and db:billing:migrate are distinct commands that
-can never be confused for one another, and a base prefix handed to RegisterContextCommands is honoured.
-The manager pin each family carries is covered by the package's own tests; what only shows up from the
-outside is the command surface a multi-database application actually exposes. */
+/* runMigrateContextCheck asserts a multi-database binary gets one command family per migration context: each context carries its own command prefix, so db:crm:migrate and db:billing:migrate are distinct commands that can never be confused for one another, and a base prefix handed to RegisterContextCommands is honoured. The manager pin each family carries is covered by the package's own tests; what only shows up from the outside is the command surface a multi-database application actually exposes. */
 func runMigrateContextCheck() {
     contexts := []migrate.ContextConfig{
         {Name: "crm", Migrations: bunmigrate.NewMigrations()},

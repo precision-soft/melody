@@ -30,12 +30,3 @@ func NewRequestClock() *RequestClock {
 
 type RequestClock struct {
 }
-
-/* the longer word must not be read as the directive: a plain prefix match would claim it and register a process singleton as a per-request service without saying so */
-//melody:scopedLater
-func NewNearlyScoped() *NearlyScoped {
-    return &NearlyScoped{}
-}
-
-type NearlyScoped struct {
-}

@@ -61,6 +61,57 @@ func TestPlainTextSerializer_Deserialize_NilTarget(t *testing.T) {
     }
 }
 
+func TestPlainTextSerializer_Deserialize_TypedNilTarget(t *testing.T) {
+    serializer := NewPlainTextSerializer()
+
+    var stringTarget *string
+    err := serializer.Deserialize([]byte("x"), stringTarget)
+    if nil == err {
+        t.Fatalf("expected error for a typed-nil string target")
+    }
+
+    var bytesTarget *[]byte
+    err = serializer.Deserialize([]byte("x"), bytesTarget)
+    if nil == err {
+        t.Fatalf("expected error for a typed-nil bytes target")
+    }
+}
+
+func TestPlainTextSerializer_Serialize_CopiesTheBytePayload(t *testing.T) {
+    serializer := NewPlainTextSerializer()
+
+    input := []byte("abc")
+
+    data, err := serializer.Serialize(input)
+    if nil != err {
+        t.Fatalf("unexpected error")
+    }
+
+    input[0] = 'x'
+
+    if "abc" != string(data) {
+        t.Fatalf("expected the serialized payload to own its bytes, got %q", string(data))
+    }
+}
+
+func TestPlainTextSerializer_Deserialize_CopiesThePayloadIntoTheTarget(t *testing.T) {
+    serializer := NewPlainTextSerializer()
+
+    payload := []byte("abc")
+
+    var target []byte
+    err := serializer.Deserialize(payload, &target)
+    if nil != err {
+        t.Fatalf("unexpected error")
+    }
+
+    payload[0] = 'x'
+
+    if "abc" != string(target) {
+        t.Fatalf("expected the deserialized value to own its bytes, got %q", string(target))
+    }
+}
+
 func TestPlainTextSerializer_Deserialize_UnsupportedTarget(t *testing.T) {
     serializer := NewPlainTextSerializer()
 
@@ -68,5 +119,30 @@ func TestPlainTextSerializer_Deserialize_UnsupportedTarget(t *testing.T) {
     err := serializer.Deserialize([]byte("x"), &target)
     if nil == err {
         t.Fatalf("expected error")
+    }
+}
+
+func TestPlainTextSerializer_Serialize_RendersAnyOtherValue(t *testing.T) {
+    serializer := NewPlainTextSerializer()
+
+    for _, testCase := range []struct {
+        value    any
+        expected string
+    }{
+        {value: 42, expected: "42"},
+        {value: 1.5, expected: "1.5"},
+        {value: true, expected: "true"},
+        {value: nil, expected: "<nil>"},
+        {value: struct{ Name string }{Name: "melody"}, expected: "{melody}"},
+        {value: []int{1, 2}, expected: "[1 2]"},
+    } {
+        payload, err := serializer.Serialize(testCase.value)
+        if nil != err {
+            t.Fatalf("unexpected error for %#v: %v", testCase.value, err)
+        }
+
+        if testCase.expected != string(payload) {
+            t.Fatalf("expected %#v to render as %q, got %q", testCase.value, testCase.expected, payload)
+        }
     }
 }

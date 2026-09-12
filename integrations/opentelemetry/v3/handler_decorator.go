@@ -87,7 +87,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
 
                 statusCode := recorder.statusCode
 
-                /* @important a hijacked connection left the request/response model at the upgrade, so recording it as the constructor's default 200 puts a connection that lives for hours in the same duration series as an ordinary request and destroys the latency distribution */
+                /* a hijacked connection left the request/response model at the upgrade, so recording it as the constructor's default 200 puts a connection that lives for hours in the same duration series as an ordinary request and destroys the latency distribution */
                 if true == recorder.hijacked {
                     statusCode = nethttp.StatusSwitchingProtocols
                 }
@@ -169,14 +169,14 @@ func (instance *statusRecordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWr
     return connection, readWriter, hijackErr
 }
 
-/* @info ReadFrom is forwarded so the wrapper keeps satisfying io.ReaderFrom, preserving the underlying writer's sendfile fast path for file responses. */
+/* ReadFrom is forwarded so the wrapper keeps satisfying io.ReaderFrom, preserving the underlying writer's sendfile fast path for file responses. */
 func (instance *statusRecordingResponseWriter) ReadFrom(reader io.Reader) (int64, error) {
     instance.wroteHeader = true
 
     return io.Copy(instance.ResponseWriter, reader)
 }
 
-/* @info Unwrap exposes the underlying writer so http.ResponseController can reach its flush/hijack/deadline support through the wrapper, mirroring the http kernel's recording writer. */
+/* Unwrap exposes the underlying writer so http.ResponseController can reach its flush/hijack/deadline support through the wrapper, mirroring the http kernel's recording writer. */
 func (instance *statusRecordingResponseWriter) Unwrap() nethttp.ResponseWriter {
     return instance.ResponseWriter
 }

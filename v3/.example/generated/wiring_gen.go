@@ -37,6 +37,23 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
 
     melodycontainer.MustRegister(
         registrar,
+        repository.ServiceCatalogReadingRepository,
+        func(resolver containercontract.Resolver) (repository.CatalogReadingRepository, error) {
+            var zeroValue repository.CatalogReadingRepository
+
+            storage, storageErr := melodycontainer.FromResolverByType[*persistence.ArchiveStorage](resolver)
+            if nil != storageErr {
+                return zeroValue, storageErr
+            }
+
+            return repository.NewCatalogReadingRepository(
+                storage,
+            )
+        },
+    )
+
+    melodycontainer.MustRegister(
+        registrar,
         repository.ServiceCategoryRepository,
         func(resolver containercontract.Resolver) (repository.CategoryRepository, error) {
             var zeroValue repository.CategoryRepository
@@ -170,10 +187,16 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, eventDispatcherErr
             }
 
+            clockInstance, clockInstanceErr := melodycontainer.FromResolverByType[contract.Clock](resolver)
+            if nil != clockInstanceErr {
+                return nil, clockInstanceErr
+            }
+
             return service.NewCurrencyService(
                 currencyRepository,
                 cacheInstance,
                 eventDispatcher,
+                clockInstance,
             ), nil
         },
     )
@@ -225,6 +248,26 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
 
     melodycontainer.MustRegister(
         registrar,
+        service.ServiceRateRefreshService,
+        func(resolver containercontract.Resolver) (*service.RateRefreshService, error) {
+            configuration := melodyconfig.ConfigMustFromResolver(resolver)
+
+            currencyService, currencyServiceErr := melodycontainer.FromResolverByType[*service.CurrencyService](resolver)
+            if nil != currencyServiceErr {
+                return nil, currencyServiceErr
+            }
+
+            ratesBaseUrl := configuration.MustGet("app.rates.base_url").MustString()
+
+            return service.NewRateRefreshService(
+                currencyService,
+                ratesBaseUrl,
+            ), nil
+        },
+    )
+
+    melodycontainer.MustRegister(
+        registrar,
         service.ServiceUserService,
         func(resolver containercontract.Resolver) (*service.UserService, error) {
             userRepository, userRepositoryErr := melodycontainer.FromResolverByType[repository.UserRepository](resolver)
@@ -252,6 +295,19 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
 
     melodycontainer.MustRegisterType(
         registrar,
+        func(resolver containercontract.Resolver) (*reporting.CatalogReportExporter, error) {
+            configuration := melodyconfig.ConfigMustFromResolver(resolver)
+
+            exportEndpoint := configuration.MustGet("app.reporting.export_endpoint").MustString()
+
+            return reporting.NewCatalogReportExporter(
+                exportEndpoint,
+            ), nil
+        },
+    )
+
+    melodycontainer.MustRegisterType(
+        registrar,
         func(resolver containercontract.Resolver) (*reporting.CatalogReportService, error) {
             configuration := melodyconfig.ConfigMustFromResolver(resolver)
 
@@ -268,6 +324,11 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
             journalRepository, journalRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogJournalRepository](resolver)
             if nil != journalRepositoryErr {
                 return nil, journalRepositoryErr
+            }
+
+            readingRepository, readingRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogReadingRepository](resolver)
+            if nil != readingRepositoryErr {
+                return nil, readingRepositoryErr
             }
 
             cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
@@ -296,6 +357,7 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 formatter,
                 productService,
                 journalRepository,
+                readingRepository,
                 cacheInstance,
                 clockInstance,
                 catalogTitle,

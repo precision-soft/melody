@@ -4,6 +4,7 @@ import (
     "bytes"
     "encoding/json"
     "errors"
+    "fmt"
     "reflect"
     "strings"
     "testing"
@@ -127,3 +128,51 @@ func TestJsonPrinter_AWriteFailureIsReportedRatherThanSwallowed(t *testing.T) {
 }
 
 var errFailingOutputWriter = errors.New("the writer refused")
+
+/* the encoder emits the C1 block raw, so a document carrying U+009B repainted the terminal it was printed to and a NEL ended the record for a reader splitting on Unicode line boundaries; the printer spells the block as json escapes on the way out — in the data, in a key, in a warning, in the one-line and in the pretty form alike — and the decoded document is the one the command gave. The spelling is asked of the encoder's own vocabulary rather than typed, so the assertion follows the encoder if it ever changes. */
+func TestJsonPrinter_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
+    for _, format := range []Format{FormatJson, FormatJsonPretty} {
+        envelope := Envelope{Data: map[string]any{"name": "a\xc2\x9bb", "k\xc2\x9dey": "value"}}
+        envelope.AddWarning("app.warning", "wa\xc2\x85rn", nil)
+
+        option := DefaultOption()
+        option.Format = format
+
+        buffer := &bytes.Buffer{}
+
+        if printErr := (&JsonPrinter{}).Print(buffer, envelope, option); nil != printErr {
+            t.Fatalf("%s: unexpected print error: %v", format, printErr)
+        }
+
+        for _, continuation := range []byte{0x85, 0x9b, 0x9d} {
+            if true == bytes.Contains(buffer.Bytes(), []byte{0xc2, continuation}) {
+                t.Fatalf("%s: a raw C1 rune c2 %02x survived in %q", format, continuation, buffer.String())
+            }
+
+            spelling := "\\" + "u00" + fmt.Sprintf("%02x", continuation)
+            if false == bytes.Contains(buffer.Bytes(), []byte(spelling)) {
+                t.Fatalf("%s: expected the spelling %s in %q", format, spelling, buffer.String())
+            }
+        }
+
+        decoded := map[string]any{}
+        if decodeErr := json.Unmarshal(buffer.Bytes(), &decoded); nil != decodeErr {
+            t.Fatalf("%s: expected a decodable document, got %v for %q", format, decodeErr, buffer.String())
+        }
+
+        data, isMap := decoded["data"].(map[string]any)
+        if false == isMap || "a\xc2\x9bb" != data["name"] || "value" != data["k\xc2\x9dey"] {
+            t.Fatalf("%s: expected the data decoded to the values given, got %#v", format, decoded["data"])
+        }
+
+        warnings, isList := decoded["warnings"].([]any)
+        if false == isList || 1 != len(warnings) {
+            t.Fatalf("%s: expected one warning, got %#v", format, decoded["warnings"])
+        }
+
+        warning, isWarning := warnings[0].(map[string]any)
+        if false == isWarning || "wa\xc2\x85rn" != warning["message"] {
+            t.Fatalf("%s: expected the warning decoded to the message given, got %#v", format, warnings[0])
+        }
+    }
+}

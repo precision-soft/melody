@@ -1,0 +1,8 @@
+# The reachable findings the vulncheck band accepts, one line per module and advisory.
+#
+#   module ~ advisory ~ reason
+#
+# Read by .dev/validate/vulncheck.sh. This is not a suppression list: every line is a claim the run has
+# to satisfy. A reachable finding with no line here fails the check, and a line whose finding no longer
+# occurs fails it just as loudly — the advisory it excuses is gone, so the line has to go. Wildcards are
+# refused. The reason is mandatory: a line whose reason is empty is a line nobody can review.

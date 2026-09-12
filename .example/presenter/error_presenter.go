@@ -169,7 +169,7 @@ func buildApiResponse(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
-    payload any,
+    payload apiResponse,
 ) melodyhttpcontract.Response {
     if nil == runtimeInstance {
         return fallbackJsonResponse(statusCode, payload)
@@ -185,8 +185,8 @@ func buildApiResponse(
     if nil != serializerManager {
         serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
 
-        /* a header that refuses every available media type is answered as not acceptable on the error path exactly as the result handler answers it on the success path: falling through would render the failure in the very representation the client rejected; the incident itself is already in the application log by the time a presenter runs */
-        if true == errors.Is(err, melodyserializer.ErrNotAcceptable) {
+        /* a header that refuses every available media type is answered as not acceptable on the SUCCESS path, exactly as the result handler answers it; a REFUSAL keeps the status it earned instead, which is the asymmetry the framework's own error renderer states and the reason it falls back for every resolution failure alike: a 401 or a 404 rendered as an empty 406 tells the client nothing about why it was turned away, and the only thing negotiation could have withheld is a representation it had already rejected. The flag is read off the envelope being rendered rather than passed beside it, so the two can never disagree about which path this is. */
+        if true == payload.Success && true == errors.Is(err, melodyserializer.ErrNotAcceptable) {
             return melodyhttp.EmptyResponse(nethttp.StatusNotAcceptable)
         }
 
@@ -236,8 +236,7 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
     return response
 }
 
-/* the debug decision is the kernel environment, exactly as the framework exception listener
-reads it; when it cannot be determined the presenter stays closed and emits no cause material */
+/* the debug decision is the kernel environment, exactly as the framework exception listener reads it; when it cannot be determined the presenter stays closed and emits no cause material */
 func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
     if nil == runtimeInstance {
         return false

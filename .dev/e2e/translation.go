@@ -9,9 +9,7 @@ import (
 
 const translationLabel = "translation"
 
-/* the example's greeting route is public (config/security.go lists ^/i18n), so every probe below is anonymous.
-The handler reads the locale from the ?locale= QUERY parameter (handler/i18n/greeting_handler.go) and hands it to
-the translator; ?name= fills the greeting placeholder and ?count= drives the ICU plural. */
+/* the example's greeting route is public (config/security.go lists ^/i18n), so every probe below is anonymous. The handler reads the locale from the ?locale= QUERY parameter (handler/i18n/greeting_handler.go) and hands it to the translator; ?name= fills the greeting placeholder and ?count= drives the ICU plural. */
 const translationRoute = "/i18n/greeting/"
 
 /* translationPayload mirrors handler/i18n.GreetingResponse. */
@@ -98,10 +96,7 @@ func assertTranslationPlural(client *liveExampleClient, locale string, count int
     }
 }
 
-/* assertTranslationFallback proves the fallback CHAIN rather than the mere absence of an error. An unknown locale
-must render the default catalogue's message; the failure it guards against is a translator that fell through to
-returning the message ID itself ("greeting", "cart.items"), which is what a missing-catalogue path degrades to and
-what a caller then renders straight into a page. */
+/* assertTranslationFallback proves the fallback CHAIN rather than the mere absence of an error. An unknown locale must render the default catalogue's message; the failure it guards against is a translator that fell through to returning the message ID itself ("greeting", "cart.items"), which is what a missing-catalogue path degrades to and what a caller then renders straight into a page. */
 func assertTranslationFallback(client *liveExampleClient) {
     payload := translationPayload{}
     path := translationRoute + "?locale=de&name=Ada&count=2"
@@ -139,9 +134,7 @@ func assertTranslationFallback(client *liveExampleClient) {
     pass("an unknown locale fell back to the default catalogue instead of returning the raw message id")
 }
 
-/* assertTranslationRegionFallback is the second link of the chain: a region-qualified locale with no catalogue of
-its own resolves to its base language. A resolver that only ever matched the whole tag would silently serve every
-"ro-RO" reader the english text, which is a defect no error surfaces. */
+/* assertTranslationRegionFallback is the second link of the chain: a region-qualified locale with no catalogue of its own resolves to its base language. A resolver that only ever matched the whole tag would silently serve every "ro-RO" reader the english text, which is a defect no error surfaces. */
 func assertTranslationRegionFallback(client *liveExampleClient) {
     payload := translationPayload{}
     path := translationRoute + "?locale=ro-RO&name=Ada&count=1"
@@ -169,14 +162,9 @@ func translationLooksLikeMessageIdentifier(rendered string) bool {
     return "greeting" == rendered || "cart.items" == rendered
 }
 
-/* assertTokenFirewallJsonEntryPoint proves the PER-FIREWALL entry point overrides the global one. The example gives
-the token firewall on /secure a JsonEntryPoint (config/security.go) while the global entry point redirects to the
-login page, so a browser-shaped request — Accept: text/html, no credential — must be answered with a 401 json
-envelope and NOT with a 302 to /login/.
+/* assertTokenFirewallJsonEntryPoint proves the PER-FIREWALL entry point overrides the global one. The example gives the token firewall on /secure a JsonEntryPoint (config/security.go) while the global entry point redirects to the login page, so a browser-shaped request — Accept: text/html, no credential — must be answered with a 401 json envelope and NOT with a 302 to /login/.
 
-The regression this catches is a real one and it is silent from the browser's side: an api firewall that inherited
-the global redirect answers 302 to every unauthenticated api call, so a fetch() follows it and receives the login
-PAGE with a 200, and the client parses html as its payload instead of seeing the 401 it must handle. */
+   The regression this catches is a real one and it is silent from the browser's side: an api firewall that inherited the global redirect answers 302 to every unauthenticated api call, so a fetch() follows it and receives the login PAGE with a 200, and the client parses html as its payload instead of seeing the 401 it must handle. */
 func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
     path := "/secure/me/"
 
@@ -207,8 +195,7 @@ func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
         fail("%s: the 401 from %s carried a Location header (%q), so it is still redirecting", translationLabel, path, response.location)
     }
 
-    /* a 401 with an html body would mean the json entry point was bypassed by the content negotiation the Accept
-       header asked for, which is the same defect wearing a different status code */
+    /* a 401 with an html body would mean the json entry point was bypassed by the content negotiation the Accept header asked for, which is the same defect wearing a different status code */
     if false == strings.Contains(response.contentType, "application/json") {
         fail(
             "%s: the 401 from %s is %q, wanted application/json from the firewall's own entry point",
@@ -218,28 +205,28 @@ func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
         )
     }
 
-    /* the body is the FRAMEWORK's error payload ({"error":...,"time":...} from http.JsonErrorResponse), not the
-       example presenter's success/payload/errors envelope: the refusal is produced by the firewall's entry point
-       before any handler runs, so nothing in the application shapes it */
+    /* the body is the FRAMEWORK's standardized error envelope ({"status":...,"time":...,"error":{"message":...}} from http.JsonErrorResponse), not the example presenter's success/payload/errors envelope: the refusal is produced by the firewall's entry point before any handler runs, so nothing in the application shapes it */
     errorPayload := struct {
-        Error string `json:"error"`
-        Time  string `json:"time"`
+        Status int    `json:"status"`
+        Time   string `json:"time"`
+        Error  struct {
+            Message string `json:"message"`
+        } `json:"error"`
     }{}
     if decodeErr := json.Unmarshal(response.body, &errorPayload); nil != decodeErr {
         fail(
-            "%s: the 401 from %s is not the framework's json error payload (%v): %s",
+            "%s: the 401 from %s is not the framework's json error envelope (%v): %s",
             translationLabel,
             path,
             decodeErr,
             exampleTruncate(response.bodyText()),
         )
     }
-    if "" == errorPayload.Error {
+    if "" == errorPayload.Error.Message {
         fail("%s: the 401 from %s carries no error message: %s", translationLabel, path, exampleTruncate(response.bodyText()))
     }
 
-    /* the WWW-Authenticate header is the sharpest available proof of WHICH entry point ran: only the json one sets
-       it, so its absence means the refusal came from somewhere else even when the status happens to be 401 */
+    /* the WWW-Authenticate header is the sharpest available proof of WHICH entry point ran: only the json one sets it, so its absence means the refusal came from somewhere else even when the status happens to be 401 */
     if "" == response.headerList.Get("WWW-Authenticate") {
         fail(
             "%s: the 401 from %s carries no WWW-Authenticate header — the refusal did not come from the token firewall's json entry point",
@@ -250,7 +237,7 @@ func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
 
     pass(
         "the token firewall answered 401 json (error=%q, WWW-Authenticate=%q) to an Accept: text/html request — its entry point overrides the global 302",
-        errorPayload.Error,
+        errorPayload.Error.Message,
         response.headerList.Get("WWW-Authenticate"),
     )
 }

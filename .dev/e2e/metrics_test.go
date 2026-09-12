@@ -5,9 +5,7 @@ import (
     "testing"
 )
 
-/* metricsTestExposition is a trimmed but faithful excerpt of what the example's /metrics answers: the otel scope
-labels are present on every series (a parser that demanded an exact label set would match nothing), the counter
-carries the exporter's _total suffix, and the histogram exposes _bucket, _sum and _count under one name. */
+/* metricsTestExposition is a trimmed but faithful excerpt of what the example's /metrics answers: the otel scope labels are present on every series (a parser that demanded an exact label set would match nothing), the counter carries the exporter's _total suffix, and the histogram exposes _bucket, _sum and _count under one name. */
 const metricsTestExposition = `# HELP http_server_request_count_total number of handled http requests
 # TYPE http_server_request_count_total counter
 http_server_request_count_total{http_request_method="GET",http_response_status_code="200",http_route="/health",otel_scope_name="melody.example",otel_scope_schema_url="",otel_scope_version=""} 12
@@ -36,9 +34,7 @@ func TestPrometheusSeriesSum_ReadsTheRequestedSeries(t *testing.T) {
     }
 }
 
-/* the whole control assertion rests on this: a series that is ABSENT and a series that is present at zero are
-different findings, and a parser that reported both as 0 would let "the control route stayed unchanged" pass on a
-scrape where the metric had vanished entirely. */
+/* the whole control assertion rests on this: a series that is ABSENT and a series that is present at zero are different findings, and a parser that reported both as 0 would let "the control route stayed unchanged" pass on a scrape where the metric had vanished entirely. */
 func TestPrometheusSeriesSum_DistinguishesMissingFromZero(t *testing.T) {
     zero, zeroFound := prometheusSeriesSum(metricsTestExposition, metricsCounterPrefix, metricsCounterSuffix, map[string]string{
         "http_route":                "/i18n/greeting",
@@ -65,8 +61,7 @@ func TestPrometheusSeriesSum_DistinguishesMissingFromZero(t *testing.T) {
     }
 }
 
-/* the labels select the series, so a different method or status on the same route is a different series: without
-this the /health counter would pick up the POST 401 line too and the exact-delta assertion would drift. */
+/* the labels select the series, so a different method or status on the same route is a different series: without this the /health counter would pick up the POST 401 line too and the exact-delta assertion would drift. */
 func TestPrometheusSeriesSum_LabelsSelectTheSeries(t *testing.T) {
     value, found := prometheusSeriesSum(metricsTestExposition, metricsCounterPrefix, metricsCounterSuffix, map[string]string{
         "http_route":                "/health",
@@ -79,8 +74,7 @@ func TestPrometheusSeriesSum_LabelsSelectTheSeries(t *testing.T) {
     }
 }
 
-/* the histogram exposes three names under one prefix; without the suffix the sum would fold _bucket, _sum and
-_count together and report a number that means nothing. */
+/* the histogram exposes three names under one prefix; without the suffix the sum would fold _bucket, _sum and _count together and report a number that means nothing. */
 func TestPrometheusSeriesSum_SuffixSeparatesTheHistogramFamilies(t *testing.T) {
     count, countFound := prometheusSeriesSum(metricsTestExposition, metricsHistogramPrefix, metricsHistogramCountSuffix, map[string]string{
         "http_route": "/health",
@@ -97,8 +91,7 @@ func TestPrometheusSeriesSum_SuffixSeparatesTheHistogramFamilies(t *testing.T) {
     }
 }
 
-/* comment lines carry the metric name too, so a parser that did not skip them would read "# HELP" as a sample and
-report a bogus value or, worse, count a series that has no samples at all as found. */
+/* comment lines carry the metric name too, so a parser that did not skip them would read "# HELP" as a sample and report a bogus value or, worse, count a series that has no samples at all as found. */
 func TestPrometheusSeriesSum_SkipsHelpAndTypeLines(t *testing.T) {
     body := "# HELP http_server_request_count_total number of handled http requests\n# TYPE http_server_request_count_total counter\n"
 
@@ -124,8 +117,7 @@ func TestSplitPrometheusLine_ReadsNameLabelsAndValue(t *testing.T) {
     }
 }
 
-/* a label value may itself hold a brace, so the block has to end at the LAST closing brace before the value rather
-than at the first one — otherwise the value is read out of the middle of the label block. */
+/* a label value may itself hold a brace, so the block has to end at the LAST closing brace before the value rather than at the first one — otherwise the value is read out of the middle of the label block. */
 func TestSplitPrometheusLine_TakesTheLastClosingBrace(t *testing.T) {
     _, labelBlock, value, parsed := splitPrometheusLine(`metric{path="/a{b}",kind="x"} 3`)
 

@@ -705,3 +705,39 @@ func TestEventDispatcherAdapter_InspectorTiebreakFollowsTheDispatchOrder(t *test
         t.Fatalf("expected the inspector to rank listener id %s first, got %s", expectedFirst, registered[0].Listeners[0].ListenerId)
     }
 }
+
+type adapterIdentityProbeEvent struct {
+    *Event
+    marker int
+}
+
+func TestEventDispatcherAdapter_HandsListenersTheOriginalEvent(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+
+    seenMarker := 0
+    _ = adapter.AddListener(
+        "identity.probe",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            if probe, ok := eventValue.(*adapterIdentityProbeEvent); true == ok {
+                seenMarker = probe.marker
+            }
+            return nil
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := adapter.Dispatch(
+        runtimeInstance,
+        &adapterIdentityProbeEvent{Event: NewEvent("identity.probe", nil, clockInstance), marker: 42},
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 42 != seenMarker {
+        t.Fatalf("expected the adapter to hand the listener the original custom event (marker 42), got %d", seenMarker)
+    }
+}

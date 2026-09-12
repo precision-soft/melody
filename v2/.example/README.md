@@ -4,6 +4,8 @@ The `.example` directory contains a small **product catalog** application built 
 
 It is **not** a full production product. Its purpose is to demonstrate how Melody is intended to be used in userland, with realistic wiring and clear architectural boundaries: routing, HTTP handlers, dependency injection, structured logging, sessions and authentication, security access control, caching, events, and CLI commands.
 
+This README is the whole of the application's documentation. It keeps no changelog, because it has no history to keep: an example is not a project with a past, it has one state — the present one — and this document describes that state. A database left in an older shape is brought to it by `example:db:reset` rather than by a record of how it got there.
+
 ---
 
 ## What it represents
@@ -41,12 +43,12 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ```
 .example/
 ├── cache/            # cache serializer for the example container
-├── cli/              # CLI commands (app:info, product:list, catalog:journal, catalog:report:refresh)
+├── cli/              # CLI commands (app:info, product:list, catalog:journal, catalog:report:refresh, example:db:reset)
 ├── config/           # application wiring; one file per module hook
 ├── entity/           # domain entities (Category, Currency, Product, User)
 ├── event/            # domain event types
 ├── handler/          # HTTP handlers (pages + JSON APIs), with category/, currency/, product/, user/ subpackages
-├── migration/        # the one migration set that owns this example's schema on mysql
+├── migration/        # the one migration set that owns this example's schema on mysql, in one DDL migration
 ├── page/             # HTML page templates
 ├── presenter/        # HTTP error / response presenters
 ├── repository/       # repository interfaces + in-memory implementations
@@ -140,7 +142,7 @@ accepts the role list in the two spellings a session can carry: the `[]string` t
 
 ### The migration set
 
-The schema is owned by one migration set in [`migration/`](./migration/) — five mysql DDL migrations, one per table, the journal among them: this major keeps the journal on the same connection as the catalogue, where v1 gives it a second database on postgres. Two doors run the set, so neither can drift from the other:
+The schema is owned by one migration set in [`migration/`](./migration/) — a single mysql DDL migration holding the five tables, the journal among them: this major keeps the journal on the same connection as the catalogue, where v1 gives it a second database on postgres. The set is one migration because this application has no history — an example has one state, the present one, so its schema is the statement of that state rather than the record of how it got there, and a database left in an older shape is answered by `example:db:reset` rather than by a step that repairs its past. Two doors run the set, so neither can drift from the other:
 
 - the **repository providers** call `migration.EnsureMigrated` at first resolution, and the four catalogue providers then seed an empty table. That is what keeps a freshly recreated volume usable with no operator step — the tables appear when the first request reaches a repository — and it is why every `CREATE TABLE`
   carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry;
@@ -148,6 +150,8 @@ The schema is owned by one migration set in [`migration/`](./migration/) — fiv
   runs the same set from the operator's side. It comes from the
   [`integrations/bunorm/migrate`](../../integrations/bunorm/migrate/v2/) module facade registered in
   [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service (`service.example.database.registry`).
+
+`example:db:reset` is the third door, and the only one that goes backwards. It drops the tables the set owns, drops and recreates the bun bookkeeping with them, applies the schema again and reseeds every nomenclature in one pass. It exists because this application has no history: a database left in an older shape — carrying bookkeeping rows that name migrations this schema no longer has — is brought to the present state here, by a command an operator runs deliberately, rather than by code every process pays for at boot. It refuses to act without `--force`, printing what it would drop and exiting zero, and it is a command of the application rather than of the migration module: dropping an application's whole schema is not an operator door a published module should grow.
 
 The module is registered whether or not a database is configured, so the command surface does not change between environments; without one every `db:*` command fails at `Run` with the container refusal naming the registry service.
 

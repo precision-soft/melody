@@ -1,4 +1,2 @@
-/*
-Package cli provides CLI contracts, command registration, and the execution model.
-*/
+/* Package cli provides CLI contracts, command registration, and the execution model. */
 package cli

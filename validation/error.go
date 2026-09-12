@@ -128,9 +128,9 @@ func (instance ValidationErrors) HasErrors() bool {
 
 /* IsRuleWiringErrorCode reports whether a code names a mistake in the DECLARATION rather than in the value: a rule the registry does not know, a parameter set the constraint refuses, a tag the parser cannot read, or a pattern that does not compile. None of them can be produced by any input a client sends — the tag is what is wrong, and it is wrong for every request that route will ever serve.
 
-The distinction has two consumers. A record filed for one of these is a program failure and belongs at error, not at the warning a deliberate 4xx earns, where a permanently broken route was indistinguishable from a user mistyping an address. And the context these errors carry names the developer's own typo, the parameters that were refused and the constraint's reason — the operator's material, not the client's.
+   The distinction has two consumers. A record filed for one of these is a program failure and belongs at error, not at the warning a deliberate 4xx earns, where a permanently broken route was indistinguishable from a user mistyping an address. And the context these errors carry names the developer's own typo, the parameters that were refused and the constraint's reason — the operator's material, not the client's.
 
-The refusal itself stays a field error by design: the validator fails closed on a rule it cannot honour rather than passing the value, and VALIDATION.md documents the codes as validation codes with full rights. */
+   The refusal itself stays a field error by design: the validator fails closed on a rule it cannot honour rather than passing the value, and VALIDATION.md documents the codes as validation codes with full rights. */
 func IsRuleWiringErrorCode(code string) bool {
     switch code {
     case ErrorUnknownRule, ErrorInvalidRuleSyntax, ConstraintRegexErrorInvalidPattern:

@@ -35,8 +35,10 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
         )
     }
 
-    /* a module's identity is its instance: the same instance reached through two providers used to boot twice, and the loud half of that — a duplicate service name — hid the silent half, its listeners and middlewares each attached twice. The skip covers the children too: they were expanded when the instance first registered. An instance of an uncomparable type cannot be a map key, so it keeps the old behavior rather than a runtime panic; Name stays informative and two distinct instances sharing one name stay two modules. */
-    if false == reflect.TypeOf(moduleInstance).Comparable() {
+    /* a module's identity is its instance: the same instance reached through two providers used to boot twice, and the loud half of that — a duplicate service name — hid the silent half, its listeners and middlewares each attached twice. The skip covers the children too: they were expanded when the instance first registered. An instance that cannot be a map key keeps the old behavior rather than a runtime panic; Name stays informative and two distinct instances sharing one name stay two modules.
+
+       The question is asked of the VALUE, not of the type. A type is comparable when every field is, and an interface field counts as comparable at that level whatever it ends up holding — so a module registered as a struct value carrying an `any` field passed this guard and then panicked with "hash of unhashable type" on the very next line, the moment its field held a map, a slice or a func. That is the exact panic the guard is here to avoid. The container asks the same question the same way, in isComparableValue. */
+    if false == reflect.ValueOf(moduleInstance).Comparable() {
         instance.appendModule(moduleInstance, depth)
 
         return

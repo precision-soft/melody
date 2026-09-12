@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -31,9 +32,23 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username is required"), nil
         }
 
+        /* the username becomes a cache key component and a 255-byte column, so a spelling longer than either holds is turned away before the row lands */
+        if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must stay within 255 bytes"), nil
+        }
+
         normalizedPassword := strings.TrimSpace(dto.Password)
         if "" == normalizedPassword {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password is required"), nil
+        }
+
+        /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake instead of surfacing as a hashing failure */
+        if security.PasswordMaximumBytes < len(normalizedPassword) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
+        }
+
+        if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
         }
 
         userService := service.MustGetUserService(runtimeInstance.Container())
@@ -46,11 +61,16 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
         }
 
+        passwordHash, hashErr := security.HashPassword(normalizedPassword)
+        if nil != hashErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
+        }
+
         user, createErr := userService.Create(
             runtimeInstance,
             "",
             normalizedUsername,
-            security.Sha256Hex(normalizedPassword),
+            passwordHash,
             normalizeRoles(dto.Roles),
         )
         if nil != createErr {

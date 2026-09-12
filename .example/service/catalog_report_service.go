@@ -34,7 +34,7 @@ type CatalogReport struct {
 
 /* CatalogReportService stamps a reading of the catalogue and remembers it for a while.
 
-The clock is injected rather than read from the wall, which is what makes the stamp assertable: a frozen clock lets a test state the exact instant a report carries and the exact instant a cached one still carries, neither of which can be written against time.Now. */
+   The clock is injected rather than read from the wall, which is what makes the stamp assertable: a frozen clock lets a test state the exact instant a report carries and the exact instant a cached one still carries, neither of which can be written against time.Now. */
 type CatalogReportService struct {
     clock             melodyclockcontract.Clock
     backend           CatalogReportBackend

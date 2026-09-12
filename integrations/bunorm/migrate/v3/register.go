@@ -2,15 +2,17 @@ package migrate
 
 import (
     "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/uptrace/bun/migrate"
 )
 
+/* RegisterCommands builds the migration command family for one migration set. A nil set is refused rather than answered with no commands: the caller believes it registered the family and finds out at invocation time, as "unknown command", far from the wiring that caused it. The module gates its own optional set before calling here, so a binary that registers only migration contexts never reaches this refusal. */
 func RegisterCommands(
     migrations *migrate.Migrations,
     options Options,
 ) []contract.Command {
     if nil == migrations {
-        return []contract.Command{}
+        exception.Panic(exception.NewError("bunorm migrate: migrations are nil at RegisterCommands", nil, nil))
     }
 
     if "" == options.ManagerFlagName {

@@ -1273,7 +1273,9 @@ func (instance *rateLimitCaptureLogger) Error(message string, context loggingcon
     instance.errorCalls++
 }
 
-type alreadyReportingRuntimeLimiter struct{}
+type alreadyReportingRuntimeLimiter struct {
+    allowWithRuntimeCalls int
+}
 
 func (instance *alreadyReportingRuntimeLimiter) Allow(key string) bool {
     return true
@@ -1283,6 +1285,8 @@ func (instance *alreadyReportingRuntimeLimiter) Reset(key string) {
 }
 
 func (instance *alreadyReportingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+    instance.allowWithRuntimeCalls++
+
     return true, exception.MarkLogged(
         exception.NewError("rate limiter store failure", exceptioncontract.Context{"key": "actor"}, nil),
     )
@@ -1297,7 +1301,8 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
-    middleware := RateLimitMiddleware(NewRateLimitConfig(&alreadyReportingRuntimeLimiter{}, nil, nil))
+    limiter := &alreadyReportingRuntimeLimiter{}
+    middleware := RateLimitMiddleware(NewRateLimitConfig(limiter, nil, nil))
 
     handler := middleware(
         func(
@@ -1312,11 +1317,68 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
     _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
 
+    /* an empty journal is also what a middleware that never metered the request leaves behind, so the silence means nothing until the limiter says it was asked */
+    if 1 != limiter.allowWithRuntimeCalls {
+        t.Fatalf("expected the middleware to meter the request exactly once, got %d calls", limiter.allowWithRuntimeCalls)
+    }
+
     if 0 != capture.warningCalls || 0 != capture.errorCalls {
         t.Fatalf(
             "a failure the limiter already recorded must not be recorded a second time, got %d warnings %d errors",
             capture.warningCalls,
             capture.errorCalls,
         )
+    }
+}
+
+/* a typed-nil limiter passes the plain comparison, looks live for the guard, and dereferences its nil receiver on the first request the middleware meters; the interface read refuses it at construction under the same name */
+func TestRateLimitMiddleware_RefusesATypedNilLimiterByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil limiter to be refused at construction")
+        }
+    }()
+
+    _ = RateLimitMiddleware(NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
+}
+
+/* the listener door shares the middleware door's refusal. The panic is asserted by NAME: with the guard dead the nil dispatcher three lines below panics too, and a recover that accepts any panic would report that second failure as the refusal it is not. */
+func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil limiter to be refused at registration")
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "limiter is required") {
+            t.Fatalf("expected the refusal to name the limiter, got %v", recovered)
+        }
+    }()
+
+    RegisterRateLimitRequestListener(nil, NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
+}
+
+/* the marks are searched with a binary search, which is entitled to an ordered slice, so the recorded instant is clamped to the last mark. A wall clock moved backwards under the process otherwise appended out of order, and an unordered slice does not merely keep an expired mark — the search can cut a LIVE one away and hand the key its budget back, on a limiter the package points at login, one-time codes and password reset. */
+func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *testing.T) {
+    startedAt := time.Now()
+    frozenClock := clock.NewFrozenClock(startedAt)
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 2, 12*time.Second)
+
+    frozenClock.TravelTo(startedAt.Add(20 * time.Second))
+    if false == limiter.Allow("key1") {
+        t.Fatal("expected the first request to be admitted")
+    }
+
+    /* the clock answers an earlier instant than one already recorded */
+    frozenClock.TravelTo(startedAt.Add(5 * time.Second))
+    if false == limiter.Allow("key1") {
+        t.Fatal("expected the second request to be admitted; the budget is two")
+    }
+
+    /* the mark at +20s is still inside the twelve second window that opens at +18s, so the budget is spent */
+    frozenClock.TravelTo(startedAt.Add(30 * time.Second))
+    if true == limiter.Allow("key1") {
+        t.Fatal("expected the refusal: the live mark must not be cut away by a search over unordered marks")
     }
 }

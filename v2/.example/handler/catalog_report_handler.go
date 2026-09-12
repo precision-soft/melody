@@ -24,7 +24,7 @@ type catalogJournalEntryPayload struct {
 
 /* CatalogReportHandler renders the clock-stamped reading of the catalogue, served from the redis cache once it is warm, together with the most recent changes the journal recorded.
 
-The counts come from the cached reading and the entries are read live: the numbers are what the report is for and are worth remembering for a while, while the list of who changed what is short, cheap and only useful when it is current. Without a database there is no journal and the list is simply empty. */
+   The counts come from the cached reading and the entries are read live: the numbers are what the report is for and are worth remembering for a while, while the list of who changed what is short, cheap and only useful when it is current. Without a database there is no journal and the list is simply empty. */
 func CatalogReportHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         reportService := service.MustGetCatalogReportService(runtimeInstance.Container())

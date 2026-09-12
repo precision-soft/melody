@@ -12,7 +12,7 @@ import (
 
 func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        topic := queryStringOr(request, "topic", "default")
+        topic := queryStringOr(request, "topic", CatalogTopic)
         text := queryStringOr(request, "text", "hello")
 
         _, dispatchErr := bus.Dispatch(runtimeInstance, message.Notification{Topic: topic, Text: text})

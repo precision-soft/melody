@@ -28,10 +28,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
     generateCommand := melodycron.NewGenerateCommand(newCronConfiguration())
 
-    generateCommand.RegisterTemplate(&KubernetesCronjobTemplate{
-        Namespace: "production",
-        Image:     "myapp:latest",
-    })
+    generateCommand.RegisterTemplate(&AnsibleCronTemplate{TaskNamePrefix: "billing cron: "})
 
     return []melodyclicontract.Command{
         NewBillingCleanupCommand(),

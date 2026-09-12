@@ -5,44 +5,39 @@ import (
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
+/* the guard exists to replace the raw dereference with a refusal that names the pattern, so an unqualified recover is satisfied by the very crash it was written to remove. */
 func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     group := NewRouteGroup(nil, "/api")
 
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    group.HandleWithOptions(
-        "/x",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            return EmptyResponse(200), nil
-        },
-        NewRouteOptions("a", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
-    )
+    testhelper.AssertPanicsWithError(t, func() {
+        group.HandleWithOptions(
+            "/x",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return EmptyResponse(200), nil
+            },
+            NewRouteOptions("a", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        )
+    }, "router is nil")
 }
 
+/* the nil options refusal sits below the nil router one and reads the same to an unqualified recover; the message is what says which of the two answered. */
 func TestRouteGroup_PanicsWhenOptionsIsNil(t *testing.T) {
     router := NewRouter()
     group := router.Group("/api")
 
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    group.HandleWithOptions(
-        "/x",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            return EmptyResponse(200), nil
-        },
-        nil,
-    )
+    testhelper.AssertPanicsWithError(t, func() {
+        group.HandleWithOptions(
+            "/x",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return EmptyResponse(200), nil
+            },
+            nil,
+        )
+    }, "the route options is nil")
 }
 
 func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
