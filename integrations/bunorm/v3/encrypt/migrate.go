@@ -143,15 +143,11 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
     }
 }
 
-/* EnsureColumnCapacity refuses a migration whose ciphertext could not fit back into the column it is read from.
+/* EnsureColumnCapacity checks that currently unsealed values will fit after encryption before rewriting any row. It measures the longest eligible value and seals a probe of that size with the migration's cipher, so the required capacity includes the actual envelope and encoding overhead.
 
-   Sealing expands. A value comes back wrapped in a marker, a key id, a nonce and an authentication tag, base64 encoded — roughly 1.34 characters per plaintext byte plus 52, so a VARCHAR(255) stops being able to hold its own contents at 153 bytes of plaintext. Under the strict sql_mode MySQL ships with, the UPDATE that overflows fails and the run stops with the row intact. Under sql_mode='' it SUCCEEDS with a warning: the column keeps a truncated ciphertext, the row is counted as migrated and the command exits zero. The plaintext is gone at that point and a truncated ciphertext can never authenticate again, so nothing is recoverable from it — and nothing in this module pins sql_mode.
+   Already-sealed values are excluded because the transform preserves them; malformed sealed values are rejected by the transform. A column with nothing left to seal needs no capacity measurement. Key rotation requires EnsureColumnCapacityForReencrypt instead, because it rewrites existing ciphertext too.
 
-   The requirement is therefore established before the first row is written, by sealing a probe as long as the longest value the column actually holds with the very cipher the run will use, so it cannot drift from what seal produces. Values already sealed are left out of that measurement: the transform hands them back unchanged and they are already stored in the column, so they fit by definition — measuring them would make a second run over a migrated column demand a column wide enough to seal the ciphertext. The exclusion cannot hide a damaged one: a marker-shaped value that no longer decrypts stops the run inside the transform before anything is written over it. A column with nothing left to seal is not measured at all.
-
-   What it cannot promise is a value written after it ran: a longer one inserted concurrently is still bounded only by the server's sql_mode. This catches the sizing mistake before it is applied to a whole table; it does not make a non-strict server safe.
-
-   This is the check for a run that only seals what is not sealed yet. A key rotation rewrites the sealed values too and grows them for a different reason, which EnsureColumnCapacityForReencrypt covers. */
+   This check is a preflight, not a concurrency guarantee. A longer value inserted afterwards can still overflow. MySQL without strict sql_mode may truncate ciphertext and report success, making it undecryptable; production migrations must also enforce an appropriate server mode or prevent concurrent writes. */
 func (instance *Migrator) EnsureColumnCapacity(ctx context.Context, spec TableSpec) error {
     return instance.ensureColumnCapacity(ctx, spec, "")
 }

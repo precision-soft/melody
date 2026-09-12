@@ -4,6 +4,7 @@ import (
     "io"
     "log"
     "os"
+    "reflect"
     "sync"
     "sync/atomic"
 
@@ -22,31 +23,58 @@ var (
     bunDiagnosticsTarget atomic.Pointer[diagnosticsTarget]
 )
 
-/* diagnosticsTarget holds the writer one routing installed, and the logger it was built for. The writer is built once per LOGGER rather than per record or per routing: it is logging.NewStandardErrorLogger's own, so the record shape stays the framework's and is not spelled a second time here; and the logger is kept so a repeated routing on the same logger installs nothing and a teardown hands the channel back only when the channel is its own. */
+/* diagnosticsTarget is one installed writer and the logger identity used for conditional teardown. */
 type diagnosticsTarget struct {
     logger loggingcontract.Logger
     writer io.Writer
 }
 
-/* RouteDiagnostics sends bun's own diagnostic channel to the application's journal. Bun reports the developer's declaration mistakes through a package-level logger of its own — an unknown struct tag option, an unknown on_update or on_delete rule on a relation, a query carrying arguments and no placeholders — and unrouted they are written to standard error as unstructured text, invisible to a deployment whose journal is a json file. They arrive as warning records carrying the line, the shape NewStandardErrorLogger already gives net/http's own reporting.
+/* RouteDiagnostics forwards bun diagnostics to the logger as warnings. The process-wide forwarder is installed once; routing replaces its atomic destination. Comparable logger identities reuse their writer, while non-comparable values receive a new destination on every call. Nil and typed-nil loggers leave the destination unchanged.
 
-   Bun's logger is one variable for the whole process, so it is set exactly once — but what is set is a forwarder onto a destination this function replaces whenever it is called with a DIFFERENT logger, and the destination is what decides where a record goes. The distinction is the whole point: a process that builds, closes and rebuilds its application — a test binary above all, but equally an application wired before its own logger exists — used to leave bun's channel pinned to the first lifecycle's logger for the life of the process, so every later lifecycle's diagnostics were dropped into a logger that was closed, or into an emergency fallback nobody reads. Now the first routing of each lifecycle takes the channel back. A routing on the logger already installed changes nothing and allocates nothing: the providers route on every open, and a destination rebuilt per open was a writer allocated per open for the same journal.
-
-   A nil logger, and a typed nil holding no value, route nothing: they are the wiring mistake this package refuses everywhere else, and installing one as the destination would drop records against a receiver that cannot take them.
-
-   It does not reach the one line the mysql dialect writes when it cannot read the server version. That line goes through the standard library's own default logger, not through bun's, so routing it means taking log.SetOutput for the whole process — every dependency and the application's own log calls with it — which is the application's decision to make and not this package's. See the mysql readme. */
+   This does not redirect the standard library logger used by the MySQL dialect's server-version diagnostic. */
 func RouteDiagnostics(logger loggingcontract.Logger) {
     if nil == logger || true == isNilInterface(logger) {
         return
     }
 
-    if live := bunDiagnosticsTarget.Load(); nil != live && logger == live.logger {
+    if live := bunDiagnosticsTarget.Load(); nil != live && sameDiagnosticLogger(logger, live.logger) {
         return
     }
 
     bunDiagnosticsTarget.Store(newDiagnosticsTarget(logger))
 
     bunDiagnosticsOnce.Do(installBunDiagnostics)
+}
+
+func sameDiagnosticLogger(left loggingcontract.Logger, right loggingcontract.Logger) bool {
+    if nil == left || nil == right {
+        return nil == left && nil == right
+    }
+
+    return reflect.ValueOf(left).Comparable() && reflect.ValueOf(right).Comparable() && left == right
+}
+
+/* A value logger with non-comparable fields needs a stable registry-owned identity for routing and teardown. */
+type registryDiagnosticLogger struct {
+    loggingcontract.Logger
+}
+
+func (instance *registryDiagnosticLogger) Enabled(level loggingcontract.Level) bool {
+    reporter, reportsLevel := instance.Logger.(interface {
+        Enabled(loggingcontract.Level) bool
+    })
+    if false == reportsLevel {
+        return true
+    }
+    return reporter.Enabled(level)
+}
+
+func diagnosticLoggerWithIdentity(logger loggingcontract.Logger) loggingcontract.Logger {
+    if reflect.ValueOf(logger).Comparable() {
+        return logger
+    }
+
+    return &registryDiagnosticLogger{Logger: logger}
 }
 
 /* newDiagnosticsTarget builds the destination one routing installs. The writer is built once per routing rather than per record, and it is logging.NewStandardErrorLogger's own, so the record shape stays the framework's and is not spelled a second time here. */
@@ -64,10 +92,10 @@ func ResetDiagnostics() {
     bunDiagnosticsTarget.Store(nil)
 }
 
-/* resetDiagnosticsRoutedTo hands bun's diagnostic channel back only when the live destination is the one routed to this logger. It is what a registry's Close calls: the process may hold two registries — two applications in one test binary, or a second registry wired beside the first — and a Close that reset the channel unconditionally took it away from the registry still running, whose diagnostics went to standard error until its next open routed them again. Two registries sharing one logger still share one channel, and the first to close hands it back for both; the next open of the other takes it again. */
+/* resetDiagnosticsRoutedTo releases only the matching destination. Registries wrap non-comparable loggers with a stable identity; a direct non-comparable value cannot prove ownership and must use ResetDiagnostics for an unconditional hand-back. */
 func resetDiagnosticsRoutedTo(logger loggingcontract.Logger) {
     live := bunDiagnosticsTarget.Load()
-    if nil == live || logger != live.logger {
+    if nil == live || false == sameDiagnosticLogger(logger, live.logger) {
         return
     }
 

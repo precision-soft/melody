@@ -13,6 +13,7 @@ func newInMemoryCatalogReadingRepository() *inMemoryCatalogReadingRepository {
 }
 
 /* inMemoryCatalogReadingRepository is what an environment without an archive connection gets. It keeps the same identity rule its postgres sister keeps — one reading per instant — because a fallback that accepted what the real one refuses would let a defect reach production through the only path a test can drive. */
+/* inMemoryCatalogReadingRepository owns the process-local reading archive; its mutex protects stored readings across requests. */
 type inMemoryCatalogReadingRepository struct {
     mutex            sync.RWMutex
     readingByInstant map[time.Time]*CatalogReadingRecord

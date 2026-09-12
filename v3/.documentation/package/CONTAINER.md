@@ -41,6 +41,20 @@ The container is responsible for:
 - Provide deterministic shutdown:
     - [`Close`](../../container/container_close.go)
 
+## Services are stateless by default
+
+A process service is shared by every request and concurrent call. Keep its dependencies and immutable configuration on the service; keep the current user, request context, response, work buffers and per-call counters in local variables or in a value the service produces. A mutex prevents a data race but does not make one request's state belong to another request.
+
+Stateful exceptions must have a clear owner:
+
+- Factories keep configuration; each produced value owns its operation state.
+- Connection and pool owners, including database registries, broker transports and telemetry providers, retain process resources and synchronize their lifecycle.
+- Caches, rate limiters, token/session stores, in-memory repositories and subscription hubs retain state as their purpose. Synchronize access and define retention and shutdown behavior.
+- Registries retain process configuration; build it before serving or synchronize supported runtime changes.
+- Scoped services own request or operation state. Register them through the scoped registrar and resolve them from that scope. A scope does not serialize concurrent access to the same service within one request.
+
+A process service that retains mutable state must explain its purpose, ownership and synchronization in the type's GoDoc. This is a design and review rule; the container does not infer request semantics from field names or automatically change a service's lifetime. The example's generated wiring shares its formatter and journal while giving each request a separate report trail.
+
 ## Configuration
 
 ### Type registration
@@ -189,6 +203,8 @@ func example() {
 
   What it buys is not speed. Measured on the applications here, the whole teardown is about a millisecond and the waves save none of it; what changes is that a service is no longer STARVED — every closer in a wave starts at once and sees the whole of what is left of the deadline, instead of the remainder the component before it did not spend, so "the budget was already gone when this one was reached" stops being the ordinary case for whatever the order happened to put last. Two services the walk sees holding EACH OTHER — or a ring of them — gain no edge, because no ordering between them is true, and are closed one after the other inside their wave rather than at once — the plan names such a group by number in `TeardownPlanEntry.SerialGroup`, and `debug:container` prints it as the `group` column, since "same wave, no dependencies" would otherwise read as "closed together"; the built instances an override evicted close one after the other past everything the graph proved. What the walk reads of a service is the same wherever the service came from: pointer words and struct and array layouts, never an interface, a slice or a string, because every word may be memory somebody else is writing — a fresh value's own fields included, since a provider may hand back an object built long before and already in use. A collaborator held only through an interface field or a slice is therefore not seen, from any door, and keeps the order it had; resolve it, or declare the edge.
 
+  The inference walk visits pointers, structs, and pointer-bearing arrays by minimum reachable depth. Cycles do not suppress shorter paths. It admits at most 65,536 values, at depth at most 12 and with at most 256 fields or elements per value; the queue has the same total bound. A broad level can exhaust this budget before deeper collaborators are visited. Explicit dependency declarations remain the reliable contract for relationships outside these limits.
+
   One residue no graph can close, and it is why this is opt-in rather than default: two `Close` methods that touch the same EXTERNAL state — one file, one table, a `sql.Register` name, a system resource — have no relation the container can see, whatever it walks. Declaring the edge between them is the only thing that orders them, and nothing will report that it is missing.
 - A closed container refuses writes and keeps serving what it built: `Register` — the scoped registrations made through the container included — the overrides and `ArmParallelTeardown` return the container-is-closed error, a new creation is refused, and a resolution of an already-built instance still answers — which is what lets an in-flight request degrade gracefully during shutdown. A scope is stricter: every entry of a closed scope answers "scope is closed". A resolution racing `Close()` is defined behavior — a creation caught mid-race is refused and the value it built is closed rather than leaked (see [`container/container_close.go`](../../container/container_close.go) and [`container/resolver_context.go`](../../container/resolver_context.go)); the one thing `Close()` does not survive is re-entry from a service's own `Close`, which deadlocks the teardown that is waiting on it.
 - `OverrideInstance` / `MustOverrideInstance` reject service names with the `service.` prefix (protected services). If you must override a protected service in userland tests, use `OverrideProtectedInstance` or `MustOverrideProtectedInstance` (see [`OverrideService`](../../container/contract/override.go) and its implementations in [`container/container.go`](../../container/container.go) and [`container/scope.go`](../../container/scope.go)). The scoped registration paths refuse the prefix outright — with or without `Replacing()` — because a scoped registration of a protected name would be the same substitution, one scope wide.
@@ -232,6 +248,8 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
 `Scope.RegisterScoped` adds a service to one live scope, layered over the plan the container was booted with. It is the rare case; a scoped service is normally declared at boot so every scope gets it. Like the other two registration doors it refuses once the container has begun closing, because a registration accepted on a live scope would report success for a service whose every resolution the creation guard then refuses.
 
 ### Scope teardown
+
+The concrete scope supports the optional `interface { CloseWithContext(context.Context) error }` capability. It passes the caller's context unchanged to each owned service that implements both `Close() error` and `CloseWithContext(context.Context) error`, preferring the latter even after cancellation. `Close()` delegates with `context.Background()`. All services share the same budget; a legacy `Close()` cannot be interrupted by it. Errors and panics are recorded while the remaining services continue closing. The `Scope` interface and the kernel/CLI callers remain unchanged, so their normal scope cleanup has no added deadline.
 
 `Close` closes what the scope built and nothing else: an override belongs to whoever installed it, and a singleton reached through the scope belongs to the root container. Services the scope built are closed in dependency order, dependents before their dependencies — one instance filed under its name and its type is collapsed into one node before the ordering runs, so the close order holds however the service was resolved, and a value neither comparable nor addressable is closed once rather than once per filing. An override that has nowhere else to be closed can join the teardown with [`ClosedWithScope()`](../../container/override_option.go) through `OverrideProtectedInstanceWithOptions`; a created instance such an override evicts is still the scope's, and still closes with it.
 

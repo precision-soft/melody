@@ -22,6 +22,7 @@ func NewRegistry() *Registry {
     }
 }
 
+/* Registry retains process API descriptions. Populate it before serving requests; concurrent readers require that descriptors and their referenced maps and slices remain unchanged. */
 type Registry struct {
     descriptorsByRoute map[string]Descriptor
 }

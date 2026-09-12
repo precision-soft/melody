@@ -193,7 +193,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts
     if 0 == maxAttempts {
-        maxAttempts = 3
+        maxAttempts = DefaultRetryConfig().MaxAttempts
     }
 
     for {
@@ -426,15 +426,16 @@ func (instance *Provider) toConnectionContext(
 const minimumBackoffDelay = time.Millisecond
 
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
+    defaults := DefaultRetryConfig()
     /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
     initialDelay := instance.retryConfig.InitialDelay
     if 0 >= initialDelay {
-        initialDelay = 500 * time.Millisecond
+        initialDelay = defaults.InitialDelay
     }
 
     maxDelay := instance.retryConfig.MaxDelay
     if 0 >= maxDelay {
-        maxDelay = 5 * time.Second
+        maxDelay = defaults.MaxDelay
     }
 
     /* the floor is applied to BOTH bounds, so every branch below returns at least it: raising the initial delay alone would still let a sub-millisecond ceiling cap the result straight back under the floor. */
@@ -449,7 +450,7 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
     /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through, poison the float-space growth below and collapse the backoff into an immediate re-dial storm once the NaN converts to a negative duration. */
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
     if false == (backoffMultiplier >= 1) {
-        backoffMultiplier = 2.0
+        backoffMultiplier = defaults.BackoffMultiplier
     }
 
     /* the first attempt waits the initial delay, so the growth is over the attempts ALREADY made. A zero attempt is not one of them and would wrap the unsigned subtraction below into a growth of four billion steps; it reads as the first attempt, which is the answer the growth loop this replaced gave it by never running. */

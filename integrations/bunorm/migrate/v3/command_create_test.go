@@ -177,3 +177,37 @@ func TestCreateCommand_ADirectorySyncFailureAfterTheRenameIsAWarningNotAFailure(
         t.Fatalf("expected exactly one migration file, got %d", len(entries))
     }
 }
+
+func TestCreateCommand_FinalizesALongValidFileName(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+    directory := t.TempDir()
+    migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
+    name := strings.Repeat("m", 237)
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--format=json", name)
+    if nil != runErr {
+        t.Errorf("valid migration name could not be finalized: %v", runErr)
+    }
+    entries, err := os.ReadDir(directory)
+    if nil != err {
+        t.Fatal(err)
+    }
+    if 1 != len(entries) {
+        t.Fatalf("expected one migration and no temporary file, got %d entries", len(entries))
+    }
+    filename := entries[0].Name()
+    if 255 != len(filename) || false == strings.HasSuffix(filename, "_"+name+".go") {
+        t.Fatalf("unexpected generated name: %q", filename)
+    }
+    content, err := os.ReadFile(filepath.Join(directory, filename))
+    if nil != err {
+        t.Fatal(err)
+    }
+    if false == strings.Contains(string(content), "Migrations.MustRegister") {
+        t.Fatal("generated migration is incomplete")
+    }
+    if false == json.Valid([]byte(rendered)) || false == strings.Contains(rendered, filename) {
+        t.Errorf("JSON output does not describe the created migration: %s", rendered)
+    }
+}

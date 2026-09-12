@@ -14,6 +14,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
+/* ManagerRegistry owns process database pools and coordinates opens and shutdown under its lock. Its bound context must have process lifetime; per-request transactions belong to the caller. */
 type ManagerRegistry struct {
     logger loggingcontract.Logger
     /* openContext bounds the lazy opens of providers that implement ContextOpener, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole retry budget. */
@@ -92,7 +93,7 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
     }
 
     return &ManagerRegistry{
-        logger:                        logger,
+        logger:                        diagnosticLoggerWithIdentity(logger),
         openContext:                   ctx,
         providerDefinitionByName:      providerDefinitionByName,
         defaultProviderDefinitionName: defaultProviderDefinitionName,
@@ -455,18 +456,21 @@ func (instance *ManagerRegistry) currentLogger() loggingcontract.Logger {
     return instance.logger
 }
 
-/* SetLogger replaces the logger this registry reports through, and takes bun's diagnostic channel with it. It exists for the wiring window an application cannot avoid: a registry built while the modules are still being assembled has no application logger to be handed — the framework's own does not exist yet — so it is constructed on the emergency logger, and without this door every later open, every retry warning and every terminal connection failure would keep bypassing the journal for the life of the process.
-
-   The routing follows deliberately: the same call that gives the registry its real journal gives bun's own diagnostics the same destination, so the two cannot drift apart. A nil logger, and a typed nil holding no value, are refused — they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
+/* SetLogger replaces the registry logger and routes bun diagnostics to it in the same critical section. Nil and typed-nil loggers are refused. A closed registry returns ErrManagerRegistryClosed without changing either destination. */
 func (instance *ManagerRegistry) SetLogger(logger loggingcontract.Logger) error {
     if true == isNilInterface(logger) {
         return ErrLoggerIsRequired
     }
 
     instance.lock.Lock()
-    instance.logger = logger
-    instance.lock.Unlock()
+    defer instance.lock.Unlock()
 
+    if true == instance.closed {
+        return ErrManagerRegistryClosed
+    }
+
+    logger = diagnosticLoggerWithIdentity(logger)
+    instance.logger = logger
     RouteDiagnostics(logger)
 
     return nil

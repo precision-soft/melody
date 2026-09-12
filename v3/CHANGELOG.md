@@ -311,6 +311,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
+- Discover held collaborators by minimum reachable depth during container teardown inference. Cyclic graphs no longer hide a collaborator within the depth limit because a longer path was visited first; breadth-first admission keeps the queue and work bounded.
+
+- container: scope teardown now prefers a service's `CloseWithContext` over `Close`, including evicted instances. The concrete scope exposes `CloseWithContext(context.Context) error` with one shared caller context; `Close()` uses `context.Background()`. The `Scope` contract remains unchanged, legacy closers retain their own timing, and a failed or panicking closer does not prevent remaining services from closing.
+
 - container: extend the type identity collision guard to declared teardown dependencies, in either registration order. A declaration for a composite type from one package can no longer bind to an identically spelled type from another package. Refused registrations leave no declared identities or edges behind.
 
 - http: reject request paths with surrounding whitespace before routing or authorization, preventing a raw protected path from using the public rule of its trimmed spelling.

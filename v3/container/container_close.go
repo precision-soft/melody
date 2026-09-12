@@ -35,17 +35,11 @@ func (instance *container) IsClosed() bool {
     return instance.isClosed
 }
 
-/* ArmParallelTeardown lets the container close, in one wave, every service the teardown graph proves has no relation to any other service in that wave. It is OFF by default: the teardown this container has shipped is strictly sequential, and a service that needs another to outlive it without ever saying so has been carried by the creation order rather than by the graph, which is an accident that holds until the day it does not.
+/* ArmParallelTeardown enables concurrent closing of unrelated services within each teardown wave. It is disabled by default. Arming asserts that the application's required ordering is represented by provider resolutions or explicit teardown dependencies; captured collaborators and shared external resources may otherwise have no observable relationship.
 
-   Arming it is an ASSERTION about the application's own providers, not a performance setting, and that is why it is a door in the composition root rather than a configuration key: whoever turns it on has to be the person who wrote the providers. What is asserted is that every ordering the services need is written down — by a provider that RESOLVES its collaborator, which records the edge as a side effect of the resolution and cannot fall out of step with what the provider uses, or by WithTeardownDependency where there is genuinely nothing to resolve. A provider that captures an already-built collaborator and hands it back declares nothing, and under waves "no edge" is read as "no relation" rather than as an order nobody chose.
+   Every service in a wave receives the same remaining teardown context. This can prevent an unrelated slow closer from exhausting another service's budget, but does not guarantee faster shutdown.
 
-   What it buys is not speed. On the applications measured, the whole teardown is a millisecond and the waves save none of it; what changes is that a service is no longer STARVED — every closer in a wave starts at once and sees the whole of what is left of the deadline, instead of the remainder the component before it did not spend, so "the budget was already gone when this one was reached" stops being the ordinary case.
-
-   One residue no graph can close, and it is the reason this is opt-in rather than default: two Close methods that touch the same EXTERNAL state — one file, one table, a sql.Register name, a system resource — have no relation this container can see, whatever it walks. Declaring the edge between them is the only thing that orders them, and nothing here will report that it is missing.
-
-   Arming validates what is registered at that moment, and every registration made after it is validated at its own door under the same rules: a declaration naming a service nothing registered, a scoped service, or a type more than one service is registered under is refused there, and so is the second registration under a type a declaration already names. Without that the guard would be a snapshot, and a registration arriving after it would land in one wave with the service it declared itself before.
-
-   A closed container refuses to arm, with the cause Register answers on the same condition. Accepted, the call did worse than report success over nothing: it walked instances the teardown had already closed, re-created the records that teardown had just released, and left the flag set on a container that will never close again. */
+   Arming validates existing declarations, and subsequent registrations enforce the same rules: dependencies must resolve to registered container services, and type declarations must identify an unambiguous service. Scoped targets and conflicting type registrations are refused. A closed container cannot be armed. */
 func (instance *container) ArmParallelTeardown() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -260,13 +254,11 @@ func (instance *container) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline the caller declares, handed to every service that can observe one. It is declared on the container rather than on the Container contract because a method added there is a method every application carrying its own implementation would have to grow, and because the caller that has a budget already reaches this value through a type assertion for IsClosed; WithTeardownDependency is declared the same way, for the same reason.
+/* CloseWithContext closes owned services under the caller's shared context, preferring their CloseWithContext capability. Services implementing only Close retain their own timing and cannot be interrupted by this context. The method is available on the concrete container without extending the Container interface.
 
-   The deadline is shared, not copied: it bounds the teardown as a whole, which is the figure a supervisor's termination grace is measured against, so each service sees what is LEFT of it rather than a fresh window of its own. A component that spends the whole budget therefore starves the ones the graph puts after it — measured on the example, seven of eight closes cost under two milliseconds together and one costs thirty seconds — and that is the intended reading of a whole-teardown budget: what the operator learns is which service ate it, and which were left with none.
+   Close failures are reported individually. Exceeding a declared deadline is diagnostic rather than an additional failure: the record includes the budget, elapsed time, per-service durations, services active at expiry, and services reached afterwards. It accompanies the error when a close failed and is available through TeardownDeadlineOverrun when closing otherwise succeeded. The application logs that latter record without changing its exit code.
 
-   The failure map names only the closes that FAILED, and a spent budget is not one of them: a closer reached with the deadline gone answers nil where it has nothing left to do, which is the ordinary state once an earlier component has eaten the budget, so a teardown that ran twice its deadline used to exit clean with no trace of the service that ate it — measured, an eighty-millisecond close under a forty-millisecond budget answered nil ten times out of ten and recorded nothing. A teardown that runs past its deadline therefore keeps a record of its own: the budget it was given, what it spent, the closers that were running when the deadline passed, the ones reached after it, and the duration of every close. The record travels beside the failures in the error when a close failed, and through TeardownDeadlineOverrun when none did, which is how an overrun that exits clean still reaches the journal. It is a diagnostic and never a failure: failing the teardown for it would punish the plain Close that CONTAINER.md declares bounded by nothing but itself, change the exit code of every deployment whose closers exceed the budget while releasing everything, and judge twice a figure the shield around the teardown already judges once.
-
-   A context with no deadline is the caller saying there is no term, and every service that reads it is told the same. */
+   A context without a deadline imposes no deadline and produces no deadline-overrun record. */
 func (instance *container) CloseWithContext(closeContext context.Context) error {
     instance.closeOnce.Do(func() {
         instance.closeErr = instance.closeInternal(closeContext)

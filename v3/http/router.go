@@ -22,6 +22,7 @@ func NewRouterWithRouteRegistry(routeRegistry *RouteRegistry) *Router {
     }
 }
 
+/* Router owns routing configuration built before serving. Request matching reads the prepared tree; registration and direct registry mutation are boot-time operations. */
 type Router struct {
     routeRegistry *RouteRegistry
     routeTreeRoot *routeTreeNode

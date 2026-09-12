@@ -29,6 +29,7 @@ func NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock) *InMemory
     }
 }
 
+/* InMemoryTokenStore owns process-local token and revocation state under its mutex; request identity is supplied to each operation. */
 type InMemoryTokenStore struct {
     clock                    clockcontract.Clock
     mutex                    sync.RWMutex

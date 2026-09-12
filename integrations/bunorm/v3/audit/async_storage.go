@@ -19,6 +19,7 @@ var asyncStorageCloseGrace = 5 * time.Second
 /* defaultAsyncStorageLogger is where a dead-letter goes when nothing installed a logger through WithLogger. The queue swallows the outcome of every write it takes — a failed save, a panicking delegate, an entry the worker never saw — so a nil default made each of those exits silent in every assembly that did not know to wire a logger, which measured as all of them: the counters were the only signal, and nothing read them. The emergency logger is the process's journal of last resort, the same fallback the rate limiter and the database providers take. A variable so the test can capture what would otherwise go to standard error. */
 var defaultAsyncStorageLogger = logging.EmergencyLogger
 
+/* AsyncStorage owns a process-lifetime queue and worker. Unbound saves enqueue value entries; database-bound saves use the caller's context synchronously. Dead-letter callbacks run outside the queue lock. */
 type AsyncStorage struct {
     delegate Storage
     queue    chan asyncEntry
@@ -91,9 +92,9 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
     }
 
     instance.mutex.RLock()
-    defer instance.mutex.RUnlock()
 
     if true == instance.closed {
+        instance.mutex.RUnlock()
         for _, entry := range entries {
             instance.dropped.Add(1)
             instance.deadLetter(table, entry, exception.NewError("async audit storage is closed, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageClosed))
@@ -106,23 +107,29 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
         return exception.NewError("async audit storage is closed, dropped the entries", map[string]any{"table": table, "dropped": len(entries)}, ErrAsyncStorageClosed)
     }
 
-    var refused int
+    var refused []Entry
     for _, entry := range entries {
         select {
         case instance.queue <- asyncEntry{table: table, entry: entry}:
             instance.entriesOutstanding.Add(1)
         default:
-            refused++
+            refused = append(refused, entry)
             instance.dropped.Add(1)
-            instance.deadLetter(table, entry, exception.NewError("async audit queue is full, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageQueueFull))
         }
     }
 
-    if 0 == refused {
+    instance.mutex.RUnlock()
+
+    /* Logger callbacks run outside the queue lock and may reenter the storage. */
+    for _, entry := range refused {
+        instance.deadLetter(table, entry, exception.NewError("async audit queue is full, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageQueueFull))
+    }
+
+    if 0 == len(refused) {
         return nil
     }
 
-    return exception.NewError("async audit queue is full, dropped the entries", map[string]any{"table": table, "dropped": refused}, ErrAsyncStorageQueueFull)
+    return exception.NewError("async audit queue is full, dropped the entries", map[string]any{"table": table, "dropped": len(refused)}, ErrAsyncStorageQueueFull)
 }
 
 func (instance *AsyncStorage) Dropped() uint64 {
@@ -176,6 +183,11 @@ const asyncStorageCloseGraceFloor = time.Millisecond
 /* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */
 func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) error {
     drainGrace, cancellationGrace := instance.closeGracesWithin(closeContext)
+    callerDone := closeContext.Done()
+    if 0 >= cancellationGrace {
+        /* The zero-budget path keeps its explicit spent-budget verdict. */
+        callerDone = nil
+    }
 
     instance.mutex.Lock()
     alreadyClosed := instance.closed
@@ -206,6 +218,14 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     select {
     case <-drained:
         return nil
+    case <-callerDone:
+        select {
+        case <-drained:
+            return nil
+        default:
+        }
+        instance.workerCancel()
+        return instance.interruptedCloseError(closeContext.Err())
     case <-time.After(drainGrace):
         /* the drain and the grace can end in the same instant, and a select between two ready cases picks at random: a queue that emptied is not cancelled out from under the save that emptied it */
         select {
@@ -231,6 +251,13 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     select {
     case <-drained:
         drainedAfterCancellation = true
+    case <-callerDone:
+        select {
+        case <-drained:
+            drainedAfterCancellation = true
+        default:
+            return instance.interruptedCloseError(closeContext.Err())
+        }
     case <-time.After(cancellationGrace):
         /* the drain and the grace can end in the same instant, and a select between two ready cases picks at random: a worker that DID react to its cancellation is not reported as one that ignored it. The answer is still not nil — the saves it reacted to were dead-lettered, which is what the second answer below says. */
         select {
@@ -252,6 +279,14 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
         "async audit storage cancelled a wedged save after the drain grace; the remaining entries were dead-lettered",
         map[string]any{"grace": drainGrace.String()},
         nil,
+    )
+}
+
+func (instance *AsyncStorage) interruptedCloseError(cause error) error {
+    return exception.NewError(
+        "async audit storage close was interrupted; outstanding entries were not confirmed stored",
+        map[string]any{"outstanding": instance.entriesOutstanding.Load(), "queued": len(instance.queue)},
+        cause,
     )
 }
 

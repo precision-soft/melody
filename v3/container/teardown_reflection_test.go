@@ -391,7 +391,7 @@ func TestHeldPointerIdentities_FindsAServiceAtTheDepthLimitWhicheverFieldComesFi
     }
 }
 
-/* wideHolder nests two arrays at the per-level limit, which is more cells than the walk's whole budget: a service in the first cell is found and one in the last is not, which is the budget doing what the per-level limits cannot. */
+/* wideHolder exceeds the total node budget without exceeding either array's element limit. The smaller control fits within the budget, including its pointer fields. */
 type wideHolder struct {
     cells [256][256]struct{ service *closeOrderServiceB }
 }
@@ -402,7 +402,9 @@ func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    first := &wideHolder{}
+    first := &struct {
+        cells [128][128]struct{ service *closeOrderServiceB }
+    }{}
     first.cells[0][0].service = held
 
     if false == holdsIdentity(heldPointerIdentities(first), heldIdentity) {

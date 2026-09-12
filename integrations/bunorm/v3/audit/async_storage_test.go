@@ -5,6 +5,7 @@ import (
     "context"
     "errors"
     "path/filepath"
+    "runtime"
     "strings"
     "sync"
     "syscall"
@@ -928,5 +929,179 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     drainGrace, cancellationGrace = storage.closeGracesWithin(roomyContext)
     if 0 >= drainGrace || 0 >= cancellationGrace {
         t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
+    }
+}
+
+type callbackAuditLogger struct {
+    *capturingLogger
+    onError func()
+}
+
+func (instance *callbackAuditLogger) Error(message string, fields loggingcontract.Context) {
+    instance.onError()
+    instance.capturingLogger.Error(message, fields)
+}
+
+func TestAsyncStorage_ClosedSaveLoggerCanReenterClose(t *testing.T) {
+    delegate := newRecordingStorage()
+    close(delegate.release)
+    storage := NewAsyncStorage(delegate, 1)
+    if err := storage.Close(); nil != err {
+        t.Fatal(err)
+    }
+    logger := &callbackAuditLogger{
+        capturingLogger: &capturingLogger{},
+        onError: func() { _ = storage.Close() },
+    }
+    storage.WithLogger(logger)
+    done := make(chan error, 1)
+    go func() {
+        done <- storage.Save(context.Background(), DefaultTable, Entry{Entity: "late"})
+    }()
+    select {
+    case err := <-done:
+        if false == errors.Is(err, ErrAsyncStorageClosed) {
+            t.Fatalf("expected closed refusal, got %v", err)
+        }
+        if 1 != logger.count() || 1 != storage.Dropped() {
+            t.Fatalf("dead-letter accounting changed: logs=%d dropped=%d", logger.count(), storage.Dropped())
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("dead-letter logger could not reenter Close")
+    }
+}
+
+func TestAsyncStorage_FullQueueLoggerCanCloseAndDrain(t *testing.T) {
+    delegate := newRecordingStorage()
+    storage := NewAsyncStorage(delegate, 1)
+    var release sync.Once
+    unblock := func() { release.Do(func() { close(delegate.release) }) }
+    t.Cleanup(unblock)
+    logger := &callbackAuditLogger{
+        capturingLogger: &capturingLogger{},
+        onError: func() {
+            unblock()
+            _ = storage.Close()
+        },
+    }
+    storage.WithLogger(logger)
+    if err := storage.Save(context.Background(), DefaultTable, Entry{Entity: "in flight"}); nil != err {
+        t.Fatal(err)
+    }
+    select {
+    case <-delegate.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatal("delegate did not receive the first entry")
+    }
+    if err := storage.Save(context.Background(), DefaultTable, Entry{Entity: "queued"}); nil != err {
+        t.Fatal(err)
+    }
+    done := make(chan error, 1)
+    go func() {
+        done <- storage.Save(context.Background(), DefaultTable, Entry{Entity: "refused"})
+    }()
+    select {
+    case err := <-done:
+        if false == errors.Is(err, ErrAsyncStorageQueueFull) {
+            t.Fatalf("expected queue-full refusal, got %v", err)
+        }
+        if 2 != delegate.count() || 1 != logger.count() || 1 != storage.Dropped() {
+            t.Fatalf("unexpected accounting: saved=%d logs=%d dropped=%d", delegate.count(), logger.count(), storage.Dropped())
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("queue-full logger could not close and drain the storage")
+    }
+}
+
+func TestAsyncStorage_CloseObservesCancellationDuringDrain(t *testing.T) {
+    delegate := &wedgedStorage{entered: make(chan struct{})}
+    storage := NewAsyncStorage(delegate, 1).WithLogger(&capturingLogger{})
+    if err := storage.Save(context.Background(), DefaultTable, Entry{Entity: "in flight"}); nil != err {
+        t.Fatal(err)
+    }
+    <-delegate.entered
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    done := make(chan error, 1)
+    go func() { done <- storage.CloseWithContext(ctx) }()
+    t.Cleanup(func() {
+        storage.workerCancel()
+        storage.wait.Wait()
+    })
+
+    startedDeadline := time.After(2 * time.Second)
+    for {
+        storage.mutex.RLock()
+        started := storage.closed
+        storage.mutex.RUnlock()
+        if started {
+            break
+        }
+        select {
+        case <-startedDeadline:
+            t.Fatal("close did not begin")
+        default:
+            runtime.Gosched()
+        }
+    }
+    cancel()
+    select {
+    case err := <-done:
+        if false == errors.Is(err, context.Canceled) {
+            t.Fatalf("expected caller cancellation, got %v", err)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("close ignored caller cancellation during drain")
+    }
+}
+
+type cancellationIgnoringAuditStorage struct {
+    entered   chan struct{}
+    cancelled chan struct{}
+    release   chan struct{}
+}
+
+func (instance *cancellationIgnoringAuditStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+    close(instance.entered)
+    <-ctx.Done()
+    close(instance.cancelled)
+    <-instance.release
+    return ctx.Err()
+}
+
+func TestAsyncStorage_CloseObservesCancellationDuringWorkerJoin(t *testing.T) {
+    previousGrace := asyncStorageCloseGrace
+    asyncStorageCloseGrace = time.Second
+    t.Cleanup(func() { asyncStorageCloseGrace = previousGrace })
+    delegate := &cancellationIgnoringAuditStorage{
+        entered: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{}),
+    }
+    storage := NewAsyncStorage(delegate, 1).WithLogger(&capturingLogger{})
+    t.Cleanup(func() {
+        storage.workerCancel()
+        close(delegate.release)
+        storage.wait.Wait()
+    })
+    if err := storage.Save(context.Background(), DefaultTable, Entry{Entity: "in flight"}); nil != err {
+        t.Fatal(err)
+    }
+    <-delegate.entered
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    done := make(chan error, 1)
+    go func() { done <- storage.CloseWithContext(ctx) }()
+    select {
+    case <-delegate.cancelled:
+    case <-time.After(3 * time.Second):
+        t.Fatal("close did not cancel the worker after its drain grace")
+    }
+    cancel()
+    select {
+    case err := <-done:
+        if false == errors.Is(err, context.Canceled) {
+            t.Fatalf("expected caller cancellation during join, got %v", err)
+        }
+    case <-time.After(500 * time.Millisecond):
+        t.Fatal("close ignored caller cancellation while joining the worker")
     }
 }

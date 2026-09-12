@@ -25,6 +25,7 @@ func NewInMemoryLocker(clockInstance clockcontract.Clock) *InMemoryLocker {
 
 const inMemoryPurgeInterval = 512
 
+/* InMemoryLocker owns process-local lease state under its mutex and issues tokens atomically. Each returned lock owns its acquisition state. */
 type InMemoryLocker struct {
     clock   clockcontract.Clock
     mutex   sync.Mutex

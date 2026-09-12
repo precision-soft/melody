@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Finalize Go migrations with long valid filenames using a short temporary name. A destination at the filesystem component limit no longer fails after creation because the temporary suffix exceeds that limit.
+
+- `db:migrate` and `db:rollback` retain a migration panic as the JSON failure when releasing the migration lock also fails. The unlock failure remains reported alongside it, and the original panic is re-raised unchanged.
+
 - `db:create` keeps the mode the migration file carries when it finishes bun's write atomically. Bun asks for 0644 and the process umask narrows it — under `umask 077` the file is 0600 — and the rewrite stamped 0644 unconditionally, widening what the operator's umask had narrowed; the rewritten file now carries the mode the destination had, with bun's 0644 as the fallback for a destination that cannot be read.
 - `db:create` holds the migration name to `^[0-9a-z_-]+$` before it reaches bun or the database, so a path separator or a parent reference never touches the filesystem whatever the pinned dependency's own check does; and the FILES block survives a create that answered no file.
 

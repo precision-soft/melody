@@ -79,13 +79,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
             lockErr,
         )
     }
-    /* the unlock failure becomes the command's verdict only when the migration itself succeeded: a failed migration keeps its own error, with the unlock failure printed beside it */
-    defer func() {
-        unlockErr := unlockMigrations(ctx, migrator, outputInstance)
-        if nil == runErr && nil != unlockErr {
-            runErr = unlockErr
-        }
-    }()
+    defer finishMigrationUnlock(ctx, migrator, outputInstance, &runErr)
 
     if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(ctx, db)

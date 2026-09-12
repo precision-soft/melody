@@ -13,7 +13,7 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-/* migrationNamePattern is the grammar a migration name is held to before it reaches bun's generator: the same set bun's own nameRE accepts, kept here so the confinement of the file path is this command's, not the pinned dependency's. */
+/* migrationNamePattern restricts migration names to Bun's filename grammar. */
 var migrationNamePattern = regexp.MustCompile(`^[0-9a-z_\-]+$`)
 
 func NewCreateGoCommand(migrations *migrate.Migrations, options Options) *CreateCommand {
@@ -56,7 +56,7 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return err
     }
 
-    /* the name becomes part of a file path under the migrations directory, so it is held to the grammar bun's own generator accepts BEFORE it reaches bun: a path separator or a parent reference in it must never touch the filesystem, and that must not depend on the pinned dependency keeping its regexp — a confinement borrowed from a dependency is one release away from not being there. */
+    /* Validate the filename component before invoking the generator. */
     if false == migrationNamePattern.MatchString(migrationName) {
         return exception.NewError(
             "migration name must match "+migrationNamePattern.String(),
@@ -81,10 +81,10 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return createErr
     }
 
-    /* bun wrote that file with a single os.WriteFile, which is not atomic and not durable: the same content is written again here into a temporary neighbour, fsynced, renamed over it and the directory fsynced, so a command that reports success has left a whole file behind rather than one a crash could have truncated into a Go source that does not compile. The path and the content are bun's own, taken from what it just returned. */
+    /* Finish the generated file with an atomic rewrite and directory sync. */
     if nil != files && "" != files.Path {
         if finishErr := finishFileAtomically(files.Path, []byte(files.Content)); nil != finishErr {
-            /* the rename landed and only the directory fsync did not: the file is whole and in place, so the run is a success with a warning naming what could not be guaranteed — reported as a failure, the operator's re-run would create a second migration under a new timestamp beside this one */
+            /* A directory-sync failure leaves the complete file in place; report the durability warning without prompting another creation. */
             if false == errors.Is(finishErr, errDirectorySyncAfterRename) {
                 return finishErr
             }
@@ -113,7 +113,7 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
 func (instance *CreateCommand) formatMigrationFiles(file *migrate.MigrationFile) []string {
     lines := make([]string, 0)
 
-    /* bun answers a file on every success today; the guard is for the door's contract, not its current behaviour — a nil here rendered as a nil dereference inside the success path, after the migration had already been created */
+    /* A missing file descriptor is represented explicitly in the command output. */
     if nil == file {
         return append(lines, "<unknown>")
     }

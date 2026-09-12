@@ -23,6 +23,7 @@ const (
     BootCollisionKindHttpRouteName = "httpRouteName"
 )
 
+/* RouteRegistry retains process routing configuration. Register routes and install the boot recorder before concurrent request handling; mutations are not synchronized. */
 type RouteRegistry struct {
     routes      []route
     routeByName map[string]route

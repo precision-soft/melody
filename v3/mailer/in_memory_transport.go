@@ -11,6 +11,7 @@ func NewInMemoryTransport() *InMemoryTransport {
     return &InMemoryTransport{}
 }
 
+/* InMemoryTransport records messages under a mutex. Sent copies the outer message slice; nested message data remains shared with the supplied messages. */
 type InMemoryTransport struct {
     mutex sync.Mutex
     sent  []mailercontract.Message

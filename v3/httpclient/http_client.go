@@ -30,6 +30,7 @@ func NewDefaultHttpClient() *HttpClient {
     )
 }
 
+/* HttpClient owns a reusable connection pool and synchronized process-wide defaults. Use request options for request-specific headers, credentials, and timeouts; setters change defaults shared by all callers. */
 type HttpClient struct {
     client  *nethttp.Client
     mutex   sync.RWMutex
@@ -636,7 +637,7 @@ func (instance *HttpClient) SetBaseUrl(baseUrl string) {
     instance.baseUrl = baseUrl
 }
 
-/* SetHeader stores the header under its canonical spelling, the one the constructor stores under: the map is applied to every request with Set, which canonicalizes, so rotating a credential under a different spelling than the one it was configured with used to leave two live entries whose survivor was chosen by map iteration order — a different credential per request. Canonicalizing here makes the collision structurally impossible, and a rotation overwrites the entry it means to. */
+/* SetHeader changes a shared default using the canonical header name. Per-request headers belong in request options. */
 func (instance *HttpClient) SetHeader(key string, value string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

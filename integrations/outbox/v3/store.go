@@ -43,6 +43,7 @@ func NewStore(database *bun.DB, codec MessageCodec) *Store {
     }
 }
 
+/* Store holds a shared database pool and codec. Transactions, claims, and message payloads belong to individual calls. */
 type Store struct {
     database *bun.DB
     codec    MessageCodec

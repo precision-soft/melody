@@ -322,8 +322,7 @@ else
         check_fail "the default crontab template lost its user column (got '${WITH_USER_SIXTH_FIELD_STRING}')"
     fi
 
-    # the ownership marker is what --prune reads to prove a file is the generator's own; asserted on the
-    # file the run just wrote, not on the command's word
+    # The marker identifies generated output for readers; pruning does not use it as ownership proof.
     if printf '%s' "${CRONTAB_WITH_USER_STRING}" | grep -qF '# owned by melody:cron:generate'; then
         check_pass "the generated crontab carries the ownership marker"
     else
@@ -338,29 +337,25 @@ else
     fi
 fi
 
-# --prune reconciles dir(--out): a stale file the marker proves ours is emptied down to its header, and
-# the operator's own file beside it is untouched — both read back from the directory afterwards, which is
-# what proves the sweep, not the command's report of it
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -rf /tmp/cron-prune-band && mkdir -p /tmp/cron-prune-band; go run . melody:cron:generate --out /tmp/cron-prune-band/stale.crontab >/dev/null 2>&1; printf '# written by the operator\n*/5 * * * * root /usr/local/bin/backup\n' > /tmp/cron-prune-band/operator.crontab; go run . melody:cron:generate --out /tmp/cron-prune-band/crontab --prune >/dev/null 2>&1; cat /tmp/cron-prune-band/stale.crontab 2>/dev/null"
-PRUNED_STALE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+# Pruning removes only the calculated destination. A generated neighbour and an operator file
+# must survive byte-for-byte; the selected destination must disappear without regeneration.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -rf /tmp/cron-prune-band && mkdir -p /tmp/cron-prune-band && go run . melody:cron:generate --out /tmp/cron-prune-band/stale.crontab >/dev/null 2>&1 && cp /tmp/cron-prune-band/stale.crontab /tmp/cron-prune-band/stale.before && cp /tmp/cron-prune-band/stale.crontab /tmp/cron-prune-band/crontab && printf '# written by the operator\\n*/5 * * * * root /usr/local/bin/backup\\n' > /tmp/cron-prune-band/operator.crontab && cp /tmp/cron-prune-band/operator.crontab /tmp/cron-prune-band/operator.before && go run . melody:cron:generate --out /tmp/cron-prune-band/crontab --prune >/dev/null 2>&1 && test ! -e /tmp/cron-prune-band/crontab && printf 'target-removed\\n'"
 
-if printf '%s' "${PRUNED_STALE_STRING}" | grep -qF '# owned by melody:cron:generate' && ! printf '%s' "${PRUNED_STALE_STRING}" | grep -q 'product:list'; then
-    check_pass "--prune emptied the stale destination down to its marker-carrying header"
+if [[ 0 -eq "${RUN_IN_DEV_STATUS_INTEGER}" ]] && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qF 'target-removed'; then
+    check_pass "--prune removed the calculated destination without regenerating it"
 else
-    check_fail "--prune left the stale destination running or destroyed its marker"
+    check_fail "--prune failed to remove the calculated destination"
 fi
 
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "cat /tmp/cron-prune-band/operator.crontab 2>/dev/null"
-OPERATOR_FILE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "cmp -s /tmp/cron-prune-band/stale.before /tmp/cron-prune-band/stale.crontab && cmp -s /tmp/cron-prune-band/operator.before /tmp/cron-prune-band/operator.crontab"
 
-if printf '%s' "${OPERATOR_FILE_STRING}" | grep -q '/usr/local/bin/backup'; then
-    check_pass "--prune left the operator's unowned file untouched"
+if [[ 0 -eq "${RUN_IN_DEV_STATUS_INTEGER}" ]]; then
+    check_pass "--prune preserved generated and operator neighbours byte-for-byte"
 else
-    check_fail "--prune touched a file it cannot prove it wrote"
+    check_fail "--prune changed a file outside its calculated destinations"
 fi
 
-# the k8s manifests open with the same marker as a leading YAML comment, which is what makes a k8s output
-# directory reconcilable by the same sweep
+# The k8s manifests retain the same informational marker as a leading YAML comment.
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/cron-band-k8s.yaml; go run . melody:cron:generate --template k8s --image registry.example/app:1 --out /tmp/cron-band-k8s.yaml >/dev/null 2>&1; cat /tmp/cron-band-k8s.yaml 2>/dev/null"
 K8S_MANIFEST_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 

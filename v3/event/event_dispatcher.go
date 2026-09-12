@@ -33,6 +33,7 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
     }
 }
 
+/* EventDispatcher retains process listener registrations under its mutexes. Dispatch keeps each event and invocation state local to the call. */
 type EventDispatcher struct {
     mutex                   sync.RWMutex
     listeners               map[string][]listenerWithPriority

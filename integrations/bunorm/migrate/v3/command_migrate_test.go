@@ -9,6 +9,8 @@ import (
     "strings"
     "testing"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
+    clicontract "github.com/precision-soft/melody/v3/cli/contract"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/uptrace/bun/migrate"
 )
@@ -584,5 +586,59 @@ func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testi
 
     if &elsewhere != resolveDefaultRunnerOption().Writer {
         t.Fatalf("expected the command to put the fallback back on the way out, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
+func TestMigrationCommands_PanicKeepsPrecedenceOverUnlockFailure(t *testing.T) {
+    for _, rollback := range []bool{false, true} {
+        name := "migrate"
+        if rollback {
+            name = "rollback"
+        }
+        t.Run(name, func(t *testing.T) {
+            database, recorder := newFakeBunDatabase()
+            recorder.execHook = func(query string) error {
+                if isUnlockDelete(query) {
+                    return errors.New("unlock failed after panic")
+                }
+                return nil
+            }
+            if rollback {
+                recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+            }
+            panicValue := errors.New("migration body panicked")
+            migrations := migrate.NewMigrations()
+            panicking := func(context.Context, *migrate.Migrator, *migrate.Migration) error {
+                panic(panicValue)
+            }
+            migrations.Add(migrate.Migration{Name: "20240101000000", Comment: "panic_probe", Up: panicking, Down: panicking})
+            var command clicontract.Command = NewMigrateCommand(migrations, DefaultOptions())
+            if rollback {
+                command = NewRollbackCommand(migrations, DefaultOptions())
+            }
+            runtimeInstance := newRuntimeWithDatabase(t, database)
+            buffer := &bytes.Buffer{}
+            var recovered any
+            func() {
+                defer func() { recovered = recover() }()
+                if err := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, []string{command.Name(), "--format=json"}, buffer); nil != err {
+                    t.Errorf("command returned before its panic: %v", err)
+                }
+            }()
+            if panicValue != recovered {
+                t.Fatalf("original panic was lost: %v", recovered)
+            }
+            var document map[string]any
+            if err := json.Unmarshal(buffer.Bytes(), &document); nil != err {
+                t.Fatalf("invalid JSON: %v: %s", err, buffer.String())
+            }
+            rendered := buffer.String()
+            if false == strings.Contains(rendered, command.Name()+" panicked") || false == strings.Contains(rendered, panicValue.Error()) {
+                t.Fatalf("JSON lost the migration panic: %s", rendered)
+            }
+            if false == strings.Contains(rendered, "unlock failed after panic") || 0 > recorder.firstIndexMatching(isUnlockDelete) {
+                t.Fatalf("unlock failure was not retained beside the panic: %s", rendered)
+            }
+        })
     }
 }

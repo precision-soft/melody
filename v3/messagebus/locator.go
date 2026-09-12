@@ -15,6 +15,7 @@ func NewHandlerLocator() *HandlerLocator {
     }
 }
 
+/* HandlerLocator owns a synchronized registry of shared handlers. Each dispatch supplies its runtime and message; registered handlers must support their intended concurrency. */
 type HandlerLocator struct {
     mutex          sync.RWMutex
     handlersByType map[reflect.Type][]messagebuscontract.MessageHandler

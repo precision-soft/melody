@@ -26,6 +26,7 @@ const TombstoneRetention = 5 * time.Minute
 /* sessionStripeCount is how many locks the per-session critical sections are spread over. The number is fixed rather than one lock per live session: a map of locks would have to be grown and pruned under a lock of its own, which is the contention this exists to remove, and 256 already puts two concurrent requests on the same stripe about as often as they collide on the same session. */
 const sessionStripeCount = 256
 
+/* Manager owns process-lifetime session storage coordination and synchronized deletion and rotation records. Individual session snapshots belong to their callers. */
 type Manager struct {
     storage sessioncontract.Storage
     /* every instant the tombstone record reads — the burial's and the one the retention window is measured from — comes from here, the way both storages already take theirs, so a test can sit the window exactly on its boundary and a manager wired by the framework agrees with the kernel's clock instead of keeping a second timeline. The default is the system clock, whose Now carries the monotonic reading time.Since used, so the window is measured the same way it always was. */

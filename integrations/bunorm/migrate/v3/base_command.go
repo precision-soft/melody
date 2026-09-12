@@ -36,6 +36,21 @@ func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputIns
     return nil
 }
 
+/* Called directly as a defer so recover observes the migration's panic before unlock can change the verdict. */
+func finishMigrationUnlock(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, runErr *error) {
+    recovered := recover()
+    defer func() {
+        if nil != recovered {
+            panic(recovered)
+        }
+    }()
+
+    unlockErr := unlockMigrations(ctx, unlocker, outputInstance)
+    if nil == recovered && nil == *runErr && nil != unlockErr {
+        *runErr = unlockErr
+    }
+}
+
 type baseCommand struct {
     migrations *migrate.Migrations
     options    Options

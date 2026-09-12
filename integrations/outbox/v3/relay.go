@@ -127,6 +127,7 @@ func NewRelay(config RelayConfig) *Relay {
     return &Relay{config: resolved}
 }
 
+/* Relay holds configuration and shared collaborators. Claimed messages, lease progress, and delivery results are local to each RunOnce call. */
 type Relay struct {
     config RelayConfig
 }

@@ -305,6 +305,7 @@ func WithRevocationEpochRetention(retention time.Duration) TokenStoreOption {
     }
 }
 
+/* RedisTokenStore retains immutable connection and timeout configuration; Redis owns the shared token state. Its bound context must outlive individual requests, whose contexts are passed separately to runtime operations. */
 type RedisTokenStore struct {
     client                     rueidis.Client
     ctx                        context.Context

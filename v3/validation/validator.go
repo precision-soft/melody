@@ -46,6 +46,7 @@ func NewValidator() *Validator {
     return validator
 }
 
+/* Validator owns a synchronized constraint registry and rule cache. Validation data stays local to each call; registered constraints must support concurrent use. */
 type Validator struct {
     mutex       sync.RWMutex
     constraints map[string]validationcontract.Constraint
