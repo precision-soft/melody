@@ -4,6 +4,7 @@ import (
     nethttp "net/http"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -36,10 +37,11 @@ func (instance *Module) Description() string {
     return "registers the tracing and metrics middlewares plus the prometheus metrics route"
 }
 
+/* a nil entry in the configured lists is refused at boot rather than skipped: a skipped observability middleware has no later consumer to fail loudly — the app serves traffic uninstrumented and the operator reads an empty-but-healthy dashboard with nothing to distinguish "no traffic" from "not measured". The typical source is a discarded constructor error (`middleware, _ := NewMetricsMiddleware(meter)`), which is exactly a wiring mistake boot should name. */
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
     for _, middleware := range instance.config.Middlewares {
         if nil == middleware {
-            continue
+            exception.Panic(exception.NewError("opentelemetry module received a nil middleware - a discarded constructor error leaves the app silently uninstrumented", nil, nil))
         }
 
         registrar.Use(middleware)
@@ -50,7 +52,7 @@ func (instance *Module) RegisterHttpHandlerDecorators(kernelInstance kernelcontr
     decorators := make([]applicationcontract.HttpHandlerDecorator, 0, len(instance.config.HandlerDecorators))
     for _, decorator := range instance.config.HandlerDecorators {
         if nil == decorator {
-            continue
+            exception.Panic(exception.NewError("opentelemetry module received a nil handler decorator - a discarded constructor error leaves the app silently uninstrumented", nil, nil))
         }
 
         decorators = append(decorators, decorator)

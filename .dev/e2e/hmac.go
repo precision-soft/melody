@@ -9,11 +9,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* runHmacCheck exercises the full F1/F2 cross-app machine-to-machine auth flow against a REAL redis-backed
-nonce guard — the multi-instance replay story an in-process guard cannot demonstrate. A calling service
-(wms) signs an actor-carrying envelope for a named audience (erp); the callee (erp) verifies it through a
-rueidis NonceGuard, propagates the originating actor, then proves the same envelope is refused on replay,
-on audience mismatch, and on a tampered body. */
+/* runHmacCheck exercises the full F1/F2 cross-app machine-to-machine auth flow against a REAL redis-backed nonce guard — the multi-instance replay story an in-process guard cannot demonstrate. A calling service (wms) signs an actor-carrying envelope for a named audience (erp); the callee (erp) verifies it through a rueidis NonceGuard, propagates the originating actor, then proves the same envelope is refused on replay, on audience mismatch, and on a tampered body. */
 func runHmacCheck(address string) {
     provider := rueidisintegration.NewProvider()
     client, openErr := provider.Open(rueidisintegration.NewConnectionParameters(address, "", ""))
@@ -61,8 +57,7 @@ func runHmacCheck(address string) {
 
     header := mustSign(wmsSigner, "POST", "/internal/orders", body, actor)
 
-    /* (1) happy path: authenticates as the wms SERVICE principal, carries the registry roles, and
-       propagates the originating human actor so erp can authorize/audit on its behalf */
+    /* (1) happy path: authenticates as the wms SERVICE principal, carries the registry roles, and propagates the originating human actor so erp can authorize/audit on its behalf */
     token := resolveHmac(erpSource, "POST", "/internal/orders", body, wmsSigner.HeaderName(), header)
     if false == token.IsAuthenticated() {
         fail("(1) expected the cross-app envelope to authenticate")
@@ -81,16 +76,14 @@ func runHmacCheck(address string) {
     pass("(1) authenticated as %q roles=%v on-behalf-of=%q tenant=%q",
         token.UserIdentifier(), token.Roles(), onBehalf.Identifier(), onBehalf.Attributes()["tenant"])
 
-    /* (2) replay: the SAME header verified again must be refused — the live redis guard remembered the
-       nonce, so even a different erp instance sharing the guard rejects the captured envelope */
+    /* (2) replay: the SAME header verified again must be refused — the live redis guard remembered the nonce, so even a different erp instance sharing the guard rejects the captured envelope */
     replayToken := resolveHmac(erpSource, "POST", "/internal/orders", body, wmsSigner.HeaderName(), header)
     if true == replayToken.IsAuthenticated() {
         fail("(2) expected the replayed envelope to be refused by the live redis nonce guard")
     }
     pass("(2) replayed envelope refused → authenticated=%v (redis nonce consumed)", replayToken.IsAuthenticated())
 
-    /* (3) audience binding: an envelope minted for erp presented to a DIFFERENT service (billing) is
-       refused because its ServiceIdentity does not match the signed audience */
+    /* (3) audience binding: an envelope minted for erp presented to a DIFFERENT service (billing) is refused because its ServiceIdentity does not match the signed audience */
     billingSource := security.NewHmacTokenSource(security.HmacTokenSourceConfig{
         Secrets:         secrets,
         Apps:            apps,

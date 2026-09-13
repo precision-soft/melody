@@ -9,7 +9,7 @@ import (
 
 /* NewStandardErrorLogger adapts a melody logger to the *log.Logger net/http's Server.ErrorLog wants, so the connection-level failures the http kernel never sees reach the application's journal instead of the standard logger's default output. A tls handshake that fails before any request exists, a malformed request line, a listener degrading while the process stays up, a superfluous WriteHeader, and the one panic no request guard can absorb — the one raised while the request scope is closing — all arrive here. Written to stderr as unstructured text they are invisible to a deployment whose journal is a json file.
 
-The flags are zero: the record carries the logger's own timestamp, and the standard prefix would only repeat it inside the message. */
+   The flags are zero: the record carries the logger's own timestamp, and the standard prefix would only repeat it inside the message. */
 func NewStandardErrorLogger(logger loggingcontract.Logger, message string) *log.Logger {
     return log.New(&standardLogWriter{logger: logger, message: message}, "", 0)
 }

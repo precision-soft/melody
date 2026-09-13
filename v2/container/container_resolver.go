@@ -25,7 +25,7 @@ type createWithGuardCreateFunc func(resolver containercontract.Resolver) (any, e
 
 /* instanceStore is where a finished service is kept. A container provider builds a process-lifetime singleton and writes the container's own maps; a scoped provider builds one instance for the scope that drove the resolution and writes that scope alone, which is what keeps the root container blind to it. Naming the target rather than hiding it inside the creation closure is what lets one creation guard serve both lifetimes without knowing which it is running.
 
-keep answers with the value that ends up installed: an override that landed while the provider ran already occupies the slot and wins — an override answers before anything is built, and blindly overwriting it would revoke an installation the overrider was told succeeded — so keep leaves it in place and hands it back with overrideWins raised, and the guard closes the value it built and serves the override instead. */
+   keep answers with the value that ends up installed: an override that landed while the provider ran already occupies the slot and wins — an override answers before anything is built, and blindly overwriting it would revoke an installation the overrider was told succeeded — so keep leaves it in place and hands it back with overrideWins raised, and the guard closes the value it built and serves the override instead. */
 type instanceStore struct {
     keep func(value any) (keptValue any, overrideWins bool, err error)
 }

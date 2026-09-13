@@ -250,11 +250,7 @@ func TestManagerRegistry_OpenOfOneManagerDoesNotBlockCacheHitsForAnother(t *test
     close(releaseOpen)
 }
 
-/*
-   A panic inside Provider.Open must still delete the in-flight entry and close its
-   done channel, so that a caller that coalesced onto the same open is released with
-   an error instead of blocking forever on a done channel that is never closed.
-*/
+/* A panic inside Provider.Open must still delete the in-flight entry and close its done channel, so that a caller that coalesced onto the same open is released with an error instead of blocking forever on a done channel that is never closed. */
 func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
     logger := &fakeLogger{}
 
@@ -346,12 +342,7 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
     <-firstDone
 }
 
-/*
-   The in-flight entry is what a second caller coalesces onto, and it has to be
-   registered before the provider is dialed: registered after, a caller arriving
-   during the dial would find neither the cache nor the entry and dial the same
-   name again, opening a pool the publish immediately overwrites and leaks.
-*/
+/* The in-flight entry is what a second caller coalesces onto, and it has to be registered before the provider is dialed: registered after, a caller arriving during the dial would find neither the cache nor the entry and dial the same name again, opening a pool the publish immediately overwrites and leaks. */
 func TestManagerRegistry_AnInFlightOpenIsRegisteredBeforeTheDial(t *testing.T) {
     logger := &fakeLogger{}
 
@@ -393,13 +384,7 @@ func TestManagerRegistry_AnInFlightOpenIsRegisteredBeforeTheDial(t *testing.T) {
     }
 }
 
-/*
-   A caller that finds an in-flight open must wait on it rather than dial. The
-   pending entry is installed by hand, so the caller is a waiter by construction
-   and no scheduling window decides what the test observes: the provider counts
-   every dial, and the manager published on the entry is the one the waiter has
-   to answer with.
-*/
+/* A caller that finds an in-flight open must wait on it rather than dial. The pending entry is installed by hand, so the caller is a waiter by construction and no scheduling window decides what the test observes: the provider counts every dial, and the manager published on the entry is the one the waiter has to answer with. */
 func TestManagerRegistry_ACallerFindingAnInFlightOpenWaitsInsteadOfDialing(t *testing.T) {
     logger := &fakeLogger{}
     provider := &fakeProvider{}
@@ -454,11 +439,7 @@ func TestManagerRegistry_ACallerFindingAnInFlightOpenWaitsInsteadOfDialing(t *te
     }
 }
 
-/*
-   closeRaceDialect is a minimal bun dialect assembled only from packages that
-   already ship inside the bun core module, so a real *bun.DB can be built for the
-   close-during-open regression without pulling in a database driver dependency.
-*/
+/* closeRaceDialect is a minimal bun dialect assembled only from packages that already ship inside the bun core module, so a real *bun.DB can be built for the close-during-open regression without pulling in a database driver dependency. */
 type closeRaceDialect struct {
     schema.BaseDialect
 
@@ -506,12 +487,7 @@ func (instance *closeRaceDialect) DefaultSchema() string {
     return "main"
 }
 
-/*
-   closeRaceConnector signals its closeSignal channel exactly once when the *sql.DB
-   it backs is closed. database/sql invokes connector.Close from DB.Close when the
-   connector implements io.Closer, which lets the test observe that the registry
-   closed the freshly opened database rather than leaking its pool.
-*/
+/* closeRaceConnector signals its closeSignal channel exactly once when the *sql.DB it backs is closed. database/sql invokes connector.Close from DB.Close when the connector implements io.Closer, which lets the test observe that the registry closed the freshly opened database rather than leaking its pool. */
 type closeRaceConnector struct {
     closeSignal chan struct{}
     closeOnce   sync.Once
@@ -541,10 +517,7 @@ func (instance *closeRaceDriver) Open(name string) (driver.Conn, error) {
     return nil, errors.New("open by data source name is not supported by the close-race driver")
 }
 
-/*
-   newCloseRaceDatabase returns a real *bun.DB whose Close is observable through the
-   returned channel, which is closed the moment the underlying database is closed.
-*/
+/* newCloseRaceDatabase returns a real *bun.DB whose Close is observable through the returned channel, which is closed the moment the underlying database is closed. */
 func newCloseRaceDatabase() (*bun.DB, chan struct{}) {
     closeSignal := make(chan struct{})
     connector := &closeRaceConnector{closeSignal: closeSignal}
@@ -572,12 +545,7 @@ var (
     _ Provider         = (*closeRaceProvider)(nil)
 )
 
-/*
-   A Close that lands while a Provider.Open is still in flight must not leak the
-   connection pool of the database that open is about to return. The registry has to
-   close that freshly opened database and refuse to memoize it, handing the caller
-   ErrManagerRegistryClosed instead of a live manager.
-*/
+/* A Close that lands while a Provider.Open is still in flight must not leak the connection pool of the database that open is about to return. The registry has to close that freshly opened database and refuse to memoize it, handing the caller ErrManagerRegistryClosed instead of a live manager. */
 func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *testing.T) {
     logger := &fakeLogger{}
 
@@ -993,10 +961,7 @@ func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testi
     }
 }
 
-/*
-   failClosingConnector backs a real *bun.DB whose Close fails with the given error,
-   so the aggregation of teardown failures can be observed per database name.
-*/
+/* failClosingConnector backs a real *bun.DB whose Close fails with the given error, so the aggregation of teardown failures can be observed per database name. */
 type failClosingConnector struct {
     closeErr error
 }
@@ -1094,11 +1059,7 @@ func TestManagerRegistry_CloseKeepsALoneCloseFailureUntouched(t *testing.T) {
     }
 }
 
-/*
-   configurableMigrationProvider answers OpenForMigration with whatever pair the
-   test pinned, optionally parking mid-open on its channels so a Close can land
-   while the migration open is in flight.
-*/
+/* configurableMigrationProvider answers OpenForMigration with whatever pair the test pinned, optionally parking mid-open on its channels so a Close can land while the migration open is in flight. */
 type configurableMigrationProvider struct {
     migrationDatabase *bun.DB
     migrationErr      error
@@ -1868,12 +1829,7 @@ func TestManagerRegistry_AnUnknownMigrationDefinitionNamesTheRequestedAndTheRegi
     }
 }
 
-/*
-   blockingCloseConnector parks the close of the *sql.DB it backs until the test
-   releases it. That is the shape a partitioned peer produces at shutdown, where the
-   driver waits on a COM_QUIT nobody answers and the migration connection has its
-   write deadlines deliberately lifted.
-*/
+/* blockingCloseConnector parks the close of the *sql.DB it backs until the test releases it. That is the shape a partitioned peer produces at shutdown, where the driver waits on a COM_QUIT nobody answers and the migration connection has its write deadlines deliberately lifted. */
 type blockingCloseConnector struct {
     closeEntered chan struct{}
     releaseClose chan struct{}

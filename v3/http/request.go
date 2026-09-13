@@ -5,12 +5,12 @@ import (
     "io"
     "mime"
     nethttp "net/http"
+    "net/url"
 
     "github.com/precision-soft/melody/v3/bag"
     bagcontract "github.com/precision-soft/melody/v3/bag/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
-    "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -45,52 +45,44 @@ func NewRequest(
 
     queryBag := bag.NewParameterBagFromValues(httpRequest.URL.Query())
     postBag := bag.NewParameterBag()
+    var bodyReadErr error
 
     if true == shouldAutoParseForm(httpRequest) {
-        /* @important a urlencoded body is drained by ParseForm; buffer it first and restore Body/GetBody
-           afterwards so a later reader that needs the raw bytes still sees them — in particular the HMAC
-           internal-auth source, whose signed body-hash check would otherwise verify against an empty body and
-           silently accept a tampered form-encoded request. multipart bodies are left untouched: ParseForm does
-           not read them (a handler streams them through ParseMultipartForm), so buffering there would defeat
-           the large-upload disk spooling for no benefit. */
+        /* a urlencoded body is drained by ParseForm; buffer it first and restore Body/GetBody afterwards so a later reader that needs the raw bytes still sees them — in particular the HMAC internal-auth source, whose signed body-hash check would otherwise verify against an empty body and silently accept a tampered form-encoded request. multipart bodies are left untouched: ParseForm does not read them (a handler streams them through ParseMultipartForm), so buffering there would defeat the large-upload disk spooling for no benefit. */
         var rawBody []byte
         bufferedBody := false
         if true == isUrlEncodedForm(httpRequest) {
-            rawBody, bufferedBody = readRequestBodyBytes(httpRequest)
+            rawBody, bufferedBody, bodyReadErr = readRequestBodyBytes(httpRequest)
             if true == bufferedBody {
                 restoreRequestBody(httpRequest, rawBody)
             }
         }
 
-        parseFormErr := httpRequest.ParseForm()
+        /* a body whose read failed is not parsed: the reader is poisoned mid-stream, so ParseForm could only report a second symptom of the same failure — the read error is recorded on the request instead, and the kernel refuses the request before a handler mistakes an oversized or truncated submission for an empty one */
+        if nil == bodyReadErr {
+            parseFormErr := httpRequest.ParseForm()
 
-        if true == bufferedBody {
-            restoreRequestBody(httpRequest, rawBody)
-        }
+            if true == bufferedBody {
+                restoreRequestBody(httpRequest, rawBody)
+            }
 
-        if nil == parseFormErr {
-            postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
-        } else if nil != runtimeInstance {
-            loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
-            if nil != loggerInstance {
-                loggerInstance.Warning(
+            /* ParseForm parses the body and the query and reports the body's failure first, falling back to the query's, so its error alone does not say which half broke — and only the body half is the handler's form. */
+            if nil == parseFormErr {
+                postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
+            } else if bodyParseErr := urlEncodedBodyParseError(bufferedBody, rawBody); nil != bodyParseErr {
+                /* a form that does not parse is recorded the way a body that does not read is, and the kernel refuses the request for both: a warning that let the request continue handed the handler an empty form for a real submission — "field missing" answered about a field the client sent. The half the parse did yield is deliberately not published: the request is refused, and a partially read form is exactly what the handler must not be given. */
+                bodyReadErr = exception.NewError(
                     "failed to parse form data",
                     map[string]any{
-                        "error":  parseFormErr.Error(),
                         "method": httpRequest.Method,
                         "path":   httpRequest.URL.Path,
                     },
+                    bodyParseErr,
                 )
+            } else {
+                /* the body parsed and only the QUERY did not, which is a different failure and not the handler's form: net/http drops the malformed query pairs, which Request already read for itself through URL.Query(). Refusing the whole request for one turned a served submission into a 400 — a POST whose body is perfectly valid, answered 400 because the client wrote its query with a legacy semicolon separator — and left the handler an empty form on the way there. */
+                postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
             }
-        } else {
-            logging.NewDefaultLogger().Warning(
-                "failed to parse form data",
-                map[string]any{
-                    "error":  parseFormErr.Error(),
-                    "method": httpRequest.Method,
-                    "path":   httpRequest.URL.Path,
-                },
-            )
         }
     }
 
@@ -104,6 +96,7 @@ func NewRequest(
         attributes:      attributesBag,
         runtimeInstance: runtimeInstance,
         requestContext:  requestContext,
+        bodyReadErr:     bodyReadErr,
     }
 }
 
@@ -115,6 +108,8 @@ type Request struct {
     attributes      bagcontract.ParameterBag
     runtimeInstance runtimecontract.Runtime
     requestContext  httpcontract.RequestContext
+    /* the error that stopped the urlencoded body from being buffered for form parsing; the kernel refuses the request when it is set, so a handler never sees the failed read as an empty form */
+    bodyReadErr error
 }
 
 func (instance *Request) HttpRequest() *nethttp.Request {
@@ -153,6 +148,17 @@ func (instance *Request) Header(name string) string {
     return instance.httpRequest.Header.Get(name)
 }
 
+/* urlEncodedBodyParseError reports the failure of the BODY half of ParseForm, which is the half whose absence a handler cannot see: net/http parses an application/x-www-form-urlencoded body with the same reader it uses for the query, and the buffered bytes are the exact input it is given. A multipart body is never parsed by ParseForm — a handler streams it through ParseMultipartForm — so it has no body half here, and neither does a request that carried no body at all. */
+func urlEncodedBodyParseError(bufferedBody bool, rawBody []byte) error {
+    if false == bufferedBody {
+        return nil
+    }
+
+    _, parseErr := url.ParseQuery(string(rawBody))
+
+    return parseErr
+}
+
 func shouldAutoParseForm(httpRequest *nethttp.Request) bool {
     if nethttp.MethodPost != httpRequest.Method &&
         nethttp.MethodPut != httpRequest.Method &&
@@ -173,9 +179,7 @@ func shouldAutoParseForm(httpRequest *nethttp.Request) bool {
     return "application/x-www-form-urlencoded" == mediaType || "multipart/form-data" == mediaType
 }
 
-/* isUrlEncodedForm reports whether the request carries an application/x-www-form-urlencoded body — the one
-auto-parsed form type whose body ParseForm consumes (multipart is streamed separately), so only this one
-needs its body buffered and restored for later readers. */
+/* isUrlEncodedForm reports whether the request carries an application/x-www-form-urlencoded body — the one auto-parsed form type whose body ParseForm consumes (multipart is streamed separately), so only this one needs its body buffered and restored for later readers. */
 func isUrlEncodedForm(httpRequest *nethttp.Request) bool {
     mediaType, _, parseErr := mime.ParseMediaType(httpRequest.Header.Get("Content-Type"))
     if nil != parseErr {
@@ -185,26 +189,23 @@ func isUrlEncodedForm(httpRequest *nethttp.Request) bool {
     return "application/x-www-form-urlencoded" == mediaType
 }
 
-/* readRequestBodyBytes reads the request body fully into memory, reporting whether a body was present. It
-does not restore the body; the caller restores it through restoreRequestBody once (or twice, around a
-draining parse) as needed. */
-func readRequestBodyBytes(httpRequest *nethttp.Request) ([]byte, bool) {
+/* readRequestBodyBytes reads the request body fully into memory, reporting whether a body was present and the error that interrupted the read — a MaxBytesReader refusing an oversized body, or a client aborting mid-upload. It does not restore the body; the caller restores it through restoreRequestBody once (or twice, around a draining parse) as needed. */
+func readRequestBodyBytes(httpRequest *nethttp.Request) ([]byte, bool, error) {
     if nil == httpRequest.Body {
-        return nil, false
+        return nil, false, nil
     }
 
     bodyBytes, readErr := io.ReadAll(httpRequest.Body)
     if nil != readErr {
-        return nil, false
+        return nil, false, readErr
     }
 
     _ = httpRequest.Body.Close()
 
-    return bodyBytes, true
+    return bodyBytes, true, nil
 }
 
-/* restoreRequestBody replaces Body and GetBody with fresh readers over the given bytes, so a consumer that
-already drained the body (ParseForm) does not strand it empty for the next reader. */
+/* restoreRequestBody replaces Body and GetBody with fresh readers over the given bytes, so a consumer that already drained the body (ParseForm) does not strand it empty for the next reader. */
 func restoreRequestBody(httpRequest *nethttp.Request, bodyBytes []byte) {
     httpRequest.Body = io.NopCloser(bytes.NewReader(bodyBytes))
     httpRequest.GetBody = func() (io.ReadCloser, error) {
@@ -241,13 +242,16 @@ func (instance *Request) FormValue(key string) string {
     return instance.httpRequest.FormValue(key)
 }
 
+/* Input answers a request parameter by name, reading the POST body first, then the query string, then the route parameters — the first source that HAS the key answers, so a body field shadows a query parameter of the same name and both shadow a route parameter. A handler that must have the value the router bound reads Params rather than Input, because the route parameter is the only one of the three the server itself chose.
+
+   Input answers the first value of a repeated key, as FormValue beside it and url.Values.Get already do. The request bags keep a single key and a repeated one apart by type and bag.String refuses a slice with a panic — right where the key is the programmer's, wrong here, because the shape of a request parameter is the client's to choose: "?tag=a&tag=b" turned every handler reading a parameter by name into a 500 with a full stack record, unauthenticated and free to repeat. A handler that needs the whole array reads it with bag.StringSlice, which is what the panic was pointing at. */
 func (instance *Request) Input(key string) string {
     if nil != instance.post && true == instance.post.Has(key) {
-        return bag.StringOrDefault(instance.post, key, "")
+        return firstStringValue(instance.post, key)
     }
 
     if nil != instance.query && true == instance.query.Has(key) {
-        return bag.StringOrDefault(instance.query, key, "")
+        return firstStringValue(instance.query, key)
     }
 
     if nil != instance.params {
@@ -258,6 +262,15 @@ func (instance *Request) Input(key string) string {
     }
 
     return ""
+}
+
+func firstStringValue(parameterBag bagcontract.ParameterBag, key string) string {
+    value, exists, err := bag.StringAt(parameterBag, key, 0)
+    if false == exists || nil != err {
+        return ""
+    }
+
+    return value
 }
 
 func (instance *Request) Cookie(name string) (*nethttp.Cookie, error) {

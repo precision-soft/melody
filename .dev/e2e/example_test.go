@@ -7,11 +7,9 @@ import (
     "testing"
 )
 
-/* an UNSET MELODY_E2E_MAJORS must mean every major: the project's convention is that a default run is the
-full run, and a default that quietly resolved to v3 alone is exactly the gap these sections exist to close. */
+/* an UNSET MELODY_E2E_MAJORS must mean every major: the project's convention is that a default run is the full run, and a default that quietly resolved to v3 alone is exactly the gap these sections exist to close. */
 func TestExampleMajorList_UnsetCoversEveryMajor(t *testing.T) {
-    /* Setenv arms the cleanup that restores whatever the run was started with; Unsetenv then exercises the
-       LookupEnv fallback the default depends on */
+    /* Setenv arms the cleanup that restores whatever the run was started with; Unsetenv then exercises the LookupEnv fallback the default depends on */
     t.Setenv(exampleMajorListVariable, exampleMajorListDefault)
     if unsetErr := os.Unsetenv(exampleMajorListVariable); nil != unsetErr {
         t.Fatalf("unset %s: %v", exampleMajorListVariable, unsetErr)
@@ -29,8 +27,7 @@ func TestExampleMajorList_UnsetCoversEveryMajor(t *testing.T) {
     }
 }
 
-/* an EMPTY value is the opt-out, the same clear-to-skip contract the backend variables follow; the caller
-announces the skip, so the list itself has to come back empty rather than fall back to the default. */
+/* an EMPTY value is the opt-out, the same clear-to-skip contract the backend variables follow; the caller announces the skip, so the list itself has to come back empty rather than fall back to the default. */
 func TestExampleMajorList_EmptyValueSelectsNothing(t *testing.T) {
     t.Setenv(exampleMajorListVariable, "")
 
@@ -51,9 +48,7 @@ func TestExampleMajorList_AcceptsSpaceCommaAndVPrefixedEntries(t *testing.T) {
     }
 }
 
-/* the ports have to stay distinct from each other, from the :8080 the dev container supervises and from the
-:18080 stack.sh's signal check uses, or two applications fight for one socket and the section that loses reports a
-boot failure that has nothing to do with the code under test. */
+/* the ports have to stay distinct from each other, from the :8080 the dev container supervises and from the :18080 stack.sh's signal check uses, or two applications fight for one socket and the section that loses reports a boot failure that has nothing to do with the code under test. */
 func TestExampleMajorCatalog_PortsAreDistinctAndReserved(t *testing.T) {
     seen := map[int]bool{
         8080:  true,
@@ -69,9 +64,7 @@ func TestExampleMajorCatalog_PortsAreDistinctAndReserved(t *testing.T) {
     }
 }
 
-/* the command prints its boot log to stdout before the file logger exists, and those lines are json objects
-of their own; picking the FIRST decodable object would hand a log line to the decoder instead of the envelope,
-and under --format=json the envelope is a single line exactly like they are. */
+/* the command prints its boot log to stdout before the file logger exists, and those lines are json objects of their own; picking the FIRST decodable object would hand a log line to the decoder instead of the envelope, and under --format=json the envelope is a single line exactly like they are. */
 func TestExampleJsonDocument_SkipsTheBootLogLines(t *testing.T) {
     output := strings.Join(
         []string{
@@ -91,8 +84,7 @@ func TestExampleJsonDocument_SkipsTheBootLogLines(t *testing.T) {
     }
 }
 
-/* the pretty document is still read, so a run driven with --format=json-pretty by hand reports what it found
-rather than a decode failure that reads like a broken command */
+/* the pretty document is still read, so a run driven with --format=json-pretty by hand reports what it found rather than a decode failure that reads like a broken command */
 func TestExampleJsonDocument_StillReadsAPrettyPrintedEnvelope(t *testing.T) {
     output := strings.Join(
         []string{
@@ -125,8 +117,7 @@ func TestExampleReportsPositiveCount(t *testing.T) {
     }
 }
 
-/* the assertion reports the attribute by name, so an unset SameSite must never be printed as if the cookie
-carried one. */
+/* the assertion reports the attribute by name, so an unset SameSite must never be printed as if the cookie carried one. */
 func TestExampleSameSiteName(t *testing.T) {
     for sameSite, expected := range map[http.SameSite]string{
         http.SameSiteLaxMode:     "Lax",
@@ -140,9 +131,7 @@ func TestExampleSameSiteName(t *testing.T) {
     }
 }
 
-/* fail() exits through os.Exit, which runs no deferred function: without this hook a started example
-process outlives the failing run and holds its port, so the NEXT run reports an occupied port instead of the
-failure that actually happened. */
+/* fail() exits through os.Exit, which runs no deferred function: without this hook a started example process outlives the failing run and holds its port, so the NEXT run reports an occupied port instead of the failure that actually happened. */
 func TestPushFailureCleanup_RunsRegisteredTeardownAndSkipsPopped(t *testing.T) {
     failureCleanupList = nil
 
@@ -168,5 +157,39 @@ func TestPushFailureCleanup_RunsRegisteredTeardownAndSkipsPopped(t *testing.T) {
     }
     if 0 != len(failureCleanupList) {
         t.Fatalf("the cleanup list must be emptied after it ran, holds %d", len(failureCleanupList))
+    }
+}
+
+/* the journal reader has to ask the database the application writes to, and the v1 example's journal moved
+   from the shared scratch database into one of its own. The swap is what carries that, and it is pinned on
+   values rather than only through the reader, because the shipped dsn carries a query the swap must not
+   drop and a caller may hand it shapes the reader would answer wrongly without saying so. */
+func TestExamplePostgresDsnSwapsTheDatabaseForTheMajorBeingDriven(t *testing.T) {
+    v1, _ := exampleMajorByNumber(1)
+
+    swapped := examplePostgresDsn(v1, "postgres://melody:melody@postgres:5432/melody_test?sslmode=disable")
+    if "postgres://melody:melody@postgres:5432/melody_example_v1?sslmode=disable" != swapped {
+        t.Fatalf("expected the database swapped and the query kept, got %q", swapped)
+    }
+
+    withoutQuery := examplePostgresDsn(v1, "postgres://melody:melody@postgres:5432/melody_test")
+    if "postgres://melody:melody@postgres:5432/melody_example_v1" != withoutQuery {
+        t.Fatalf("expected the database swapped with no query, got %q", withoutQuery)
+    }
+}
+
+/* an empty dsn is how a caller says there is no database to reach, and the sections that receive it
+   announce their out-of-band half as skipped; a dsn with no path is answered unchanged rather than
+   repaired, because pointing a caller's configuration somewhere else silently is what hides a mistake. */
+func TestExamplePostgresDsnLeavesWhatItCannotSwapAlone(t *testing.T) {
+    v1, _ := exampleMajorByNumber(1)
+
+    if "" != examplePostgresDsn(v1, "") {
+        t.Fatal("expected an empty dsn to stay empty")
+    }
+
+    pathless := "postgres:melody"
+    if pathless != examplePostgresDsn(v1, pathless) {
+        t.Fatalf("expected a dsn with no path segment to be answered unchanged, got %q", examplePostgresDsn(v1, pathless))
     }
 }

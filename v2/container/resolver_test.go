@@ -10,6 +10,7 @@ import (
     alpha "github.com/precision-soft/melody/v2/container/internal/collisionalpha/contract"
     beta "github.com/precision-soft/melody/v2/container/internal/collisionbeta/contract"
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/internal/testhelper"
 )
 
 type resolverTestService struct {
@@ -228,13 +229,14 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
 func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
     serviceContainer := NewContainer()
 
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    _ = MustFromResolver[*testService](serviceContainer, "service.missing")
+    /* an unqualified recover accepts any panic at all, including one thrown by a guard three lines away; the message is what names the refusal under test */
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = MustFromResolver[*testService](serviceContainer, "service.missing")
+        },
+        "service is not registered",
+    )
 }
 
 var _ containercontract.Resolver = (*resolverTestResolver)(nil)

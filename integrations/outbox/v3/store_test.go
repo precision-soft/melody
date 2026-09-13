@@ -3,10 +3,12 @@ package outbox
 import (
     "context"
     "database/sql"
+    "math"
     "os"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
     "github.com/uptrace/bun/driver/pgdriver"
@@ -284,5 +286,45 @@ func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
     }
     if 1 != len(second) || first[0].Id != second[0].Id {
         t.Fatalf("expected the in-flight row to re-surface after its visibility lapsed, got %+v", second)
+    }
+}
+
+/* bun writes no LIMIT clause for a non-positive limit and narrows the value to int32 first, so zero, a negative and a value past the int32 range all claimed the whole table through this public door. */
+func TestClaimLimit_RefusesANonPositiveLimitAndCapsAboveTheMaximum(t *testing.T) {
+    for _, refused := range []int{0, -1, math.MinInt} {
+        if _, limitErr := claimLimit(refused); nil == limitErr {
+            t.Fatalf("expected %d refused", refused)
+        }
+    }
+
+    for input, expected := range map[int]int{1: 1, 1024: 1024, maximumBatchSize: maximumBatchSize, maximumBatchSize + 1: maximumBatchSize, 1 << 40: maximumBatchSize, math.MaxInt: maximumBatchSize} {
+        limit, limitErr := claimLimit(input)
+        if nil != limitErr {
+            t.Fatalf("expected %d accepted, got %v", input, limitErr)
+        }
+        if expected != limit {
+            t.Fatalf("expected %d to become %d, got %d", input, expected, limit)
+        }
+    }
+}
+
+/* the refusal precedes every query: the store below is built over a connector nothing can reach, so a query would have failed with a dial error rather than the refusal asserted here. */
+func TestStore_ClaimDueMessagesRefusesANonPositiveLimitBeforeAnyQuery(t *testing.T) {
+    sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://nobody:nothing@127.0.0.1:1/nowhere?sslmode=disable")))
+    t.Cleanup(func() {
+        sqldb.Close()
+    })
+
+    store := NewStore(bun.NewDB(sqldb, pgdialect.New()), &stringCodec{})
+
+    pending, claimErr := store.ClaimDueMessages(context.Background(), 0, time.Minute)
+    if nil == claimErr || nil != pending {
+        t.Fatalf("expected the zero limit refused before any query, got %v, %v", pending, claimErr)
+    }
+    if "outbox claim limit must be positive" != claimErr.Error() {
+        t.Fatalf("expected the refusal by name, got %v", claimErr)
+    }
+    if 0 != exception.LogContext(claimErr)["limit"] {
+        t.Fatalf("expected the refused limit in the context, got %v", exception.LogContext(claimErr))
     }
 }

@@ -1,6 +1,7 @@
 package audit
 
 import (
+    "encoding/json"
     "reflect"
     "strings"
     "time"
@@ -12,14 +13,44 @@ import (
 
 const redactedValue = "<redacted>"
 
-var encryptedStringType = reflect.TypeOf(encrypt.EncryptedString(""))
-var encryptedDeterministicStringType = reflect.TypeOf(encrypt.EncryptedDeterministicString(""))
+/* the encrypted column types are recognised through the marker interface rather than by type identity: the compartment-bound generic forms (EncryptedStringFor[R], EncryptedDeterministicStringFor[R]) instantiate a distinct reflect.Type per marker, so an identity list matched the two default-cipher types and silently left every compartment column unredacted */
+var encryptedColumnType = reflect.TypeOf((*encrypt.EncryptedColumn)(nil)).Elem()
 var baseModelType = reflect.TypeOf(bun.BaseModel{})
+
+func isEncryptedColumnType(fieldType reflect.Type) bool {
+    return fieldType.Implements(encryptedColumnType)
+}
 
 type Change struct {
     Field string `json:"field"`
     Old   any    `json:"old,omitempty"`
     New   any    `json:"new,omitempty"`
+
+    oldPresent bool
+    newPresent bool
+}
+
+type changeEnvelope struct {
+    Field string `json:"field"`
+    Old   *any   `json:"old,omitempty"`
+    New   *any   `json:"new,omitempty"`
+}
+
+/* MarshalJSON emits each side by PRESENCE rather than by emptiness: under plain omitempty a genuine transition to a zero value — active true→false, a counter to 0, a string emptied — marshalled byte-identical to the one-sided shape of an insert or a delete, and a consumer of the trail could not tell "changed to false" from "no new value recorded". The walk records which sides exist, so a present zero renders (as false, 0, "" or null) and an absent side stays out. A Change built by hand keeps the old reading: with no presence recorded, a side is emitted when it is non-nil. */
+func (instance Change) MarshalJSON() ([]byte, error) {
+    envelope := changeEnvelope{Field: instance.Field}
+
+    if true == instance.oldPresent || nil != instance.Old {
+        oldValue := instance.Old
+        envelope.Old = &oldValue
+    }
+
+    if true == instance.newPresent || nil != instance.New {
+        newValue := instance.New
+        envelope.New = &newValue
+    }
+
+    return json.Marshal(envelope)
 }
 
 func ChangeSet(before any, after any) []Change {
@@ -122,28 +153,28 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
                 continue
             }
             if true == redact {
-                *changes = append(*changes, Change{Field: name, Old: redactedValue, New: redactedValue})
+                *changes = append(*changes, Change{Field: name, Old: redactedValue, New: redactedValue, oldPresent: true, newPresent: true})
                 continue
             }
-            *changes = append(*changes, Change{Field: name, Old: oldValue, New: newValue})
+            *changes = append(*changes, Change{Field: name, Old: oldValue, New: newValue, oldPresent: true, newPresent: true})
             continue
         }
 
         if true == newUsable {
             if true == redact {
-                *changes = append(*changes, Change{Field: name, New: redactedValue})
+                *changes = append(*changes, Change{Field: name, New: redactedValue, newPresent: true})
                 continue
             }
-            *changes = append(*changes, Change{Field: name, New: newValue})
+            *changes = append(*changes, Change{Field: name, New: newValue, newPresent: true})
             continue
         }
 
         if true == redact {
-            *changes = append(*changes, Change{Field: name, Old: redactedValue})
+            *changes = append(*changes, Change{Field: name, Old: redactedValue, oldPresent: true})
             continue
         }
 
-        *changes = append(*changes, Change{Field: name, Old: oldValue})
+        *changes = append(*changes, Change{Field: name, Old: oldValue, oldPresent: true})
     }
 }
 
@@ -158,7 +189,7 @@ func isAuditableEmbed(field reflect.StructField) bool {
         return false
     }
 
-    return baseModelType != embedded && encryptedStringType != embedded && encryptedDeterministicStringType != embedded && reflect.TypeOf(time.Time{}) != embedded
+    return baseModelType != embedded && false == isEncryptedColumnType(embedded) && reflect.TypeOf(time.Time{}) != embedded
 }
 
 /* structValueOf resolves a value to the struct behind it and records every pointer it walks through, reporting as its second result whether the chase met a pointer this walk had already been through. Go permits `type Node struct { *Node }` where it rejects the non-pointer form, so an embedded pointer can lead back to a struct the walk is already inside; that loop carries no nil to end the chase and, unrecorded, the embed recursion runs until the stack is gone — a fatal error, not a panic, so nothing downstream can recover it. */
@@ -241,7 +272,7 @@ func isRedactedField(field reflect.StructField) bool {
 
     fieldType := dereferencePointerType(field.Type)
 
-    if fieldType == encryptedStringType || fieldType == encryptedDeterministicStringType {
+    if true == isEncryptedColumnType(fieldType) {
         return true
     }
 
@@ -256,7 +287,7 @@ func valueContainsRedactTag(value any) bool {
     return valueContainsRedactTagReflect(reflect.ValueOf(value), map[redactVisitKey]struct{}{})
 }
 
-/* @important the visit key combines the pointer with a length discriminator so two distinct re-slices that share a backing-array start (full and full[:1]) are not collapsed into the same already-visited value — that false dedup would skip a redact-tagged element living past the shorter slice's length and leak it as plaintext. A *T or map header is identified by its pointer alone (length stays 0); a slice adds its length + 1, so a self-referential slice (same pointer, same length) is still caught as a cycle while a different-length view of the same array is traversed, and a slice key never collides with a length-0 pointer/map key. */
+/* the visit key combines the pointer with a length discriminator so two distinct re-slices that share a backing-array start (full and full[:1]) are not collapsed into the same already-visited value — that false dedup would skip a redact-tagged element living past the shorter slice's length and leak it as plaintext. A *T or map header is identified by its pointer alone (length stays 0); a slice adds its length + 1, so a self-referential slice (same pointer, same length) is still caught as a cycle while a different-length view of the same array is traversed, and a slice key never collides with a length-0 pointer/map key. */
 type redactVisitKey struct {
     pointer uintptr
     length  uintptr
@@ -282,16 +313,16 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
     }
 
     valueType := value.Type()
-    if valueType == encryptedStringType || valueType == encryptedDeterministicStringType {
+    if true == isEncryptedColumnType(valueType) {
         return true
     }
 
     switch value.Kind() {
     case reflect.Slice:
-        /* @important guard self-referential slices reached through an interface element (slice -> any -> same slice), which carry no pointer node for the deref loop to catch and would otherwise recurse until the stack overflows. */
+        /* guard self-referential slices reached through an interface element (slice -> any -> same slice), which carry no pointer node for the deref loop to catch and would otherwise recurse until the stack overflows. */
         pointer := value.Pointer()
         if 0 != pointer {
-            /* @important key on pointer AND length so a re-slice sharing the backing-array start but with a different length (full vs full[:1]) is not mistaken for an already-visited value, which would skip a redact-tagged element past the shorter view and leak it */
+            /* key on pointer AND length so a re-slice sharing the backing-array start but with a different length (full vs full[:1]) is not mistaken for an already-visited value, which would skip a redact-tagged element past the shorter view and leak it */
             key := redactVisitKey{pointer: pointer, length: uintptr(value.Len()) + 1}
             if _, visited := seen[key]; true == visited {
                 return false
@@ -340,8 +371,7 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
                 return true
             }
 
-            subFieldType := dereferencePointerType(subField.Type)
-            if subFieldType == encryptedStringType || subFieldType == encryptedDeterministicStringType {
+            if true == isEncryptedColumnType(dereferencePointerType(subField.Type)) {
                 return true
             }
 
@@ -358,7 +388,7 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
 
 /* typeContainsRedactTag answers whether a redact tag is reachable from fieldType. The type graph it walks is finite but freely cyclic — `type Attributes map[string]Attributes`, `type Node []Node` and `type Pointer *Pointer` are all legal Go, as are the same shapes spread across two named types — so every type is recorded before it is taken apart, both in the element chase and in the recursion, and a type met a second time ends that branch.
 
-Ending it with false is the exact answer rather than a concession. The walk is a reachability question whose result is an OR over the fields, and the first true returns straight out through every frame; a type already under examination can therefore only be reached from a frame that is still exploring it and will report any tag it finds on its own. False here means no redact tag is reachable by any path, and the alternative — answering true for a back-edge — would redact every self-referential shape, `type Category struct { Children []Category }` included, turning the audit trail into a column of placeholders. */
+   Ending it with false is the exact answer rather than a concession. The walk is a reachability question whose result is an OR over the fields, and the first true returns straight out through every frame; a type already under examination can therefore only be reached from a frame that is still exploring it and will report any tag it finds on its own. False here means no redact tag is reachable by any path, and the alternative — answering true for a back-edge — would redact every self-referential shape, `type Category struct { Children []Category }` included, turning the audit trail into a column of placeholders. */
 func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{}) bool {
     for reflect.Ptr == fieldType.Kind() || reflect.Slice == fieldType.Kind() || reflect.Array == fieldType.Kind() {
         if _, visited := seen[fieldType]; true == visited {
@@ -392,6 +422,11 @@ func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{
         }
 
         if "redact" == subField.Tag.Get("audit") {
+            return true
+        }
+
+        /* the value walk treats an encrypted column type as redactable; this type walk answers the same question and used to disagree with it — a struct whose only sensitive member was an EncryptedString field read as tag-free through this branch */
+        if true == isEncryptedColumnType(dereferencePointerType(subField.Type)) {
             return true
         }
 

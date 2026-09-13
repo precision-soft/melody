@@ -17,10 +17,7 @@ import (
     "github.com/redis/rueidis"
 )
 
-/* runRunExclusiveCheck exercises lock.RunExclusive over a live redis lease locker: a second caller is turned
-away while the first holds the lock, the lock is released as soon as the callback returns so the next tick runs, and an
-unreachable store fails closed rather than double-running the work. This is the primitive that keeps a
-cron-launched command running exactly once per tick across N application instances. */
+/* runRunExclusiveCheck exercises lock.RunExclusive over a live redis lease locker: a second caller is turned away while the first holds the lock, the lock is released as soon as the callback returns so the next tick runs, and an unreachable store fails closed rather than double-running the work. This is the primitive that keeps a cron-launched command running exactly once per tick across N application instances. */
 func runRunExclusiveCheck(address string) {
     client := openRedis(address)
     defer client.Close()
@@ -165,9 +162,7 @@ func runRunExclusiveCheck(address string) {
     pass("run exclusive failed closed on an unreachable store")
 }
 
-/* runLeaderGateCheck exercises lock.LeaderGate over a live redis lease locker: exactly one of two competing
-gates is elected, the follower keeps campaigning, and when the leader shuts down the follower is promoted —
-the election the outbox relay and singleton workers rely on. */
+/* runLeaderGateCheck exercises lock.LeaderGate over a live redis lease locker: exactly one of two competing gates is elected, the follower keeps campaigning, and when the leader shuts down the follower is promoted — the election the outbox relay and singleton workers rely on. */
 func runLeaderGateCheck(address string) {
     client := openRedis(address)
     defer client.Close()
@@ -237,8 +232,7 @@ func runLeaderGateCheck(address string) {
     pass("leader gate dropped leadership on shutdown")
 }
 
-/* startLeaderGate runs a gate on its own cancellable runtime and reports election through a channel closed by
-OnElected, so a caller can wait on the outcome rather than poll IsLeader. */
+/* startLeaderGate runs a gate on its own cancellable runtime and reports election through a channel closed by OnElected, so a caller can wait on the outcome rather than poll IsLeader. */
 func startLeaderGate(
     locker lockcontract.Locker,
     name string,

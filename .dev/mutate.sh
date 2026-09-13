@@ -4,9 +4,9 @@
 #
 #   docker exec melody-dev-1 bash /app/.dev/run-batch.sh "bash /app/.dev/mutate.sh /app/.dev/mutate/lot<N>.table"
 #
-# A table row has seven tilde-separated fields:
+# A table row has seven tilde-separated fields, plus an optional eighth carrying build tags:
 #
-#   file ~ expected line ~ occurrence ~ anchor ~ replacement ~ package ~ -run pattern
+#   file ~ expected line ~ occurrence ~ anchor ~ replacement ~ package ~ -run pattern [~ build tags]
 #
 # Blank lines and lines opening with # are skipped.
 #
@@ -16,7 +16,7 @@
 #
 # A row is abandoned as BROKEN rather than reported when it cannot prove anything:
 #
-#   - it does not split into all seven fields, or the anchor is empty
+#   - it does not split into the seven required fields, or the anchor is empty
 #   - the file does not exist in the copy
 #   - the requested occurrence of the anchor does not sit on the expected line — textual twins put the
 #     same anchor at the same indentation in two functions, and a mistaken occurrence moves the
@@ -59,23 +59,51 @@ survived=0
 broken=0
 total=0
 
-while IFS='~' read -r file line occurrence anchor replacement package runpattern; do
+while IFS='~' read -r file line occurrence anchor replacement package runpattern tags; do
     [ -z "${file}" ] && continue
     case "${file}" in \#*) continue ;; esac
-    echo "${package}"
-done < "${TABLE}" | sort -u | while read -r package; do
-    if ! go test "${package}" >/dev/null 2>&1; then
-        echo "CONTROL FAILED for ${package} — abandoning, nothing can be concluded"
-        exit 1
+    echo "${package} ${tags}"
+# the package and its optional tags are separated by a SPACE, so this read must name that separator: the
+# batch runner this harness is invoked through sets IFS to newline+tab, and an inherited IFS put the whole
+# line — package plus a trailing space — into ${package}, so every control ran `go test "<path> "` and
+# answered "directory not found". The harness abandoned correctly, but for a reason that was its own.
+done < "${TABLE}" | sort -u | while IFS=' ' read -r package tags; do
+    # the control's output is KEPT and shown when it fails: discarded, a red control says only that the
+    # package is red, which sends the reader to reproduce it by hand — and a control that fails for a
+    # reason of the harness's own (an inherited IFS, a missing environment) then looks exactly like one
+    # that fails for a reason of the code's
+    CONTROL_LOG="${COPY}.control.log"
+
+    if [ -n "${tags}" ]; then
+        if ! go test -tags "${tags}" "${package}" >"${CONTROL_LOG}" 2>&1; then
+            echo "CONTROL FAILED for ${package} under -tags ${tags} — abandoning, nothing can be concluded"
+            tail -30 "${CONTROL_LOG}"
+            exit 1
+        fi
+        echo "control green: ${package} (-tags ${tags})"
+    else
+        if ! go test "${package}" >"${CONTROL_LOG}" 2>&1; then
+            echo "CONTROL FAILED for ${package} — abandoning, nothing can be concluded"
+            tail -30 "${CONTROL_LOG}"
+            exit 1
+        fi
+        echo "control green: ${package}"
     fi
-    echo "control green: ${package}"
 done || exit 1
 
-while IFS='~' read -r file line occurrence anchor replacement package runpattern; do
+while IFS='~' read -r file line occurrence anchor replacement package runpattern tags; do
     [ -z "${file}" ] && continue
     case "${file}" in \#*) continue ;; esac
 
     total=$((total + 1))
+
+    # the eighth field is optional: a source behind a build tag is invisible to the default build,
+    # so both its guard and its test only exist under that tag
+    if [ -n "${tags}" ]; then
+        TAGFLAG="-tags ${tags}"
+    else
+        TAGFLAG=""
+    fi
 
     if [ -z "${anchor}" ] || [ -z "${line}" ] || [ -z "${occurrence}" ] || [ -z "${package}" ] || [ -z "${runpattern}" ]; then
         echo "[${total}] BROKEN: row does not split into all fields"
@@ -119,7 +147,7 @@ while IFS='~' read -r file line occurrence anchor replacement package runpattern
         continue
     fi
 
-    listed=$(go test "${package}" -run "${runpattern}" -list "${runpattern}" 2>&1)
+    listed=$(go test ${TAGFLAG} "${package}" -run "${runpattern}" -list "${runpattern}" 2>&1)
     if echo "${listed}" | grep -qE "build failed|cannot use|undefined:|syntax error|declared and not used|too many|not enough"; then
         echo "[${total}] BROKEN: the mutant does not compile"
         broken=$((broken + 1))
@@ -135,7 +163,7 @@ while IFS='~' read -r file line occurrence anchor replacement package runpattern
         continue
     fi
 
-    if go test "${package}" -run "${runpattern}" >/dev/null 2>&1; then
+    if go test ${TAGFLAG} "${package}" -run "${runpattern}" >/dev/null 2>&1; then
         echo "[${total}] SURVIVED: ${file}:${line} '${anchor}' -> '${replacement}' (${matched} test(s))"
         survived=$((survived + 1))
     else

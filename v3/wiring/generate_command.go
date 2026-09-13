@@ -11,6 +11,7 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -55,7 +56,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
         },
         &clicontract.BoolFlag{
             Name:  "strict",
-            Usage: "fail when a declared bind matched no constructor argument or a constructor was skipped",
+            Usage: "fail when a declared bind or exclude matched no constructor, or a constructor was skipped",
         },
         &clicontract.BoolFlag{
             Name:  "report-vendor",
@@ -74,7 +75,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
 
 func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     if nil == instance.bindSet {
         return exception.NewError("the wiring generate command requires a bind set", nil, nil)
@@ -109,15 +110,16 @@ func (instance *GenerateCommand) Run(
 
     instance.writeReport(commandContext, report)
 
+    /* every strict violation is carried in one refusal: the run is inspected through its exit and its error record, and an error naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary */
     if true == commandContext.Bool("strict") {
+        strictContext := make(map[string]any)
+
         if 0 < len(report.UnusedBinds) {
-            return exception.NewError(
-                "declared binds matched no constructor argument",
-                map[string]any{
-                    "binds": strings.Join(report.UnusedBinds, ", "),
-                },
-                nil,
-            )
+            strictContext["binds"] = strings.Join(report.UnusedBinds, ", ")
+        }
+
+        if 0 < len(report.UnusedExcludes) {
+            strictContext["excludes"] = strings.Join(report.UnusedExcludes, ", ")
         }
 
         /* a skipped constructor is coverage the wiring silently lost; strict exists so a loss has to be acknowledged, which is what //melody:ignore is for */
@@ -127,11 +129,13 @@ func (instance *GenerateCommand) Run(
                 skippedNames = append(skippedNames, skipped.Name)
             }
 
+            strictContext["constructors"] = strings.Join(skippedNames, ", ")
+        }
+
+        if 0 < len(strictContext) {
             return exception.NewError(
-                "constructors were skipped",
-                map[string]any{
-                    "constructors": strings.Join(skippedNames, ", "),
-                },
+                "declared binds or excludes matched no constructor, or constructors were skipped",
+                strictContext,
                 nil,
             )
         }
@@ -139,7 +143,7 @@ func (instance *GenerateCommand) Run(
 
     outputPath := commandContext.String("out")
     if "" == outputPath {
-        fmt.Fprint(commandContext.Writer, source)
+        fmt.Fprint(commandContext.Writer(), source)
 
         return nil
     }
@@ -148,47 +152,74 @@ func (instance *GenerateCommand) Run(
         outputPath = filepath.Join(projectDirectory, outputPath)
     }
 
-    makeDirectoryErr := os.MkdirAll(filepath.Dir(outputPath), 0o755)
-    if nil != makeDirectoryErr {
+    /* a generated file inside a scanned directory is read back by the next scan — with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out; the constructor's own contract says the output package must not be a scanned one, and this is where it is enforceable */
+    for _, packageBinding := range instance.bindSet.Packages() {
+        scannedDirectory := packageBinding.Directory()
+        if false == filepath.IsAbs(scannedDirectory) {
+            scannedDirectory = filepath.Join(projectDirectory, scannedDirectory)
+        }
+
+        relativePath, relativeErr := filepath.Rel(scannedDirectory, outputPath)
+        if nil == relativeErr && false == strings.HasPrefix(relativePath, "..") {
+            return exception.NewError(
+                "the output path lies inside a scanned package directory",
+                map[string]any{
+                    "out":        outputPath,
+                    "importPath": packageBinding.ImportPath(),
+                    "directory":  scannedDirectory,
+                },
+                nil,
+            )
+        }
+    }
+
+    /* an existing file that does not open with the generated marker is someone's source, and the write below truncates before it writes; a mistyped --out must not be how a hand-written file dies */
+    existingContent, readErr := os.ReadFile(outputPath)
+    if nil != readErr && false == os.IsNotExist(readErr) {
         return exception.NewError(
-            "could not create the output directory of the generated wiring",
+            "could not inspect the existing output file",
             map[string]any{
                 "out": outputPath,
             },
-            makeDirectoryErr,
+            readErr,
+        )
+    }
+    if nil == readErr && 0 < len(existingContent) && false == strings.HasPrefix(string(existingContent), generatedFileNote) {
+        return exception.NewError(
+            "the output file exists and is not a generated wiring file; remove it or choose another path",
+            map[string]any{
+                "out": outputPath,
+            },
+            nil,
         )
     }
 
-    writeErr := os.WriteFile(outputPath, []byte(source), 0o644)
+    /* the framework's own atomic writer, which this package can import directly: it lands the source through a temp file, a sync, a rename and a directory sync, so a write that dies partway leaves the previous file intact rather than a truncated Go source the compiler and the committed-file diff read as the generator's output */
+    writeErr := internal.WriteFileAtomically(outputPath, []byte(source), "generated wiring file")
     if nil != writeErr {
-        return exception.NewError(
-            "could not write the generated wiring",
-            map[string]any{
-                "out": outputPath,
-            },
-            writeErr,
-        )
+        return writeErr
     }
 
-    fmt.Fprintf(commandContext.Writer, "wiring written to %s\n", outputPath)
+    fmt.Fprintf(commandContext.Writer(), "wiring written to %s\n", outputPath)
 
     return nil
 }
 
+
 /* writeReport prints what the generation covered and, more importantly, what it did not: a skipped constructor and an unmatched bind are both silent losses of coverage unless they are named. */
 func (instance *GenerateCommand) writeReport(
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
     report *GenerateReport,
 ) {
-    fmt.Fprintf(commandContext.Writer, "registered %d constructors\n", report.ConstructorCount)
+    fmt.Fprintf(commandContext.Writer(), "registered %d constructors\n", report.ConstructorCount)
 
     if 0 < report.ScopedConstructorCount {
-        fmt.Fprintf(commandContext.Writer, "registered %d scoped constructors\n", report.ScopedConstructorCount)
+        fmt.Fprintf(commandContext.Writer(), "registered %d scoped constructors\n", report.ScopedConstructorCount)
     }
 
     for _, skipped := range report.Skipped {
         fmt.Fprintf(
-            commandContext.Writer,
+            commandContext.Writer(),
             "skipped %s (%s:%d): %s\n",
             skipped.Name,
             skipped.File,
@@ -200,19 +231,28 @@ func (instance *GenerateCommand) writeReport(
     /* vendor trees cannot contribute services, so naming them is opt-in: on a large project the list is noise, but a user wondering where a constructor went can ask for it */
     if true == commandContext.Bool("report-vendor") {
         for _, vendorDirectory := range report.SkippedVendorDirectories {
-            fmt.Fprintf(commandContext.Writer, "skipped vendor directory: %s\n", vendorDirectory)
+            fmt.Fprintf(commandContext.Writer(), "skipped vendor directory: %s\n", vendorDirectory)
         }
     }
 
     /* a build-excluded file holding a candidate is opt-in for the same reason: a foreign-GOOS variant is legitimate noise, but a user missing a service built under a tag can ask which files the scan left out and pass the tag through --tags */
     if true == commandContext.Bool("report-excluded") {
         for _, excludedFile := range report.ExcludedFiles {
-            fmt.Fprintf(commandContext.Writer, "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
+            fmt.Fprintf(commandContext.Writer(), "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
         }
     }
 
     for _, unused := range report.UnusedBinds {
-        fmt.Fprintf(commandContext.Writer, "bind %s matched no constructor argument\n", unused)
+        fmt.Fprintf(commandContext.Writer(), "bind %s matched no constructor argument\n", unused)
+    }
+
+    for _, unused := range report.UnusedExcludes {
+        fmt.Fprintf(commandContext.Writer(), "exclude %s matched no constructor\n", unused)
+    }
+
+    /* the generator's contract is to say when it could not check the bind targets; the command always hands over the running configuration, so this line names the degenerate case where that configuration declares nothing */
+    if true == report.BindTargetsUnchecked {
+        fmt.Fprint(commandContext.Writer(), "bind targets were not checked: the application declares no parameters\n")
     }
 
     reachedNames := make([]string, 0, len(report.GlobalBindReach))
@@ -226,7 +266,7 @@ func (instance *GenerateCommand) writeReport(
         constructors := report.GlobalBindReach[argumentName]
 
         fmt.Fprintf(
-            commandContext.Writer,
+            commandContext.Writer(),
             "global bind %s reaches %d constructors: %s\n",
             argumentName,
             len(constructors),

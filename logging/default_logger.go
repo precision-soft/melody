@@ -32,7 +32,7 @@ func (instance *defaultLogger) Log(level loggingcontract.Level, message string, 
         context = loggingcontract.Context{}
     }
 
-    /* one record stays one line: the message and the context values regularly embed request-derived text, and an unescaped line break would end this record and start a fully-formed fake one at whatever level the payload names — the json sibling gets the same guarantee from its encoder */
+    /* one record stays one line: the message and the context values regularly embed request-derived text, and an unescaped line break would end this record and start a fully-formed fake one at whatever level the payload names — the json sibling encodes each field and then spells the C1 block, which its encoder leaves raw, as json escapes */
     log.Printf(
         "[%s] %s %s",
         instance.levelLabels.LabelFor(level),

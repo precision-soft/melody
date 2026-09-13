@@ -962,16 +962,7 @@ func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
     }
 }
 
-/*
-TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second
-unwrap shape the standard library defines. Every walk here anchored on the
-single-valued errors.Unwrap, which answers nothing at all for an errors.Join:
-a failure that gathered what several replicas had to say arrived as one
-flattened line of text, with the context of every branch — the host that
-refused, the destination that timed out — reaching no record. The writers this
-framework repaired are one producer of the shape; a join can arrive from any
-dependency and from any application.
-*/
+/* TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second unwrap shape the standard library defines. Every walk here anchored on the single-valued errors.Unwrap, which answers nothing at all for an errors.Join: a failure that gathered what several replicas had to say arrived as one flattened line of text, with the context of every branch — the host that refused, the destination that timed out — reaching no record. The writers this framework repaired are one producer of the shape; a join can arrive from any dependency and from any application. */
 func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
     firstCause := NewError(
         "the primary replica refused the write",
@@ -1067,5 +1058,48 @@ func TestBuildCauseChain_ASingleWrapChainIsUnchanged(t *testing.T) {
 
     if 3 != len(chain) || "top" != chain[0] || "middle" != chain[1] || "deepest" != chain[2] {
         t.Fatalf("expected the chain walked top down, got %v", chain)
+    }
+}
+
+type contextPanicProviderError struct{}
+
+func (instance *contextPanicProviderError) Error() string {
+    return "the provider refused"
+}
+
+func (instance *contextPanicProviderError) Context() exceptioncontract.Context {
+    panic("context rendering gave up")
+}
+
+/* renderErrorText already keeps a panicking Error() from unwinding through the recovery defer LogContext runs inside of, but a foreign Context() ran bare — at the top provider, in the cause-context walk, and in the From* constructors that run on the same recovery paths. The record survives with the panic value in the context's place instead of the process unwinding on a second panic. */
+func TestLogContext_AProviderWhoseContextPanicsIsContained(t *testing.T) {
+    foreignErr := &contextPanicProviderError{}
+
+    logContext := LogContext(foreignErr)
+    if nil == logContext {
+        t.Fatalf("expected the record to survive the panicking context")
+    }
+
+    if "context rendering gave up" != logContext["contextPanicked"] {
+        t.Fatalf("expected the panic value to be kept in the context's place, got %#v", logContext)
+    }
+
+    wrapped := NewError("wrapper", nil, foreignErr)
+    wrappedContext := LogContext(wrapped)
+    if nil == wrappedContext {
+        t.Fatalf("expected the record of the wrapper to survive the cause's panicking context")
+    }
+}
+
+func TestFromError_AProviderWhoseContextPanicsIsContained(t *testing.T) {
+    foreignErr := &contextPanicProviderError{}
+
+    converted := FromError(foreignErr)
+    if nil == converted {
+        t.Fatalf("expected the conversion to survive the panicking context")
+    }
+
+    if "context rendering gave up" != converted.Context()["contextPanicked"] {
+        t.Fatalf("expected the panic value to be kept in the context's place, got %#v", converted.Context())
     }
 }

@@ -33,10 +33,11 @@ func (instance *capturingEventDispatcher) RemoveListener(registration eventcontr
     return false
 }
 
-func (instance *capturingEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
+func (instance *capturingEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
+    return eventcontract.SubscriberRegistration{}
 }
 
-func (instance *capturingEventDispatcher) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
+func (instance *capturingEventDispatcher) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
     return 0
 }
 
@@ -96,7 +97,7 @@ func captureResponseNormalizerListener(t *testing.T) eventcontract.EventListener
     return dispatcher.listener
 }
 
-/* @info A nil response has to leave the normalizer as nil. The kernel already replaces a handler's nil with an empty 204 before it dispatches this event, and writeResponse answers a nil the same way, so a synthesis here would be a second place deciding what "no response" means — and the two can then disagree. Nothing covered this: putting the synthesis back left every package under ./http/... green. */
+/* A nil response has to leave the normalizer as nil. The kernel already replaces a handler's nil with an empty 204 before it dispatches this event, and writeResponse answers a nil the same way, so a synthesis here would be a second place deciding what "no response" means — and the two can then disagree. Nothing covered this: putting the synthesis back left every package under ./http/... green. */
 func TestKernelResponseNormalizerListener_LeavesANilResponseAlone(t *testing.T) {
     listener := captureResponseNormalizerListener(t)
 
@@ -112,7 +113,7 @@ func TestKernelResponseNormalizerListener_LeavesANilResponseAlone(t *testing.T) 
     }
 }
 
-/* @info the two normalizations the listener does own: a response that names no status code gets 200, and one with no header map gets an empty one, so everything downstream can write into it without a nil check. */
+/* the two normalizations the listener does own: a response that names no status code gets 200, and one with no header map gets an empty one, so everything downstream can write into it without a nil check. */
 func TestKernelResponseNormalizerListener_FillsTheStatusCodeAndHeaders(t *testing.T) {
     listener := captureResponseNormalizerListener(t)
 

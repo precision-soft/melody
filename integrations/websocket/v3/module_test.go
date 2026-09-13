@@ -40,18 +40,39 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-func TestModule_RegisterHttpRoutesGuards(t *testing.T) {
+/* inverted from the old skip-silently pin: an unregistered route has no later consumer to fail loudly — clients get 404 while boot reads healthy — so the missing hub or path is refused at boot instead. The nil hub is refused by NewStreamHandler's own guard, which registration reaches at this same boot moment; the module deliberately carries no shadowed sister in front of it. */
+func TestModule_RegisterHttpRoutesRefusesAMissingHubAtBoot(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
-    NewModule(ModuleConfig{Path: "/stream"}).RegisterHttpRoutes(kernel)
-    if 0 != len(kernel.router.handled) {
-        t.Fatalf("expected no route without a hub, got %v", kernel.router.handled)
-    }
 
-    kernel = &spyKernel{router: &spyRouter{}}
-    NewModule(ModuleConfig{Hub: melodyhttp.NewServerSentEventHub()}).RegisterHttpRoutes(kernel)
-    if 0 != len(kernel.router.handled) {
-        t.Fatalf("expected no route without a path, got %v", kernel.router.handled)
-    }
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected the nil hub to be refused at boot instead of silently registering no route")
+        }
+    }()
+
+    NewModule(ModuleConfig{Path: "/stream"}).RegisterHttpRoutes(kernel)
+}
+
+/* the options carry a VALID IdleTimeout deliberately: with the zero value, NewStreamHandler's own panic would answer for a disarmed path guard and the mutant would survive shadowed — the empty path must be the only refusal candidate. */
+func TestModule_RegisterHttpRoutesRefusesAnEmptyPathAtBoot(t *testing.T) {
+    kernel := &spyKernel{router: &spyRouter{}}
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected the empty path to be refused at boot instead of silently registering no route")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == strings.Contains(recoveredErr.Error(), "path is empty") {
+            t.Fatalf("expected the refusal to name the empty path, got %v", recovered)
+        }
+    }()
+
+    NewModule(ModuleConfig{
+        Hub:     melodyhttp.NewServerSentEventHub(),
+        Options: Options{IdleTimeout: 30 * time.Second},
+    }).RegisterHttpRoutes(kernel)
 }
 
 func TestModule_RegisterHttpRoutesUsesDefaultName(t *testing.T) {

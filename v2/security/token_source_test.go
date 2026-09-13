@@ -375,8 +375,7 @@ func recordSecurityLoginEvents(dispatcher eventcontract.EventDispatcher) *[]stri
     return &dispatchedNameList
 }
 
-/* The resolver is the application's function; a nil pointer of its own token type reaches here as a non-nil
-interface and, read as a live token, is published into the security context every voter then reads. */
+/* The resolver is the application's function; a nil pointer of its own token type reaches here as a non-nil interface and, read as a live token, is published into the security context every voter then reads. */
 func TestResolverTokenSource_ResolveReadsATypedNilTokenAsAbsent(t *testing.T) {
     tokenSource := NewResolverTokenSource(
         func(request httpcontract.Request) securitycontract.Token {

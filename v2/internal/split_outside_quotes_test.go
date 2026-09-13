@@ -24,9 +24,7 @@ func TestSplitOutsideQuotes_HonoursQuotedSections(t *testing.T) {
 }
 
 func TestSplitOutsideQuotes_CapsTheMemberCount(t *testing.T) {
-    /* an unauthenticated header of nothing but separators must not become a member per byte: the
-       negotiating readers cut a short list, so the split is bounded far above any real header and the
-       remainder past the cap stays one final member */
+    /* an unauthenticated header of nothing but separators must not become a member per byte: the negotiating readers cut a short list, so the split is bounded far above any real header and the remainder past the cap stays one final member */
     hostileValue := strings.Repeat(",", 100000)
 
     members := SplitOutsideQuotes(hostileValue, ',')

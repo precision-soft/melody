@@ -185,14 +185,14 @@ func TestParseValidationTag_ParenthesizedRegexWithCommaInsideGroup(t *testing.T)
     }
 }
 
-/* @info A ']' outside a character class is a literal in RE2, so a regex constraint containing one is a valid pattern; rejecting the tag made the field un-validatable on every request. */
+/* a ']' outside a character class is a literal in RE2, so a pattern carrying one is valid. */
 func TestParseValidationTag_RegexWithLiteralClosingBracketIsAccepted(t *testing.T) {
     if _, err := parseValidationTag(`regex(pattern=^a]b$)`); nil != err {
         t.Fatalf("expected a regex with a literal ']' to parse, got: %v", err)
     }
 }
 
-/* @info A POSIX named class ([[:alpha:]]) carries its own ']' inside the bracket expression; treating that inner ']' as the class close split a valid RE2 pattern at an in-class comma and made the field reject every value. */
+/* a POSIX named class ([[:alpha:]]) carries its own ']' inside the bracket expression, and that inner ']' is not the class close. */
 func TestSplitByTopLevelComma_PosixNamedClassKeepsInClassComma(t *testing.T) {
     parts := splitByTopLevelComma("regex=[[:alpha:],]")
     if 1 != len(parts) {
@@ -247,5 +247,154 @@ func TestParseValidationTag_MemoizesTheSyntaxError(t *testing.T) {
 
     if firstErr != secondErr {
         t.Fatalf("expected the syntax error to be memoized, got %v and %v", firstErr, secondErr)
+    }
+}
+
+func TestParseIntStrict_RefusesTrailingGarbage(t *testing.T) {
+    for _, valueString := range []string{"99.5", "-0.5", "1e3", "5abc", "0x10", "1_000", "", " 5"} {
+        if _, ok := parseIntStrict(valueString); true == ok {
+            t.Fatalf("expected %q to be refused", valueString)
+        }
+    }
+
+    for _, valueString := range []string{"5", "-5", "+5", "0"} {
+        parsed, ok := parseIntStrict(valueString)
+        if false == ok {
+            t.Fatalf("expected %q to parse", valueString)
+        }
+
+        if 0 != parsed && 5 != parsed && -5 != parsed {
+            t.Fatalf("unexpected parse of %q: %d", valueString, parsed)
+        }
+    }
+}
+
+func TestParseValidationTag_RefusesATagWithZeroRules(t *testing.T) {
+    for _, tag := range []string{",", " , ", ",,"} {
+        rules, err := parseValidationTag(tag)
+
+        if nil == err {
+            t.Fatalf("expected tag %q to be refused, got rules %v", tag, rules)
+        }
+    }
+}
+
+func TestParseValidationTag_EveryShapeTheGrammarRefuses(t *testing.T) {
+    for _, refusedTag := range []string{
+        "(1,2)",
+        "between(min=1,oops)",
+        "between(=1)",
+        "=5",
+        ",",
+        " , ",
+    } {
+        rules, parseErr := parseValidationTagUncached(refusedTag)
+        if nil == parseErr {
+            t.Fatalf("expected %q to be refused, got %#v", refusedTag, rules)
+        }
+
+        if "invalid validation tag syntax" != parseErr.Error() {
+            t.Fatalf("unexpected refusal for %q: %v", refusedTag, parseErr)
+        }
+    }
+}
+
+func TestParseValidationTag_ADoubledCommaIsSkippedRatherThanRefused(t *testing.T) {
+    rules, parseErr := parseValidationTagUncached("between(min=1,,max=9)")
+    if nil != parseErr {
+        t.Fatalf("unexpected error: %v", parseErr)
+    }
+
+    if 1 != len(rules) {
+        t.Fatalf("expected one rule, got %#v", rules)
+    }
+
+    if "1" != rules[0].params["min"] || "9" != rules[0].params["max"] {
+        t.Fatalf("expected both parameters to survive the doubled comma, got %#v", rules[0].params)
+    }
+
+    rules, parseErr = parseValidationTagUncached("notBlank,  ,max=5")
+    if nil != parseErr {
+        t.Fatalf("unexpected error: %v", parseErr)
+    }
+
+    if 2 != len(rules) {
+        t.Fatalf("expected the empty part to be skipped and both rules to survive, got %#v", rules)
+    }
+
+    if "notBlank" != rules[0].name || "max" != rules[1].name {
+        t.Fatalf("unexpected rules: %#v", rules)
+    }
+}
+
+func TestHasBalancedBrackets_AnUnbalancedClosingBraceIsRefusedToo(t *testing.T) {
+    if true == hasBalancedBrackets("a}b") {
+        t.Fatalf("expected a stray closing brace to be refused")
+    }
+
+    if true == hasBalancedBrackets("a)b") {
+        t.Fatalf("expected a stray closing parenthesis to be refused")
+    }
+
+    if false == hasBalancedBrackets("a{2}b") {
+        t.Fatalf("expected a balanced quantifier to be accepted")
+    }
+
+    if false == hasBalancedBrackets("(a){2}") {
+        t.Fatalf("expected balanced parentheses and braces to be accepted")
+    }
+}
+
+func TestSplitByCommaOutsideRegexMeta_BothQuoteCharactersHoldACommaTogether(t *testing.T) {
+    doubleQuoted := splitByCommaOutsideRegexMeta(`message="one, two",max=5`)
+    if 2 != len(doubleQuoted) {
+        t.Fatalf("expected the double-quoted comma to stay inside its member, got %#v", doubleQuoted)
+    }
+
+    if `message="one, two"` != doubleQuoted[0] {
+        t.Fatalf("unexpected first member: %q", doubleQuoted[0])
+    }
+
+    singleQuoted := splitByCommaOutsideRegexMeta(`message='one, two',max=5`)
+    if 2 != len(singleQuoted) {
+        t.Fatalf("expected the single-quoted comma to stay inside its member, got %#v", singleQuoted)
+    }
+
+    if `message='one, two'` != singleQuoted[0] {
+        t.Fatalf("unexpected first member: %q", singleQuoted[0])
+    }
+
+    /* a quote of the other kind inside a quoted section is a literal, so it must not close the section it sits in */
+    mixed := splitByCommaOutsideRegexMeta(`message="it's one, two",max=5`)
+    if 2 != len(mixed) {
+        t.Fatalf("expected the apostrophe inside the double-quoted value to stay literal, got %#v", mixed)
+    }
+}
+
+func TestSplitByCommaOutsideRegexMeta_AnEscapeInsideACharacterClassCountsAsContent(t *testing.T) {
+    parts := splitByCommaOutsideRegexMeta(`regex=[\],]+,max=5`)
+    if 2 != len(parts) {
+        t.Fatalf("expected the comma inside the class to stay literal, got %#v", parts)
+    }
+
+    if `regex=[\],]+` != parts[0] {
+        t.Fatalf("unexpected first member: %q", parts[0])
+    }
+
+    if `max=5` != parts[1] {
+        t.Fatalf("unexpected second member: %q", parts[1])
+    }
+
+    if false == hasBalancedBrackets(`[\]]`) {
+        t.Fatalf("expected a class whose member is an escaped bracket to be balanced")
+    }
+
+    rules, parseErr := parseValidationTagUncached(`regex=[\d],max=5`)
+    if nil != parseErr {
+        t.Fatalf("unexpected error: %v", parseErr)
+    }
+
+    if 2 != len(rules) {
+        t.Fatalf("expected the escaped class member to keep both rules, got %#v", rules)
     }
 }

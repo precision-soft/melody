@@ -1,7 +1,6 @@
 package output
 
 import (
-    "context"
     "io"
     "testing"
 
@@ -66,38 +65,20 @@ func TestNormalizeOption_ClampsNegativeNumericValues(t *testing.T) {
 }
 
 func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
-    parsed := Option{}
-
-    commandContext := &clicontract.CommandContext{
-        Name:      "test",
-        Flags:     StandardFlags(),
-        Writer:    io.Discard,
-        ErrWriter: io.Discard,
-        Action: func(
-            actionContext context.Context,
-            actionCommandContext *clicontract.CommandContext,
-        ) error {
-            parsed = ParseOptionFromCommand(actionCommandContext)
-
-            return nil
+    commandContext := &stubCommandContext{
+        stringValues: map[string]string{
+            FlagNameFormat: string(FormatJson),
+            FlagNameOrder:  string(SortOrderDescending),
+        },
+        intValues: map[string]int{
+            FlagNameLimit:         7,
+            FlagNameOffset:        3,
+            FlagNameVerbosity:     2,
+            FlagNameTableMaxWidth: 120,
         },
     }
 
-    runErr := commandContext.Run(
-        context.Background(),
-        []string{
-            "test",
-            "--format=json",
-            "--order=desc",
-            "--limit=7",
-            "--offset=3",
-            "--verbosity=2",
-            "--table-width=120",
-        },
-    )
-    if nil != runErr {
-        t.Fatalf("expected no error, got %v", runErr)
-    }
+    parsed := ParseOptionFromCommand(commandContext)
 
     if FormatJson != parsed.Format {
         t.Fatalf("expected format %q, got %q", FormatJson, parsed.Format)
@@ -124,6 +105,107 @@ func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
 
 func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
     parsed := ParseOptionFromCommand(nil)
+
+    if FormatTable != parsed.Format {
+        t.Fatalf("expected %q, got %q", FormatTable, parsed.Format)
+    }
+}
+
+func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
+    normalized := NormalizeOption(Option{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
+
+    if 0 != normalized.VerbosityLevel {
+        t.Fatalf("expected the negative verbosity level clamped to 0, got %d", normalized.VerbosityLevel)
+    }
+}
+
+/* the parser reads a contract now, so the reading is asserted on a double that answers per name instead of on a command line driven through the parsing engine: what the test then proves is this file's own guard — which flag name feeds which field of the option — rather than the engine's ability to parse an argument. That the declared validators and defaults survive the trip into the engine is the adapter's guard and is proved there. */
+type stubCommandContext struct {
+    stringValues      map[string]string
+    boolValues        map[string]bool
+    intValues         map[string]int
+    stringSliceValues map[string][]string
+    setFlagNames      map[string]bool
+    arguments         []string
+    writer            io.Writer
+    askedFlagNames    []string
+}
+
+var _ clicontract.Context = (*stubCommandContext)(nil)
+
+func (instance *stubCommandContext) record(flagName string) {
+    instance.askedFlagNames = append(instance.askedFlagNames, flagName)
+}
+
+func (instance *stubCommandContext) String(flagName string) string {
+    instance.record(flagName)
+
+    return instance.stringValues[flagName]
+}
+
+func (instance *stubCommandContext) Bool(flagName string) bool {
+    instance.record(flagName)
+
+    return instance.boolValues[flagName]
+}
+
+func (instance *stubCommandContext) Int(flagName string) int {
+    instance.record(flagName)
+
+    return instance.intValues[flagName]
+}
+
+func (instance *stubCommandContext) StringSlice(flagName string) []string {
+    instance.record(flagName)
+
+    return instance.stringSliceValues[flagName]
+}
+
+func (instance *stubCommandContext) IsSet(flagName string) bool {
+    instance.record(flagName)
+
+    return instance.setFlagNames[flagName]
+}
+
+func (instance *stubCommandContext) Arguments() []string {
+    return instance.arguments
+}
+
+func (instance *stubCommandContext) Writer() io.Writer {
+    if nil == instance.writer {
+        return io.Discard
+    }
+
+    return instance.writer
+}
+
+/* the two sources have to agree on nine strings and nothing checks that they do: a name read here that no flag declares reads the zero value of a flag that does not exist, on every run, in silence. The double records what was asked for, so the lockstep is asserted in the direction the argument-driven test could only assert by accident. */
+func TestParseOptionFromCommand_ReadsOnlyDeclaredFlagNames(t *testing.T) {
+    commandContext := &stubCommandContext{}
+
+    ParseOptionFromCommand(commandContext)
+
+    declaredFlagNames := map[string]bool{}
+    for _, flag := range StandardFlags() {
+        declaredFlagNames[flag.Definition().Name] = true
+    }
+
+    if 0 == len(commandContext.askedFlagNames) {
+        t.Fatalf("expected the parser to read at least one flag")
+    }
+
+    for _, askedFlagName := range commandContext.askedFlagNames {
+        if false == declaredFlagNames[askedFlagName] {
+            t.Fatalf("expected %q to be declared by StandardFlags, declared: %v", askedFlagName, declaredFlagNames)
+        }
+    }
+}
+
+/* a caller handing back a typed nil of its own context type produces a non-nil interface: read with a plain comparison it passes the guard above and the first flag read dereferences it */
+func TestParseOptionFromCommand_ReturnsTheDefaultsForATypedNilCommand(t *testing.T) {
+    var typedNilContext *stubCommandContext
+
+    parsed := ParseOptionFromCommand(typedNilContext)
 
     if FormatTable != parsed.Format {
         t.Fatalf("expected %q, got %q", FormatTable, parsed.Format)

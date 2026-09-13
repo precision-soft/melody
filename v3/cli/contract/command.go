@@ -8,5 +8,5 @@ type Command interface {
     Name() string
     Description() string
     Flags() []Flag
-    Run(runtimeInstance runtimecontract.Runtime, commandContext *CommandContext) error
+    Run(runtimeInstance runtimecontract.Runtime, commandContext Context) error
 }

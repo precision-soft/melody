@@ -61,9 +61,14 @@ func (instance *BearerTokenSource) Resolve(
 
     claims, validateErr := instance.validator.Validate(runtimeInstance, tokenString)
     if nil != validateErr {
+        /* the request fails closed to anonymous either way, but a credential failing its checks and the platform failing to check it must not share a severity: a revocation epoch store or token store that cannot answer degrades every bearer of a valid token to anonymous at once, and this record is where that incident surfaces. */
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            logger.Info("bearer token rejected", exception.LogContext(validateErr))
+            if true == isInfrastructureFailure(validateErr) {
+                logger.Error("bearer token validation infrastructure failed", exception.LogContext(validateErr))
+            } else {
+                logger.Info("bearer token rejected", exception.LogContext(validateErr))
+            }
         }
 
         return NewAnonymousToken(), nil
@@ -74,7 +79,11 @@ func (instance *BearerTokenSource) Resolve(
         if nil != enrichErr {
             logger := logging.LoggerFromRuntime(runtimeInstance)
             if nil != logger {
-                logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr))
+                if true == isInfrastructureFailure(enrichErr) {
+                    logger.Error("bearer token enrichment infrastructure failed", exception.LogContext(enrichErr))
+                } else {
+                    logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr))
+                }
             }
 
             return NewAnonymousToken(), nil

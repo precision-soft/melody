@@ -9,6 +9,7 @@ import (
     "fmt"
     "io"
     "net/http"
+    "net/url"
     "strings"
     "time"
 
@@ -24,15 +25,10 @@ const (
     serverSentEventPublishRoute = "/events/publish/"
 )
 
-/* serverSentEventBackplaneChannel is defaultServerSentEventBackplaneChannel in the rueidis integration. It is
-unexported there, so it is mirrored here — and the wire event below is a mirror of that package's own
-serverSentEventWireEvent for the same reason. A rename on either side surfaces as a failed delivery in the very
-first wire assertion rather than as silence. */
+/* serverSentEventBackplaneChannel is defaultServerSentEventBackplaneChannel in the rueidis integration. It is unexported there, so it is mirrored here — and the wire event below is a mirror of that package's own serverSentEventWireEvent for the same reason. A rename on either side surfaces as a failed delivery in the very first wire assertion rather than as silence. */
 const serverSentEventBackplaneChannel = "melody:sse"
 
-/* serverSentEventWirePayload is the json the backplane publishes: the ORIGIN of the replica that produced the
-event (which is how a replica recognises and drops its own), the topic, and the event itself. ServerSentEvent
-carries no json tags, so its fields travel under their Go names. */
+/* serverSentEventWirePayload is the json the backplane publishes: the ORIGIN of the replica that produced the event (which is how a replica recognises and drops its own), the topic, and the event itself. ServerSentEvent carries no json tags, so its fields travel under their Go names. */
 type serverSentEventWirePayload struct {
     Origin string                     `json:"origin"`
     Topic  string                     `json:"topic"`
@@ -42,9 +38,7 @@ type serverSentEventWirePayload struct {
 /* serverSentEventArrivalBudget is how long an assertion waits for a frame that MUST arrive. */
 const serverSentEventArrivalBudget = 8 * time.Second
 
-/* serverSentEventSilenceBudget is how long an assertion waits to be sure a frame must NOT arrive. It is
-deliberately shorter: every path being probed for absence (a suppressed origin, another topic, a split frame) would
-deliver immediately if it were broken, so a longer wait buys nothing and costs the run three times over. */
+/* serverSentEventSilenceBudget is how long an assertion waits to be sure a frame must NOT arrive. It is deliberately shorter: every path being probed for absence (a suppressed origin, another topic, a split frame) would deliver immediately if it were broken, so a longer wait buys nothing and costs the run three times over. */
 const serverSentEventSilenceBudget = 2 * time.Second
 
 /* runServerSentEventCheck drives the live event stream of the supervised application while acting as a SECOND
@@ -80,12 +74,18 @@ func runServerSentEventCheck(baseUrl string, redisAddress string) {
 
     topic := liveExampleUnique("e2e-sse")
 
+    /* the event routes are behind the firewall now — publishing injects a frame into every stream open across the cluster, so it carries the write role, and the stream carries the catalog writes made behind it. /events sits under the MAIN firewall, whose token source resolves a SESSION, so the identity travels as a cookie: this section opens its own jar and signs in, which is what a section that authenticates does here. The shared jar-less client above still drives the transport, with the cookie passed explicitly, so no session leaks onto any later section. */
+    editorClient := newExampleHttpClient()
+    signInExampleHttpEditor(editorClient, baseUrl, "")
+
+    sessionCookieHeader := exampleSessionCookieHeader(editorClient, baseUrl)
+
     response := client.openStream(serverSentEventLabel, serverSentEventStreamRoute+"?topic="+topic, map[string]string{
         "Accept": "text/event-stream",
+        "Cookie": sessionCookieHeader,
     })
 
-    /* both paths, because os.Exit runs no deferred function: without the failure hook a red assertion below leaves
-       this stream open and its subscriber registered inside the supervised application forever */
+    /* both paths, because os.Exit runs no deferred function: without the failure hook a red assertion below leaves this stream open and its subscriber registered inside the supervised application forever */
     releaseStream := pushFailureCleanup(func() {
         _ = response.Body.Close()
     })
@@ -99,7 +99,7 @@ func runServerSentEventCheck(baseUrl string, redisAddress string) {
     reader := newServerSentEventStreamReader(response.Body)
 
     assertServerSentEventPreamble(reader)
-    assertServerSentEventInProcessPublish(client, reader, topic)
+    assertServerSentEventInProcessPublish(client, reader, topic, sessionCookieHeader)
     assertServerSentEventWireDelivery(redisClient, reader, topic)
     assertServerSentEventIdSanitisation(redisClient, reader, topic)
     assertServerSentEventTopicIsolation(redisClient, reader, topic)
@@ -115,9 +115,7 @@ func assertServerSentEventHeaders(response *http.Response) {
     for name, expected := range map[string]string{
         "Content-Type":  "text/event-stream",
         "Cache-Control": "no-cache",
-        /* the proxy-buffering opt-out is part of the contract, not a nicety: behind nginx a stream without it is
-           held in the proxy buffer and the client sees nothing until the response ends, which for a stream is
-           never */
+        /* the proxy-buffering opt-out is part of the contract, not a nicety: behind nginx a stream without it is held in the proxy buffer and the client sees nothing until the response ends, which for a stream is never */
         "X-Accel-Buffering": "no",
     } {
         actual := response.Header.Get(name)
@@ -129,10 +127,7 @@ func assertServerSentEventHeaders(response *http.Response) {
     pass("the stream answered 200 with text/event-stream, no-cache and the proxy-buffering opt-out")
 }
 
-/* assertServerSentEventPreamble asserts the ordering the handler promises: the comment is flushed at subscription
-time, so it arrives BEFORE anything is published. Nothing has been published at this point in the section, so an
-arriving frame that is not the comment means the flush was deferred until the first event — and a client that waits
-for the preamble to know it is connected would then hang until something happened to be broadcast. */
+/* assertServerSentEventPreamble asserts the ordering the handler promises: the comment is flushed at subscription time, so it arrives BEFORE anything is published. Nothing has been published at this point in the section, so an arriving frame that is not the comment means the flush was deferred until the first event — and a client that waits for the preamble to know it is connected would then hang until something happened to be broadcast. */
 func assertServerSentEventPreamble(reader *serverSentEventStreamReader) {
     frame, arrived := reader.next(serverSentEventArrivalBudget)
     if false == arrived {
@@ -157,12 +152,17 @@ func assertServerSentEventPreamble(reader *serverSentEventStreamReader) {
     pass("the preamble comment was flushed before any event was published")
 }
 
-func assertServerSentEventInProcessPublish(client *liveExampleClient, reader *serverSentEventStreamReader, topic string) {
+func assertServerSentEventInProcessPublish(client *liveExampleClient, reader *serverSentEventStreamReader, topic string, sessionCookieHeader string) {
     text := liveExampleUnique("in-process")
 
     path := fmt.Sprintf("%s?topic=%s&text=%s", serverSentEventPublishRoute, topic, text)
 
-    response := client.get(serverSentEventLabel, path)
+    /* publishing is a POST now: it broadcasts to every stream open across the cluster, which a GET made reachable from a bare url — an <img> tag on any page was enough. */
+    response := client.call(serverSentEventLabel, liveExampleRequest{
+        method:     "POST",
+        path:       path,
+        headerList: map[string]string{"Cookie": sessionCookieHeader},
+    })
     requireLiveExampleStatus(serverSentEventLabel, path, response, http.StatusAccepted)
 
     frame := requireServerSentEventFrame(reader, "the in-process publish")
@@ -183,9 +183,7 @@ func assertServerSentEventInProcessPublish(client *liveExampleClient, reader *se
     pass("an in-process publish reached the live stream as event %q", frame.event)
 }
 
-/* assertServerSentEventWireDelivery publishes straight onto the shared channel under a FOREIGN origin, which is
-what a second replica's broadcast looks like from this application's side. It is also the only place the id: and
-retry: fields are exercised, since nothing in the example ever sets them. */
+/* assertServerSentEventWireDelivery publishes straight onto the shared channel under a FOREIGN origin, which is what a second replica's broadcast looks like from this application's side. It is also the only place the id: and retry: fields are exercised, since nothing in the example ever sets them. */
 func assertServerSentEventWireDelivery(redisClient rueidis.Client, reader *serverSentEventStreamReader, topic string) {
     data := liveExampleUnique("off-the-wire")
     eventId := liveExampleUnique("event-id")
@@ -219,11 +217,7 @@ func assertServerSentEventWireDelivery(redisClient rueidis.Client, reader *serve
     pass("an event published on the redis channel by another replica reached the stream framed with id: and retry:")
 }
 
-/* assertServerSentEventIdSanitisation is the response-splitting probe. The id carries a BLANK LINE, which in the
-event-stream grammar terminates a frame: unsanitised, the writer emits the id, then the blank line ends the frame
-early, and the rest of the id is read as the beginning of a NEW frame whose fields the publisher chose. The
-assertions are therefore that exactly one frame arrives, that it carries the real data, and that nothing carrying
-the injected content follows it. */
+/* assertServerSentEventIdSanitisation is the response-splitting probe. The id carries a BLANK LINE, which in the event-stream grammar terminates a frame: unsanitised, the writer emits the id, then the blank line ends the frame early, and the rest of the id is read as the beginning of a NEW frame whose fields the publisher chose. The assertions are therefore that exactly one frame arrives, that it carries the real data, and that nothing carrying the injected content follows it. */
 func assertServerSentEventIdSanitisation(redisClient rueidis.Client, reader *serverSentEventStreamReader, topic string) {
     data := liveExampleUnique("un-split")
     injected := liveExampleUnique("injected-frame")
@@ -296,10 +290,7 @@ func assertServerSentEventTopicIsolation(redisClient rueidis.Client, reader *ser
     pass("an event published on another topic reached nothing on this stream")
 }
 
-/* assertServerSentEventMalformedPayloadSurvives publishes a payload the backplane cannot decode and then a valid
-one. The valid event arriving is the assertion: a decoder that returned from its subscription callback in a way that
-tore down the subscription would leave the replica permanently deaf to the channel, and nothing on the http surface
-would reveal it — the stream stays open, the headers stay correct, and events simply stop. */
+/* assertServerSentEventMalformedPayloadSurvives publishes a payload the backplane cannot decode and then a valid one. The valid event arriving is the assertion: a decoder that returned from its subscription callback in a way that tore down the subscription would leave the replica permanently deaf to the channel, and nothing on the http surface would reveal it — the stream stays open, the headers stay correct, and events simply stop. */
 func assertServerSentEventMalformedPayloadSurvives(redisClient rueidis.Client, reader *serverSentEventStreamReader, topic string) {
     publishServerSentEventRaw(redisClient, "this is not a json wire event at all")
     publishServerSentEventRaw(redisClient, `{"origin":"x","topic":`)
@@ -327,13 +318,9 @@ func assertServerSentEventMalformedPayloadSurvives(redisClient rueidis.Client, r
     pass("two malformed payloads on the shared channel did not deafen the subscription (the next valid event arrived)")
 }
 
-/* assertServerSentEventOriginSuppression stands the harness up as a full replica — its own hub, its own backplane
-on the same channel — and broadcasts through it. The event must reach the harness's own subscriber exactly once:
-locally, and NOT a second time off the channel it just published to.
+/* assertServerSentEventOriginSuppression stands the harness up as a full replica — its own hub, its own backplane on the same channel — and broadcasts through it. The event must reach the harness's own subscriber exactly once: locally, and NOT a second time off the channel it just published to.
 
-The check begins by proving the harness's own subscription is live, with a foreign-origin publish. Without that
-guard a backplane that had not finished subscribing would deliver the broadcast once for the trivial reason that it
-never heard its own message back — the assertion would be green and would have tested nothing. */
+   The check begins by proving the harness's own subscription is live, with a foreign-origin publish. Without that guard a backplane that had not finished subscribing would deliver the broadcast once for the trivial reason that it never heard its own message back — the assertion would be green and would have tested nothing. */
 func assertServerSentEventOriginSuppression(redisAddress string, publishClient rueidis.Client) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -357,10 +344,7 @@ func assertServerSentEventOriginSuppression(redisAddress string, publishClient r
     subscriber := hub.Subscribe(topic, 16)
     defer hub.Unsubscribe(subscriber)
 
-    /* non-vacuity guard: a foreign-origin publish must reach the subscriber before the broadcast below means
-       anything at all. The publish is repeated because a redis SUBSCRIBE is established asynchronously and a
-       message published before it lands is simply gone — pub/sub keeps nothing for a subscriber that was not
-       there yet. */
+    /* non-vacuity guard: a foreign-origin publish must reach the subscriber before the broadcast below means anything at all. The publish is repeated because a redis SUBSCRIBE is established asynchronously and a message published before it lands is simply gone — pub/sub keeps nothing for a subscriber that was not there yet. */
     probe := liveExampleUnique("subscription-probe")
     subscriptionLive := false
 
@@ -445,10 +429,7 @@ func publishServerSentEventRaw(client rueidis.Client, message string) {
     }
 }
 
-/* newServerSentEventForeignOrigin produces an origin no replica can be using: the backplane derives its own from
-16 random bytes, so a random 16-byte value collides with a live replica's origin with probability zero for any run
-that ever finishes. An origin that DID collide would make the application drop the event as its own and the
-assertion would report a delivery failure. */
+/* newServerSentEventForeignOrigin produces an origin no replica can be using: the backplane derives its own from 16 random bytes, so a random 16-byte value collides with a live replica's origin with probability zero for any run that ever finishes. An origin that DID collide would make the application drop the event as its own and the assertion would report a delivery failure. */
 func newServerSentEventForeignOrigin() string {
     buffer := make([]byte, 16)
     if _, readErr := rand.Read(buffer); nil != readErr {
@@ -464,8 +445,7 @@ func requireServerSentEventFrame(reader *serverSentEventStreamReader, what strin
         fail("%s: %s never reached the stream within %s", serverSentEventLabel, what, serverSentEventArrivalBudget)
     }
 
-    /* a keepalive comment can legitimately interleave with the events, so a comment frame is stepped over rather
-       than mistaken for the event under test */
+    /* a keepalive comment can legitimately interleave with the events, so a comment frame is stepped over rather than mistaken for the event under test */
     for true == frame.isComment() {
         frame, arrived = reader.next(serverSentEventArrivalBudget)
         if false == arrived {
@@ -476,9 +456,7 @@ func requireServerSentEventFrame(reader *serverSentEventStreamReader, what strin
     return frame
 }
 
-/* serverSentEventFrame is one parsed frame. The field count is kept so a comment-only frame is distinguishable
-from a frame that merely happens to carry no data — those are different things on the wire, and the preamble
-assertion turns on the difference. */
+/* serverSentEventFrame is one parsed frame. The field count is kept so a comment-only frame is distinguishable from a frame that merely happens to carry no data — those are different things on the wire, and the preamble assertion turns on the difference. */
 type serverSentEventFrame struct {
     commentList []string
     unknownList []string
@@ -509,10 +487,7 @@ func (instance serverSentEventFrame) describe() string {
     )
 }
 
-/* parseServerSentEventFrame turns the lines of one frame into fields, following the event-stream grammar: a line
-whose first character is a colon is a comment, otherwise the name is everything before the first colon and the
-value everything after it with ONE optional leading space removed. A line with no colon at all is a field with an
-empty value. */
+/* parseServerSentEventFrame turns the lines of one frame into fields, following the event-stream grammar: a line whose first character is a colon is a comment, otherwise the name is everything before the first colon and the value everything after it with ONE optional leading space removed. A line with no colon at all is a field with an empty value. */
 func parseServerSentEventFrame(lineList []string) serverSentEventFrame {
     frame := serverSentEventFrame{}
 
@@ -558,9 +533,7 @@ func splitServerSentEventLine(line string) (string, string) {
     return line[:colon], value
 }
 
-/* serverSentEventStreamReader turns a live stream body into a channel of frames. A goroutine is unavoidable: the
-body never ends, so every read has to be able to outlive the assertion that is waiting for it, and closing the body
-is what stops the goroutine. */
+/* serverSentEventStreamReader turns a live stream body into a channel of frames. A goroutine is unavoidable: the body never ends, so every read has to be able to outlive the assertion that is waiting for it, and closing the body is what stops the goroutine. */
 type serverSentEventStreamReader struct {
     frameList chan serverSentEventFrame
 }
@@ -601,8 +574,7 @@ func newServerSentEventStreamReader(body io.Reader) *serverSentEventStreamReader
     return instance
 }
 
-/* next waits up to budget for the next frame. The second return value distinguishes "no frame arrived" from a
-frame whose fields are all empty — the absence assertions turn on exactly that difference. */
+/* next waits up to budget for the next frame. The second return value distinguishes "no frame arrived" from a frame whose fields are all empty — the absence assertions turn on exactly that difference. */
 func (instance *serverSentEventStreamReader) next(budget time.Duration) (serverSentEventFrame, bool) {
     select {
     case frame, open := <-instance.frameList:
@@ -614,4 +586,24 @@ func (instance *serverSentEventStreamReader) next(budget time.Duration) (serverS
     case <-time.After(budget):
         return serverSentEventFrame{}, false
     }
+}
+
+/* exampleSessionCookieHeader renders the cookies a signed-in client holds for the base url as one Cookie header. The streaming client inside openStream is built per call and carries no jar, so the identity has to travel as a header — which also keeps it scoped to the two requests this section makes rather than to a shared jar. */
+func exampleSessionCookieHeader(client *http.Client, baseUrl string) string {
+    parsedUrl, parseErr := url.Parse(baseUrl)
+    if nil != parseErr {
+    	fail("%s: parse the base url %q: %v", serverSentEventLabel, baseUrl, parseErr)
+    }
+
+    cookieList := client.Jar.Cookies(parsedUrl)
+    if 0 == len(cookieList) {
+    	fail("%s: the signed-in client holds no cookie for %s", serverSentEventLabel, baseUrl)
+    }
+
+    rendered := make([]string, 0, len(cookieList))
+    for _, cookieValue := range cookieList {
+    	rendered = append(rendered, cookieValue.Name+"="+cookieValue.Value)
+    }
+
+    return strings.Join(rendered, "; ")
 }

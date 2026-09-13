@@ -31,11 +31,7 @@ type ManagerRegistry struct {
     closed             bool
 }
 
-/*
-   managerOpen tracks a single in-flight Provider.Open for one definition name so
-   that concurrent openers of the same name coalesce onto one attempt instead of
-   each dialing the database while holding the registry-wide lock.
-*/
+/* managerOpen tracks a single in-flight Provider.Open for one definition name so that concurrent openers of the same name coalesce onto one attempt instead of each dialing the database while holding the registry-wide lock. */
 type managerOpen struct {
     done      chan struct{}
     manager   *Manager
@@ -107,7 +103,7 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
 
 /* MarkSecretParameters arms the framework's redaction for the configuration parameters that hold this registry's credentials: those the caller names here, and those any definition's provider declares through SecretParameterProvider. It is a setter rather than a constructor argument because this major hands the connection values to the provider instead of the names it would read them under, so the application — the party that resolved the values — is the party that knows the keys, and because MarkSecret propagates to a parameter the configuration has already read, arming after construction redacts exactly as much as arming during it would.
 
-Marking here rather than inside an open is what covers a process that never dials: a console run, a boot that fails before the first query, a debug:parameters invocation. A nil configuration, an empty name, or a name no parameter answers to leaves the marking undone, the same way MarkSecret leaves an absent parameter alone. */
+   Marking here rather than inside an open is what covers a process that never dials: a console run, a boot that fails before the first query, a debug:parameters invocation. A nil configuration, an empty name, or a name no parameter answers to leaves the marking undone, the same way MarkSecret leaves an absent parameter alone. */
 func (instance *ManagerRegistry) MarkSecretParameters(configuration configcontract.Configuration, parameterNames ...string) {
     if true == isNilInterface(configuration) {
         return
@@ -344,12 +340,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
 
     instance.lock.Unlock()
 
-    /*
-       Open the provider outside the registry-wide lock: dialing, pinging and any
-       uninterruptible retry sleeps of a down database must not serialize cache
-       hits for other managers or a concurrent Close. A failed open is never
-       memoized, so a later call retries.
-    */
+    /* Open the provider outside the registry-wide lock: dialing, pinging and any uninterruptible retry sleeps of a down database must not serialize cache hits for other managers or a concurrent Close. A failed open is never memoized, so a later call retries. */
 
     settled := false
     providerReturned := false
@@ -427,11 +418,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         }
 
         if true == instance.closed {
-            /*
-               Close ran while this open was in flight: it already iterated the manager
-               map without this entry, so memoizing the manager now would leak its
-               connection pool. Close the freshly opened database and refuse.
-            */
+            /* Close ran while this open was in flight: it already iterated the manager map without this entry, so memoizing the manager now would leak its connection pool. Close the freshly opened database and refuse. */
             _ = database.Close()
             pendingOpen.openError = ErrManagerRegistryClosed
 

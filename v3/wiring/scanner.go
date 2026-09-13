@@ -17,6 +17,7 @@ import (
 
 const (
     constructorPrefix = "New"
+    directivePrefix   = "//melody:"
     bindDirective     = "//melody:bind"
     ignoreDirective   = "//melody:ignore"
     serviceDirective  = "//melody:service"
@@ -82,6 +83,8 @@ type ScanResult struct {
     SkippedVendorDirectories []string
     /* ExcludedFiles names the source files a build constraint kept out of the scan even though they hold constructor candidates — a service the running binary carries under a build tag the scan was not told about. They are reported on request rather than skipped, since strict cannot know which tags the binary was built with; passing them through --tags brings the file back in. */
     ExcludedFiles []string
+    /* UnusedExcludes names the exclude patterns that matched no constructor, in declaration order. An exclusion that stopped matching — a renamed type, a typo in the pattern — silently registers the very constructor it was declared to keep out, so it is reported the way an unused bind is. */
+    UnusedExcludes []string
 }
 
 type SkippedConstructor struct {
@@ -91,17 +94,47 @@ type SkippedConstructor struct {
     Reason string
 }
 
-/* Scan walks the directory of a package binding and returns every constructor it can wire. A directory below the one declared is scanned as its own package, its import path derived from the relative path, so a package declared as the root of a domain covers the packages beneath it. */
+/* Scan walks the directory of a package binding and returns every constructor it can wire. A directory below the one declared is scanned as its own package, its import path derived from the relative path, so a package declared as the root of a domain covers the packages beneath it. A symlink standing where the declared directory should be is resolved before the walk — the walk itself does not follow symlinks, and a symlinked root would otherwise be read as an empty package with nothing to report; a symlinked subdirectory stays out of the scan, exactly as the go tool leaves it out of a build. */
 func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []string) (*ScanResult, error) {
     rootDirectory := packageBinding.Directory()
     if false == filepath.IsAbs(rootDirectory) {
         rootDirectory = filepath.Join(projectDirectory, rootDirectory)
     }
 
+    resolvedRootDirectory, resolveErr := filepath.EvalSymlinks(rootDirectory)
+    if nil != resolveErr {
+        return nil, exception.NewError(
+            "could not resolve the package directory",
+            map[string]any{
+                "directory":  rootDirectory,
+                "importPath": packageBinding.ImportPath(),
+            },
+            resolveErr,
+        )
+    }
+    rootDirectory = resolvedRootDirectory
+
+    /* a malformed pattern is refused before anything is walked: path.Match answers ErrBadPattern for it on every name, so the exclusion the operator declared would otherwise match nothing and the constructor it names would be registered anyway, with no trace */
+    excludes := packageBinding.Excludes()
+    for _, pattern := range excludes {
+        if _, matchErr := path.Match(pattern, ""); nil != matchErr {
+            return nil, exception.NewError(
+                "an exclude pattern is malformed",
+                map[string]any{
+                    "pattern":    pattern,
+                    "importPath": packageBinding.ImportPath(),
+                },
+                matchErr,
+            )
+        }
+    }
+
     result := &ScanResult{
         Constructors: make([]*Constructor, 0),
         Skipped:      make([]*SkippedConstructor, 0),
     }
+
+    matchedExcludes := make(map[string]bool)
 
     fileSet := token.NewFileSet()
 
@@ -134,7 +167,7 @@ func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []s
             return nil
         }
 
-        return scanFile(fileSet, rootDirectory, currentPath, packageBinding, buildTags, result)
+        return scanFile(fileSet, rootDirectory, currentPath, packageBinding, buildTags, matchedExcludes, result)
     })
     if nil != walkErr {
         return nil, exception.NewError(
@@ -145,6 +178,12 @@ func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []s
             },
             walkErr,
         )
+    }
+
+    for _, pattern := range excludes {
+        if false == matchedExcludes[pattern] {
+            result.UnusedExcludes = append(result.UnusedExcludes, pattern)
+        }
     }
 
     sort.SliceStable(result.Constructors, func(first int, second int) bool {
@@ -164,6 +203,7 @@ func scanFile(
     currentPath string,
     packageBinding *PackageBinding,
     buildTags []string,
+    matchedExcludes map[string]bool,
     result *ScanResult,
 ) error {
     /* a file the build excludes — a //go:build ignore script, the unsatisfied half of a tag pair, a foreign GOOS suffix — contributes no constructors to the binary the wiring is generated for, and scanning it anyway would register phantom services or the same service twice. The scan is told which tags the binary carries so a file gated on one of them is included rather than dropped; the generated source is then specific to that tag set, naming constructors a build without those tags does not have. */
@@ -208,7 +248,12 @@ func scanFile(
                 continue
             }
 
-            if true == parseDirectives(functionDeclaration).isIgnored {
+            directives, directivesErr := parseDirectives(fileSet, currentPath, functionDeclaration)
+            if nil != directivesErr {
+                return directivesErr
+            }
+
+            if true == directives.isIgnored {
                 continue
             }
 
@@ -244,7 +289,11 @@ func scanFile(
 
         position := fileSet.Position(functionDeclaration.Pos())
 
-        directives := parseDirectives(functionDeclaration)
+        directives, directivesErr := parseDirectives(fileSet, currentPath, functionDeclaration)
+        if nil != directivesErr {
+            return directivesErr
+        }
+
         if true == directives.isIgnored {
             continue
         }
@@ -268,7 +317,7 @@ func scanFile(
             continue
         }
 
-        if true == isExcluded(constructor.ReturnType.Expression, packageBinding.Excludes()) {
+        if true == isExcluded(constructor.ReturnType.Expression, packageBinding.Excludes(), matchedExcludes) {
             continue
         }
 
@@ -329,19 +378,24 @@ type constructorDirectives struct {
     isScoped              bool
 }
 
-func parseDirectives(functionDeclaration *ast.FuncDecl) *constructorDirectives {
+func parseDirectives(
+    fileSet *token.FileSet,
+    currentPath string,
+    functionDeclaration *ast.FuncDecl,
+) (*constructorDirectives, error) {
     directives := &constructorDirectives{
         binds: make(map[string]string),
     }
 
     if nil == functionDeclaration.Doc {
-        return directives
+        return directives, nil
     }
 
     for _, comment := range functionDeclaration.Doc.List {
         text := strings.TrimSpace(comment.Text)
 
-        if ignoreDirective == text {
+        /* the remainder of an ignore is its reason, which the directive does not read: //melody:ignore kept as a test double is the natural spelling, and demanding the bare form would silently register the constructor the comment says to leave out */
+        if _, isIgnore := directiveRemainder(text, ignoreDirective); true == isIgnore {
             directives.isIgnored = true
 
             continue
@@ -362,22 +416,46 @@ func parseDirectives(functionDeclaration *ast.FuncDecl) *constructorDirectives {
             continue
         }
 
-        remainder, isBind := directiveRemainder(text, bindDirective)
-        if false == isBind {
+        if remainder, isBind := directiveRemainder(text, bindDirective); true == isBind {
+            for _, assignment := range strings.Fields(remainder) {
+                separatorIndex := strings.Index(assignment, "=")
+
+                /* a bind spelled without the equals sign, or with an empty half, would otherwise fall back to a broader bind — or to none — and the override written right beside the constructor would silently not be the one in effect */
+                if 0 >= separatorIndex || len(assignment)-1 == separatorIndex {
+                    return nil, exception.NewError(
+                        "a bind directive assignment must be spelled argument=parameter",
+                        map[string]any{
+                            "assignment":  assignment,
+                            "constructor": functionDeclaration.Name.Name,
+                            "file":        currentPath,
+                            "line":        fileSet.Position(comment.Pos()).Line,
+                        },
+                        nil,
+                    )
+                }
+
+                directives.binds[assignment[:separatorIndex]] = assignment[separatorIndex+1:]
+            }
+
             continue
         }
 
-        for _, assignment := range strings.Fields(remainder) {
-            separatorIndex := strings.Index(assignment, "=")
-            if 0 >= separatorIndex {
-                continue
-            }
-
-            directives.binds[assignment[:separatorIndex]] = assignment[separatorIndex+1:]
+        /* any other spelling under the directive prefix is a typo of one of the four directives, and every one of them fails open when it is dropped: a mistyped scoped demotes a request-lifetime service to a singleton, a mistyped ignore registers the constructor it acknowledges, so the unknown directive is refused where it was written */
+        if true == strings.HasPrefix(text, directivePrefix) {
+            return nil, exception.NewError(
+                "an unknown melody directive is not one of bind, ignore, service or scoped",
+                map[string]any{
+                    "directive":   text,
+                    "constructor": functionDeclaration.Name.Name,
+                    "file":        currentPath,
+                    "line":        fileSet.Position(comment.Pos()).Line,
+                },
+                nil,
+            )
         }
     }
 
-    return directives
+    return directives, nil
 }
 
 /* directiveRemainder matches a directive exactly or followed by whitespace. A plain prefix match would also claim a longer word — //melody:serviceFoo — and read a name out of what is not the directive at all. */
@@ -722,13 +800,15 @@ func derivedImportPath(rootImportPath string, rootDirectory string, filePath str
     return rootImportPath + "/" + filepath.ToSlash(relativeDirectory), nil
 }
 
-func isExcluded(typeExpression string, excludes []string) bool {
+/* isExcluded reports whether an exclude pattern claims the type name, recording every pattern that matched so the scan can name the ones that never did. A malformed pattern cannot reach this loop: Scan refuses it before the walk starts. */
+func isExcluded(typeExpression string, excludes []string, matchedExcludes map[string]bool) bool {
     typeName := strings.TrimPrefix(typeExpression, "*")
 
     if separatorIndex := strings.Index(typeName, "."); 0 <= separatorIndex {
         typeName = typeName[separatorIndex+1:]
     }
 
+    excluded := false
     for _, pattern := range excludes {
         matched, matchErr := path.Match(pattern, typeName)
         if nil != matchErr {
@@ -736,9 +816,10 @@ func isExcluded(typeExpression string, excludes []string) bool {
         }
 
         if true == matched {
-            return true
+            matchedExcludes[pattern] = true
+            excluded = true
         }
     }
 
-    return false
+    return excluded
 }

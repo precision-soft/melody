@@ -38,11 +38,11 @@ func (instance *InitCommand) Flags() []clicontract.Flag {
 
 func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer, option)
+    outputInstance := newCommandOutput(commandContext.Writer, commandContext.Args().Slice(), option)
 
     startedAt := time.Now()
     defer func() {
-        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
     }()
 
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)

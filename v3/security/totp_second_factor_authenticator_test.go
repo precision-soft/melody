@@ -1,10 +1,12 @@
 package security
 
 import (
+    "errors"
     "net/http/httptest"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -134,7 +136,7 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
     }
 }
 
-/* @info Verify normalizes whitespace out of a submitted code, so "123 456" and "123456" are the same code. The replay guard must key on the normalized form: keying on the raw header value would let a captured code be replayed by re-spacing it. */
+/* Verify normalizes whitespace out of a submitted code, so "123 456" and "123456" are the same code. The replay guard must key on the normalized form: keying on the raw header value would let a captured code be replayed by re-spacing it. */
 func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
@@ -282,5 +284,84 @@ func TestTotpSecondFactor_AnonymousPrimaryPassesThrough(t *testing.T) {
 
     if _, isPending := PendingUserFromToken(token); true == isPending {
         t.Fatal("expected no two-factor challenge when primary authentication did not succeed")
+    }
+}
+
+/* the frozen instant sits decades from the real clock, so a code generated FOR that instant authenticates only if the authenticator verifies on the injected clock — and stops authenticating once that clock alone leaves the skew window. */
+func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("secret: %v", secretErr)
+    }
+
+    frozen := clock.NewFrozenClock(time.Unix(1_000_000, 0))
+    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Enrollments: &fixedEnrollmentStore{secret: secret, enrolled: true},
+        Clock:       frozen,
+    })
+
+    code, codeErr := totp.GenerateCodeAt(secret, frozen.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("code: %v", codeErr)
+    }
+
+    token, authenticateErr := authenticator.Authenticate(totpRequest(code))
+    if nil != authenticateErr {
+        t.Fatalf("authenticate: %v", authenticateErr)
+    }
+
+    if false == token.IsAuthenticated() {
+        t.Fatal("a code minted for the injected clock's instant was refused, so the authenticator read some other clock")
+    }
+
+    frozen.Advance(10 * time.Minute)
+
+    lateToken, lateErr := authenticator.Authenticate(totpRequest(code))
+    if nil != lateErr {
+        t.Fatalf("authenticate: %v", lateErr)
+    }
+
+    if true == lateToken.IsAuthenticated() {
+        t.Fatal("the injected clock left the skew window and the code still authenticated, so the authenticator read some other clock")
+    }
+}
+
+/* fixedEnrollmentStore never fails, so the fail-closed refusal below it had no fixture that could reach it: inverting that refusal to return the primary token would have let every enrolled user past the second factor whenever the enrollment store was down, with the suite green. */
+type failingEnrollmentStore struct {
+    lookupErr error
+}
+
+func (instance *failingEnrollmentStore) FindTotpSecret(
+    _ runtimecontract.Runtime,
+    _ string,
+) (string, bool, error) {
+    return "", false, instance.lookupErr
+}
+
+func TestTotpSecondFactor_AFailingEnrollmentLookupRefusesInsteadOfPassingThrough(t *testing.T) {
+    lookupErr := errors.New("enrollment store unavailable")
+
+    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Enrollments: &failingEnrollmentStore{lookupErr: lookupErr},
+        ReplayGuard: nil,
+    })
+
+    token, err := authenticator.Authenticate(totpRequest(""))
+    if nil == err {
+        t.Fatalf("expected an unavailable enrollment store to refuse rather than pass the primary token through")
+    }
+
+    if nil != token {
+        t.Fatalf("expected no token to be handed out when the second factor cannot be decided, got %#v", token)
+    }
+
+    if false == errors.Is(err, lookupErr) {
+        t.Fatalf("expected the store's own failure to stay classifiable beneath the refusal, got %v", err)
+    }
+
+    if "could not look up two-factor enrollment" != err.Error() {
+        t.Fatalf("unexpected refusal message: %q", err.Error())
     }
 }

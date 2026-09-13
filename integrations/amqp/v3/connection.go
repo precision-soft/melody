@@ -73,12 +73,13 @@ func (instance *Provider) Dialer(dsn string) func() (*amqp091.Connection, error)
     }
 }
 
+/* Close is bounded by a deadline on the socket, because the client's plain Close is an RPC that shares the send locks with every publish: on a connection whose peer stopped reading, a write in flight holds those locks for good and the close would join it, so the one door the composition root has to end a shared connection would itself never return. */
 func (instance *Provider) Close(connection *amqp091.Connection) error {
     if nil == connection {
         return nil
     }
 
-    return connection.Close()
+    return connection.CloseDeadline(time.Now().Add(closeJoinTimeout))
 }
 
 /* redactedDsnPlaceholder stands in for any dsn this function cannot prove it has stripped credentials from. */

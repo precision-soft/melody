@@ -4,24 +4,21 @@ import (
     "context"
     "fmt"
     "io"
+    "net"
     "net/http"
     "net/http/cookiejar"
+    "net/url"
     "strings"
     "time"
 )
 
-/* exampleRateLimitBudget mirrors the write allowance the example wires on the nomenclature's write endpoints
-(config/redis.go, catalogWriteAllowance). */
+/* exampleRateLimitBudget mirrors the write allowance the example wires on the nomenclature's write endpoints (config/redis.go, catalogWriteAllowance). */
 const exampleRateLimitBudget = 30
 
-/* exampleRateLimitPrefix mirrors the key prefix the supervised v3 example gives its redis rate limiter, so the
-harness can clear the counters of a previous run rather than inherit a spent budget inside the same fixed
-window. It carries the major for the same reason the application does: three applications share one redis. */
+/* exampleRateLimitPrefix mirrors the key prefix the supervised v3 example gives its redis rate limiter, so the harness can clear the counters of a previous run rather than inherit a spent budget inside the same fixed window. It carries the major for the same reason the application does: three applications share one redis. */
 const exampleRateLimitPrefix = "melody-example-v3:rate_limit:"
 
-/* the throttled endpoint is a real one — creating a product — so the body below is deliberately invalid: the
-rate-limit middleware runs before the handler, so a refused write still spends the allowance and the catalogue
-is left exactly as it was. */
+/* the throttled endpoint is a real one — creating a product — so the body below is deliberately invalid: the rate-limit middleware runs before the handler, so a refused write still spends the allowance and the catalogue is left exactly as it was. */
 const (
     exampleThrottledWriteRoute = "/products/api/create/"
     exampleThrottledWriteBody  = `{"name":""}`
@@ -31,6 +28,10 @@ const (
 
     exampleHttpAdminUsername = "admin"
     exampleHttpAdminPassword = "admin"
+
+    /* the seeded account that holds ROLE_USER and nothing else: what a section needs when it has to drive an authenticated route as somebody who is NOT the one under test. */
+    exampleHttpUserUsername = "user"
+    exampleHttpUserPassword = "user"
 )
 
 /* runExampleHttpCheck drives the running .example application over real HTTP — the only place the whole
@@ -54,8 +55,7 @@ func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress st
     client := newExampleHttpClient()
     signInExampleHttpEditor(client, baseUrl, "")
 
-    /* a spoofed forwarded address from an untrusted peer must not mint a fresh budget: every call below is
-       counted against the loopback peer address, so the budget is spent once and stays spent */
+    /* a spoofed forwarded address from an untrusted peer must not mint a fresh budget: every call below is counted against the loopback peer address, so the budget is spent once and stays spent */
     spentAt := 0
     for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
         spoofed := fmt.Sprintf("203.0.113.%d", attempt)
@@ -92,17 +92,17 @@ func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress st
     }
     pass("example rate limit left the reads alone while the writes were refused")
 
+    /* the conversion door rides the same signed-in client and the same spent budget on purpose: it is a
+       READ, so the limiter that closed the writes has to leave it open, and driving it here says so without
+       a section of its own */
+    runExampleCurrencyConversionCheck(client, baseUrl)
+
     runExampleLoadBalancerCheck(client, loadBalancerUrl, redisAddress)
 }
 
-/* runExampleLoadBalancerCheck drives the load-balancer half — the ONLY place the trusted-proxy chain is
-proven: through the load balancer the peer is nginx (a trusted proxy), so the forwarded chain is honoured and
-the budget is enforced against the resolved client address.
+/* runExampleLoadBalancerCheck drives the load-balancer half — the ONLY place the trusted-proxy chain is proven: through the load balancer the peer is nginx (a trusted proxy), so the forwarded chain is honoured and the budget is enforced against the resolved client address.
 
-Because it is the sole proof of that property, an unset EXAMPLE_LOAD_BALANCER_URL must announce a SKIP rather
-than pass silently — otherwise a regression in the forwarded-chain resolution goes green (the same false-green
-class the REDIS_ADDRESS skip already guards against: the direct-path checks still pass, this assertion never
-runs, and the section is reported fully passed). */
+   Because it is the sole proof of that property, an unset EXAMPLE_LOAD_BALANCER_URL must announce a SKIP rather than pass silently — otherwise a regression in the forwarded-chain resolution goes green (the same false-green class the REDIS_ADDRESS skip already guards against: the direct-path checks still pass, this assertion never runs, and the section is reported fully passed). */
 func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, redisAddress string) {
     if "" == loadBalancerUrl {
         skip("example http: EXAMPLE_LOAD_BALANCER_URL is not set — the load balancer trusted-proxy half did not run")
@@ -111,9 +111,13 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
 
     resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
 
-    /* the cookie jar keys sessions by the host of the url, so the session established against the direct
-       address is not sent to the load balancer: this half signs in through the load balancer itself */
+    /* the cookie jar keys sessions by the host of the url, so the session established against the direct address is not sent to the load balancer: this half signs in through the load balancer itself */
     signInExampleHttpEditor(client, loadBalancerUrl, exampleHostHeader)
+
+    /* the key the budget charges through the balancer must NOT be the balancer's own address, and that is what separates the chain being honoured from its FALLBACK: with the balancer's name unresolved or stale the list is empty, no header is believed, and every client behind the balancer is charged to the balancer's own address — the peer the example sees. The counts alone (budget+1 in both arms below) read the same in both states, so a fallback would have been green. The balancer's addresses are read off the url's host, the way the example resolves the name it trusts. */
+    balancerAddressList := balancerAddressesOf(loadBalancerUrl)
+
+    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
 
     balancerSpentAt := 0
     for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
@@ -135,14 +139,51 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
         )
     }
     pass("example rate limit enforced the shared budget through the load balancer (429 past the budget)")
+
+    balancerKeys := exampleRateLimitKeys("example http", redisAddress, exampleRateLimitPrefix)
+    if 1 != len(balancerKeys) {
+        fail("example http: expected the writes through the load balancer to charge exactly one key, found %v", balancerKeys)
+    }
+    for _, balancerAddress := range balancerAddressList {
+        if strings.HasSuffix(balancerKeys[0], ":"+balancerAddress) {
+            fail(
+                "example http: through the load balancer the budget was charged to the balancer's own address %s (%v) — its attestation was not read (the trusted proxy list is empty or stale)",
+                balancerAddress,
+                balancerKeys,
+            )
+        }
+    }
+    pass("example rate limit charged the client the balancer attested, not the balancer itself (the trusted proxy list resolves)")
+
+    /* the balancer APPENDS the peer it saw to the chain the client sent, so a client that sends its own X-Forwarded-For arrives as "<what it sent>, <its address>". With the whole private space trusted, the address the balancer appended — this harness's container, and the docker gateway for every host client — read as one more hop, and the client's own entry became the key: a fresh budget per call. Trusting the balancer alone, the appended address is the client the balancer attested, and what the client wrote to its left is never read. */
+    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
+
+    balancerSpoofSpentAt := 0
+    for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
+        status := requestThrottledWrite(client, loadBalancerUrl, exampleHostHeader, fmt.Sprintf("203.0.113.%d", attempt))
+        if http.StatusTooManyRequests == status {
+            balancerSpoofSpentAt = attempt
+            break
+        }
+        if http.StatusUnauthorized == status || http.StatusForbidden == status {
+            fail("example http: load balancer call %d with a spoofed header returned %d — the section reached the firewall, not the limiter", attempt, status)
+        }
+    }
+
+    if exampleRateLimitBudget+1 != balancerSpoofSpentAt {
+        fail(
+            "example http: through the load balancer a spoofed X-Forwarded-For was believed — the budget was exhausted at call %d, wanted %d (the address the balancer appended was read as a trusted hop)",
+            balancerSpoofSpentAt,
+            exampleRateLimitBudget+1,
+        )
+    }
+    pass("example rate limit ignored a spoofed X-Forwarded-For sent through the load balancer (budget spent once)")
 }
 
 /* exampleHostHeader is the virtual host the load balancer serves the example under. */
 const exampleHostHeader = "example.melody.localhost.precision-soft.com"
 
-/* newExampleHttpClient keeps a cookie jar so the session the sign-in establishes travels on every following
-call, exactly as a browser would send it. Redirects are not followed: a redirect answer to a write would
-otherwise be read as a success. */
+/* newExampleHttpClient keeps a cookie jar so the session the sign-in establishes travels on every following call, exactly as a browser would send it. Redirects are not followed: a redirect answer to a write would otherwise be read as a success. */
 func newExampleHttpClient() *http.Client {
     jar, jarErr := cookiejar.New(nil)
     if nil != jarErr {
@@ -162,8 +203,7 @@ func signInExampleHttpEditor(client *http.Client, baseUrl string, hostHeader str
     signInExampleHttp(client, baseUrl, hostHeader, exampleHttpEditorUsername, exampleHttpEditorPassword)
 }
 
-/* the admin is what a section signs in as when it drives the directory: the user routes are behind ROLE_ADMIN,
-which the editor does not hold. */
+/* the admin is what a section signs in as when it drives the directory: the user routes are behind ROLE_ADMIN, which the editor does not hold. */
 func signInExampleHttpAdmin(client *http.Client, baseUrl string) {
     signInExampleHttp(client, baseUrl, "", exampleHttpAdminUsername, exampleHttpAdminPassword)
 }
@@ -241,10 +281,39 @@ func requestExample(client *http.Client, method string, baseUrl string, path str
     return response.StatusCode
 }
 
-/* resetExampleRateLimitCounters clears the counters one limiter wrote, so a section starts from a full budget
-instead of inheriting a spent one. The prefix is a parameter because the applications under test keep separate
-counters: they share one redis, and a section that measures an exact exhaustion point cannot have another
-application spending its budget. */
+/* resetExampleRateLimitCounters clears the counters one limiter wrote, so a section starts from a full budget instead of inheriting a spent one. The prefix is a parameter because the applications under test keep separate counters: they share one redis, and a section that measures an exact exhaustion point cannot have another application spending its budget. */
+/* balancerAddressesOf resolves the host of the load balancer url to the addresses the example sees the balancer under; a host that does not resolve fails the section, because an assertion against no address would pass over anything. */
+func balancerAddressesOf(loadBalancerUrl string) []string {
+    parsed, parseErr := url.Parse(loadBalancerUrl)
+    if nil != parseErr {
+        fail("example http: parse the load balancer url %q: %v", loadBalancerUrl, parseErr)
+    }
+
+    addressList, lookupErr := net.LookupHost(parsed.Hostname())
+    if nil != lookupErr || 0 == len(addressList) {
+        fail("example http: the load balancer host %q resolves to nothing (%v)", parsed.Hostname(), lookupErr)
+    }
+
+    return addressList
+}
+
+/* exampleRateLimitKeys lists the keys the budget has charged, which name the client each was charged to. */
+func exampleRateLimitKeys(label string, redisAddress string, prefix string) []string {
+    if "" == redisAddress {
+        fail("%s: REDIS_ADDRESS is required to read the rate limit counters", label)
+    }
+
+    client := openRedis(redisAddress)
+    defer client.Close()
+
+    keys, keysErr := client.Do(context.Background(), client.B().Keys().Pattern(prefix+"*").Build()).AsStrSlice()
+    if nil != keysErr {
+        fail("%s: list rate limit keys: %v", label, keysErr)
+    }
+
+    return keys
+}
+
 func resetExampleRateLimitCounters(label string, redisAddress string, prefix string) {
     if "" == redisAddress {
         fail("%s: REDIS_ADDRESS is required to clear the rate limit counters", label)

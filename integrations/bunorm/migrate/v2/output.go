@@ -4,6 +4,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "reflect"
     "strconv"
     "time"
 
@@ -14,8 +15,9 @@ import (
 )
 
 type commandOutput struct {
-    writer io.Writer
-    option output.Option
+    writer    io.Writer
+    arguments []string
+    option    output.Option
 
     /* the json accumulation: under --format=json every print records instead of writing, and finish renders the one machine-readable document the cli runner's silenced banner promises — the flag was accepted and validated long before this package honoured it */
     messages   []string
@@ -26,10 +28,12 @@ type commandOutput struct {
     files      []string
 }
 
-func newCommandOutput(writer io.Writer, option output.Option) *commandOutput {
+/* newCommandOutput takes the command's positional arguments beside its writer and flags: the machine document declares an arguments field, and built without them it answered an empty list for every command, db:create included, whose one argument names the migration the document reports on. */
+func newCommandOutput(writer io.Writer, arguments []string, option output.Option) *commandOutput {
     return &commandOutput{
-        writer: writer,
-        option: option,
+        writer:    writer,
+        arguments: append([]string{}, arguments...),
+        option:    option,
     }
 }
 
@@ -55,13 +59,42 @@ func (instance *commandOutput) wantsDetail() bool {
     return instance.option.Verbose
 }
 
+/* finishRun renders the command's document from the outcome the run ACTUALLY had, a panic included, and is the single door every command in this family defers to.
+
+   The document is the machine contract a deploy pipeline reads, and rendered from the named return alone it reported SUCCESS for a run that died: a panic leaves the linear path that assigns runErr, so the deferred render saw nil, skipped the error branch, and wrote a complete envelope carrying `"error":null` together with every message the run had accumulated before it fell over — indistinguishable, to anything parsing stdout, from a clean run that applied them. The framework's own cli boundary makes exactly this repair for exactly this reason, and says so in as many words, but it sits OUTSIDE this defer: by the time it recovers, the success document has already been written.
+
+   recovered is passed in rather than read here, because recover() answers only when it is called directly by the deferred function itself — a call one frame deeper answers nil and would leave this door believing every run ended well. The panic is re-raised unchanged once the document says what happened, so the exit path, the status code and the journal record are all exactly what they were. */
+func (instance *commandOutput) finishRun(commandName string, startedAt time.Time, runErr error, recovered any) error {
+    if nil == recovered {
+        return instance.finish(commandName, startedAt, runErr)
+    }
+
+    /* a run that had already failed keeps its own failure as the verdict: the panic came after it, and the reason the command failed is the one the operator needs */
+    if nil == runErr {
+        runErr = exception.NewError(
+            commandName+" panicked",
+            /* the recovered VALUE travels beside its type: an error-shaped panic reaches the cause slot below with its own context and chain intact, but a string or any other value has no cause to give, and without this it reached the document as a type name and nothing else — the operator learning that something panicked and never what */
+            map[string]any{
+                "command":        commandName,
+                "recoveredType":  fmt.Sprintf("%T", recovered),
+                "recoveredValue": fmt.Sprintf("%v", recovered),
+            },
+            exception.PanicCause(recovered),
+        )
+    }
+
+    _ = instance.finish(commandName, startedAt, runErr)
+
+    panic(recovered)
+}
+
 /* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded. */
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
         return runErr
     }
 
-    meta := output.NewMeta(command, nil, instance.option, startedAt, time.Since(startedAt), output.Version{})
+    meta := output.NewMeta(command, instance.arguments, instance.option, startedAt, time.Since(startedAt), output.Version{})
     envelope := output.NewEnvelope(meta)
 
     data := map[string]any{}
@@ -115,23 +148,15 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
     return renderErr
 }
 
-/*
-errorDetailsOf and errorCauseOf fill the two fields the json envelope always
-declared and always answered null. The machine document is the contract a
-pipeline reads, and it was the one rendering that threw away what the error
-already carried: at the same instant, over the same value, the journal filed
-the connection, the pool sizing, the deadlines and the whole cause chain, while
-stdout answered `"details":null,"cause":null` beside a single sentence.
+/* errorDetailsOf and errorCauseOf fill the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing, the deadlines and the whole cause chain, while stdout answered `"details":null,"cause":null` beside a single sentence.
 
-The details object is empty rather than null when the error carries no context,
-so the field keeps its json type on every failure — the rule the machine
-contracts of this family were put on.
-*/
+   The details object is empty rather than null when the error carries no context, so the field keeps its json type on every failure — the rule the machine contracts of this family were put on. */
 func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(runErr, &provider) && nil != provider {
+    /* the As target is read through the typed-nil door, not through a plain nil comparison: a typed-nil link satisfies As, passes that comparison and then takes a read lock on a nil receiver inside Context(), panicking in the very rendering that was reporting the failure — and the panic unwinds finish, so the document the pipeline reads is never written and the failure is lost. bun's migrator produces exactly that link: it wraps the application's migration-function error with %w after a plain nil test, and fmt records the operand before formatting it. errorCauseOf below reaches the same conclusion through BuildCauseChain, which skips typed-nil links of its own accord. */
+    if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
         }
@@ -148,6 +173,22 @@ func errorCauseOf(runErr error) *output.ErrorCause {
     }
 
     return output.NewErrorCause(causeChain[0], map[string]any{"chain": causeChain})
+}
+
+/* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */
+func isNilInterface(value any) bool {
+    if nil == value {
+        return true
+    }
+
+    reflected := reflect.ValueOf(value)
+
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
 }
 
 /* pluralizeMigrations renders the applied count the way a log line reads it, so a single migration does not report "1 migrations" */
@@ -168,6 +209,7 @@ func (instance *commandOutput) printTextSuccess(message string) {
     instance.printSuccess(message)
 }
 
+/* every text door of the output escapes what it did not write itself before the terminal sees it — the applied line names the manager, the files block names the paths bun answered, the warning carries the close error off the wire — while the json branch hands the value to the document, whose printer escapes the C1 block itself. The warning was the one door that let its message through as sent, and its one caller with foreign text is the close failure of the migration connection. */
 func (instance *commandOutput) printSuccess(message string) {
     if true == instance.isJson() {
         instance.messages = append(instance.messages, message)
@@ -175,10 +217,12 @@ func (instance *commandOutput) printSuccess(message string) {
         return
     }
 
+    escapedMessage := escapeControlCharacters(message, false)
+
     if false == instance.option.NoColor {
-        _, _ = fmt.Fprintf(instance.writer, "%s%s%s\n", cli.AnsiGreen, message, cli.AnsiReset)
+        _, _ = fmt.Fprintf(instance.writer, "%s%s%s\n", cli.AnsiGreen, escapedMessage, cli.AnsiReset)
     } else {
-        _, _ = fmt.Fprintln(instance.writer, message)
+        _, _ = fmt.Fprintln(instance.writer, escapedMessage)
     }
 }
 
@@ -189,10 +233,12 @@ func (instance *commandOutput) printWarning(message string) {
         return
     }
 
+    escapedMessage := escapeControlCharacters(message, false)
+
     if false == instance.option.NoColor {
-        _, _ = fmt.Fprintf(instance.writer, "%s%sWARNING: %s%s\n", cli.AnsiYellow, cli.AnsiBold, message, cli.AnsiReset)
+        _, _ = fmt.Fprintf(instance.writer, "%s%sWARNING: %s%s\n", cli.AnsiYellow, cli.AnsiBold, escapedMessage, cli.AnsiReset)
     } else {
-        _, _ = fmt.Fprintf(instance.writer, "WARNING: %s\n", message)
+        _, _ = fmt.Fprintf(instance.writer, "WARNING: %s\n", escapedMessage)
     }
 }
 
@@ -208,7 +254,7 @@ func (instance *commandOutput) printError(err error) {
         return
     }
 
-    /* the message came off the wire, so its control characters are escaped before the terminal sees them; the json branch above needs none of this, the encoder escapes on its own */
+    /* the message came off the wire, so its control characters are escaped before the terminal sees them; the json branch above hands it to the document, whose printer escapes the C1 block the encoder leaves raw and writes a byte that is not valid UTF-8 as U+FFFD, the encoder's documented answer */
     escapedMessage := escapeControlCharacters(err.Error(), false)
 
     if false == instance.option.NoColor {
@@ -296,7 +342,7 @@ func (instance *commandOutput) printFilesBlock(files []string) {
 
     _, _ = fmt.Fprintln(instance.writer, "FILES")
     for _, file := range files {
-        _, _ = fmt.Fprintf(instance.writer, "  %s\n", file)
+        _, _ = fmt.Fprintf(instance.writer, "  %s\n", escapeControlCharacters(file, false))
     }
 }
 

@@ -34,7 +34,7 @@ func (instance *ExclusiveTickCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *ExclusiveTickCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext *melodyclicontract.CommandContext,
+    commandContext melodyclicontract.Context,
 ) error {
     hold := 2 * time.Second
     if holdFlag := commandContext.String("hold"); "" != holdFlag {

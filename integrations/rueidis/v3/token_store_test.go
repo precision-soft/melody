@@ -8,6 +8,8 @@ import (
     "time"
 
     melodyclock "github.com/precision-soft/melody/v3/clock"
+    "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/runtime"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
     redisclient "github.com/redis/rueidis"
 )
@@ -959,4 +961,272 @@ func TestRedisTokenStore_ClockSkewBoundWidensTheBoundaryItself(t *testing.T) {
     if _, found, _ := bounded.Lookup(runtimeInstance, "attacker-token"); true == found {
         t.Fatalf("the stamp sits inside the verifying node's own tolerance, so only widening the boundary can refuse it — and it was honoured")
     }
+}
+
+func TestRedisTokenStore_PutWithTtlRefusesANonPositiveTtl(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:nonpositivettl"))
+
+    for name, ttl := range map[string]time.Duration{
+        "zero":     0,
+        "negative": -time.Second,
+    } {
+        func() {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("a %s ttl fell through to the store-forever spelling — the exact inversion of what an elapsed remaining lifetime asked for", name)
+                }
+            }()
+
+            store.PutWithTtl("token-bad-ttl", securitycontract.Claims{UserIdentifier: "alice"}, ttl)
+        }()
+    }
+}
+
+func TestRedisTokenStore_NegativeMaximumClockSkewIsRefusedNotIgnored(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    defer func() {
+        if nil == recover() {
+            t.Fatal("a negative skew was silently ignored: the operator believes a tighter policy is in force while the default runs")
+        }
+    }()
+
+    NewTokenStore(client, WithTokenStoreMaximumClockSkew(-time.Second))
+}
+
+func TestRedisTokenStore_NegativeEpochRetentionIsRefusedNotIgnored(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    defer func() {
+        if nil == recover() {
+            t.Fatal("a negative retention was silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass")
+        }
+    }()
+
+    NewTokenStore(client, WithRevocationEpochRetention(-time.Second))
+}
+
+/* the bounded doors are probed over a store whose replies stop arriving; each call runs under a timer far below the client's own five-second ceiling, so a mutant that hands a round trip the unbounded context fails on the timer instead of on the ceiling, and a mutant that removes the bound on a read-only command — which the client retries for as long as the context allows — fails on the timer instead of never */
+
+func newWedgedTokenStore(t *testing.T, options ...TokenStoreOption) (*RedisTokenStore, *gate) {
+    t.Helper()
+
+    client, storeGate := dialGated(t)
+    store := NewTokenStore(client, append([]TokenStoreOption{
+        WithTokenStorePrefix("melody:token:test:wedge:" + t.Name()),
+        WithTokenStoreCallTimeout(50 * time.Millisecond),
+    }, options...)...)
+
+    store.Put("warm", securitycontract.Claims{UserIdentifier: "wedge"})
+    store.Delete("warm")
+
+    storeGate.Wedge()
+
+    return store, storeGate
+}
+
+func TestRedisTokenStore_PutIsBoundedByTheCallTimeout(t *testing.T) {
+    store, _ := newWedgedTokenStore(t)
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        store.Put("token", securitycontract.Claims{UserIdentifier: "wedge"})
+
+        return nil
+    }))
+}
+
+func TestRedisTokenStore_DeleteIsBoundedByTheCallTimeout(t *testing.T) {
+    store, _ := newWedgedTokenStore(t)
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        store.Delete("token")
+
+        return nil
+    }))
+}
+
+func TestRedisTokenStore_DeleteByUserScanIsBoundedByTheCallTimeout(t *testing.T) {
+    store, _ := newWedgedTokenStore(t)
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        store.DeleteByUser("wedge")
+
+        return nil
+    }))
+}
+
+func TestRedisTokenStore_PurgeExpiredScanIsBoundedByTheCallTimeout(t *testing.T) {
+    store, _ := newWedgedTokenStore(t)
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        store.PurgeExpired()
+
+        return nil
+    }))
+}
+
+func TestRedisTokenStore_RevokeBeforeIsBoundedByTheCallTimeout(t *testing.T) {
+    store, _ := newWedgedTokenStore(t)
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        store.RevokeBefore("wedge", "", time.Now())
+
+        return nil
+    }))
+}
+
+func TestRedisTokenStore_LookupCapsARuntimeWithoutDeadlineAtTheCallTimeout(t *testing.T) {
+    store, _ := newWedgedTokenStore(t)
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        _, _, lookupErr := store.Lookup(newTokenStoreRuntime(), "token")
+
+        return lookupErr
+    }))
+}
+
+func TestRedisTokenStore_RevocationEpochCapsARuntimeWithoutDeadlineAtTheCallTimeout(t *testing.T) {
+    store, _ := newWedgedTokenStore(t)
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        _, epochErr := store.RevocationEpoch(newTokenStoreRuntime(), "wedge", "")
+
+        return epochErr
+    }))
+}
+
+/* the runtime half keeps a request deadline TIGHTER than the call timeout: with the call timeout at a second, a runtime carrying ten milliseconds is refused in tens of milliseconds, where a cap that replaced the request context would wait the full second */
+func TestRedisTokenStore_LookupKeepsATighterRequestDeadline(t *testing.T) {
+    store, _ := newWedgedTokenStore(t, WithTokenStoreCallTimeout(time.Second))
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+
+    started := time.Now()
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        _, _, lookupErr := store.Lookup(runtimeInstance, "token")
+
+        return lookupErr
+    }))
+
+    if elapsed := time.Since(started); 500*time.Millisecond < elapsed {
+        t.Fatalf("expected the request's own deadline to end the lookup, it took %s", elapsed)
+    }
+}
+
+func TestWithTokenStoreCallTimeout_NonPositiveFallsBackToTheDefault(t *testing.T) {
+    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(ctx, 0) is born cancelled, and every door would fail forever */
+    cases := map[string]time.Duration{
+        "zero":     0,
+        "negative": -1 * time.Second,
+    }
+
+    for name, timeout := range cases {
+        t.Run(name, func(t *testing.T) {
+            store := &RedisTokenStore{callTimeout: defaultTokenStoreCallTimeout}
+
+            WithTokenStoreCallTimeout(timeout)(store)
+
+            if defaultTokenStoreCallTimeout != store.callTimeout {
+                t.Fatalf("expected a %v call timeout to fall back to the default, got %v", timeout, store.callTimeout)
+            }
+        })
+    }
+}
+
+func TestWithTokenStoreCallTimeout_PositiveIsKept(t *testing.T) {
+    store := &RedisTokenStore{callTimeout: defaultTokenStoreCallTimeout}
+
+    WithTokenStoreCallTimeout(750 * time.Millisecond)(store)
+
+    if 750*time.Millisecond != store.callTimeout {
+        t.Fatalf("expected a positive call timeout to be kept, got %v", store.callTimeout)
+    }
+}
+
+func TestNewTokenStore_DefaultCallTimeout(t *testing.T) {
+    store := NewTokenStore(newTokenStoreClient(t))
+
+    if defaultTokenStoreCallTimeout != store.callTimeout {
+        t.Fatalf("expected the default call timeout, got %v", store.callTimeout)
+    }
+}
+
+/* PIN of a decision, not a guard: the context given at construction hands its values to every door and nothing else — a boot context already cancelled when the store is built must not fail the Put that follows it, since the store outlives whatever built it */
+func TestWithTokenStoreContext_KeepsTheValuesAndDropsTheLifetime(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    type valueKey struct{}
+    ctx, cancel := context.WithCancel(context.WithValue(context.Background(), valueKey{}, "carried"))
+    cancel()
+
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:ctx:"+t.Name()), WithTokenStoreContext(ctx))
+
+    if carried := store.ctx.Value(valueKey{}); "carried" != carried {
+        t.Fatalf("expected the value to be carried, got %v", carried)
+    }
+
+    if nil != store.ctx.Err() {
+        t.Fatalf("expected the cancellation to be dropped, got %v", store.ctx.Err())
+    }
+
+    store.Put("token", securitycontract.Claims{UserIdentifier: "ctx"})
+    defer store.Delete("token")
+
+    _, exists, lookupErr := store.Lookup(newTokenStoreRuntime(), "token")
+    if nil != lookupErr || false == exists {
+        t.Fatalf("expected the token written under a cancelled construction context to resolve, exists=%v err=%v", exists, lookupErr)
+    }
+}
+
+/* the Lua batch behind DeleteByUser is the second round trip of the call: the SSCAN step is answered with an array and passes, the batch is answered with an integer and is wedged, so the bound proven is the batch's own */
+func TestRedisTokenStore_DeleteByUserBatchIsBoundedByTheCallTimeout(t *testing.T) {
+    client, storeGate := dialGated(t)
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:wedge:"+t.Name()), WithTokenStoreCallTimeout(50*time.Millisecond))
+
+    store.Put("member", securitycontract.Claims{UserIdentifier: "batch"})
+
+    storeGate.WedgeIntegerReplies()
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        store.DeleteByUser("batch")
+
+        return nil
+    }))
+}
+
+/* the Lua batch behind PurgeExpired sits behind two cursor steps, the SCAN over the index sets and the SSCAN over one set; both are arrays and pass, the batch's integer is wedged */
+func TestRedisTokenStore_PurgeExpiredBatchIsBoundedByTheCallTimeout(t *testing.T) {
+    client, storeGate := dialGated(t)
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:wedge:"+t.Name()), WithTokenStoreCallTimeout(50*time.Millisecond))
+
+    store.Put("member", securitycontract.Claims{UserIdentifier: "purge"})
+
+    storeGate.WedgeIntegerReplies()
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        store.PurgeExpired()
+
+        return nil
+    }))
+}
+
+/* the SSCAN of one index set is the second cursor walk of PurgeExpired: the outer SCAN's array passes, the inner one is wedged */
+func TestRedisTokenStore_PurgeExpiredMemberScanIsBoundedByTheCallTimeout(t *testing.T) {
+    client, storeGate := dialGated(t)
+    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:wedge:"+t.Name()), WithTokenStoreCallTimeout(50*time.Millisecond))
+
+    store.Put("member", securitycontract.Claims{UserIdentifier: "members"})
+
+    storeGate.WedgeArrayRepliesAfter(1)
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        store.PurgeExpired()
+
+        return nil
+    }))
 }

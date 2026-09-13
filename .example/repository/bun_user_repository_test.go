@@ -37,3 +37,4 @@ func TestUsernameTakenByAnotherComparesOnTheBinaryCollation(t *testing.T) {
         t.Fatalf("expected the uniqueness door to compare on the binary collation, recorded: %v", recorder.recordedQueries())
     }
 }
+

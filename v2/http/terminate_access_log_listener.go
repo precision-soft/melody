@@ -4,6 +4,7 @@ import (
     "time"
 
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
+    "github.com/precision-soft/melody/v2/internal"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
@@ -27,7 +28,7 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
                 return nil
             }
 
-            if nil == terminateEvent.Request() || nil == terminateEvent.Request().RequestContext() {
+            if true == internal.IsNilInterface(terminateEvent.Request()) || nil == terminateEvent.Request().RequestContext() {
                 return nil
             }
 
@@ -67,7 +68,7 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
             routeName := ""
             routePattern := ""
 
-            if nil != terminateEvent.Request() {
+            if false == internal.IsNilInterface(terminateEvent.Request()) {
                 routeName = terminateEvent.Request().RouteName()
                 routePattern = terminateEvent.Request().RoutePattern()
             }
@@ -92,7 +93,8 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
                 host = terminateEvent.Request().HttpRequest().Host
 
                 if nil != terminateEvent.Request().HttpRequest().URL {
-                    queryString = terminateEvent.Request().HttpRequest().URL.RawQuery
+                    /* the parameter names are kept and every value redacted: an access-log line is written for every request and read by more people than the request was, while a query string is the one part of a request line that routinely carries a credential — an api key, a one-time token, a signed link. The names are what diagnoses a call; the values are what must never be kept. */
+                    queryString = internal.RedactQueryValuesForDiagnostics(terminateEvent.Request().HttpRequest().URL.RawQuery)
                 }
 
                 remoteAddr = terminateEvent.Request().HttpRequest().RemoteAddr

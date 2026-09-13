@@ -14,7 +14,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
-/* @info Two definitions may legitimately share a name — that is what allowDuplicates is for, and how one middleware runs both before and after another. The Kahn traversal emits every duplicate, so counting emitted definitions against the node map (which is keyed by unique name) reports a cycle where the graph has none, and Build turns that into an error the application panics on. */
+/* Two definitions may legitimately share a name — that is what allowDuplicates is for, and how one middleware runs both before and after another. The Kahn traversal emits every duplicate, so counting emitted definitions against the node map (which is keyed by unique name) reports a cycle where the graph has none, and Build turns that into an error the application panics on. */
 func TestOrderDefinitions_DuplicateNamesAreNotACycle(t *testing.T) {
     first := NewHttpMiddlewareDefinition("audit", 0, nil, nil, nil, nil, nil, false, true)
     second := NewHttpMiddlewareDefinition("audit", 0, nil, nil, nil, nil, nil, false, true)
@@ -32,7 +32,7 @@ func TestOrderDefinitions_DuplicateNamesAreNotACycle(t *testing.T) {
     }
 }
 
-/* @info The sentinel must still catch a real cycle: a depends-on-b and b depends-on-a. */
+/* The sentinel must still catch a real cycle: a depends-on-b and b depends-on-a. */
 func TestOrderDefinitions_RealCycleIsDetected(t *testing.T) {
     first := NewHttpMiddlewareDefinition("a", 0, []string{"b"}, nil, nil, nil, nil, false, false)
     second := NewHttpMiddlewareDefinition("b", 0, []string{"a"}, nil, nil, nil, nil, false, false)
@@ -297,7 +297,7 @@ func TestBuild_LeavesUngatedPipelinesAlone(t *testing.T) {
     }
 }
 
-/* @info Splitting one middleware across environments is how a configuration that differs per environment is ordinarily written: an `auth` wired for development beside an `auth` wired for production, both registered under the one name the rest of the pipeline orders against. What has to be present wherever the referrer runs is A middleware called `auth`, not one particular registration of it — so the union of the registrations is what answers the reference. Weighing them one at a time refused this in dev AND in prod, for a configuration that boots correctly in both. */
+/* Splitting one middleware across environments is how a configuration that differs per environment is ordinarily written: an `auth` wired for development beside an `auth` wired for production, both registered under the one name the rest of the pipeline orders against. What has to be present wherever the referrer runs is A middleware called `auth`, not one particular registration of it — so the union of the registrations is what answers the reference. Weighing them one at a time refused this in dev AND in prod, for a configuration that boots correctly in both. */
 func TestBuild_AcceptsAReferenceCoveredByTheUnionOfSameNamedDefinitions(t *testing.T) {
     developmentAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, true)
     productionAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"prod"}, passthroughFactory(), false, true)
@@ -310,7 +310,7 @@ func TestBuild_AcceptsAReferenceCoveredByTheUnionOfSameNamedDefinitions(t *testi
     }
 }
 
-/* @info the control: a union that still leaves a gap is still refused. Two registrations covering dev and staging do not answer an always-on referrer, which runs in production too, and that is the mistake the check exists to catch. */
+/* the control: a union that still leaves a gap is still refused. Two registrations covering dev and staging do not answer an always-on referrer, which runs in production too, and that is the mistake the check exists to catch. */
 func TestBuild_StillRefusesAReferenceTheUnionDoesNotCover(t *testing.T) {
     developmentAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, true)
     stagingAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"staging"}, passthroughFactory(), false, true)
@@ -322,7 +322,7 @@ func TestBuild_StillRefusesAReferenceTheUnionDoesNotCover(t *testing.T) {
     }
 }
 
-/* @info supportedEnvironments is a copy of what config.validateEnvironment admits, and the union of same-named definitions is only universal because of it: a name registered for every supported environment is registered everywhere. If config ever admits a third environment and this list does not learn about it, the union silently stops covering an always-on referrer and a configuration that boots everywhere starts being refused. The comment above the copy promises this guard; here it is. */
+/* supportedEnvironments is a copy of what config.validateEnvironment admits, and the union of same-named definitions is only universal because of it: a name registered for every supported environment is registered everywhere. If config ever admits a third environment and this list does not learn about it, the union silently stops covering an always-on referrer and a configuration that boots everywhere starts being refused. The comment above the copy promises this guard; here it is. */
 func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
     fromConfiguration := []string{config.EnvDevelopment, config.EnvProduction}
 
@@ -344,7 +344,7 @@ func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
     }
 }
 
-/* @info Several groups are built from one builder in one process, each from its own selection. A pair of definitions confined to `api` says nothing about the `web` build, which assembles neither of them — yet the gating pass was handed every definition the builder holds, so `web` refused to build over a reference no request to it could reach. The check still fires for the group that does carry the pair. */
+/* Several groups are built from one builder in one process, each from its own selection. A pair of definitions confined to `api` says nothing about the `web` build, which assembles neither of them — yet the gating pass was handed every definition the builder holds, so `web` refused to build over a reference no request to it could reach. The check still fires for the group that does carry the pair. */
 func TestBuild_GatingOfAnotherGroupDoesNotRefuseThisOne(t *testing.T) {
     profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"api"}, []string{"dev"}, passthroughFactory(), false, false)
     audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"api"}, nil, passthroughFactory(), false, false)
@@ -356,5 +356,88 @@ func TestBuild_GatingOfAnotherGroupDoesNotRefuseThisOne(t *testing.T) {
 
     if _, _, buildErr := NewBuilder(profiler, audit, page).Build(&gatingTestKernel{environment: "dev"}, "api"); nil == buildErr {
         t.Fatal("the api group does carry the pair, so the unsatisfiable reference must still be refused there")
+    }
+}
+
+/* Describe answers what Build would run, so it mirrors Build's own third refusal: without it the listing reports as healthy a definition the serving boot refuses. */
+func TestBuilderDescribe_MirrorsTheNilFactoryRefusalOfBuild(t *testing.T) {
+    builder := NewBuilder(NewHttpMiddlewareDefinition("broken", 0, nil, nil, nil, nil, nil, false, false))
+
+    _, _, describeErr := builder.Describe("dev", "")
+    if nil == describeErr || false == strings.Contains(describeErr.Error(), "middleware factory is nil") {
+        t.Fatalf("expected the description to refuse the definition the build refuses, got %v", describeErr)
+    }
+}
+
+func TestBuilder_KeepsTheReportWhenAFactoryFails(t *testing.T) {
+    builder := NewBuilder(
+        NewHttpMiddlewareDefinition(
+            "failing",
+            10,
+            nil,
+            nil,
+            nil,
+            nil,
+            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+                return nil, fmt.Errorf("factory exploded")
+            },
+            false,
+            false,
+        ),
+    )
+
+    _, report, buildErr := builder.Build(&gatingTestKernel{environment: "dev"}, "")
+    if nil == buildErr {
+        t.Fatalf("expected the factory failure to surface")
+    }
+
+    /* dropped for the refusal, the caller reporting the failure had the name of the offending middleware and nothing about the selection, the gating or the cycle detection around it — while Describe, the same selection without the factories, has always returned it */
+    if nil == report {
+        t.Fatalf("expected the report to travel with the refusal")
+    }
+}
+
+func TestBuilder_RecordsAMiddlewareItsFactoryDeclinedToBuildAsInactive(t *testing.T) {
+    builder := NewBuilder(
+        NewHttpMiddlewareDefinition(
+            "declined",
+            10,
+            nil,
+            nil,
+            nil,
+            nil,
+            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+                return nil, nil
+            },
+            false,
+            false,
+        ),
+    )
+
+    middlewares, report, buildErr := builder.Build(&gatingTestKernel{environment: "dev"}, "")
+    if nil != buildErr {
+        t.Fatalf("build: %v", buildErr)
+    }
+
+    if 0 != len(middlewares) {
+        t.Fatalf("expected no middleware in the chain, got %d", len(middlewares))
+    }
+
+    /* requested, selected and ordered, then vanished from the chain without appearing in the selected names OR in the inactive list — the operator reading the report saw a pipeline that simply never mentioned it */
+    found := false
+    for _, inactive := range report.Inactive() {
+        if "declined" == inactive.Name() {
+            found = true
+        }
+    }
+
+    if false == found {
+        t.Fatalf("expected the declined middleware to be reported inactive, got %+v", report.Inactive())
+    }
+
+    for _, selectedName := range report.SelectedNames() {
+        if "declined" == selectedName {
+            t.Fatalf("a middleware that was never built must not be reported as selected")
+        }
     }
 }

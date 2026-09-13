@@ -11,6 +11,7 @@ import (
     "sync"
 
     "github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/http"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -389,6 +390,26 @@ func releaseGzipWriter(gzipWriter *gzip.Writer, level int) {
     pool.Put(gzipWriter)
 }
 
+/* copyIntoGzipWriterSafely contains a panic raised by the response body reader while it is being compressed. The reader belongs to the application, the copy runs on a goroutine this middleware started, and neither of the kernel's two recovery defers nor net/http's own per-connection recovery stands over a goroutine the framework started itself — so a panic there took the process down, every in-flight request with it, for one handler's bad body. Every other call this framework makes into application code is contained the same way. The panic travels back as the copy error the caller already reports through the pipe, so this one response fails along the path that already exists for a body that could not be read. */
+func copyIntoGzipWriterSafely(gzipWriter *gzip.Writer, source io.Reader) (copyErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        copyErr = exception.NewError(
+            "the response body reader panicked while the response was being compressed",
+            nil,
+            http.RecoverToError(recoveredValue),
+        )
+    }()
+
+    _, copyErr = io.Copy(gzipWriter, source)
+
+    return copyErr
+}
+
 func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceCloser io.Reader, level int, compressionDone chan<- struct{}) {
     defer close(compressionDone)
     defer closeBodyReaderQuiet(sourceCloser)
@@ -404,7 +425,7 @@ func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceC
     /* every path below reaches this only after gzipWriter.Close has returned, which is the condition the pool depends on */
     defer releaseGzipWriter(gzipWriter, level)
 
-    _, copyErr := io.Copy(gzipWriter, source)
+    copyErr := copyIntoGzipWriterSafely(gzipWriter, source)
     if nil != copyErr {
         _ = gzipWriter.Close()
         _ = pipeWriter.CloseWithError(copyErr)

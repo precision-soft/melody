@@ -179,7 +179,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         attributes[RouteAttributeLocales] = append([]string{}, options.Locales()...)
     }
 
-    instance.routeRegistry.registerRoute(
+    routeStored := instance.routeRegistry.registerRoute(
         route{
             name:         options.Name(),
             pattern:      normalizedPattern,
@@ -195,6 +195,11 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
             attributes:   attributes,
         },
     )
+
+    /* a route the registry declined is not put in the matching tree. The index below is the position of the LAST STORED route, so registering it for a declined one gave the pattern's tree entry a route that is not its own — the invariant every reader of the tree relies on, and the one the priority tie-break reads the index for. Today only the re-validation inside matchPath keeps that from answering the wrong handler. */
+    if false == routeStored {
+        return
+    }
 
     routeIndex := len(instance.routeRegistry.routesInternal()) - 1
 
@@ -456,12 +461,7 @@ func (instance *Router) match(method string, path string, host string, scheme st
         return nil, nil, map[string]any{}
     }
 
-    /* the winning route's attributes are the registry's own map, alive for every request of the
-       process: handed out uncopied, a sort or an append through the match result — or through
-       request.Attributes(), where the kernel publishes these values — rewrote the route table with no
-       lock. The copy is deep, so the methods slice and any nested value a route registered are the
-       caller's to mutate; what the copy does not descend into (a pointer, a struct) is shared state
-       by the same boundary the session copy documents. */
+    /* the winning route's attributes are the registry's own map, alive for every request of the process: handed out uncopied, a sort or an append through the match result — or through request.Attributes(), where the kernel publishes these values — rewrote the route table with no lock. The copy is deep, so the methods slice and any nested value a route registered are the caller's to mutate; what the copy does not descend into (a pointer, a struct) is shared state by the same boundary the session copy documents. */
     return bestHandler, bestParams, internal.CopyAnyMap(bestAttributes)
 }
 

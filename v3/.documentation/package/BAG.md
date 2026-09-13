@@ -30,7 +30,7 @@ Important rules:
 - Missing keys return `exists == false` for helpers that expose key presence (for example `String` and `StringStrict`).
 - For conversion helpers (`Int`, `Bool`, `Float64`, `Duration`), the boolean result represents whether a typed value was present/produced (for example, it is `false` when the stored value is `nil`).
 - When a key is present but the stored value cannot be converted, conversion helpers return an error (with the boolean typically `true`, meaning the key was present and conversion was attempted).
-- `String` is intentionally permissive: it returns `""` for non-string stored types. Use `StringStrict` when you need validation and errors.
+- `String` is intentionally permissive: it returns `""` for non-string scalar stored types, but a `[]string` value panics naming the key — read it with `StringSlice`. Use `StringStrict` when you need validation and errors. `NewParameterBagFromValues` keeps the single and the repeated key apart by type — a key that appeared once is stored as the string it is, a genuinely repeated one stays a `[]string` — which is what lets `String` and `Request.Input` answer single request parameters.
 
 ## Conversion semantics
 
@@ -38,9 +38,11 @@ The typed helpers distinguish three situations:
 
 - **Key missing**: the bag does not contain the key. Helpers return `exists == false` and no error.
 - **Key present, value is nil**: the bag contains the key, but its stored value is `nil`.
-    - `String` / `StringStrict` treat this as present and return `""` with `exists == true`.
+    - All string accessors (`String`, `StringStrict`, `StringSlice`, `StringSliceStrict`) report this as absent and return the zero value with `exists == false`.
     - `Int` / `Bool` / `Float64` / `Duration` treat this as no typed value and return the zero value with `exists == false`.
-- **Key present, value cannot be converted**: helpers return a typed parse error and `exists == true`.
+- **Key present, value cannot be converted**: the two families answer differently, because only one of them has an error to return.
+    - `Int` / `Bool` / `Float64` / `Duration` return the zero value, `exists == true` and a typed parse error.
+    - `String` / `StringSlice` have **no error return** at all: they answer `("", true)` and `(nil, true)` respectively, so an unconvertible value is indistinguishable from a genuinely empty one. Use the `Strict` variants where that distinction matters.
 
 Notes:
 
@@ -113,10 +115,14 @@ func readRequestParameters(
 
 ## Footguns & caveats
 
-- `String` returns `""` for non-string stored types; use `StringStrict` to detect type mismatches.
+- `String` returns `""` for non-string scalar stored types — a `[]string` value panics naming the key, and is read with `StringSlice`; use `StringStrict` to detect type mismatches.
 - `StringSlice` and `StringSliceStrict` accept both `[]string` and `string` (single value), returning a slice in both cases.
-- A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) still report it as present with a zero value.
-- `ParameterBag.All()` returns a copy of the internal map.
+- A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) report it as absent as well.
+- `ParameterBag.All()` returns a copy of the internal map, deep for the shapes the bag's own writers produce (`[]string`, `map[string]string`); other value types come back as stored.
+- `ParameterBag.Get` copies at the same depth `All` does: a `[]string` or `map[string]string` it answers is the caller's own, so mutating it cannot write into the bag behind its lock or race a concurrent `All`/`StringSlice` copy. Scalars are returned as stored and pay nothing. The frozen majors hand the stored value back live and document it as read-only.
+- The string grammar `Float64` accepts is plain decimal — an optional sign, digits and at most one decimal point — matching the strict base-10 `Int` in what it refuses: underscore spellings (`"1_000.5"`), hexadecimal floats (`"0x1p10"`) and exponents (`"1e3"`) are refused rather than silently accepted, and `NaN` with the infinities is refused on every branch. The frozen majors keep the wider `strconv.ParseFloat` grammar with the difference documented.
+- `bag.AppendString` appends inside one critical section when handed the concrete `*ParameterBag`; over a foreign implementation of the contract it falls back to Get and Set, whose window between two locks can lose a concurrent append.
+- `ParameterBag{}` — the zero value of the exported type — accepts a write: `Set` and `AppendString` allocate the map rather than panicking inside the assignment.
 
 ## Userland API
 

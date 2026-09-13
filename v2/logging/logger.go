@@ -14,16 +14,9 @@ import (
 
 const causeChainMaxDepth = 8
 
-type logEntry struct {
-    Message string                     `json:"message"`
-    Level   loggingcontract.LevelLabel `json:"level"`
-    Time    string                     `json:"time"`
-    Context map[string]any             `json:"context"`
-}
-
 /* LevelEnabled asks a logger whether a record at this level would survive its threshold, and answers true for one that cannot be asked. It is the single door onto loggingcontract.LevelReporter, so the "absent means enabled" rule lives in one place rather than being restated at each caller — a site that spelled the fallback the other way would silently stop recording against every logger that does not implement the capability, which is most of them.
 
-Ask it only where the answer saves work that is otherwise thrown away: a context map assembled at the call site, a name resolved through reflection. A record whose arguments already exist costs nothing to hand over, and gating it here would only add a second place where a level decision is made. */
+   Ask it only where the answer saves work that is otherwise thrown away: a context map assembled at the call site, a name resolved through reflection. A record whose arguments already exist costs nothing to hand over, and gating it here would only add a second place where a level decision is made. */
 func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bool {
     levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
     if false == isReporter {
@@ -66,19 +59,26 @@ func LogError(logger loggingcontract.Logger, err error) {
         return
     }
 
-    enrichedContext := enrichForeignContextWithCause(err)
+    /* the message is taken from the same assembly as the context, because that is where it is rendered under a recover: this path is reached from inside the recovery handlers, where the error is whatever a panic carried, and an Error() that dereferences the very nil field that made it panic-worthy would take the record down with it — the one record written to explain the failure. */
+    enrichedContext := exception.LogContext(err)
+    renderedMessage, isRendered := enrichedContext["error"].(string)
+    if false == isRendered || "" == renderedMessage {
+        renderedMessage = "the error message could not be rendered"
+    }
+
+    delete(enrichedContext, "error")
 
     if nil == logger || true == internal.IsNilInterface(logger) {
         if 0 < len(enrichedContext) {
-            log.Printf("[ERROR] %s context=%v", internal.EscapeControlCharacters(err.Error()), internal.EscapeControlCharacters(fmt.Sprintf("%v", enrichedContext)))
+            log.Printf("[ERROR] %s context=%v", internal.EscapeControlCharacters(renderedMessage), internal.EscapeControlCharacters(fmt.Sprintf("%v", enrichedContext)))
         } else {
-            log.Printf("[ERROR] %s", internal.EscapeControlCharacters(err.Error()))
+            log.Printf("[ERROR] %s", internal.EscapeControlCharacters(renderedMessage))
         }
 
         return
     }
 
-    logger.Error(err.Error(), enrichedContext)
+    logger.Error(renderedMessage, enrichedContext)
 }
 
 func IsValidLevel(value loggingcontract.Level) bool {
@@ -144,42 +144,3 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
     return context
 }
 
-/* enrichForeignContextWithCause assembles the context of an error that is not a top-level *exception.Error: the context of the nearest ContextProvider in the chain and the cause chain walked from the error's own wrap link, mirroring what enrichContextWithCause renders for an exception. The error's own message is deliberately absent — it travels as the record's message, and repeating it under a context key would say the same thing twice in one record. */
-func enrichForeignContextWithCause(err error) exceptioncontract.Context {
-    context := exceptioncontract.Context{}
-
-    var provider exceptioncontract.ContextProvider
-    if true == errors.As(err, &provider) && false == internal.IsNilInterface(provider) {
-        for key, value := range provider.Context() {
-            context[key] = value
-        }
-    }
-
-    causeErr := errors.Unwrap(err)
-    if nil == causeErr || true == internal.IsNilInterface(causeErr) {
-        return context
-    }
-
-    _, hasCause := context["cause"]
-    _, hasCauseChain := context["causeChain"]
-
-    causeChain := exception.BuildCauseChain(causeErr, causeChainMaxDepth)
-    if 0 < len(causeChain) {
-        if false == hasCause {
-            context["cause"] = causeChain[0]
-        }
-        if false == hasCauseChain {
-            context["causeChain"] = causeChain
-        }
-    }
-
-    _, hasCauseContextChain := context["causeContextChain"]
-    if false == hasCauseContextChain {
-        causeContextChain := exception.BuildCauseContextChain(causeErr, causeChainMaxDepth)
-        if 0 < len(causeContextChain) {
-            context["causeContextChain"] = causeContextChain
-        }
-    }
-
-    return context
-}

@@ -23,10 +23,7 @@ func (instance *Module) buildEncrypt() {
     instance.cipher = cipher
 }
 
-/* encryptDatabaseFactory resolves the shared *bun.DB for the melody:encrypt:database bulk command; the
-encrypt module evaluates it at the first command run — after Boot — so the database is never opened for the
-command's sake in http or worker mode, and a boot without a configured database still registers the command
-(the first run then reports the missing service). */
+/* encryptDatabaseFactory resolves the shared *bun.DB for the melody:encrypt:database bulk command; the encrypt module evaluates it at the first command run — after Boot — so the database is never opened for the command's sake in http or worker mode, and a boot without a configured database still registers the command (the first run then reports the missing service). */
 func (instance *Module) encryptDatabaseFactory(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
     return melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
 }

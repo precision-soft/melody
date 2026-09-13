@@ -469,3 +469,98 @@ func TestService_AccessorsReportTheConfiguredPolicy(t *testing.T) {
         t.Fatalf("unexpected expose headers: %v", service.ExposeHeaders())
     }
 }
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestService_IsPreflight_ATypedNilRequestIsNotPreflight(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{"http://example.com"}})
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    if true == service.IsPreflight(unassignedRequest) {
+        t.Fatalf("expected a typed nil request to not be a preflight")
+    }
+}
+
+func TestService_RequestOrigin_ATypedNilRequestHasNoOrigin(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{"http://example.com"}})
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    if "" != service.RequestOrigin(unassignedRequest) {
+        t.Fatalf("expected no origin for a typed nil request, got %q", service.RequestOrigin(unassignedRequest))
+    }
+}
+
+/* a Vary field is a comma-separated list, and the compression middleware writes Accept-Encoding into the same field on the same response, so Origin routinely arrives beside another token. Comparing the whole field against the single token misses it and appends a second entry naming Origin twice, which a shared cache reads as a different set of dimensions than the one the response was stored under. */
+func TestAddVaryOrigin_ReadsAnExistingFieldTokenByToken(t *testing.T) {
+    headers := nethttp.Header{}
+    headers.Set("Vary", "Accept-Encoding, Origin")
+
+    addVaryOrigin(headers)
+
+    if 1 != len(headers.Values("Vary")) {
+        t.Fatalf("expected the token already in the list to be found, got: %v", headers.Values("Vary"))
+    }
+
+    if "Accept-Encoding, Origin" != headers.Get("Vary") {
+        t.Fatalf("expected the existing list to be left as it was, got: %q", headers.Get("Vary"))
+    }
+}
+
+/* header field names are case-insensitive, so a layer that wrote the token in another case named the same dimension. The lowercase spelling is the one the comparison already carries, so it separates nothing; an upper-case one is recognised only if the case is folded, and no other probe in this package writes a Vary field at all. */
+func TestAddVaryOrigin_ReadsAnExistingTokenInAnyCase(t *testing.T) {
+    headers := nethttp.Header{}
+    headers.Set("Vary", "ORIGIN")
+
+    addVaryOrigin(headers)
+
+    if 1 != len(headers.Values("Vary")) {
+        t.Fatalf("expected the upper-case spelling to be recognised, got: %v", headers.Values("Vary"))
+    }
+
+    if "ORIGIN" != headers.Get("Vary") {
+        t.Fatalf("expected the existing spelling to be left as it was, got: %q", headers.Get("Vary"))
+    }
+}
+
+/* Access-Control-Max-Age: 0 is not the absence of an answer, it is an instruction to cache the preflight for zero seconds, which a browser reads as "ask again for every request". A service configured without a max age has no opinion to advertise, so the field stays off the response and the browser applies its own default instead of being told to stop caching. A negative value is the same absence spelled another way and would reach the wire as a malformed field. */
+func TestService_ApplyPreflightHeaders_ANonPositiveMaxAgeAdvertisesNothing(t *testing.T) {
+    for _, maxAge := range []int{0, -1} {
+        service := NewService(Config{
+            AllowOrigins: []string{"https://app.example.com"},
+            MaxAge:       maxAge,
+        })
+
+        headers := nethttp.Header{}
+        service.ApplyPreflightHeaders("https://app.example.com", headers)
+
+        if "" != headers.Get("Access-Control-Max-Age") {
+            t.Fatalf(
+                "a max age of %d must not reach the wire, got Access-Control-Max-Age %q",
+                maxAge,
+                headers.Get("Access-Control-Max-Age"),
+            )
+        }
+
+        if "" == headers.Get("Access-Control-Allow-Methods") {
+            t.Fatalf("expected the rest of the preflight answer to be applied for a max age of %d", maxAge)
+        }
+    }
+}
+
+/* the positive control for the refusal above: a service that does carry a max age advertises it, so the guard is read as "non-positive is withheld" and not as "the field is never written" */
+func TestService_ApplyPreflightHeaders_APositiveMaxAgeIsAdvertised(t *testing.T) {
+    service := NewService(Config{
+        AllowOrigins: []string{"https://app.example.com"},
+        MaxAge:       120,
+    })
+
+    headers := nethttp.Header{}
+    service.ApplyPreflightHeaders("https://app.example.com", headers)
+
+    if "120" != headers.Get("Access-Control-Max-Age") {
+        t.Fatalf("expected the configured max age to be advertised, got %q", headers.Get("Access-Control-Max-Age"))
+    }
+}

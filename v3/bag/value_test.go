@@ -1,6 +1,8 @@
 package bag
 
 import (
+    "net/url"
+    "strings"
     "testing"
 )
 
@@ -174,7 +176,7 @@ func TestBagFloat64_ConversionsAndErrors(t *testing.T) {
     }
 }
 
-/* @info a key set to nil is present but carries no value: String used to report it as set while Int, Bool, Float64 and Duration reported it as unset, so Has and the typed accessors contradicted each other on the same state */
+/* a key set to nil is present but carries no value: String used to report it as set while Int, Bool, Float64 and Duration reported it as unset, so Has and the typed accessors contradicted each other on the same state */
 func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("key", nil)
@@ -203,5 +205,65 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
 
     if value, exists := String(parameterBag, "key"); false == exists || "value" != value {
         t.Fatalf("expected a set value to be reported, got %q exists=%v", value, exists)
+    }
+}
+
+/* the request bags keep the single and the repeated key apart by type, so a []string landing under String is a genuine array: the empty string would lose the value and one element would hide the rest, which is why the read refuses loudly toward StringSlice/StringAt instead of guessing. */
+func TestString_RefusesASliceNamingTheParameter(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("tags", []string{"a", "b"})
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected reading a string slice as one string to panic")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError || false == strings.Contains(recoveredErr.Error(), "cannot be read as one string") {
+            t.Fatalf("expected the refusal to name the shape, got %v", recoveredValue)
+        }
+    }()
+
+    _, _ = String(parameterBag, "tags")
+}
+
+/* a key that appeared once in url.Values is stored as the string it is, and only a genuinely repeated key stays a slice — the separation String and Input depend on. */
+func TestNewParameterBagFromValues_KeepsTheSingleAndTheRepeatedKeyApartByType(t *testing.T) {
+    parameterBag := NewParameterBagFromValues(url.Values{
+        "single":   []string{"one"},
+        "repeated": []string{"one", "two"},
+        "empty":    []string{},
+    })
+
+    if value, exists := String(parameterBag, "single"); false == exists || "one" != value {
+        t.Fatalf("expected the single occurrence as a string, got %q exists=%v", value, exists)
+    }
+
+    values, exists := StringSlice(parameterBag, "repeated")
+    if false == exists || 2 != len(values) {
+        t.Fatalf("expected the repeated key as a slice, got %#v exists=%v", values, exists)
+    }
+
+    if true == parameterBag.Has("empty") {
+        t.Fatalf("expected a key with no values to stay out of the bag")
+    }
+}
+
+func TestBagString_NonStringScalarReportsAbsentAndFallsBackToDefault(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("port", 9000)
+
+    _, exists := String(parameterBag, "port")
+    if true == exists {
+        t.Fatalf("expected a non-string scalar to report absent, not present-but-empty")
+    }
+
+    if "8080" != StringOrDefault(parameterBag, "port", "8080") {
+        t.Fatalf("expected StringOrDefault to substitute the default for a non-string value")
+    }
+
+    if true == HasNonEmptyString(parameterBag, "port") {
+        t.Fatalf("expected HasNonEmptyString to report false for a non-string value")
     }
 }

@@ -3,7 +3,9 @@ package security
 import (
     "github.com/precision-soft/melody/v3/event"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -26,7 +28,9 @@ func (instance *ResolverTokenSource) Name() string {
 
 func (instance *ResolverTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     token := instance.resolver(request)
-    if nil == token {
+
+    /* the resolver is the application's function, and a nil pointer of its own token type reaches here as a non-nil interface: read as a live token it is published into the security context, where the first Roles() call panics */
+    if true == internal.IsNilInterface(token) {
         return NewAnonymousToken(), nil
     }
 
@@ -62,14 +66,22 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
                 NewLoginFailureEvent(request, err),
             )
             if nil != eventSecurityLoginFailureErr {
-                return nil, eventSecurityLoginFailureErr
+                /* keep the authentication error as the cause: it carries the status the client should see (a 401 for bad credentials), which a bare dispatch error would replace with a 500 while hiding the real reason from the log */
+                return nil, exception.NewError(
+                    "security login failure event dispatch failed",
+                    exceptioncontract.Context{
+                        "dispatchError": eventSecurityLoginFailureErr.Error(),
+                    },
+                    err,
+                )
             }
         }
 
         return nil, err
     }
 
-    if nil == token {
+    /* IsNilInterface and not `nil ==`: the token is the application's, so a nil pointer of its own token type is a non-nil interface a bare check hands back as a live token instead of falling through to the anonymous one */
+    if true == internal.IsNilInterface(token) {
         return NewAnonymousToken(), nil
     }
 

@@ -65,11 +65,11 @@ func logAuthorizationRefusalAtLevel(
     logContext := loggingcontract.Context{
         "reason": reason,
     }
-    if nil != request && nil != request.HttpRequest() {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
         logContext["method"] = request.HttpRequest().Method
         logContext["path"] = request.HttpRequest().URL.Path
     }
-    if nil != request && nil != request.RequestContext() {
+    if false == internal.IsNilInterface(request) && nil != request.RequestContext() {
         logContext["requestId"] = request.RequestContext().RequestId()
     }
 
@@ -114,7 +114,9 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            if nil == requestEvent || nil == requestEvent.Request() {
+            /* IsNilInterface on the request and not `nil ==`: a nil pointer of a request type is a non-nil
+            interface a bare check reads as a live request, and the path read below dereferences it. */
+            if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 
@@ -267,7 +269,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
                 logAuthorizationRefusal(runtimeInstance, requestEvent.Request(), "token_not_authenticated")
 
-                if nil != entryPoint {
+                /* IsNilInterface and not `nil !=`: the entry point comes through NewCompiledFirewall unvalidated, so a typed nil of the application's own type is a non-nil interface this branch takes for a live entry point, and Start below dereferences it on the unauthenticated path */
+                if false == internal.IsNilInterface(entryPoint) {
                     response, startErr := entryPoint.Start(runtimeInstance, requestEvent.Request())
                     if nil != startErr {
                         exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), startErr)
@@ -281,8 +284,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                         return nil
                     }
 
-                    /* an entry point that produced no response must not let the request through: fall through to the fail-closed 401 rather than writing a nil response the kernel reads as "no decision" */
-                    if nil != response {
+                    /* an entry point that produced no response must not let the request through: fall through to the fail-closed 401 rather than writing a nil response the kernel reads as "no decision". IsNilInterface and not `nil !=`: the entry point is the application's, so a typed nil of its own response type is a non-nil interface a bare check would carry through, and SetResponse normalizes it back to the nil that lets the request past authentication. */
+                    if false == internal.IsNilInterface(response) {
                         requestEvent.SetResponse(response)
                         return nil
                     }
@@ -343,9 +346,11 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 refusalContext["matchedRule"] = matchedRule.PathPrefix()
             }
 
-            if nil != accessDeniedHandler {
+            /* IsNilInterface and not `nil !=`: it arrives through NewCompiledFirewall unvalidated, so a typed nil is a non-nil interface this branch takes for a live handler and Handle dereferences it on the REFUSAL path, the least exercised one before production */
+            if false == internal.IsNilInterface(accessDeniedHandler) {
                 response, handlerErr := accessDeniedHandler.Handle(runtimeInstance, requestEvent.Request(), decisionErr)
-                if nil == handlerErr && nil != response {
+                /* IsNilInterface and not `nil !=`/`nil ==`: the handler is the application's, so a typed nil of its own response type is a non-nil interface a bare check reads as a live response — SetResponse then normalizes it to nil and the denial is served as a granted request. The nil-response branch below must catch the same typed nil to raise its refusal. */
+                if nil == handlerErr && false == internal.IsNilInterface(response) {
                     logAuthorizationRefusalAtLevel(
                         runtimeInstance,
                         requestEvent.Request(),
@@ -359,7 +364,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                     return nil
                 }
 
-                if nil == handlerErr && nil == response {
+                if nil == handlerErr && true == internal.IsNilInterface(response) {
                     refusalContext["deniedHandlerOutcome"] = "nil_response"
                     refusalLevel = loggingcontract.LevelError
 

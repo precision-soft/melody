@@ -8,9 +8,9 @@ models. Go-native equivalent of a Doctrine unit-of-work audit listener.
 `ChangeSet(before, after)` diffs two struct values by `bun` column name, recording only changed fields (relations and `bun.BaseModel` are skipped; the exported fields of other embedded structs are flattened in, matching how bun promotes their columns). Sensitive fields are recorded as changed but masked to `<redacted>`:
 
 - tag a field `audit:"redact"`, or
-- type it `encrypt.EncryptedString` (auto-redacted).
+- type it as any encrypted column type — `encrypt.EncryptedString`, `encrypt.EncryptedDeterministicString`, or the compartment-bound `encrypt.EncryptedStringFor[R]` / `EncryptedDeterministicStringFor[R]` forms — all recognised through the `encrypt.EncryptedColumn` marker interface (auto-redacted).
 
-Additional fields can be dropped globally or per entity via the `Registry` (see below).
+Additional fields can be dropped globally or per entity via the `Registry` (see below). Ignored fields are matched by **bun column name** (the first tag segment, or the Go field name where no tag names one) — the same name the change-set records.
 
 ## Recording
 
@@ -41,7 +41,9 @@ Pass `""` as the id to let the `Tracker` derive it from the model's bun primary 
 > is never committed without its audit record. The lower-level `Recorder.Record{Insert,Update,Delete}` API
 > is available when you already hold before/after yourself; wrap the context in `audit.WithDatabase(ctx, tx)`
 > to have those calls write the audit entry through your own unit-of-work transaction, keeping it atomic
-> with the data change.
+> with the data change. The two doors are **alternatives**: a `Tracker` refuses a context that carries a
+> caller-made `WithDatabase` binding, because running its own transaction inside yours does not compose —
+> it deadlocks the pool — and the refusal names the `Recorder` path to take instead.
 
 ### Actor
 
@@ -57,9 +59,11 @@ recorder = recorder.WithLogger(logger) // dead-letter: entries that fail to stor
 ```
 
 - `NewBunStorage(db)` — rows in an audit table (default).
-- `NewFileStorage(path)` — JSON-lines append (fsynced per batch).
-- `NewAsyncStorage(delegate, bufferSize)` — wraps any of the above to persist on a background worker so an audited write never blocks the request path; overflow/backend failures dead-letter to the logger and `Close` drains the queue. Wrap a pool-backed store (not a request transaction).
+- `NewFileStorage(path)` — JSON-lines append (fsynced per batch); a context already cancelled is refused before the file is opened.
+- `NewAsyncStorage(delegate, bufferSize)` — wraps any of the above to persist on a background worker so an audited write never waits for the delegate. An entry the queue cannot take — the buffer is full, or the storage is closed — is dead-lettered and reported to the caller as `ErrAsyncStorageQueueFull` or `ErrAsyncStorageClosed`; a save the worker could not complete is dead-lettered on the worker. Dead-letters go to the emergency logger until `WithLogger` installs the application's, so a lost entry is journaled in every assembly; the `Dropped()`/`Failed()` counters keep the tally. A save whose context carries a database binding — a `Tracker`'s unit of work, or a `WithDatabase` caller — goes through the delegate **synchronously**, so the atomicity promise above survives the async wrapper; only the unbound path is queued. `Close` drains the queue under a five-second grace, then cancels the worker's context: a delegate that reads it aborts the wedged save and the remainder is dead-lettered, and one that does not — a write parked in a syscall, a custom `Storage` that ignores its context — is abandoned after a second grace, with `Close` reporting how many entries stayed behind it.
 - any custom `Storage` implementation.
+
+A recorder built by hand over an `AsyncStorage` should use `NewRecorderOwningStorage`, whose `Close` closes the storage — the drain goroutine ends nowhere else. The default `NewRecorderWithStorage` does **not** own the storage: on the container path both are registered services and the container closes each one itself.
 
 > Table names registered via `NewRegistry`/`Registry.Register` must be plain SQL identifiers
 > (`^[A-Za-z_][A-Za-z0-9_]*$`) — they flow unquoted through `ModelTableExpr` into DDL/DML, so an invalid

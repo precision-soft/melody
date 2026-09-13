@@ -1,10 +1,12 @@
 package repository
 
 import (
+    "context"
     "time"
 
     "github.com/precision-soft/melody/.example/entity"
     "github.com/precision-soft/melody/.example/security"
+    "github.com/uptrace/bun"
 )
 
 /* The catalogue the example opens with. Both implementations start from it: the in-memory one holds it for the life of the process, and the database-backed one writes it once into an empty table, so the application shows the same nomenclature whichever way it was configured. */
@@ -93,4 +95,29 @@ func seedUserList() []*entity.User {
         entity.NewUser("user-2", "editor", security.MustHashPassword("editor"), []string{entity.RoleUser, entity.RoleEditor}),
         entity.NewUser("user-3", "admin", security.MustHashPassword("admin"), []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin}),
     }
+}
+
+/* SeedAll writes the opening state of every nomenclature this application ships with, over a database that
+   has just been brought to the schema. It is the door example:db:reset uses, and it does exactly what the
+   repository providers do at first resolution — the same seedIfEmpty over the same four repositories and
+   the same seed lists above — because a reset has to leave the application in the state a fresh volume
+   would be in, not in a second, hand-written version of it.
+
+   Each of the four is a no-op over a table that already holds rows, so calling this over a database that
+   was not reset changes nothing. */
+func SeedAll(ctx context.Context, database *bun.DB) error {
+    seedList := []func(ctx context.Context) error{
+        NewBunCategoryRepository(database).seedIfEmpty,
+        NewBunCurrencyRepository(database).seedIfEmpty,
+        NewBunProductRepository(database).seedIfEmpty,
+        NewBunUserRepository(database).seedIfEmpty,
+    }
+
+    for _, seed := range seedList {
+        if seedErr := seed(ctx); nil != seedErr {
+            return seedErr
+        }
+    }
+
+    return nil
 }

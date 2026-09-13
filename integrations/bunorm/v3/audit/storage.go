@@ -22,18 +22,17 @@ type boundDatabase struct {
     origin *bun.DB
 }
 
-/* WithDatabase binds a database/transaction handle onto the context so a Recorder's Record{Insert,
-   Update,Delete} writes its entry through it — typically the caller's already-open transaction — keeping
-   the audit entry atomic with the data change without forcing the write through the Tracker. A caller
-   that runs its own write inside a unit-of-work transaction records with WithDatabase(ctx, tx); the
-   binding is honoured unconditionally, so it is the caller's statement that the handle can carry the
-   audit rows. */
+/* WithDatabase binds a database/transaction handle onto the context so a Recorder's Record{Insert, Update,Delete} writes its entry through it — typically the caller's already-open transaction — keeping the audit entry atomic with the data change without forcing the write through the Tracker. A caller that runs its own write inside a unit-of-work transaction records with WithDatabase(ctx, tx); the binding is honoured unconditionally, so it is the caller's statement that the handle can carry the audit rows. */
 func WithDatabase(ctx context.Context, database bun.IDB) context.Context {
+    /* a nil handle — typed or bare — is a wiring error, and bound it would either be ignored in silence (losing the atomicity the caller asked for) or dereferenced inside the caller's own transaction; it is refused where it is written */
+    if true == isNilInterface(database) {
+        exception.Panic(exception.NewError("audit context database handle is nil", nil, nil))
+    }
+
     return context.WithValue(ctx, databaseContextKey{}, &boundDatabase{handle: database})
 }
 
-/* withTransactionForDatabase is the tracker-side binding: it remembers which database the transaction
-   belongs to, so a storage writing elsewhere keeps its own handle. */
+/* withTransactionForDatabase is the tracker-side binding: it remembers which database the transaction belongs to, so a storage writing elsewhere keeps its own handle. */
 func withTransactionForDatabase(ctx context.Context, handle bun.IDB, origin *bun.DB) context.Context {
     return context.WithValue(ctx, databaseContextKey{}, &boundDatabase{handle: handle, origin: origin})
 }
@@ -72,8 +71,9 @@ func (instance *BunStorage) Save(ctx context.Context, table string, entries ...E
         return nil
     }
 
-    if "" == table {
-        table = DefaultTable
+    /* Save is a public door and the table flows unquoted through ModelTableExpr as raw SQL: the Registry validates the names IT hands out, but a direct caller bypasses the Registry entirely, so the same grammar is enforced here — as an error rather than a panic, because this is the request path. The empty table is refused with the rest: silently substituting the default hid the caller that forgot which table it was writing. */
+    if false == auditTableNamePattern.MatchString(table) {
+        return exception.NewError("audit table name is not a valid identifier", map[string]any{"table": table}, nil)
     }
 
     rows := make([]Entry, len(entries))
@@ -107,9 +107,14 @@ type fileRecord struct {
     Entry Entry  `json:"entry"`
 }
 
+/* Save appends the entries as json lines and syncs the file once per batch. A context already cancelled is refused before the file is opened, the reading the database storage gets from its driver: an AsyncStorage that cancels its worker after the drain grace relies on the delegate to give the remaining entries back as dead-letters, and this one used to write every one of them regardless. An open or write already parked in the kernel — a fifo with no reader, a hung network mount — is not interrupted by this; nothing in the process can do that. */
 func (instance *FileStorage) Save(ctx context.Context, table string, entries ...Entry) error {
     if 0 == len(entries) {
         return nil
+    }
+
+    if contextErr := ctx.Err(); nil != contextErr {
+        return exception.NewError("could not append to the audit file, the context is done", map[string]any{"path": instance.path}, contextErr)
     }
 
     instance.mutex.Lock()

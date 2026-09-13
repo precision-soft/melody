@@ -41,3 +41,16 @@ func TestRequiredListenerSkippedError_AnOrdinaryFailureDoesNotAssertToIt(t *test
         t.Fatalf("expected an ordinary listener failure to stay out of this class")
     }
 }
+
+/* the zero value is constructible outside the constructors that always set the field, and the http kernel reaches this type by assertion and then renders it: dereferencing there replaced a refused request with a dead process. The sibling this type is shaped after answers both questions the same way. */
+func TestRequiredListenerSkippedError_TheZeroValueAnswersInsteadOfDereferencing(t *testing.T) {
+    zeroValue := &RequiredListenerSkippedError{}
+
+    if "" == zeroValue.Error() {
+        t.Fatalf("expected the zero value to answer with a message")
+    }
+
+    if nil != zeroValue.Unwrap() {
+        t.Fatalf("expected the zero value to unwrap to a real nil, got %#v", zeroValue.Unwrap())
+    }
+}

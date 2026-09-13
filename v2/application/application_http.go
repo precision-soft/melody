@@ -65,10 +65,7 @@ func (instance *Application) RegisterHttpMiddlewareFactories(
     instance.httpMiddlewares.UseFactories(factories...)
 }
 
-/* errorHandlerReporter is the door through which the composition root asks a kernel whether the
-application installed its own error handler — a Has door like the logger's, so a replacement kernel
-that does not implement it keeps the framework exception listener unconditionally, exactly the
-behavior it has today. */
+/* errorHandlerReporter is the door through which the composition root asks a kernel whether the application installed its own error handler — a Has door like the logger's, so a replacement kernel that does not implement it keeps the framework exception listener unconditionally, exactly the behavior it has today. */
 type errorHandlerReporter interface {
     HasErrorHandler() bool
 }
@@ -82,17 +79,12 @@ func kernelHasErrorHandler(httpKernel httpcontract.Kernel) bool {
     return reporter.HasErrorHandler()
 }
 
-/* openRequestScopeReporter is the door through which the shutdown asks a kernel how many requests are
-still inside it. It sits beside the contract rather than in it, like the error-handler door above: a
-replacement kernel that cannot answer is not interrogated, and the shutdown reports exactly what it
-did before. */
+/* openRequestScopeReporter is the door through which the shutdown asks a kernel how many requests are still inside it. It sits beside the contract rather than in it, like the error-handler door above: a replacement kernel that cannot answer is not interrogated, and the shutdown reports exactly what it did before. */
 type openRequestScopeReporter interface {
     OpenRequestScopes() int64
 }
 
-/* openRequestScopeCount answers the number of request scopes still open, and -1 for a kernel that cannot
-be asked — which is not zero: zero is the answer "everything drained", and handing that back for a kernel
-that never counted would report a drain nobody measured. */
+/* openRequestScopeCount answers the number of request scopes still open, and -1 for a kernel that cannot be asked — which is not zero: zero is the answer "everything drained", and handing that back for a kernel that never counted would report a drain nobody measured. */
 func openRequestScopeCount(httpKernel httpcontract.Kernel) int64 {
     reporter, ok := httpKernel.(openRequestScopeReporter)
     if false == ok {
@@ -110,11 +102,7 @@ func (instance *Application) bootHttp() {
     }
 }
 
-/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot, in every
-process shape: the listeners are inert in a console that never dispatches a kernel event, and a
-dispatcher inspected there answers with the same set the serving process runs — the introspection
-command used to report an empty dispatcher for a correctly wired application. The conditions are
-boot-final by contract: an error handler is installed by boot, and debug mode is configuration. */
+/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot, in every process shape: the listeners are inert in a console that never dispatches a kernel event, and a dispatcher inspected there answers with the same set the serving process runs — the introspection command used to report an empty dispatcher for a correctly wired application. Debug mode is configuration, so those conditions are boot-final; the exception listener's is not, and an http process makes it where serving begins instead. */
 func (instance *Application) registerKernelHttpListeners() {
     eventDispatcher := instance.kernel.EventDispatcher()
 
@@ -125,19 +113,29 @@ func (instance *Application) registerKernelHttpListeners() {
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
 
-    /* the framework exception listener answers every kernel.exception dispatch, so with it
-       registered an error handler the application installed at boot could never run — the kernel
-       consults the handler only when the dispatch produced no response. A handler installed by boot
-       therefore takes the listener's place; without one the listener renders exactly as before. */
-    if false == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
-        http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
+    /* a console never reaches runHttp, so it decides here: its dispatcher has to show the set a serving process runs, which is what the introspection command reads. An http process defers the one decision that is not boot-final. */
+    if config.ModeHttp != instance.runtimeFlags.Mode() {
+        instance.registerKernelExceptionListener()
     }
+}
+
+/* registerKernelExceptionListener installs the framework's exception renderer unless the application installed an error handler of its own. The framework listener answers every kernel.exception dispatch, and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely; without a handler the listener renders exactly as before.
+
+   An http process makes this decision where serving begins, not at the end of Boot. SetErrorHandler stays open on the kernel, so a handler installed after Application.Boot returned and before Run — the one window a composition root has left — was accepted by the kernel and then never consulted, the door reading as installed while rendering nothing. */
+func (instance *Application) registerKernelExceptionListener() {
+    if true == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
+        return
+    }
+
+    http.RegisterKernelExceptionListener(instance.kernel.EventDispatcher(), instance.kernel.DebugMode())
 }
 
 func (instance *Application) runHttp(
     ctx context.Context,
 ) error {
     configuration := instance.configuration
+
+    instance.registerKernelExceptionListener()
 
     httpKernel := instance.kernel.HttpKernel()
 
@@ -179,7 +177,7 @@ func (instance *Application) runHttp(
 
 /* awaitHttpServerEnd waits for whichever ends the serving first: the cancelled context or the server's own failure. The serve error is read even on the shutdown branch — when the listen fails in the same instant the context is cancelled, the select's choice of branch is arbitrary, and taking the shutdown branch used to discard the real failure, so a process that never served a byte reported a clean shutdown. Shutdown closes the listeners before it returns, so the serve goroutine has already been released and the receive is bounded. A shutdown that outlives its configured budget surfaces the deadline error and the process exits non-zero on purpose: the overrun is the operator's signal that draining hung, not a success to smooth over.
 
-Shutdown answers for the connections the server still owns, and only for those: a handler that hijacked its connection took it out of the server's accounting, so Shutdown returns immediately and reports success while that handler runs on. The request scopes the kernel opened are what remains measurable about them, and they are drained under the same budget for the same reason the budget exists. */
+   Shutdown answers for the connections the server still owns, and only for those: a handler that hijacked its connection took it out of the server's accounting, so Shutdown returns immediately and reports success while that handler runs on. The request scopes the kernel opened are what remains measurable about them, and they are drained under the same budget for the same reason the budget exists. */
 func awaitHttpServerEnd(
     ctx context.Context,
     httpServer *nethttp.Server,
@@ -195,6 +193,9 @@ func awaitHttpServerEnd(
 
         shutdownErr := httpServer.Shutdown(shutdownContext)
 
+        /* every phase of the wind-down runs, and each failing one contributes its cause. Returning on the first skipped the phases behind it, and the drain is the one that matters there: a hijacked connection is what makes Shutdown report a budget overrun in the first place, so the wait written for it was the wait that never ran, and the application container closed under a handler still on the wire. */
+        runErrs := make([]error, 0, 3)
+
         serveErr := <-errorChannel
         if nil != serveErr && false == errors.Is(serveErr, nethttp.ErrServerClosed) {
             logger.Error(
@@ -202,7 +203,7 @@ func awaitHttpServerEnd(
                 exception.LogContext(serveErr),
             )
 
-            return markHttpRunErrorLogged(serveErr)
+            runErrs = append(runErrs, serveErr)
         }
 
         if nil != shutdownErr {
@@ -211,15 +212,15 @@ func awaitHttpServerEnd(
                 exception.LogContext(shutdownErr),
             )
 
-            return markHttpRunErrorLogged(shutdownErr)
+            runErrs = append(runErrs, shutdownErr)
         }
 
         drainErr := awaitOpenRequestScopes(shutdownContext, httpKernel, logger)
         if nil != drainErr {
-            return markHttpRunErrorLogged(drainErr)
+            runErrs = append(runErrs, drainErr)
         }
 
-        return nil
+        return markHttpWindDownFailure(runErrs)
 
     case err := <-errorChannel:
         if nil != err && false == errors.Is(err, nethttp.ErrServerClosed) {
@@ -240,7 +241,7 @@ const awaitOpenRequestScopesInterval = 20 * time.Millisecond
 
 /* awaitOpenRequestScopes holds the exit until every request scope the kernel opened has closed, or until the shutdown budget the caller already opened runs out. It is what makes the stop melody reports the stop it obtained: Shutdown drains the connections the server owns and returns nil for a hijacked one, so a websocket still being served — its request scope, its session, everything it holds — used to sit under a container that was closing while the process announced a clean stop and exited zero.
 
-An expiry is an error rather than a warning, for the reason the budget overrun above is one: a drain that did not finish is the operator's signal, and the process exiting non-zero is how they receive it. A kernel that cannot be asked is not waited on at all — the answer -1 means "no measurement", and waiting on a number nobody maintains would hang every shutdown of a replacement kernel. */
+   An expiry is an error rather than a warning, for the reason the budget overrun above is one: a drain that did not finish is the operator's signal, and the process exiting non-zero is how they receive it. A kernel that cannot be asked is not waited on at all — the answer -1 means "no measurement", and waiting on a number nobody maintains would hang every shutdown of a replacement kernel. */
 func awaitOpenRequestScopes(
     ctx context.Context,
     httpKernel httpcontract.Kernel,
@@ -279,6 +280,19 @@ func awaitOpenRequestScopes(
     }
 }
 
+/* markHttpWindDownFailure answers the wind-down with the causes its phases reported. A lone cause travels exactly as it did when the first failing phase returned it, so nothing about a single failure's rendering moves; two or more are joined, because each one is independently actionable and picking a winner would drop the other. */
+func markHttpWindDownFailure(runErrs []error) error {
+    if 0 == len(runErrs) {
+        return nil
+    }
+
+    if 1 == len(runErrs) {
+        return markHttpRunErrorLogged(runErrs[0])
+    }
+
+    return markHttpRunErrorLogged(errors.Join(runErrs...))
+}
+
 /* markHttpRunErrorLogged wraps a failure runHttp already wrote to the log and marks it so: the caller turns it into the process-ending panic, and without the mark the exit handler would render the same failure a second time. */
 func markHttpRunErrorLogged(err error) error {
     wrappedErr := exception.FromError(err)
@@ -302,9 +316,9 @@ func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingco
 
 /* warnOnUnboundedDefaultSessionStorage reports, once at boot, the one combination in which sessions grow without anything ever reclaiming them: the storage melody wired itself, which lives in this process and which nothing outside it can expire, together with a lifetime of zero, which asks it to keep every entry forever.
 
-Either half alone is a deliberate and reasonable choice. A shared storage with no expiry is the operator's to prune, and the in-memory one with a lifetime set reclaims on its own. Together they are neither, and the growth does not come from anything the application wrote: melody mints a session for every request that arrives without a session cookie, so a single write on a public path — a csrf token, a flash message, a locale — turns every such request into a permanent entry, and an unauthenticated caller decides how many arrive.
+   Either half alone is a deliberate and reasonable choice. A shared storage with no expiry is the operator's to prune, and the in-memory one with a lifetime set reclaims on its own. Together they are neither, and the growth does not come from anything the application wrote: melody mints a session for every request that arrives without a session cookie, so a single write on a public path — a csrf token, a flash message, a locale — turns every such request into a permanent entry, and an unauthenticated caller decides how many arrive.
 
-It is raised from the http path alone, the way the cache warning is: a command builds its map, runs and takes it away with it. */
+   It is raised from the http path alone, the way the cache warning is: a command builds its map, runs and takes it away with it. */
 func (instance *Application) warnOnUnboundedDefaultSessionStorage(logger loggingcontract.Logger) {
     if false == instance.defaultInMemorySessionStorage {
         return

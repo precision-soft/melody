@@ -86,12 +86,18 @@ func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message an
 
 /* ClaimDueMessages atomically claims a batch of due rows so that concurrent relay instances — even without a shared Locker — never grab the same row. It requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). It selects due rows FOR UPDATE SKIP LOCKED inside a transaction (so a row another instance is claiming is skipped, not blocked on) and flips them to the in-flight state with available_at pushed out by the visibility timeout. A claimed row is therefore invisible to every other claimer until either the relay resolves it (sent/rescheduled/dead) or the visibility timeout lapses — which re-surfaces rows an instance claimed but crashed before resolving. A due row is one that is pending, or already in-flight but past its visibility deadline. Claiming does NOT touch delivery_attempts — that counter is advanced per row when the relay actually attempts delivery (RecordDeliveryAttempt), so a row the relay never reaches (a batch-mate behind a crashing row) is not charged a delivery attempt it never received. */
 func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+    limit, limitErr := claimLimit(limit)
+    if nil != limitErr {
+        return nil, limitErr
+    }
+
     claimToken, tokenErr := newClaimToken()
     if nil != tokenErr {
         return nil, tokenErr
     }
 
-    rows := make([]Message, 0, limit)
+    /* the limit is only an allocation HINT here, capped on its own: a claim within the clamp can still ask for a hundred thousand rows, and the query's own LIMIT below carries the clamped value. */
+    rows := make([]Message, 0, min(limit, 1024))
 
     claimErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         now := time.Now()
@@ -145,6 +151,19 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
     }
 
     return pending, nil
+}
+
+/* claimLimit holds a claim's limit to what the query can carry: bun writes no LIMIT clause for a non-positive value and narrows the value to int32 first, so zero, a negative and a value past the int32 range — where the narrowing wraps to zero or below — all claimed the whole table through this public door, while the relay above it clamps its own BatchSize. A non-positive limit is refused by name, a caller asking for no rows being a defect of the call, and a value past maximumBatchSize is cut to it, the clamp the relay applies. */
+func claimLimit(limit int) (int, error) {
+    if 0 >= limit {
+        return 0, exception.NewError("outbox claim limit must be positive", map[string]any{"limit": limit}, nil)
+    }
+
+    if maximumBatchSize < limit {
+        return maximumBatchSize, nil
+    }
+
+    return limit, nil
 }
 
 /* newClaimToken returns a fresh, unguessable fencing token for one claim of due messages. Every claim gets a distinct token so that a row re-claimed after its visibility lapsed no longer matches the token a stale run still holds. */

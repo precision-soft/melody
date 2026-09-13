@@ -71,12 +71,16 @@ func (instance *ProductService) List() ([]*entity.Product, error) {
 }
 
 func (instance *ProductService) FindById(id string) (*entity.Product, bool, error) {
+    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyProductById(id)
 
-    cached, rememberErr := cache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             product, found, findErr := instance.productRepository.FindById(ctx, id)
             if nil != findErr {
@@ -89,7 +93,6 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
 
             return product, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr

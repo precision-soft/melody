@@ -6,6 +6,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/security"
     melodyapplication "github.com/precision-soft/melody/v3/application"
     melodysecurity "github.com/precision-soft/melody/v3/security"
+    melodyaccesscontrol "github.com/precision-soft/melody/v3/security/accesscontrol"
     melodysecurityconfig "github.com/precision-soft/melody/v3/security/config"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -13,38 +14,111 @@ import (
 func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) {
     accessControl := melodysecurity.NewAccessControl(
         /* the index file is the same resource the root serves, so it carries the same policy: MELODY_STATIC_INDEX_FILE makes "/" and "/index.html" two spellings of one page, and anchoring the public rule at "^/$" left the explicit spelling to the ROLE_USER catch-all below */
-        melodysecurity.NewAccessControlRegexRule("^/$", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/index\\.html$", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/login", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/logout", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/routes", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/assets", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/favicon", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/i18n", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/events", melodysecuritycontract.AttributePublicAccess),
+        melodyaccesscontrol.NewRegexRule("^/$", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/index\\.html$", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/login", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/logout", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/routes", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/assets", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/favicon", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/i18n", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
 
-        melodysecurity.NewAccessControlRegexRule("^/health", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/metrics", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/openapi.json", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/ws", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/platform/check", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/messagebus/dispatch", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/encrypt/roundtrip", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/twofactor", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/outbox", melodysecuritycontract.AttributePublicAccess),
-        melodysecurity.NewAccessControlRegexRule("^/storage", melodysecuritycontract.AttributePublicAccess),
+        melodyaccesscontrol.NewRegexRule("^/health", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/metrics", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/openapi.json", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        /* the platform check takes the distributed lock for its whole timeout and runs three object-storage operations per call, so it carries the requirement every other reader of the example carries; public, an anonymous caller spent the lock and the bucket's request budget for everyone at the cost of one GET */
+        melodyaccesscontrol.NewRegexRule("^/platform/check", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
+        /* a dispatch sends one mail through the transport per call, a write to a backend the process does not own, so it is the write role; public, an anonymous POST was a mail sent on the example's behalf */
+        melodyaccesscontrol.NewRegexRule("^/messagebus/dispatch", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/encrypt/roundtrip", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        /* the enrollment door binds a second factor to an account and hands back the secret that satisfies it, and the verification door reads that secret's answer back; public, both of them named the account in a query parameter, so anyone could bind a factor they held to any identifier they liked — the administrator's included — and the account was then stuck with it, because the insert refused a second enrollment. Behind an authenticated role, the identifier is the caller's own token and there is nothing left to name. */
+        melodyaccesscontrol.NewRegexRule("^/twofactor", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
+        /* the outbox doors insert a caller-chosen row into the catalogue database and make the process publish the pending rows on the broker, and the storage doors store the request body under any key of the bucket and read any object back: writes to three backends, behind the write role the catalogue writes carry. The status read shares the prefix and therefore the role — one rule per prefix, so a door added under it inherits the requirement rather than the catch-all. Public, all of them, an anonymous client wrote through the example into every backend it was wired to. */
+        melodyaccesscontrol.NewRegexRule("^/outbox", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewRegexRule("^/storage", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
 
-        melodysecurity.NewAccessControlRule(route.ProductsPrefix, entity.RoleEditor),
-        melodysecurity.NewAccessControlRule(route.CategoriesPrefix, entity.RoleUser),
-        melodysecurity.NewAccessControlRule(route.CurrenciesPrefix, entity.RoleUser),
-        melodysecurity.NewAccessControlRule(route.UsersPrefix, entity.RoleAdmin),
-        melodysecurity.NewAccessControlRule(route.AccessTokenRevokeUserPattern, entity.RoleAdmin),
-        melodysecurity.NewAccessControlRule(route.AccessTokenPrefix, entity.RoleEditor),
-        melodysecurity.NewAccessControlRule(route.DevicePrefix, entity.RoleUser),
-        melodysecurity.NewAccessControlRule(route.SecurePrefix, entity.RoleUser),
-        melodysecurity.NewAccessControlRule(route.InternalPrefix, internalCallerRole),
+        /* publishing injects a frame into every stream open across the CLUSTER, so it is the write role the catalog writes themselves carry; streaming carries the catalog writes made behind those roles, so it is at least an authenticated reader, and the handler gates the topic on top of that. Both used to sit under a public "^/events" rule. */
+        melodyaccesscontrol.NewSegmentPrefixRule(route.EventsPublishPattern, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.EventsStreamPattern, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
 
-        melodysecurity.NewAccessControlRegexRule("^/", entity.RoleUser),
+        /* the websocket door bridges onto the same hub topic the SSE stream gates behind RoleEditor — the catalog topic, carrying every product and user write — and it has no per-topic gate of its own, so the route carries the topic's whole requirement. Public, an anonymous client watched the RoleEditor-gated mutation feed go by. */
+        melodyaccesscontrol.NewRegexRule("^/ws", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+
+        melodyaccesscontrol.NewSegmentPrefixRule(route.ProductsPrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.CategoriesPrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.CurrenciesPrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
+        /* the archive of catalogue readings carries the same requirement the catalogue listings do: a reading is the catalogue counted, so anyone who may not read the nomenclature may not read its history either. It is stated rather than left to the catch-all below, because a rule inherited by accident is one nobody re-reads when the catch-all moves. */
+        melodyaccesscontrol.NewSegmentPrefixRule(route.ReportsPrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.UsersPrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleAdmin},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.AccessTokenRevokeUserPattern, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleAdmin},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.AccessTokenPrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.DevicePrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.SecurePrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.InternalPrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{internalCallerRole},
+        }),
+
+        melodyaccesscontrol.NewRegexRule("^/", melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleUser},
+        }),
     )
 
     roleHierarchy := melodysecurity.NewRoleHierarchy(
@@ -72,8 +146,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
 
     override := melodysecurityconfig.NewFirewallOverrideConfiguration()
 
-    /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies
-       the signed envelope a caller service sends and authenticates the call as that service principal. */
+    /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies the signed envelope a caller service sends and authenticates the call as that service principal. */
     builder.AddStatelessFirewall(
         "internal",
         melodysecurity.NewPathPrefixMatcher(route.InternalPrefix),
@@ -87,9 +160,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
     )
 
-    /* the token firewall's bearer source is decorated with switch-user impersonation: an admin holding
-       ROLE_ALLOWED_TO_SWITCH can act as another user by sending X-Switch-User, and the resulting token
-       authorizes as the target while keeping the admin readable (and auditable) as the impersonator. */
+    /* the token firewall's bearer source is decorated with switch-user impersonation: an admin holding ROLE_ALLOWED_TO_SWITCH can act as another user by sending X-Switch-User, and the resulting token authorizes as the target while keeping the admin readable (and auditable) as the impersonator. */
     builder.AddStatelessFirewall(
         "token",
         melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),

@@ -3,6 +3,8 @@ package http
 import (
     nethttp "net/http"
     "testing"
+
+    "github.com/precision-soft/melody/v2/internal/testhelper"
 )
 
 func TestSetCookie_AddsHeader(t *testing.T) {
@@ -57,16 +59,13 @@ func TestDeleteCookie_SetsDefaultPath(t *testing.T) {
     }
 }
 
+/* the sibling door refuses the same empty name three lines above with a message of its own, so an unqualified recover reads that refusal as this one; the name of the door that refused is what separates them. */
 func TestDeleteCookie_PanicsWhenNameIsEmpty(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
     response := EmptyResponse(200)
 
-    DeleteCookie(response, "", "/")
+    testhelper.AssertPanicsWithError(t, func() {
+        DeleteCookie(response, "", "/")
+    }, "the cookie name is empty and can not be deleted")
 }
 
 func containsString(value string, needle string) bool {
@@ -87,8 +86,7 @@ func indexOf(value string, needle string) int {
     return -1
 }
 
-/* Nil headers are a state the contract permits — SetHeaders stores the nil it is given — and every other
-consumer of Headers() in the chain checks for it before writing. */
+/* Nil headers are a state the contract permits — SetHeaders stores the nil it is given — and every other consumer of Headers() in the chain checks for it before writing. */
 func TestSetCookie_AllocatesTheHeaderMapWhenTheResponseHasNone(t *testing.T) {
     response := EmptyResponse(200)
     response.SetHeaders(nil)

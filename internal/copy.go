@@ -35,9 +35,7 @@ func CopyAnySlice(source []any) []any {
     return copyAnySliceAtDepth(source, 0, map[visitedKey]any{})
 }
 
-/* CopyAnyValue copies one value at the same depth CopyAnyMap copies a whole map: maps and slices
-are descended into, everything else — a pointer, a struct, a channel — is returned as-is, which is
-the documented boundary of what a copied container may safely carry. */
+/* CopyAnyValue copies one value at the same depth CopyAnyMap copies a whole map: maps and slices are descended into, everything else — a pointer, a struct, a channel — is returned as-is, which is the documented boundary of what a copied container may safely carry. */
 func CopyAnyValue(value any) any {
     return copyAnyValueAtDepth(value, 0, map[visitedKey]any{})
 }

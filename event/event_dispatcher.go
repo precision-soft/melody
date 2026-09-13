@@ -100,7 +100,7 @@ func (instance *EventDispatcher) AddListener(
 
 /* MarkListenerRequired flags the registered listener so that if another listener stops event propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused rather than ignored: a mark that lands nowhere leaves the guarantee unarmed while reporting that it was applied, and the caller has no way to tell.
 
-The mark necessarily follows the registration it takes as its argument, so a dispatch running between the two steps sees the listener unmarked and a stop in that window skips it without the error. Registration at boot — before anything dispatches — closes the window; a runtime registrar that needs the guarantee armed atomically must not dispatch the event until the mark is applied. */
+   The mark necessarily follows the registration it takes as its argument, so a dispatch running between the two steps sees the listener unmarked and a stop in that window skips it without the error. Registration at boot — before anything dispatches — closes the window; a runtime registrar that needs the guarantee armed atomically must not dispatch the event until the mark is applied. */
 func (instance *EventDispatcher) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
     instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
         entry.required = true
@@ -511,11 +511,12 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
             listenerName := listenerNameOf(entry.listener)
 
             /* a listener that fails ends the dispatch exactly as decisively as one that stops propagation: the listeners behind it — a required access-control listener among them — never ran. Returning the listener's own failure first would hide that, so the skip is reported ahead of it, and the failure travels as the cause on both branches: with the stop's own refusal where the listener also stopped propagation, with the abort refusal where the failure alone ended the dispatch — a listener that failed while also producing a response would otherwise have that response served with access control never consulted, and the failure returned unlogged would reach no log at all behind a causeless refusal. */
+            /* the opt-out is not read here: MarkListenerMaySkipRequiredListeners licenses a listener that knowingly short-circuits, which is what stopping propagation is, and a failure is not a short-circuit anyone chose. Read on this branch it granted the marked listener MORE than the stop it was written for — a listener that failed after setting a response had that response served with the required access-control listener never consulted, because the kernel tells the two cases apart by the TYPE of the error the dispatch returns. */
             requiredErr := refuseSkippedRequiredListeners(
                 eventName,
                 listenerList[listenerIndex+1:],
                 listenerName,
-                entry.maySkipRequiredListeners,
+                false,
             )
             if nil != requiredErr {
                 if true == eventValue.IsPropagationStopped() {
@@ -700,7 +701,13 @@ func (instance *EventDispatcher) callListenerSafely(
     return wrapperErr
 }
 
+/* the mark is read at the depth MarkLogged writes it, the way the same file reads it of a returned error and the way the recover helpers of the logging package read it of a panic payload. Asked of the recovered value alone, the question was answered only by a payload that carries the mark ITSELF: a listener that panicked with an error wrapping one whose producer had already logged it got a second record for the one failure. */
 func recoveredValueIsAlreadyLogged(recoveredValue any) bool {
+    recoveredErr, isError := recoveredValue.(error)
+    if true == isError && false == internal.IsNilInterface(recoveredErr) {
+        return exception.IsAlreadyLogged(recoveredErr)
+    }
+
     alreadyLogged, ok := recoveredValue.(exceptioncontract.AlreadyLogged)
     if false == ok || true == internal.IsNilInterface(alreadyLogged) {
         return false

@@ -40,7 +40,7 @@ func (instance *LocalStorage) Put(
         return keyErr
     }
 
-    /* @important the base directory is created lazily on first write; os.OpenRoot then pins it so every key operation is confined to it, with each path component checked against symlink escape */
+    /* the base directory is created lazily on first write; os.OpenRoot then pins it so every key operation is confined to it, with each path component checked against symlink escape */
     if mkdirErr := os.MkdirAll(instance.baseDirectory, 0o750); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
@@ -57,12 +57,12 @@ func (instance *LocalStorage) Put(
         }
     }
 
-    /* @important reject a key whose leaf is an existing symlink rather than replacing it through the rename below; os.Root never traverses the link so nothing escapes, but refusing keeps the backend's no-symlink contract explicit, matching the prior O_CREATE-on-Root behavior */
+    /* reject a key whose leaf is an existing symlink rather than replacing it through the rename below; os.Root never traverses the link so nothing escapes, but refusing keeps the backend's no-symlink contract explicit, matching the prior O_CREATE-on-Root behavior */
     if info, lstatErr := root.Lstat(relativeKey); nil == lstatErr && 0 != info.Mode()&os.ModeSymlink {
         return exception.NewError("storage key resolves to a symlink", map[string]any{"key": key}, nil)
     }
 
-    /* @important write to a temporary object first and rename it over the key only once it is fully flushed, so a failed or partial write never destroys or truncates a previously stored object; the rename is atomic within the pinned root, matching the awss3 backend's all-or-nothing Put */
+    /* write to a temporary object first and rename it over the key only once it is fully flushed, so a failed or partial write never destroys or truncates a previously stored object; the rename is atomic within the pinned root, matching the awss3 backend's all-or-nothing Put */
     tempKey, file, createErr := createStorageTempFile(root, relativeKey)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
@@ -72,7 +72,8 @@ func (instance *LocalStorage) Put(
     if nil != copyErr {
         _ = file.Close()
         _ = root.Remove(tempKey)
-        return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
+        /* "copy", not "write": io.Copy answers one error for both sides, and the likelier one on an upload streamed from a request body is the READER dying with the client — a message that blames the storage write sends the operator at the disk when the source connection failed; the cause names the side */
+        return exception.NewError("could not copy the payload into the storage object", map[string]any{"key": key}, copyErr)
     }
 
     if 0 <= size && written != size {
@@ -97,10 +98,66 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
     }
 
+    sweepStaleTempObjects(root, relativeKey)
+
     return nil
 }
 
-/* @important allocate a uniquely named temporary object in the same directory as the target so the final rename stays within the pinned root and on the same filesystem; O_EXCL guarantees we never clobber a concurrent writer's temp or the live key */
+/* storageTempStaleAge is how old a leftover temp object must be before a later Put sweeps it. The in-process error paths already clean their own temp; what they cannot clean is a crash mid-write (kill -9, oom), whose temp would otherwise sit in the data directory forever — no sweeper, no List to even notice it through, unbounded growth under a crash-looping uploader. An hour is safely beyond any live writer: an in-flight Put refreshes its temp's mtime with every write, so only a file nothing has touched for the whole hour is provably abandoned. */
+const storageTempStaleAge = 1 * time.Hour
+
+/* sweepStaleTempObjects removes abandoned temp objects for this key, opportunistically, after a successful Put. Best-effort by design: the Put already succeeded, the sweep changes nothing the caller observes, and a failure here will be retried by the next Put of the same key — while a hard error would fail a store that worked. */
+func sweepStaleTempObjects(root *os.Root, relativeKey string) {
+    directory := filepath.Dir(relativeKey)
+    prefix := filepath.Base(relativeKey) + ".tmp-"
+
+    directoryFile, openErr := root.Open(directory)
+    if nil != openErr {
+        return
+    }
+    defer directoryFile.Close()
+
+    names, readErr := directoryFile.Readdirnames(-1)
+    if nil != readErr {
+        return
+    }
+
+    for _, name := range names {
+        if false == strings.HasPrefix(name, prefix) || false == isStorageTempSuffix(name[len(prefix):]) {
+            continue
+        }
+
+        candidate := filepath.Join(directory, name)
+
+        info, statErr := root.Lstat(candidate)
+        if nil != statErr || false == info.Mode().IsRegular() {
+            continue
+        }
+
+        if storageTempStaleAge > time.Since(info.ModTime()) {
+            continue
+        }
+
+        _ = root.Remove(candidate)
+    }
+}
+
+/* isStorageTempSuffix matches exactly the sixteen lowercase hex characters createStorageTempFile appends, so a user object that merely resembles a temp name is never swept. */
+func isStorageTempSuffix(suffix string) bool {
+    if 16 != len(suffix) {
+        return false
+    }
+
+    for _, character := range suffix {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return true
+}
+
+/* allocate a uniquely named temporary object in the same directory as the target so the final rename stays within the pinned root and on the same filesystem; O_EXCL guarantees we never clobber a concurrent writer's temp or the live key */
 func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File, error) {
     directory := filepath.Dir(relativeKey)
     base := filepath.Base(relativeKey)
@@ -200,7 +257,7 @@ func (instance *LocalStorage) Exists(
     }
     defer root.Close()
 
-    /* @important Root.Stat cannot escape the base: a missing key reports absent, while a symlink pointing outside is rejected with an error that never leaks the external target (consistent with Get and Delete) */
+    /* Root.Stat cannot escape the base: a missing key reports absent, while a symlink pointing outside is rejected with an error that never leaks the external target (consistent with Get and Delete) */
     info, statErr := root.Stat(relativeKey)
     if nil == statErr {
         if true == info.IsDir() {
