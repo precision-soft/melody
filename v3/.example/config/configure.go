@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "time"
 
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
@@ -18,8 +19,9 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
-func Configure(app *melodyapplication.Application) {
-    moduleInstance := NewExampleModule(app.Configuration())
+/* Configure wires the application. The context is the one main handed the application — the signal context — because the module binds the database registry's lazy opens to it; the application does not publish its own. */
+func Configure(ctx context.Context, app *melodyapplication.Application) {
+    moduleInstance := NewExampleModule(ctx, app.Configuration())
 
     /* observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
     app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{
@@ -119,7 +121,7 @@ func Configure(app *melodyapplication.Application) {
 
         app.RegisterModule(melodyrueidiscache.NewModule(melodyrueidiscache.ModuleConfig{
             Client: moduleInstance.redisClient,
-            Prefix: redisCacheKeyPrefix,
+            Prefix: cacheKeyPrefix(),
             /* the backend's context-less doors run unbounded without this; a store that stops answering would hold a request-path read for good */
             BackendOptions: []melodyrueidiscache.BackendOption{
                 melodyrueidiscache.WithCommandTimeout(time.Second),

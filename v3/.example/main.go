@@ -18,7 +18,7 @@ func main() {
         embeddedPublicFiles,
     )
 
-    config.Configure(app)
+    config.Configure(ctx, app)
 
     /* the wiring is done, which is where the parallel teardown is armed: arming validates every declared teardown edge, so it needs the registrations. The boot has built services by then — the logger, the transports closer, whatever a module resolves while wiring — and arming walks those as the published memory they are, pointer words and layouts only; everything built from here on is walked where it is built.
 

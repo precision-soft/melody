@@ -2533,7 +2533,7 @@ func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
     }
 
     if 500*time.Millisecond < elapsed {
-        t.Fatalf("expected %d rings to drain within 100ms, took %s", ringCount, elapsed)
+        t.Fatalf("expected %d rings to drain within 500ms, took %s", ringCount, elapsed)
     }
 }
 

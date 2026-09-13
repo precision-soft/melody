@@ -17,8 +17,11 @@ import (
 )
 
 func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcontract.Kernel) {
-    eventDispatcher := kernelInstance.EventDispatcher()
+    instance.registerSubscribers(kernelInstance.EventDispatcher())
+}
 
+/* registerSubscribers installs the application's subscribers on the dispatcher; a door of its own so what the composition root INSTALLS can be read off a dispatcher, not only what each subscriber does once installed. */
+func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.EventDispatcher) {
     instance.registerRequiredRequestContextListener(eventDispatcher)
 
     /* the registration each call answers is deliberately discarded: these five are installed once at boot and live for the process, so nothing here ever removes them. An application that removes a subscriber at runtime must keep what AddSubscriber returns — the subscriber value is not accepted back. */
@@ -96,7 +99,7 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
         ))
     }
 
-    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetConfig(budget, instance.trustedProxyList()))
+    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetConfig(budget, instance.trustedProxyResolver))
 }
 
 /* requestBudgetConfig is the hourly budget as this example wires it. The client key is resolved through the
@@ -106,14 +109,14 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
    on a listener that runs ahead of authentication and therefore refuses them at the door; with a header
    believed from anywhere inside the deployment, the same listener let any neighbouring process pick the key
    it was charged to. */
-func requestBudgetConfig(budget int, trustedProxyList []string) *melodyhttpmiddleware.RateLimitConfig {
+func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver) *melodyhttpmiddleware.RateLimitConfig {
     rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
         melodyhttpmiddleware.NewFixedWindowLimiter(budget, time.Hour),
         nil,
         nil,
     )
 
-    rateLimitConfig.SetClientIpResolver(forwardedClientIpResolver(trustedProxyList))
+    rateLimitConfig.SetClientIpResolver(trustedProxyResolver.Resolve)
 
     return rateLimitConfig
 }

@@ -54,15 +54,15 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
     )
 }
 
-/* registerArchiveLockerService publishes the archive's locker, and only when an archive is wired: without one there is nothing to serialise and nothing to take a lock on, and the writer that would have used it is not registered either. It is resolved LAZILY through the archive handle's own service, so registering it costs no connection. */
+/* registerArchiveLockerService publishes the archive's locker. With an archive wired it is the advisory lock of the archive's own database, resolved LAZILY through the archive handle's own service so registering it costs no connection. Without one it is the in-process locker, the way the general locker falls back: the archive is then the in-process repository, and a writer that found no locker skipped the write on every run — an archive nobody could fill, whose history door always answered an empty list. One process is the whole population of an in-process archive, so the in-process lock is the exclusion it needs, and the same one the rest of the application already accepts. */
 func (instance *Module) registerArchiveLockerService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    if false == instance.archiveWired {
-        return
-    }
-
     registrar.RegisterService(
         persistence.ServiceArchiveLocker,
         func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
+            if false == instance.archiveWired {
+                return melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), nil
+            }
+
             database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceArchiveDatabase)
             if nil != resolveErr {
                 return nil, resolveErr

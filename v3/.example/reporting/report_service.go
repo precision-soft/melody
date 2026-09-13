@@ -11,11 +11,19 @@ import (
     "github.com/precision-soft/melody/v3/.example/service"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 /* catalogReadingCacheKey is where a reading is left for whoever asks next. The scheduled refresh writes it and every request reads it, which is the whole point: the request that finds a cold cache is the one that pays for the reading. */
 const catalogReadingCacheKey = "catalog.reading"
+
+/* the two counts inside the payload, named once for the writer and the reader alike */
+const (
+    catalogReadingProductCountField = "products="
+    catalogReadingJournalCountField = "journal="
+)
 
 /* catalogReadingRecordedAtField names the stamp inside the payload. The reading is one cached value, so the instant it was taken at travels inside that value rather than beside it: a second key would expire on its own schedule, and a reading whose stamp had lapsed would be served with the wrong age or with none. */
 const catalogReadingRecordedAtField = "recorded_at="
@@ -33,12 +41,12 @@ func (instance *ReportFormatter) Format(title string, count int) string {
     return fmt.Sprintf("%s: %d entries", title, count)
 }
 
+/* NewCatalogReportService takes everything a reading needs and NOT the archive. The archive is the second database, opened lazily at the first resolution of the repository that publishes it, and a constructor argument is resolved at construction: every consumer of this service — the daily app:info, the hourly refresh, the history door — paid the postgres open and the archive's migration set before it did anything, and with postgres down each paid the whole retry budget for a connection nothing on its path needed. Archive and RecentReadings resolve the repository when they are called, the way the exporter resolves its client, so a process that never touches the archive never dials it. */
 //melody:bind refreshInterval=app.reporting.refresh_interval
 func NewCatalogReportService(
     formatter *ReportFormatter,
     productService *service.ProductService,
     journalRepository repository.CatalogJournalRepository,
-    readingRepository repository.CatalogReadingRepository,
     cacheInstance melodycachecontract.Cache,
     clockInstance melodyclockcontract.Clock,
     catalogTitle string,
@@ -49,7 +57,6 @@ func NewCatalogReportService(
         formatter:         formatter,
         productService:    productService,
         journalRepository: journalRepository,
-        readingRepository: readingRepository,
         cache:             cacheInstance,
         clock:             clockInstance,
         catalogTitle:      catalogTitle,
@@ -62,7 +69,6 @@ type CatalogReportService struct {
     formatter         *ReportFormatter
     productService    *service.ProductService
     journalRepository repository.CatalogJournalRepository
-    readingRepository repository.CatalogReadingRepository
     cache             melodycachecontract.Cache
     clock             melodyclockcontract.Clock
     catalogTitle      string
@@ -123,8 +129,8 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
         return nil, countErr
     }
 
-    payload := "products=" + strconv.Itoa(len(products)) +
-        " journal=" + strconv.Itoa(journalCount) +
+    payload := catalogReadingProductCountField + strconv.Itoa(len(products)) +
+        " " + catalogReadingJournalCountField + strconv.Itoa(journalCount) +
         " " + catalogReadingRecordedAtField + recordedAt.UTC().Format(time.RFC3339)
 
     setErr := instance.cache.Set(catalogReadingCacheKey, payload, instance.refreshInterval)
@@ -142,29 +148,32 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
 
 /* Archive records a reading in the archive and answers whether this call is the one that wrote it.
 
-   It is a door of its own rather than a step inside Refresh, and the split is the decision: a reading is taken on the REQUEST path too, whenever a caller finds a cold cache, and archiving there would put a write to a second database on a read, make a read door fail when postgres is down, and fill the archive with rows nobody scheduled. What belongs in the archive is the reading the SCHEDULE took, so the command is what calls this — under an advisory lock, so several processes running the same schedule record one reading between them rather than one each.
+   It is a door of its own rather than a step inside Refresh, and the split is the decision: a reading is taken on the REQUEST path too, whenever a caller finds a cold cache, and archiving there would put a write to a second database on a read, make a read door fail when postgres is down, and fill the archive with rows nobody scheduled. What belongs in the archive is the reading the SCHEDULE took, so the command is what calls this — under the archive's advisory lock, taken around the whole run, so processes that overlap on one schedule record one reading between them.
+
+   The counts the row carries are the reading's own, read back out of its payload: a second look at the catalogue here was a second observation, taken after the export window, and a write landing between the two left a row disagreeing with itself — and put the catalogue's database on the path of an archive write that needs nothing from it.
 
    A reading already recorded at that instant is not a failure: the instant is the identity of a reading, so the archive already holds exactly what this call would have written. The caller is told it did not write, and that is the whole difference. Every other failure is handed back. */
-func (instance *CatalogReportService) Archive(ctx context.Context, reading *CatalogReading) (bool, error) {
+func (instance *CatalogReportService) Archive(runtimeInstance melodyruntimecontract.Runtime, reading *CatalogReading) (bool, error) {
     if nil == reading {
         return false, fmt.Errorf("reading is required")
     }
 
-    products, listErr := instance.productService.List()
-    if nil != listErr {
-        return false, listErr
+    readingRepository, resolveErr := instance.readingRepositoryOf(runtimeInstance)
+    if nil != resolveErr {
+        return false, resolveErr
     }
 
-    journalCount, countErr := instance.journalRepository.Count(ctx)
-    if nil != countErr {
-        return false, countErr
+    productCount, productCountFound := payloadCountOf(reading.Payload, catalogReadingProductCountField)
+    journalCount, journalCountFound := payloadCountOf(reading.Payload, catalogReadingJournalCountField)
+    if false == productCountFound || false == journalCountFound {
+        return false, fmt.Errorf("the reading's payload carries no counts to archive: %q", reading.Payload)
     }
 
-    appendErr := instance.readingRepository.Append(ctx, &repository.CatalogReadingRecord{
+    appendErr := readingRepository.Append(runtimeInstance.Context(), &repository.CatalogReadingRecord{
         TakenAt:      ArchivedInstantOf(reading.RecordedAt),
         Headline:     reading.Headline,
         Payload:      reading.Payload,
-        ProductCount: len(products),
+        ProductCount: productCount,
         JournalCount: journalCount,
     })
     if nil == appendErr {
@@ -176,6 +185,14 @@ func (instance *CatalogReportService) Archive(ctx context.Context, reading *Cata
     }
 
     return false, appendErr
+}
+
+/* readingRepositoryOf resolves the archive at the moment it is needed, from the container the runtime carries — a resolution, not a capture, so the container records what this service holds of the archive at the moment it holds it. */
+func (instance *CatalogReportService) readingRepositoryOf(runtimeInstance melodyruntimecontract.Runtime) (repository.CatalogReadingRepository, error) {
+    return melodycontainer.FromResolver[repository.CatalogReadingRepository](
+        runtimeInstance.Container(),
+        repository.ServiceCatalogReadingRepository,
+    )
 }
 
 /* ArchivedInstantOf is the instant a reading is archived under: the instant it was taken at, in UTC, truncated to the second.
@@ -190,21 +207,51 @@ func ArchivedInstantOf(recordedAt time.Time) time.Time {
 /* readingAlreadyRecordedMessage is the sentence both archive implementations answer a duplicate instant with. It is compared rather than wrapped because the two implementations reach it through different mechanisms — a postgres SQLSTATE on one side, a map lookup on the other — and the message is the contract they share. */
 const readingAlreadyRecordedMessage = "reading already recorded"
 
-/* RecentReadings lists the archive, newest first. */
-func (instance *CatalogReportService) RecentReadings(ctx context.Context, limit int) ([]*repository.CatalogReadingRecord, error) {
-    return instance.readingRepository.Recent(ctx, limit)
-}
-
-/* recordedAtOf reads back the instant Refresh wrote into the payload, and says whether it found one. The stamp is the last field and carries no spaces, so it is read to the end of the value or to the next field, whichever comes first — a payload written by an older shape of this service, or by nothing at all, simply answers false. */
-func recordedAtOf(payload string) (time.Time, bool) {
-    fieldIndex := strings.Index(payload, catalogReadingRecordedAtField)
-    if 0 > fieldIndex {
-        return time.Time{}, false
+/* RecentReadings lists the archive, newest first, resolving the archive when it is asked for: the history door is the one request of this application that touches the second database, and it is the only request that pays for it. */
+func (instance *CatalogReportService) RecentReadings(runtimeInstance melodyruntimecontract.Runtime, limit int) ([]*repository.CatalogReadingRecord, error) {
+    readingRepository, resolveErr := instance.readingRepositoryOf(runtimeInstance)
+    if nil != resolveErr {
+        return nil, resolveErr
     }
 
-    value := payload[fieldIndex+len(catalogReadingRecordedAtField):]
+    return readingRepository.Recent(runtimeInstance.Context(), limit)
+}
+
+/* payloadFieldOf reads one field back out of the payload Refresh wrote, and says whether it found one. Every field carries no spaces, so it is read to the end of the value or to the next field, whichever comes first — a payload written by an older shape of this service, or by nothing at all, simply answers false. */
+func payloadFieldOf(payload string, field string) (string, bool) {
+    fieldIndex := strings.Index(payload, field)
+    if 0 > fieldIndex {
+        return "", false
+    }
+
+    value := payload[fieldIndex+len(field):]
     if separatorIndex := strings.IndexByte(value, ' '); 0 <= separatorIndex {
         value = value[:separatorIndex]
+    }
+
+    return value, true
+}
+
+/* payloadCountOf reads a count back out of the payload, as Archive does for the row it writes: the counts a row carries are the reading's, not a second look at the catalogue. */
+func payloadCountOf(payload string, field string) (int, bool) {
+    value, found := payloadFieldOf(payload, field)
+    if false == found {
+        return 0, false
+    }
+
+    count, parseErr := strconv.Atoi(value)
+    if nil != parseErr || 0 > count {
+        return 0, false
+    }
+
+    return count, true
+}
+
+/* recordedAtOf reads back the instant Refresh wrote into the payload, and says whether it found one. */
+func recordedAtOf(payload string) (time.Time, bool) {
+    value, found := payloadFieldOf(payload, catalogReadingRecordedAtField)
+    if false == found {
+        return time.Time{}, false
     }
 
     recordedAt, parseErr := time.Parse(time.RFC3339, value)

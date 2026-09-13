@@ -11,7 +11,11 @@ import (
     "github.com/precision-soft/melody/v3/.example/service"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 /* stubJournalRepository records what it was asked to write and can be told to refuse, which is the only way to observe what the trail does with a batch that did not land. */
@@ -295,22 +299,24 @@ var _ repository.ProductRepository = (*emptyProductRepository)(nil)
 func newReportServiceUnderTest(t *testing.T, clockInstance *melodyclock.FrozenClock, cacheInstance melodycachecontract.Cache) *CatalogReportService {
     t.Helper()
 
-    return newReportServiceWithArchive(t, clockInstance, cacheInstance, newRecordingReadingRepository())
+    reportService, _ := newReportServiceWithArchive(t, clockInstance, cacheInstance, newRecordingReadingRepository())
+
+    return reportService
 }
 
+/* the archive is not a constructor argument: the service resolves it when Archive or RecentReadings is called, from the container the runtime carries, so the fixture registers the double under the repository's own name and hands back a runtime over that container — the composition root's shape, which is what the resolution is pinned on */
 func newReportServiceWithArchive(
     t *testing.T,
     clockInstance *melodyclock.FrozenClock,
     cacheInstance melodycachecontract.Cache,
     readingRepository repository.CatalogReadingRepository,
-) *CatalogReportService {
+) (*CatalogReportService, melodyruntimecontract.Runtime) {
     t.Helper()
 
     reportService, buildErr := NewCatalogReportService(
         NewReportFormatter(),
         service.NewProductService(&emptyProductRepository{}, nil, nil, cacheInstance, nil, clockInstance),
         &stubJournalRepository{},
-        readingRepository,
         cacheInstance,
         clockInstance,
         "catalog",
@@ -321,7 +327,23 @@ func newReportServiceWithArchive(
         t.Fatalf("new report service: %v", buildErr)
     }
 
-    return reportService
+    return reportService, newArchiveRuntime(readingRepository)
+}
+
+func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) melodyruntimecontract.Runtime {
+    serviceContainer := melodycontainer.NewContainer()
+
+    if nil != readingRepository {
+        melodycontainer.MustRegister(
+            serviceContainer,
+            repository.ServiceCatalogReadingRepository,
+            func(resolver melodycontainercontract.Resolver) (repository.CatalogReadingRepository, error) {
+                return readingRepository, nil
+            },
+        )
+    }
+
+    return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
 /* recordingReadingRepository is the archive as a test can inspect it: what it was handed, in order, and a
@@ -439,14 +461,14 @@ func TestArchiveRecordsTheReadingUnderTheInstantItStatesAboutItself(t *testing.T
     cacheInstance := &readingCache{values: map[string]any{}}
     archive := newRecordingReadingRepository()
 
-    reportService := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
 
     reading, refreshErr := reportService.Refresh(context.Background())
     if nil != refreshErr {
         t.Fatalf("refresh: %v", refreshErr)
     }
 
-    recorded, archiveErr := reportService.Archive(context.Background(), reading)
+    recorded, archiveErr := reportService.Archive(runtimeInstance, reading)
     if nil != archiveErr {
         t.Fatalf("archive: %v", archiveErr)
     }
@@ -476,10 +498,10 @@ func TestArchiveTreatsAReadingAlreadyRecordedAsNotWrittenRatherThanAsAFailure(t 
     cacheInstance := &readingCache{values: map[string]any{}}
     archive := newRecordingReadingRepository()
 
-    reportService := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
 
     first, _ := reportService.Refresh(context.Background())
-    if recorded, _ := reportService.Archive(context.Background(), first); false == recorded {
+    if recorded, _ := reportService.Archive(runtimeInstance, first); false == recorded {
         t.Fatal("expected the first archive to write")
     }
 
@@ -489,7 +511,7 @@ func TestArchiveTreatsAReadingAlreadyRecordedAsNotWrittenRatherThanAsAFailure(t 
         Payload:    first.Payload,
     }
 
-    recorded, archiveErr := reportService.Archive(context.Background(), second)
+    recorded, archiveErr := reportService.Archive(runtimeInstance, second)
     if nil != archiveErr {
         t.Fatalf("expected a reading already recorded to be tolerated, got %v", archiveErr)
     }
@@ -510,11 +532,11 @@ func TestArchiveHandsBackAFailureThatIsNotADuplicate(t *testing.T) {
     archive := newRecordingReadingRepository()
     archive.failWith = fmt.Errorf("dial postgres: connection refused")
 
-    reportService := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
 
     reading, _ := reportService.Refresh(context.Background())
 
-    recorded, archiveErr := reportService.Archive(context.Background(), reading)
+    recorded, archiveErr := reportService.Archive(runtimeInstance, reading)
     if nil == archiveErr {
         t.Fatal("expected an unreachable archive to be reported")
     }
@@ -551,7 +573,7 @@ func TestRecentReadingsAnswersTheArchive(t *testing.T) {
     cacheInstance := &readingCache{values: map[string]any{}}
     archive := newRecordingReadingRepository()
 
-    reportService := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
 
     for index := 0; 3 > index; index++ {
         _ = archive.Append(context.Background(), &repository.CatalogReadingRecord{
@@ -561,7 +583,7 @@ func TestRecentReadingsAnswersTheArchive(t *testing.T) {
         })
     }
 
-    readingList, readErr := reportService.RecentReadings(context.Background(), 2)
+    readingList, readErr := reportService.RecentReadings(runtimeInstance, 2)
     if nil != readErr {
         t.Fatalf("recent readings: %v", readErr)
     }
@@ -572,5 +594,67 @@ func TestRecentReadingsAnswersTheArchive(t *testing.T) {
 
     if false == readingList[0].TakenAt.Equal(takenAt.Add(2*time.Second)) {
         t.Fatalf("expected the newest reading first, got %s", readingList[0].TakenAt)
+    }
+}
+
+/* the counts the row carries are the reading's own, read out of its payload: a product created and its cached list dropped between Refresh and Archive — what the http process's listener does on the shared cache — used to make the row count one more product than the payload it carries, and put the catalogue's database on an archive write that needs nothing from it. */
+func TestArchiveCarriesTheCountsTheReadingStatesRatherThanASecondObservation(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    reading := &CatalogReading{
+        RecordedAt: takenAt,
+        Headline:   "catalog",
+        Payload:    "products=3 journal=7 recorded_at=" + takenAt.Format(time.RFC3339),
+    }
+
+    if recorded, archiveErr := reportService.Archive(runtimeInstance, reading); nil != archiveErr || false == recorded {
+        t.Fatalf("expected the reading to be archived, got recorded=%v err=%v", recorded, archiveErr)
+    }
+
+    if 3 != archive.appended[0].ProductCount || 7 != archive.appended[0].JournalCount {
+        t.Fatalf("expected the row to carry the payload's counts 3/7, got %d/%d", archive.appended[0].ProductCount, archive.appended[0].JournalCount)
+    }
+}
+
+/* a payload without counts is a reading this service did not write, and a row with counts nobody measured would be a second observation by another name */
+func TestArchiveRefusesAPayloadThatCarriesNoCounts(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
+    archive := newRecordingReadingRepository()
+
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, &readingCache{values: map[string]any{}}, archive)
+
+    recorded, archiveErr := reportService.Archive(runtimeInstance, &CatalogReading{RecordedAt: clockInstance.Now(), Headline: "catalog", Payload: "recorded_at=2026-09-07T10:00:00Z"})
+    if nil == archiveErr || true == recorded {
+        t.Fatalf("expected a payload without counts to be refused, got recorded=%v err=%v", recorded, archiveErr)
+    }
+
+    if 0 != len(archive.appended) {
+        t.Fatalf("expected nothing appended, got %d rows", len(archive.appended))
+    }
+}
+
+/* the archive is resolved when it is asked for, from the container the runtime carries: a container without it fails the archive door alone, and constructing the service costs no archive at all — which is the whole point of the resolution being late. */
+func TestArchiveResolvesTheRepositoryAtTheCallAndNotAtConstruction(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService, _ := newReportServiceWithArchive(t, clockInstance, cacheInstance, nil)
+
+    reading, refreshErr := reportService.Refresh(context.Background())
+    if nil != refreshErr {
+        t.Fatalf("expected the reading to be taken without an archive on the container, got %v", refreshErr)
+    }
+
+    if _, archiveErr := reportService.Archive(newArchiveRuntime(nil), reading); nil == archiveErr {
+        t.Fatalf("expected the archive door to fail over a container without the repository")
+    }
+
+    if _, readErr := reportService.RecentReadings(newArchiveRuntime(nil), 1); nil == readErr {
+        t.Fatalf("expected the history door to fail over a container without the repository")
     }
 }

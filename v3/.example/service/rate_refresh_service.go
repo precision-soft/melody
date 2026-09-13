@@ -54,7 +54,10 @@ func NewRateRefreshService(
 /* RateRefreshService brings the exchange rates the catalogue quotes with up to the provider's. It writes
    through CurrencyService and not through the repository because the currency list and every currency by id
    are cached, and the listeners that drop those entries are subscribed to the event the service dispatches:
-   a rate written behind the cache is a rate no reader ever sees.
+   a rate written behind the cache is a rate no reader ever sees. The guarantee holds on the SHARED cache:
+   the listeners run in the process that dispatched, which is the scheduler or a console command and never
+   the http server, so on the in-process fallback the server keeps the currencies it cached until it
+   restarts — the refresh command says so on its output when that is the wiring it ran under.
 
    The client is resolved when a refresh runs rather than taken in the constructor, and that has an
    observable consequence rather than being a preference: nothing else in this application calls the

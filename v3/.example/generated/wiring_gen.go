@@ -326,11 +326,6 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, journalRepositoryErr
             }
 
-            readingRepository, readingRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogReadingRepository](resolver)
-            if nil != readingRepositoryErr {
-                return nil, readingRepositoryErr
-            }
-
             cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
             if nil != cacheInstanceErr {
                 return nil, cacheInstanceErr
@@ -357,7 +352,6 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 formatter,
                 productService,
                 journalRepository,
-                readingRepository,
                 cacheInstance,
                 clockInstance,
                 catalogTitle,

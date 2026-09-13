@@ -1,7 +1,10 @@
 package cli
 
 import (
+    "bytes"
     "context"
+    "io"
+    "os"
     "strings"
     "testing"
 
@@ -120,4 +123,34 @@ func storedRoles(t *testing.T, fixture *commandFixture, username string) []strin
     }
 
     return append([]string{}, user.Roles...)
+}
+
+/* the grant's listeners drop the account's cache entries in the process that dispatched, and the fixture's cache is the in-process map: the command has to say so, because a session opened against a server on the same fallback keeps the roles it cached until that server restarts. Read off the process's standard output, which is where the command's own line goes. */
+func TestGrantRoleCommandSaysWhenTheCacheIsThisProcessOwn(t *testing.T) {
+    fixture := newCommandFixture(t)
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+
+    previousStdout := os.Stdout
+    reader, writer, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("open the capture pipe: %v", pipeErr)
+    }
+    os.Stdout = writer
+
+    runErr := command.Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user"))
+
+    _ = writer.Close()
+    os.Stdout = previousStdout
+
+    captured := &bytes.Buffer{}
+    _, _ = io.Copy(captured, reader)
+    _ = reader.Close()
+
+    if nil != runErr {
+        t.Fatalf("expected the grant to succeed, got %v", runErr)
+    }
+
+    if false == strings.Contains(captured.String(), processLocalCacheNotice) {
+        t.Fatalf("expected the command to say the cache is this process's own, got %q", captured.String())
+    }
 }

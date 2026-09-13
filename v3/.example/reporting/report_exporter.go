@@ -74,7 +74,7 @@ func (instance *CatalogReportExporter) Export(
         return false, requestErr
     }
 
-    /* the client is built without following redirects, so a sink that moved answers here as the 3xx it sent: followed, the POST would have been re-sent as a GET without its body and the 200 of whatever page the sink pointed at would have read as the sink having received the reading */
+    /* the client is built without following redirects, so a sink that moved answers here as the 3xx it sent: followed, the POST would have been re-sent as a GET without its body and the 200 of whatever page the sink pointed at would have read as the sink having received the reading. A 307 or 308 keeps the method and the body and would have delivered — it is refused all the same, because the address the operator configured is the one they audited, and a sink that says it moved says so to the operator, not to this process. */
     if true == isRedirection(response.StatusCode()) {
         return false, exception.NewError(
             "the report sink redirected the export instead of receiving it; the sink is not where it was configured",

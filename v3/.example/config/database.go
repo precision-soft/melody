@@ -10,6 +10,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     bun "github.com/uptrace/bun"
 )
@@ -46,11 +47,13 @@ func (instance *Module) buildDatabase() {
 
     if catalogDefinition, wired := instance.catalogProviderDefinition(); true == wired {
         definitionList = append(definitionList, catalogDefinition)
+        instance.catalogLocation = databaseLocationOf(catalogDefinition.Params)
     }
 
     if archiveDefinition, wired := instance.archiveProviderDefinition(); true == wired {
         definitionList = append(definitionList, archiveDefinition)
         instance.archiveWired = true
+        instance.archiveLocation = databaseLocationOf(archiveDefinition.Params)
     }
 
     if 0 == len(definitionList) {
@@ -58,7 +61,8 @@ func (instance *Module) buildDatabase() {
     }
 
     /* the emergency logger carries the registry's reporting: the framework's own logger does not exist yet while the modules are being wired, and the emergency one is what the framework itself writes through in that window. The passwords are not marked here the way the two frozen majors mark them through the registry: this major registers its parameters itself and marks MYSQL_PASSWORD and PGSQL_PASSWORD by name in RegisterParameters, so a second marking would say the same thing twice. */
-    registry, registryErr := melodybunorm.NewManagerRegistry(
+    registry, registryErr := melodybunorm.NewManagerRegistryWithContext(
+        instance.processContext,
         melodylogging.EmergencyLogger(),
         definitionList...,
     )
@@ -83,6 +87,11 @@ func (instance *Module) buildDatabase() {
 /* catalogWired answers whether the catalogue definition was declared, which is the question every consumer of the shared handle asks — the repositories, the outbox store, the encrypt command. It is read off the handle rather than off the host key because the handle is what those consumers need, and a definition that failed to open never becomes one. */
 func (instance *Module) catalogWired() bool {
     return "" != instance.environmentValue(environmentKeyMysqlHost)
+}
+
+/* databaseLocationOf spells a declared connection as host:port/schema, the one line that separates a reset of this example's volume from a reset of whatever the host happens to point at; the credentials stay out of it, because it is printed. */
+func databaseLocationOf(parameters melodybunorm.ConnectionParameters) string {
+    return parameters.Host + ":" + parameters.Port + "/" + parameters.Database
 }
 
 /* catalogProviderDefinition declares the mysql connection, or answers that this environment did not ask for one. */
@@ -121,7 +130,7 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
 
 /* archiveProviderDefinition declares the postgres connection the reading archive is kept on, or answers that this environment did not ask for one. It is not the registry's default and must never be: the default is what an unqualified consumer reaches, and "the database" of this application is its catalogue.
 
-   The retry budget is the catalogue's, for the catalogue's reason — a cold-start race against a container that takes tens of seconds to accept connections while the application boots in one — and the provider retries only transient failures, so a real misconfiguration still fails fast. */
+   The retry budget is the archive's own, and it is request-sized: the archive is opened LAZILY, at the first resolution of the service that publishes it — a request, a scheduled command — and never at boot, so the cold-start race the catalogue's ten attempts exist for cannot occur on it. What that budget bounds instead is a caller that arrived while postgres was down: three attempts over about two seconds, where the catalogue's budget kept a request, a daily app:info and a SIGTERM waiting thirty-seven seconds behind a connection nothing on their path needed. The provider retries only transient failures, so a real misconfiguration still fails fast. */
 func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefinition, bool) {
     host := instance.environmentValue(environmentKeyPgsqlHost)
     if "" == host {
@@ -134,7 +143,7 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
     }
 
     optionList := []melodypgsql.ProviderOption{
-        melodypgsql.WithRetryConfig(melodypgsql.NewRetryConfig(10, time.Second, 5*time.Second, 2.0)),
+        melodypgsql.WithRetryConfig(melodypgsql.NewRetryConfig(archiveOpenAttempts, archiveOpenFirstBackoff, archiveOpenMaxBackoff, 2.0)),
     }
     if true == dialIsInsecure(instance.environmentValue(environmentKeyPgsqlInsecure)) {
         optionList = append(optionList, melodypgsql.WithInsecure(true))
@@ -152,6 +161,13 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
         },
     }, true
 }
+
+/* the archive's open budget: three attempts, 250 ms then 500 ms between them, about two seconds end to end on a postgres that refuses — the size of a request, which is where the open is paid */
+const (
+    archiveOpenAttempts     = 3
+    archiveOpenFirstBackoff = 250 * time.Millisecond
+    archiveOpenMaxBackoff   = time.Second
+)
 
 /* registerDatabaseServices publishes the registry and the handle it opened, so the db:* command family can resolve the one and the lazy factories (outbox store, encrypt bulk command) the other; without a configured database neither service is registered, and a factory's first use reports the missing service instead of failing boot. */
 func (instance *Module) registerDatabaseServices(registrar melodyapplicationcontract.ServiceRegistrar) {
@@ -192,7 +208,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
                     return nil, registryErr
                 }
 
-                return resolvedRegistry.Database(databaseArchiveManagerName)
+                return databaseOpenedBy(resolvedRegistry, databaseArchiveManagerName, instance.archiveLocation)
             },
             melodycontainer.WithoutTypeRegistration(),
         )
@@ -212,8 +228,22 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
                 return nil, registryErr
             }
 
-            return resolvedRegistry.Database(databaseManagerName)
+            return databaseOpenedBy(resolvedRegistry, databaseManagerName, instance.catalogLocation)
         },
         melodycontainer.WithoutTypeRegistration(),
     )
+}
+
+/* databaseOpenedBy opens one manager's handle and names it when the open refuses: the registry's refusal reads "database connection failed" over a host name, the same words for either database, and the operator reading a console has to know WHICH one — the archive on its first resolution, the catalogue at boot — before knowing why. An exception of the registry's own stays the cause, so errors.Is still reaches its sentinels. */
+func databaseOpenedBy(registry *melodybunorm.ManagerRegistry, managerName string, location string) (*bun.DB, error) {
+    database, openErr := registry.Database(managerName)
+    if nil != openErr {
+        return nil, exception.NewError(
+            "the "+managerName+" database at "+location+" could not be opened",
+            exceptioncontract.Context{"manager": managerName, "location": location},
+            openErr,
+        )
+    }
+
+    return database, nil
 }

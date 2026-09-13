@@ -47,7 +47,7 @@ func rememberEntityOrAbsence(
         return cached, nil
     }
 
-    /* Remember coalesces the readers of one key onto one loader and hands the leader's answer to every waiter, so "a value this call computed" is what the loader below ran for and nothing a waiter received: the flag is raised inside the loader, on the leader's goroutine alone. Without it every waiter wrote the found value once more — twenty-one writes for twenty readers, measured — and a waiter's late write re-installed, unbounded, an entity a listener had already cleared between the leader's load and that write, a revoked role or a changed password served until something cleared it again. */
+    /* Remember coalesces the readers of one key onto one loader and hands the leader's answer to every waiter, so "a value this call computed" is what the loader below ran for and nothing a waiter received: the flag is raised inside the loader, on the leader's goroutine alone. Without it every waiter wrote the found value once more — twenty-one writes for twenty readers, measured — and a waiter's late write re-installed, unbounded, an entity a listener had already cleared between the leader's load and that write, a revoked role or a changed password served until something cleared it again. The leader's own write keeps a window of the same shape, one write wide — a clear landing between Remember's bounded write and the unbounded one below is re-installed — and that window is the read path's, older than the flag and left as it is. */
     computedHere := false
 
     /* a read that failed is handed to Remember rather than reported here: it treats a payload it cannot

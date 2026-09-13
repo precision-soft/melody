@@ -1,6 +1,8 @@
 package config
 
 import (
+    "fmt"
+    "strings"
     "testing"
 )
 
@@ -70,5 +72,26 @@ func TestRegisterParameters_LeavesAnOutboundUrlWithoutAUserinfoReadable(t *testi
 
     if false == registrar.isMarked("MYSQL_PASSWORD") {
         t.Fatalf("expected the credentials to stay marked, marked: %v", registrar.marked)
+    }
+}
+
+/* the integration keys are switches the readme says to remove — the line gone, not blank — to boot the in-process fallbacks, and a parameter that read one of them in its template without a default failed the boot's resolution the moment the line was gone: the database dsn did exactly that, over a value nothing in the application consumed. No template may read them. */
+func TestRegisterParameters_NoTemplateReadsARemovableIntegrationKey(t *testing.T) {
+    registrar := newRecordingParameterRegistrar()
+
+    moduleWithEnvironment(t, map[string]string{}).RegisterParameters(registrar)
+
+    if 0 == len(registrar.registered) {
+        t.Fatalf("expected the module to register its parameters")
+    }
+
+    for name, value := range registrar.registered {
+        template := fmt.Sprint(value)
+
+        for _, integrationKeyPrefix := range []string{"MYSQL_", "PGSQL_"} {
+            if true == strings.Contains(template, integrationKeyPrefix) {
+                t.Fatalf("expected no template to read a %s key, %s reads %q", integrationKeyPrefix, name, template)
+            }
+        }
     }
 }

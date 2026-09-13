@@ -1,17 +1,18 @@
 package config
 
 import (
-    "bytes"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/.example/event"
+    "github.com/precision-soft/melody/v3/.example/twofactor"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
+    melodyevent "github.com/precision-soft/melody/v3/event"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
-    melodylogging "github.com/precision-soft/melody/v3/logging"
-    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
 /* the compose balancer as the shipped .env names it, already resolved: the tests below hand the list in resolved form because what they assert is what the resolver does with a peer and a chain, not what the name resolves to. */
@@ -30,10 +31,11 @@ func requestForwardedBy(t *testing.T, peer string, forwardedFor string) melodyht
     return melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("budget-test", time.Now()))
 }
 
+/* resolvedBudgetKey reads the key the budget charges, over a resolver whose entries are the given list — addresses and prefixes taken as written, so no name is looked up here; what these tests assert is what the resolver does with a peer and a header, not how a name resolves */
 func resolvedBudgetKey(t *testing.T, trustedProxyList []string, peer string, forwardedFor string) string {
     t.Helper()
 
-    resolver := requestBudgetConfig(100, trustedProxyList).ClientIpResolver()
+    resolver := requestBudgetConfig(100, newTrustedProxyResolver(strings.Join(trustedProxyList, ","), time.Now)).ClientIpResolver()
     if nil == resolver {
         t.Fatal("expected the request budget to resolve the client address rather than fall back to the peer")
     }
@@ -84,58 +86,44 @@ func TestRequestBudgetConfig_AnEmptyListChargesThePeer(t *testing.T) {
     }
 }
 
-func moduleWithTrustedProxyList(t *testing.T, value string) *Module {
-    t.Helper()
+/* the release of a second factor with its account is a subscriber the composition root INSTALLS: its own tests pin what it does once installed, and nothing pinned that it is — the wiring line could go and every test stayed green. Read off a real dispatcher: with a store, one more owner on the deletion event, and it is this one. */
+func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsAStore(t *testing.T) {
+    ownersOnDeletion := func(moduleInstance *Module) []string {
+        eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+        moduleInstance.registerSubscribers(eventDispatcher)
 
-    return moduleWithEnvironment(t, map[string]string{environmentKeyTrustedProxyList: value})
-}
+        var owners []string
+        for _, registered := range eventDispatcher.RegisteredEvents() {
+            if event.UserDeletedEventName != registered.EventName {
+                continue
+            }
 
-/* the list is read from configuration, an address or a prefix as written and a host name resolved once at build: the compose balancer is reachable by its service name and nothing else about it survives a restart of the stack. */
-func TestTrustedProxyList_ResolvesAHostNameAndKeepsAnAddressAsWritten(t *testing.T) {
-    trustedProxyList := moduleWithTrustedProxyList(t, " 10.1.2.3 , 192.168.0.0/16,localhost ").trustedProxyList()
+            for _, listener := range registered.Listeners {
+                owners = append(owners, listener.Owner)
+            }
+        }
 
-    if 3 > len(trustedProxyList) || "10.1.2.3" != trustedProxyList[0] || "192.168.0.0/16" != trustedProxyList[1] {
-        t.Fatalf("expected the address and the prefix as written followed by what localhost resolves to, got %v", trustedProxyList)
+        return owners
     }
 
-    resolvedLoopback := false
-    for _, entry := range trustedProxyList[2:] {
-        if "127.0.0.1" == entry || "::1" == entry {
-            resolvedLoopback = true
+    without := ownersOnDeletion(moduleWithEnvironment(t, map[string]string{}))
+
+    withStore := moduleWithEnvironment(t, map[string]string{})
+    withStore.twoFactorStore = twofactor.NewStore(newUndialedDatabase())
+    with := ownersOnDeletion(withStore)
+
+    if len(without)+1 != len(with) {
+        t.Fatalf("expected the store to add one owner on %s, got %v without and %v with", event.UserDeletedEventName, without, with)
+    }
+
+    found := false
+    for _, owner := range with {
+        if true == strings.Contains(owner, "TwoFactorEnrollmentSubscriber") {
+            found = true
         }
     }
 
-    if false == resolvedLoopback {
-        t.Fatalf("expected localhost to resolve to a loopback address, got %v", trustedProxyList)
-    }
-
-    if key := resolvedBudgetKey(t, trustedProxyList, "127.0.0.1", "203.0.113.7"); "203.0.113.7" != key {
-        t.Fatalf("expected the resolved loopback to be a trusted proxy, got %q", key)
-    }
-}
-
-/* an entry that names nothing is skipped and reported, never refused: the balancer is not started beside a cli command, and a list one hop shorter fails closed onto the peer address. */
-func TestTrustedProxyList_SkipsAndReportsAnEntryThatNamesNothing(t *testing.T) {
-    journal := &bytes.Buffer{}
-    previous := trustedProxyWarningLogger
-    trustedProxyWarningLogger = func() melodyloggingcontract.Logger {
-        return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug)
-    }
-    t.Cleanup(func() {
-        trustedProxyWarningLogger = previous
-    })
-
-    trustedProxyList := moduleWithTrustedProxyList(t, "no-such-host.invalid").trustedProxyList()
-
-    if 0 != len(trustedProxyList) {
-        t.Fatalf("expected an entry that names nothing to be skipped, got %v", trustedProxyList)
-    }
-
-    if false == strings.Contains(journal.String(), "no-such-host.invalid") || false == strings.Contains(journal.String(), environmentKeyTrustedProxyList) {
-        t.Fatalf("expected the skipped entry to be reported with its key, got %q", journal.String())
-    }
-
-    if key := resolvedBudgetKey(t, trustedProxyList, balancerAddress, "203.0.113.7"); balancerAddress != key {
-        t.Fatalf("expected the empty list to charge the peer, got %q", key)
+    if false == found {
+        t.Fatalf("expected the enrollment subscriber among the owners of %s, got %v", event.UserDeletedEventName, with)
     }
 }

@@ -46,17 +46,13 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
         }
     }
 
-    /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them. AMQP_DSN is on the list because it carries its credentials INLINE: unlike the database dsn, assembled from the marked password so the mark propagates to it, the amqp credentials sit whole in this one key and no marked source exists to propagate from. */
+    /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them. AMQP_DSN is on the list because it carries its credentials INLINE: the amqp credentials sit whole in this one key and no marked source exists to propagate from.
+
+       No parameter of this application assembles a template out of the integration keys — MYSQL_*, PGSQL_* — and none may: those keys are the switches the readme says to REMOVE to boot the fallbacks, and a template that read one without a default made the boot fail the moment its line was gone, over a value nothing consumed. The mysql provider assembles its own connection from the keys it reads directly. */
     registrar.MarkParameterSecret("MYSQL_PASSWORD")
     registrar.MarkParameterSecret(environmentKeyPgsqlPassword)
     registrar.MarkParameterSecret("S3_SECRET_KEY")
     registrar.MarkParameterSecret(environmentKeyAmqpDsn)
-
-    /* the dsn reads the marked password — through a parameter reference and through %env(KEY)% alike — so the secret marking travels to it and debug:parameters redacts the assembled value beside the password itself */
-    registrar.RegisterParameter(
-        "app.database.dsn",
-        "%MYSQL_USER%:%env(MYSQL_PASSWORD)%@tcp(%MYSQL_HOST%:%MYSQL_PORT%)/%MYSQL_DATABASE%",
-    )
 }
 
 var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)

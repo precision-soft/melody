@@ -209,7 +209,9 @@ func (instance *CurrencyService) Update(
 /* UpdateRate is the door the rate refresh writes through, and it goes through the service rather than
    straight to the repository for one reason: the currency list and every currency by id are cached, and
    the listeners that drop those entries are subscribed to the updated event this dispatches. A rate written
-   behind the cache is a rate no reader ever sees.
+   behind the cache is a rate no reader ever sees — in the process that dispatched, which is the refresh's
+   own; the http server sees the drop through the shared cache alone, and on the in-process fallback it
+   serves what it cached until it restarts.
 
    The rate is judged by refuseNonPositiveRate, the spelling Create reads too, and the refusal names the
    currency so a caller sweeping a whole document can say which quote was bad. */

@@ -100,6 +100,11 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
 
     fmt.Printf("granted role %q to user %q\n", role, user)
 
+    /* the listeners that drop the account's cache entries ran in THIS process: on the shared cache that is the server's view too, on the in-process fallback it is not, and a session opened against the server keeps the roles it cached until that server restarts */
+    if true == cacheIsProcessLocal(runtimeInstance) {
+        fmt.Println(processLocalCacheNotice)
+    }
+
     return nil
 }
 

@@ -1,9 +1,6 @@
 package config
 
 import (
-    "net"
-    "net/netip"
-    "strings"
     "time"
 
     outboxintegration "github.com/precision-soft/melody/integrations/outbox/v3"
@@ -29,8 +26,6 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
-    melodylogging "github.com/precision-soft/melody/v3/logging"
-    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
 
@@ -161,70 +156,9 @@ func (instance *Module) buildCatalogWriteThrottle() {
         nil,
     )
 
-    rateLimitConfig.SetClientIpResolver(forwardedClientIpResolver(instance.trustedProxyList()))
+    rateLimitConfig.SetClientIpResolver(instance.trustedProxyResolver.Resolve)
 
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
-}
-
-/* forwardedClientIpResolver reads which client a request came from, the way every budget of this example
-   has to read it: behind a trusted proxy the X-Forwarded-For client, on a direct hit the peer address, and
-   a header sent by a peer outside the trusted list ignored rather than believed. An empty list trusts no
-   header at all, so every request is charged to its peer.
-
-   Both budgets share it because they are two halves of one policy and the trusted list must not drift
-   apart: this one meters the writes that reach a handler, the request budget in event.go meters every
-   request ahead of authentication. Left on the peer address, that one charged the whole world to the
-   proxy, so one client could spend everyone's hour; trusting the whole private address space instead
-   charged the header to whoever sat in it, so any other container of the deployment chose its own key per
-   request — a budget it could refill at will, or a victim's it could spend — and, behind the compose
-   balancer, the docker gateway every host client enters through was read as one more hop, which put the
-   whole host population back on the balancer's key. The list is the balancer itself, from configuration. */
-func forwardedClientIpResolver(trustedProxyList []string) melodyhttpmiddleware.ClientIpResolver {
-    return melodyhttpmiddleware.NewForwardedClientIpResolver(melodyhttpcontract.ForwardedHeadersPolicy{
-        TrustForwardedHeaders: 0 < len(trustedProxyList),
-        TrustedProxyList:      trustedProxyList,
-    })
-}
-
-/* trustedProxyWarningLogger is where an entry of the trusted proxy list that names nothing is reported: the module is built before the container hands out the application's logger, and the entry is skipped rather than refused because a name that does not resolve in this process — the balancer not started beside a cli command — must not stop the command; skipped, the list trusts one hop fewer, which fails closed onto the peer address. A variable so the test can capture what would otherwise go to standard error. */
-var trustedProxyWarningLogger = melodylogging.EmergencyLogger
-
-/* trustedProxyList reads the proxies whose X-Forwarded-For the budgets believe, from the comma-separated APP_TRUSTED_PROXY_LIST: an address or a prefix is taken as written, and any other entry is a host name resolved once, here, at build — the compose balancer is reachable by its service name and nothing else about it is stable, so naming it is the one spelling that survives a restart of the stack. */
-func (instance *Module) trustedProxyList() []string {
-    var trustedProxyList []string
-
-    for _, rawEntry := range strings.Split(instance.environmentValue(environmentKeyTrustedProxyList), ",") {
-        entry := strings.TrimSpace(rawEntry)
-        if "" == entry {
-            continue
-        }
-
-        if _, prefixErr := netip.ParsePrefix(entry); nil == prefixErr {
-            trustedProxyList = append(trustedProxyList, entry)
-
-            continue
-        }
-
-        if _, addressErr := netip.ParseAddr(entry); nil == addressErr {
-            trustedProxyList = append(trustedProxyList, entry)
-
-            continue
-        }
-
-        addressList, lookupErr := net.LookupHost(entry)
-        if nil != lookupErr || 0 == len(addressList) {
-            trustedProxyWarningLogger().Warning(
-                "trusted proxy entry names no address; skipped, its header is not believed",
-                melodyloggingcontract.Context{"key": environmentKeyTrustedProxyList, "entry": entry, "error": lookupErr},
-            )
-
-            continue
-        }
-
-        trustedProxyList = append(trustedProxyList, addressList...)
-    }
-
-    return trustedProxyList
 }
 
 /* throttledWrite puts an endpoint that changes the nomenclature behind the shared per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage.

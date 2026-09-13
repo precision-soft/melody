@@ -43,7 +43,7 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, limitErr.Error()), nil
         }
 
-        readingList, readErr := reportService.RecentReadings(runtimeInstance.Context(), limit)
+        readingList, readErr := reportService.RecentReadings(runtimeInstance, limit)
         if nil != readErr {
             return nil, readErr
         }

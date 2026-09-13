@@ -107,7 +107,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=147
+EXPECTED_CHECK_COUNT_INTEGER=148
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -993,22 +993,22 @@ else
     check_fail "S3_SECRET_KEY is not redacted: ${S3_SECRET_ENTRY_STRING:-<entry missing>}"
 fi
 
-# the dsn only reads the password, so its redaction is the propagation promise: the marking travelled
-# through the template instead of covering the password alone
+# the dsn assembled out of the MYSQL_* keys is gone: it had no consumer, and its template failed the boot the
+# moment a MYSQL_* line was removed from .env — the unwiring the readme prescribes. The dump above is known
+# non-empty (the password entry was found in it), so an absent dsn entry is a measurement, not a tautology
 DSN_ENTRY_STRING="$(printf '%s' "${SECRETS_JSON_STRING}" | grep -o '"name":"app.database.dsn"[^}]*' | head -1 || true)"
-if printf '%s' "${DSN_ENTRY_STRING}" | grep -q '"value":"\*\*\*\*\*\*\*\*"' && printf '%s' "${DSN_ENTRY_STRING}" | grep -q '"isSecret":true'; then
-    check_pass "the dsn assembled from the marked password is redacted along with it"
+if [[ "" = "${DSN_ENTRY_STRING}" ]]; then
+    check_pass "no app.database.dsn parameter is registered any more (the dead template that failed the unwired boot)"
 else
-    check_fail "the assembled dsn is not redacted: ${DSN_ENTRY_STRING:-<entry missing>}"
+    check_fail "the app.database.dsn parameter is back: ${DSN_ENTRY_STRING}"
 fi
 
-# same shape as the password negative: an empty entry carries no assembled value either, so it is asserted present
-if [[ "" = "${DSN_ENTRY_STRING}" ]]; then
-    check_fail "the app.database.dsn entry is missing from debug:parameters, so nothing was inspected for the assembled value"
-elif printf '%s' "${DSN_ENTRY_STRING}" | grep -q 'tcp('; then
-    check_fail "the dsn entry leaks the assembled value: ${DSN_ENTRY_STRING}"
+# and no parameter assembles a connection string out of the integration keys readable: the shape the dead dsn
+# had, tcp(host:port)/database, must not appear in any value of the dump
+if printf '%s' "${SECRETS_JSON_STRING}" | grep -q 'tcp('; then
+    check_fail "a parameter assembles a readable connection string: $(printf '%s' "${SECRETS_JSON_STRING}" | grep -o '"name":"[^"]*"[^}]*tcp([^}]*' | head -1)"
 else
-    check_pass "the dsn entry carries no assembled value"
+    check_pass "no parameter assembles a readable connection string out of the integration keys"
 fi
 
 TITLE_ENTRY_STRING="$(printf '%s' "${SECRETS_JSON_STRING}" | grep -o '"name":"app.catalog_title"[^}]*' | head -1 || true)"
@@ -1343,11 +1343,15 @@ else
     check_fail "the v3 reset refusal did not hold (${V3_RESET_REFUSAL_STRING:-<empty>}, tables ${V3_TABLE_COUNT_AFTER_REFUSAL_STRING:-<no answer>})"
 fi
 
+# the run reports each step as it completes and names the database it ran on — host, port and schema — and
+# clears the cache last, which is the half of "the state a fresh volume holds" the database cannot carry
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:db:reset --force 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'the schema was recreated'; then
-    check_pass "v3 example:db:reset --force reports the reset it performed"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'catalogue reset: the schema was dropped and recreated on mysql:3306/melody_example_v3' \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'the nomenclature was reseeded' \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'cache cleared: the shared cache'; then
+    check_pass "v3 example:db:reset --force reports each step it performed, where, and the cache it cleared"
 else
-    check_fail "v3 example:db:reset --force did not report a reset (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+    check_fail "v3 example:db:reset --force did not report its steps (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
 
 # the bookkeeping is the half a rollback cannot reach: a volume migrated by an older set keeps rows naming
@@ -1572,7 +1576,8 @@ fi
 # against a race is not), so it is driven here. The assertion is a difference of one over two runs.
 V3_ARCHIVE_CONCURRENT_BEFORE_STRING="$(e2e_pgsql_scalar "${V3_ARCHIVE_DATABASE_STRING}" "${V3_ARCHIVE_COUNT_STATEMENT_STRING}")"
 
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go build -o melody-example-e2e . && ( ./melody-example-e2e catalog:report:refresh >/dev/null 2>&1 & ./melody-example-e2e catalog:report:refresh >/dev/null 2>&1 & wait ); rm -f melody-example-e2e; echo done"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go build -o melody-example-e2e . && ( ./melody-example-e2e catalog:report:refresh >/tmp/e2e-refresh-a.out 2>&1 & ./melody-example-e2e catalog:report:refresh >/tmp/e2e-refresh-b.out 2>&1 & wait ); rm -f melody-example-e2e; sed 's/\x1b\[[0-9;]*m//g' /tmp/e2e-refresh-a.out /tmp/e2e-refresh-b.out; rm -f /tmp/e2e-refresh-a.out /tmp/e2e-refresh-b.out"
+V3_ARCHIVE_CONCURRENT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 V3_ARCHIVE_CONCURRENT_AFTER_STRING="$(e2e_pgsql_scalar "${V3_ARCHIVE_DATABASE_STRING}" "${V3_ARCHIVE_COUNT_STATEMENT_STRING}")"
 V3_ARCHIVE_CONCURRENT_DELTA_INTEGER="$(( ${V3_ARCHIVE_CONCURRENT_AFTER_STRING:-0} - ${V3_ARCHIVE_CONCURRENT_BEFORE_STRING:-0} ))"
@@ -1580,6 +1585,16 @@ if [[ "1" = "${V3_ARCHIVE_CONCURRENT_DELTA_INTEGER}" ]]; then
     check_pass "two concurrent refreshes recorded one reading between them, not one each"
 else
     check_fail "two concurrent refreshes added ${V3_ARCHIVE_CONCURRENT_DELTA_INTEGER} readings, wanted exactly 1"
+fi
+
+# the one reading is the LOCK's doing, not the second's luck: the lock is taken around the whole run, so
+# the process that could not take it took no reading at all and said so — where the previous form let both
+# take one and left the primary key, on the instant truncated to the second, to fold two readings into one
+# only when both landed inside the same second
+if printf '%s' "${V3_ARCHIVE_CONCURRENT_OUTPUT_STRING}" | grep -q 'another process is taking this reading'; then
+    check_pass "the refresh that lost the archive lock skipped its run and said another process was taking the reading"
+else
+    check_fail "neither concurrent refresh reported a lost lock (${V3_ARCHIVE_CONCURRENT_OUTPUT_STRING:-<empty>})"
 fi
 
 # the read half. Only the anonymous arm is driven here: the authenticated flow belongs where the Go
