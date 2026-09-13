@@ -42,14 +42,14 @@ func MustGetCatalogReadingRepository(resolver melodycontainercontract.Resolver) 
 
 /* NewCatalogReadingRepository hands back the archive the environment can actually support: the postgres-backed one when an archive connection was configured, and the in-memory one otherwise — the same choice, made the same way, as the four nomenclature repositories beside it.
 
-   The archive's migration set is applied on the way out, so the first caller finds a table rather than a missing relation. There is no seeding: an archive of readings has no nomenclature to start from, and an empty archive is the honest state of an application that has not taken a reading yet. */
+   The archive's migration set is applied on the way out, so the first caller finds a table rather than a missing relation — under the storage's context, the process's signal context when the composition root bound one, so a SIGTERM during the wait on a held migration lock ends the wait the way it ends the dial. There is no seeding: an archive of readings has no nomenclature to start from, and an empty archive is the honest state of an application that has not taken a reading yet. */
 //melody:service ServiceCatalogReadingRepository
 func NewCatalogReadingRepository(storage *persistence.ArchiveStorage) (CatalogReadingRepository, error) {
     if false == storage.IsPersistent() {
         return newInMemoryCatalogReadingRepository(), nil
     }
 
-    migrateErr := migration.EnsureArchiveMigrated(context.Background(), storage.Database())
+    migrateErr := migration.EnsureArchiveMigrated(storage.Context(), storage.Database())
     if nil != migrateErr {
         return nil, migrateErr
     }

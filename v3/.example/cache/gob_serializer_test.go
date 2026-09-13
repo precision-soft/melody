@@ -95,3 +95,18 @@ func reflectTypeOf(value any) reflect.Type {
 func contains(haystack string, needle string) bool {
     return strings.Contains(haystack, needle)
 }
+
+type layoutProbeMapHolder struct {
+    ByCode map[string]layoutProbeBefore
+}
+
+/* a struct held as a map value is decoded by gob by field name exactly like one held directly, so the walk
+   looks through the map to its key and its element; before this, the map rendered as its opaque type name
+   and a field added to the value moved nothing */
+func TestLayoutDescriptionOf_LooksThroughAMapToItsElement(t *testing.T) {
+    description := layoutDescriptionOf(reflect.TypeOf(layoutProbeMapHolder{}), map[reflect.Type]bool{})
+
+    if false == strings.Contains(description, "ByCode map[string]cache.layoutProbeBefore{Id string; Code string}") {
+        t.Fatalf("expected the map's element to be described field by field, got %q", description)
+    }
+}

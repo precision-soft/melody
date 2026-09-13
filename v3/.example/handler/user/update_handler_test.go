@@ -1,11 +1,13 @@
 package user
 
 import (
+    "fmt"
     nethttp "net/http"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
 )
 
 func TestProtectsAnotherAdminRefusesAPeer(t *testing.T) {
@@ -154,5 +156,27 @@ func TestRolesForUpdateFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *testi
 
     if 1 != len(answered) || entity.RoleUser != answered[0] {
         t.Fatalf("an explicitly empty list answered %v", answered)
+    }
+}
+
+/* a rename the unique index refused after the door's check had passed is the caller's 400, the same answer
+   the check gives, not a 500 of a failed write */
+func TestApiUpdateHandlerAnswersTheIndexsRefusalOfATakenUsernameAs400(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
+    userRepository.refuseWrites(fmt.Errorf("audited update failed: %w", repository.ErrUsernameAlreadyExists))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoor(
+        t,
+        runtimeInstance,
+        ApiUpdateHandler(),
+        nethttp.MethodPut,
+        "/users/api/update/editor-1/",
+        map[string]string{"id": "editor-1"},
+        `{"username":"renamed"}`,
+    )
+
+    if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, "username already exists") {
+        t.Fatalf("the index's refusal answered %d: %s, wanted 400 username already exists", statusCode, body)
     }
 }

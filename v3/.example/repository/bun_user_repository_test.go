@@ -1,11 +1,13 @@
 package repository
 
 import (
+    "errors"
     "fmt"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/migration"
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 /* the two lookup doors are read as the dialect renders them rather than run against a database: what has
@@ -72,14 +74,22 @@ func TestUsernameTakenByAnotherQuery_ComparesOnTheBinaryCollation(t *testing.T) 
    different diagnosis — an identifier collision — and reporting it as a taken username would send the
    caller to rename an account whose name was never the problem. */
 func TestAsUsernameAlreadyExists_TranslatesOnlyTheUsernameIndexRefusal(t *testing.T) {
-    refusal := fmt.Errorf(
-        "audited insert failed: Error 1062 (23000): Duplicate entry 'zzprobe' for key 'melody_example_v3_user.%s'",
+    /* the shape production produces: the audit tracker's own exception, whose message says nothing about
+       the index, with the driver's refusal as its cause — the previous form of this test flattened the two
+       into one text and stayed green over a seam that never saw the index's name */
+    driverRefusal := fmt.Errorf(
+        "Error 1062 (23000): Duplicate entry 'zzprobe' for key 'melody_example_v3_user.%s'",
         migration.UserUsernameIndexName,
     )
+    refusal := exception.NewError("audited insert failed", nil, driverRefusal)
 
     translated := asUsernameAlreadyExists(refusal)
     if nil == translated {
         t.Fatalf("expected the refusal to survive as an error")
+    }
+
+    if false == errors.Is(translated, ErrUsernameAlreadyExists) {
+        t.Fatalf("expected the door's own refusal, got %q", translated.Error())
     }
 
     if "username already exists" != translated.Error() {
@@ -88,7 +98,11 @@ func TestAsUsernameAlreadyExists_TranslatesOnlyTheUsernameIndexRefusal(t *testin
 }
 
 func TestAsUsernameAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
-    primaryKey := fmt.Errorf("audited insert failed: Error 1062 (23000): Duplicate entry 'user-7' for key 'melody_example_v3_user.PRIMARY'")
+    primaryKey := exception.NewError(
+        "audited insert failed",
+        nil,
+        fmt.Errorf("Error 1062 (23000): Duplicate entry 'user-7' for key 'melody_example_v3_user.PRIMARY'"),
+    )
 
     if primaryKey != asUsernameAlreadyExists(primaryKey) {
         t.Fatalf("expected a duplicate identifier to stay the diagnosis it is, got %q", asUsernameAlreadyExists(primaryKey))

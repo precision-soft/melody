@@ -150,3 +150,36 @@ func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.
         t.Fatalf("expected the identifier to still name the account that took it, got exists=%t user=%v", exists, found)
     }
 }
+
+/* GrantRole answers what it did — granted, already held, or no such account — and appends onto a copy, so a
+   reader holding the previous value is not handed a set that grows under it */
+func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryUserRepository()
+
+    before, _, _ := repositoryInstance.FindByUsername(ctx, "user")
+
+    outcome, grantErr := repositoryInstance.GrantRole(ctx, before.Id, entity.RoleEditor)
+    if nil != grantErr || GrantRoleGranted != outcome {
+        t.Fatalf("the grant answered %d, %v; wanted GrantRoleGranted", outcome, grantErr)
+    }
+
+    if 1 != len(before.Roles) {
+        t.Fatalf("the value read before the grant now holds %v: the roles were appended in place", before.Roles)
+    }
+
+    outcome, grantErr = repositoryInstance.GrantRole(ctx, before.Id, entity.RoleEditor)
+    if nil != grantErr || GrantRoleAlreadyHeld != outcome {
+        t.Fatalf("a second grant answered %d, %v; wanted GrantRoleAlreadyHeld", outcome, grantErr)
+    }
+
+    after, _, _ := repositoryInstance.FindById(ctx, before.Id)
+    if 2 != len(after.Roles) || entity.RoleEditor != after.Roles[1] {
+        t.Fatalf("two grants of one role stored %v, wanted it once", after.Roles)
+    }
+
+    outcome, grantErr = repositoryInstance.GrantRole(ctx, "user-none", entity.RoleEditor)
+    if nil != grantErr || GrantRoleAccountAbsent != outcome {
+        t.Fatalf("a grant on a missing account answered %d, %v; wanted GrantRoleAccountAbsent", outcome, grantErr)
+    }
+}

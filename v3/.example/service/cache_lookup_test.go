@@ -8,6 +8,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
 )
 
 type countingUserRepository struct {
@@ -43,6 +44,10 @@ func (instance *countingUserRepository) Create(ctx context.Context, user *entity
 
 func (instance *countingUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
     return false, nil
+}
+
+func (instance *countingUserRepository) GrantRole(ctx context.Context, id string, role string) (repository.GrantRoleOutcome, error) {
+    return repository.GrantRoleAccountAbsent, nil
 }
 
 func (instance *countingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {

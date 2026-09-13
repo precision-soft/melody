@@ -148,6 +148,7 @@ const (
     environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
     environmentKeyTrustedProxyList     = "APP_TRUSTED_PROXY_LIST"
     environmentKeyRatesBaseUrl         = "RATES_BASE_URL"
+    environmentKeyRatesBaseCurrency    = "RATES_BASE_CURRENCY"
     environmentKeyReportExportEndpoint = "APP_REPORTING_EXPORT_ENDPOINT"
 
 )
@@ -161,6 +162,16 @@ const (
 const (
     parameterRatesBaseUrl        = "app.rates.base_url"
     parameterReportExportEndpoint = "app.reporting.export_endpoint"
+)
+
+/* the base every rate of the catalogue is quoted against, which the refresh refuses a provider's document
+   for not sharing. The seed quotes against the euro, so the default is EUR and a deployment names another
+   only when it reseeds against another; it is a parameter with a defaulted key for the same reason the two
+   endpoints are — a bound constructor argument is read with MustGet. */
+const (
+    parameterRatesBaseCurrency        = "app.rates.base_currency"
+    parameterRatesDefaultBaseCurrency = "app.rates.default_base_currency"
+    defaultRatesBaseCurrency          = "EUR"
 )
 
 /* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a same-named parameter). The values are already fully resolved here — NewConfiguration (called in NewApplication, before this composition root runs) applies applyEnvironmentOverrides + resolvePlaceholders, which expand %env(X)%/%name% indirection and unescape %% — so a plain String() read is correct. Returns "" when the key is absent so the eager build steps keep their "unset means skip this integration" behaviour. */

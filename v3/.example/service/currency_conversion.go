@@ -10,10 +10,10 @@ import (
 )
 
 /* FindCurrencyByCode answers the currency a caller named, matched on the code rather than on the identifier
-   because a code is what a client of the catalogue knows — "USD", not "cur-usd". The comparison folds case
-   so a caller writing "usd" is answered, and it is the ONLY spelling this application gives a code: the
-   nomenclature is seeded in upper case and nothing else compares codes, so there is no second reading for
-   this one to drift from. */
+   because a code is what a client of the catalogue knows — "USD", not "cur-usd". The comparison folds
+   through foldCurrencyCode so a caller writing "usd" is answered, and that function is the ONE spelling of
+   what makes two codes the same name: the rate refresh reads a provider's document through it too, so the
+   two readings cannot drift from each other. */
 func FindCurrencyByCode(currencies []*entity.Currency, code string) (*entity.Currency, bool) {
     folded := foldCurrencyCode(code)
     if "" == folded {
@@ -62,11 +62,29 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
         )
     }
 
+    converted := amount / from.Rate * to.Rate
+
+    /* the write doors bound every rate they admit, but this guard is on the read path for the same reason
+       the one above is: a row this application did not write can hold a rate that is positive and still not
+       a price, and the product of two such rates is an infinity that encoding/json refuses to render — a 500
+       on the read door for a caller who sent a valid code */
+    if true == math.IsInf(converted, 0) || true == math.IsNaN(converted) {
+        return 0, exception.NewError(
+            "the converted amount is not a finite number",
+            exceptioncontract.Context{
+                "amount":         amount,
+                "fromCurrencyId": from.Id,
+                "fromRate":       from.Rate,
+                "toCurrencyId":   to.Id,
+                "toRate":         to.Rate,
+            },
+            nil,
+        )
+    }
+
     /* rounded to the cent the way every price this application renders is, at the door that produces the
        number rather than at the one that prints it, so a converted price and a quoted one are the same kind
        of value wherever they are read */
-    converted := amount / from.Rate * to.Rate
-
     return math.Round(converted*100.0) / 100.0, nil
 }
 

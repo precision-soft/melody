@@ -47,7 +47,7 @@ func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 
         secret, uri, recoveryCodes, enrollErr := store.Enroll(runtimeInstance.Context(), user, "Melody Example")
         if nil != enrollErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not enroll the second factor"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not enroll the second factor", enrollErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, enrollPayload{
@@ -74,7 +74,7 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
         if recoveryCode := request.Header(melodysecurity.DefaultTotpRecoveryHeaderName); "" != recoveryCode {
             redeemed, redeemErr := store.RedeemRecoveryCode(runtimeInstance, user, recoveryCode)
             if nil != redeemErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not redeem the recovery code"), nil
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not redeem the recovery code", redeemErr), nil
             }
 
             if false == redeemed {
@@ -91,7 +91,7 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 
         secret, enrolled, findErr := store.FindTotpSecret(runtimeInstance, user)
         if nil != findErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not look up the enrollment"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not look up the enrollment", findErr), nil
         }
 
         if false == enrolled {
@@ -100,7 +100,7 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 
         verified, verifyErr := totp.Verify(secret, code, totp.Config{})
         if nil != verifyErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", verifyErr), nil
         }
 
         if false == verified {
@@ -109,7 +109,7 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 
         seen, rememberErr := replayGuard.Remember(runtimeInstance, "2fa:"+user+":"+totp.NormalizeCode(code), totpCodeValidityWindow())
         if nil != rememberErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", rememberErr), nil
         }
 
         if true == seen {

@@ -37,7 +37,7 @@ func LoginHandler() melodyhttpcontract.Handler {
         if true == strings.HasPrefix(contentType, "application/json") {
             decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
             if nil != decoderErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+                return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decoderErr), nil
             }
         } else {
             parseFormErr := httpRequest.ParseForm()
@@ -63,7 +63,7 @@ func LoginHandler() melodyhttpcontract.Handler {
             password,
         )
         if nil != authenticationErr {
-            /* the cause stays out of the errors list on purpose: it names internals — a cache refusal, a store address — and this is an unauthenticated door; ApiErrorWithErr keeps it in the debug-gated context instead */
+            /* the cause stays out of the errors list on purpose: it names internals — a cache refusal, a store address — and this is an unauthenticated door; ApiErrorWithErr journals it and keeps it in the debug-gated context instead */
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", authenticationErr), nil
         }
 

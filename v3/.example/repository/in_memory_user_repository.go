@@ -37,7 +37,7 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
 
     _, usernameExists := instance.findByUsernameLocked(user.Username)
     if true == usernameExists {
-        return fmt.Errorf("username already exists")
+        return ErrUsernameAlreadyExists
     }
 
     if "" == strings.TrimSpace(user.Id) {
@@ -80,7 +80,7 @@ func (instance *inMemoryUserRepository) Update(ctx context.Context, user *entity
         }
 
         if true == instance.usernameTakenByAnotherLocked(user.Username, id) {
-            return false, fmt.Errorf("username already exists")
+            return false, ErrUsernameAlreadyExists
         }
 
         instance.users[index] = user
@@ -88,6 +88,36 @@ func (instance *inMemoryUserRepository) Update(ctx context.Context, user *entity
     }
 
     return false, nil
+}
+
+/* GrantRole appends under the repository's own mutex, onto a COPY of the stored account: the stored value is
+   handed out to every reader, so the roles are not appended in place. */
+func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, id string, role string) (GrantRoleOutcome, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    trimmedId := strings.TrimSpace(id)
+    if "" == trimmedId {
+        return GrantRoleAccountAbsent, fmt.Errorf("id is required")
+    }
+
+    for index, existing := range instance.users {
+        if nil == existing || trimmedId != existing.Id {
+            continue
+        }
+
+        if true == holdsRole(existing.Roles, role) {
+            return GrantRoleAlreadyHeld, nil
+        }
+
+        granted := *existing
+        granted.Roles = append(append([]string{}, existing.Roles...), role)
+        instance.users[index] = &granted
+
+        return GrantRoleGranted, nil
+    }
+
+    return GrantRoleAccountAbsent, nil
 }
 
 func (instance *inMemoryUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {

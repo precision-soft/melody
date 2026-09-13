@@ -37,7 +37,11 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
     refreshService := service.MustGetRateRefreshService(runtimeInstance.Container())
 
     outcome, refreshErr := refreshService.Refresh(runtimeInstance)
-    if nil != refreshErr {
+
+    /* a run that refused some quotes still wrote the others, and the table below is the only place the
+       operator reads how many: it is printed, and the refusal takes the exit code after it. Every other
+       failure — the provider unread, the document refused whole — wrote nothing and has no table to show. */
+    if nil != refreshErr && 0 == outcome.Refused {
         return refreshErr
     }
 
@@ -49,11 +53,18 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
         return nil
     }
 
+    /* the columns keep the order the live band reads them in — instant, attempts, updated, skipped — and the
+       three headings that were folded into "skipped" or lost in a refusal follow them: a provider between
+       two moves answers UNCHANGED, a replayed document STALE, and a quote the catalogue would not take
+       REFUSED, with the run's exit code naming the currencies it refused */
     headers := []string{
         "AS_OF",
         "ATTEMPTS",
         "UPDATED",
         "SKIPPED",
+        "UNCHANGED",
+        "STALE",
+        "REFUSED",
     }
 
     rows := [][]string{
@@ -62,6 +73,9 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
             fmt.Sprintf("%d", outcome.Attempts),
             fmt.Sprintf("%d", outcome.Updated),
             fmt.Sprintf("%d", outcome.Skipped),
+            fmt.Sprintf("%d", outcome.Unchanged),
+            fmt.Sprintf("%d", outcome.Stale),
+            fmt.Sprintf("%d", outcome.Refused),
         },
     }
 
@@ -74,7 +88,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
         _, _ = fmt.Fprintln(writer, processLocalCacheNotice)
     }
 
-    return nil
+    return refreshErr
 }
 
 var _ melodyclicontract.Command = (*CurrencyRefreshRatesCommand)(nil)

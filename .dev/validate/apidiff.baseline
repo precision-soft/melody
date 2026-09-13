@@ -282,6 +282,7 @@ v3 ~ compatible ~ ./exception.PanicCause ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.BootCollisionKindHttpRoute ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.BootCollisionKindHttpRouteName ~ added ~ unclassified ~
 v3 ~ compatible ~ ./httpclient.(*HttpClient).Close ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.(*ServerSentEventWriter).WithWriteBudget ~ added ~ keep ~ a stream that re-arms the connection's write deadline per frame; net/http arms a server's WriteTimeout once from the request line, so a stream that outlived it lost the first event after it and was cut under a client that still believed it open
 v3 ~ compatible ~ ./httpclient.(*HttpClientConfig).FollowsRedirects ~ added ~ keep ~ the read side of WithoutRedirects, so a caller can tell which policy the client it was handed carries
 v3 ~ compatible ~ ./httpclient.(*HttpClientConfig).WithoutRedirects ~ added ~ keep ~ a client that hands a redirect back instead of following it; net/http re-sends a POST answered 301, 302 or 303 as a GET without its body, and the example's report export read the 200 of the page a moved sink pointed at as the sink having received the reading
 v3 ~ compatible ~ ./httpclient.(*HttpClient).RequestStreamWithContext ~ added ~ unclassified ~

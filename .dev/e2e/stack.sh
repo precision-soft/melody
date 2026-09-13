@@ -107,7 +107,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=148
+EXPECTED_CHECK_COUNT_INTEGER=150
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -437,6 +437,18 @@ else
     check_fail "the command-owned --role flag did not reach the command (${GRANT_OUTPUT_STRING:-<empty>})"
 fi
 
+# a spelling outside the application's vocabulary is refused by name, before the directory is read: the
+# voter compares a role's spelling exactly, so a misspelt role used to be stored, announced as granted and
+# grant nothing
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_ADMIM --user ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+MISSPELT_GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${MISSPELT_GRANT_OUTPUT_STRING}" | grep -q 'role "ROLE_ADMIM" is not one this application knows (ROLE_USER, ROLE_EDITOR, ROLE_ADMIN)'; then
+    check_pass "a role outside the application's vocabulary is refused by name, with the vocabulary"
+else
+    check_fail "a misspelt role was not refused (${MISSPELT_GRANT_OUTPUT_STRING:-<empty>})"
+fi
+
 check_section_end "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
@@ -447,7 +459,7 @@ check_section_start "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 # one invocation on purpose: the lazy-resolution marker and the grant line must come from the SAME run,
 # proving the handle resolved inside the command body and the command still completed its work afterwards
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role admin --user ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_ADMIN --user ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 LAZY_GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${LAZY_GRANT_OUTPUT_STRING}" | grep -q 'user service resolved lazily: user "ada" known=false'; then
@@ -1430,6 +1442,18 @@ if [[ "1.0842@2026-09-07T09:00:00Z" = "${V3_REFRESHED_QUOTE_STRING}" ]]; then
     check_pass "the provider's quote landed in the catalogue (cur-usd ${V3_REFRESHED_QUOTE_STRING}, read out of band)"
 else
     check_fail "cur-usd is quoted ${V3_REFRESHED_QUOTE_STRING:-<no answer>}, wanted the provider's 1.0842@2026-09-07T09:00:00Z"
+fi
+
+# the same document a second time is a provider between two moves: nothing is written and the run says
+# so under its own heading, where the previous form issued a full-row UPDATE per currency and, on mysql,
+# read its zero affected rows as three currencies deleted inside the run (SKIPPED 3). Columns: AS_OF,
+# ATTEMPTS, UPDATED, SKIPPED, UNCHANGED, STALE, REFUSED
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:currency:refresh-rates 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+V3_SECOND_REFRESH_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_SECOND_REFRESH_OUTPUT_STRING}" | grep -qE '2026-09-07T09:00:00Z[[:space:]]*\|[[:space:]]*1[[:space:]]*\|[[:space:]]*0[[:space:]]*\|[[:space:]]*0[[:space:]]*\|[[:space:]]*3[[:space:]]*\|[[:space:]]*0[[:space:]]*\|[[:space:]]*0'; then
+    check_pass "a second refresh of an unmoved document reports UNCHANGED 3 and writes nothing"
+else
+    check_fail "the second refresh reported ${V3_SECOND_REFRESH_OUTPUT_STRING:-<empty>}, wanted updated 0, skipped 0, unchanged 3"
 fi
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . catalog:report:refresh 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"

@@ -7,6 +7,7 @@ import (
     "strings"
     "sync"
     "testing"
+    "time"
 )
 
 func TestServerSentEventWriter_StripsNewlinesFromIdAndEvent(t *testing.T) {
@@ -459,4 +460,107 @@ func TestNewServerSentEventWriter_FlushesThroughAnIntermediateWrapper(t *testing
     if flushesAfterHeaders >= connection.flushes {
         t.Fatalf("expected the frame to be flushed to the connection, flushes stayed at %d", connection.flushes)
     }
+}
+
+/* deadlineRecordingConnection is a connection that records every write deadline set on it, the way a real
+   net/http connection honours ResponseController.SetWriteDeadline */
+type deadlineRecordingConnection struct {
+    *httptest.ResponseRecorder
+    deadlineList []time.Time
+}
+
+func (instance *deadlineRecordingConnection) SetWriteDeadline(deadline time.Time) error {
+    instance.deadlineList = append(instance.deadlineList, deadline)
+
+    return nil
+}
+
+/* net/http arms the server's write deadline once, from the request line; a stream that lives past it loses
+   the first frame after it. With a budget every frame moves the deadline to now plus the budget, through the
+   kernel's recording writer and an intermediate wrapper alike, so the deadline means "budget after the last
+   frame" rather than "budget after the request". */
+func TestServerSentEventWriter_RearmsTheWriteDeadlinePerFrameUnderABudget(t *testing.T) {
+    connection := &deadlineRecordingConnection{ResponseRecorder: httptest.NewRecorder()}
+    writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})
+
+    eventWriter, writerErr := NewServerSentEventWriter(writer)
+    if nil != writerErr {
+        t.Fatalf("expected the stream to be accepted, got %v", writerErr)
+    }
+
+    instant := time.Date(2026, time.September, 13, 12, 0, 0, 0, time.UTC)
+    frozen := &frozenServerSentEventClock{}
+    frozen.instant = instant
+    eventWriter.clock = frozen
+    eventWriter.WithWriteBudget(5 * time.Second)
+
+    if sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"}); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    instant = instant.Add(40 * time.Second)
+    frozen.instant = instant
+    if pingErr := eventWriter.Ping(); nil != pingErr {
+        t.Fatalf("unexpected ping error: %v", pingErr)
+    }
+
+    if 2 != len(connection.deadlineList) {
+        t.Fatalf("two frames set %d deadlines, wanted one per frame", len(connection.deadlineList))
+    }
+
+    if false == connection.deadlineList[0].Equal(instant.Add(-40*time.Second).Add(5*time.Second)) {
+        t.Errorf("the first frame armed %s, wanted its own instant plus the budget", connection.deadlineList[0])
+    }
+
+    if false == connection.deadlineList[1].Equal(instant.Add(5 * time.Second)) {
+        t.Errorf("the second frame armed %s, wanted its own instant plus the budget", connection.deadlineList[1])
+    }
+}
+
+func TestServerSentEventWriter_LeavesTheDeadlineAloneWithoutABudget(t *testing.T) {
+    connection := &deadlineRecordingConnection{ResponseRecorder: httptest.NewRecorder()}
+
+    eventWriter, writerErr := NewServerSentEventWriter(newRecordingResponseWriter(connection))
+    if nil != writerErr {
+        t.Fatalf("expected the stream to be accepted, got %v", writerErr)
+    }
+
+    eventWriter.WithWriteBudget(-time.Second)
+
+    if sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"}); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    if 0 != len(connection.deadlineList) {
+        t.Fatalf("a writer without a budget set %d deadlines, wanted none", len(connection.deadlineList))
+    }
+}
+
+/* a connection the controller cannot set a deadline on — the recorder — takes the frame as before: the
+   re-arming is a capability of the connection, not a condition of the stream */
+func TestServerSentEventWriter_WritesTheFrameWhenTheDeadlineCannotBeSet(t *testing.T) {
+    recorder := httptest.NewRecorder()
+
+    eventWriter, writerErr := NewServerSentEventWriter(recorder)
+    if nil != writerErr {
+        t.Fatalf("expected the stream to be accepted, got %v", writerErr)
+    }
+
+    eventWriter.WithWriteBudget(5 * time.Second)
+
+    if sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"}); nil != sendErr {
+        t.Fatalf("a connection without deadline support refused the frame: %v", sendErr)
+    }
+
+    if false == strings.Contains(recorder.Body.String(), "data: hello") {
+        t.Fatalf("the frame did not reach the recorder: %q", recorder.Body.String())
+    }
+}
+
+type frozenServerSentEventClock struct {
+    instant time.Time
+}
+
+func (instance *frozenServerSentEventClock) Now() time.Time {
+    return instance.instant
 }

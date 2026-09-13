@@ -13,6 +13,8 @@ import (
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v3/serializer"
     melodyvalidation "github.com/precision-soft/melody/v3/validation"
@@ -65,6 +67,13 @@ func ApiError(
     )
 }
 
+/* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under
+   the development environment; for a status of the server's own class it is JOURNALED here as well, at
+   error, because a Response is the one thing the kernel never journals: it journals a handler's failure
+   when the failure is RETURNED, and a handler that answered the failure as a 500 reached the terminate
+   listener alone — one info line, "request completed 500", no cause — so outside development the reason a
+   door answered 500 existed nowhere. A client's own refusal, below 500, is not journaled: the request was
+   wrong, and the body says so. */
 func ApiErrorWithErr(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -74,6 +83,8 @@ func ApiErrorWithErr(
 ) melodyhttpcontract.Response {
     normalizedErrors := normalizeErrors([]string{publicMessage})
     debugEnabled := debugMode(runtimeInstance)
+
+    journalServerError(runtimeInstance, request, statusCode, publicMessage, causeErr)
 
     return buildApiResponse(
         runtimeInstance,
@@ -87,6 +98,54 @@ func ApiErrorWithErr(
             Trace:   buildErrorTrace(causeErr, debugEnabled),
         },
     )
+}
+
+/* journalServerError writes the one record a 500 answered as a Response leaves: the public message the
+   client read, the route and the cause, through the runtime's logger. The cause is marked logged so a
+   reader further up that files marked errors once does not file it again. */
+func journalServerError(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    causeErr error,
+) {
+    if nethttp.StatusInternalServerError > statusCode || nil == causeErr || nil == runtimeInstance {
+        return
+    }
+
+    context := melodyexception.LogContext(causeErr, map[string]any{
+        "statusCode":    statusCode,
+        "publicMessage": publicMessage,
+    })
+
+    if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().URL {
+        context["method"] = request.HttpRequest().Method
+        context["path"] = melodyhttp.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
+    }
+
+    serverErrorLoggerOf(runtimeInstance).Error("handler answered a server error", context)
+
+    _ = melodyexception.MarkLogged(causeErr)
+}
+
+/* serverErrorLoggerOf is the application's logger, and the emergency logger when the container holds none:
+   the reason a door answered 500 has to reach SOME journal, and a process whose logger is not registered
+   is exactly the process whose operator is reading standard error. */
+func serverErrorLoggerOf(runtimeInstance melodyruntimecontract.Runtime) melodyloggingcontract.Logger {
+    if nil == runtimeInstance.Container() {
+        return melodylogging.EmergencyLogger()
+    }
+
+    logger, resolveErr := melodycontainer.FromResolver[melodyloggingcontract.Logger](
+        runtimeInstance.Container(),
+        melodylogging.ServiceLogger,
+    )
+    if nil != resolveErr || nil == logger {
+        return melodylogging.EmergencyLogger()
+    }
+
+    return logger
 }
 
 /* ApiRefusal renders a refusal a json-binding door made before the handler ran — the decoder's and the validator's alike, since JsonHandler hands both to the same responder.

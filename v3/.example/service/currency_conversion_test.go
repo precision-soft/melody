@@ -131,3 +131,19 @@ func TestFindCurrencyByCode_AnswersNothingForACodeTheCatalogueDoesNotCarry(t *te
         }
     }
 }
+
+/* the write doors bound the rates they admit, but a row this application did not write can hold a rate that
+   multiplies into an infinity; the read door refuses it instead of handing the serializer a value it
+   cannot render */
+func TestConvertAmount_RefusesAConvertedAmountThatIsNotFinite(t *testing.T) {
+    from := entity.NewCurrency("cur-tiny", "TNY", "Tiny", 5e-324, time.Time{})
+    to := entity.NewCurrency("cur-huge", "HGE", "Huge", 1e308, time.Time{})
+
+    if converted, err := ConvertAmount(100, from, to); nil == err {
+        t.Fatalf("a conversion that overflows answered %v with no error", converted)
+    }
+
+    if converted, err := ConvertAmount(100, to, to); nil != err || 100 != converted {
+        t.Errorf("an identity conversion over a huge rate answered %v, %v; wanted 100", converted, err)
+    }
+}

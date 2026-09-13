@@ -30,8 +30,9 @@ import (
 
 /* recordingUserRepository is the directory the admin doors write into, kept in this process. The doors under test are asked what they STORE, so a double that only answers reads would let the test agree with itself about what an update wrote. */
 type recordingUserRepository struct {
-    mutex sync.Mutex
-    users map[string]*entity.User
+    mutex        sync.Mutex
+    users        map[string]*entity.User
+    writeRefusal error
 }
 
 func newRecordingUserRepository(users ...*entity.User) *recordingUserRepository {
@@ -92,9 +93,22 @@ func (instance *recordingUserRepository) FindByUsername(ctx context.Context, use
     return nil, false, nil
 }
 
+/* refuseWrites makes every Create and Update answer the error given, the way the unique index refuses a name
+   another caller wrote between the door's check and its write */
+func (instance *recordingUserRepository) refuseWrites(writeErr error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.writeRefusal = writeErr
+}
+
 func (instance *recordingUserRepository) Create(ctx context.Context, user *entity.User) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if nil != instance.writeRefusal {
+        return instance.writeRefusal
+    }
 
     if nil == user {
         return errors.New("the user is nil")
@@ -110,6 +124,10 @@ func (instance *recordingUserRepository) Update(ctx context.Context, user *entit
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    if nil != instance.writeRefusal {
+        return false, instance.writeRefusal
+    }
+
     if _, exists := instance.users[user.Id]; false == exists {
         return false, nil
     }
@@ -118,6 +136,28 @@ func (instance *recordingUserRepository) Update(ctx context.Context, user *entit
     instance.users[user.Id] = &copied
 
     return true, nil
+}
+
+func (instance *recordingUserRepository) GrantRole(ctx context.Context, id string, role string) (repository.GrantRoleOutcome, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    user, exists := instance.users[id]
+    if false == exists {
+        return repository.GrantRoleAccountAbsent, nil
+    }
+
+    for _, held := range user.Roles {
+        if role == held {
+            return repository.GrantRoleAlreadyHeld, nil
+        }
+    }
+
+    granted := *user
+    granted.Roles = append(append([]string{}, user.Roles...), role)
+    instance.users[id] = &granted
+
+    return repository.GrantRoleGranted, nil
 }
 
 func (instance *recordingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {

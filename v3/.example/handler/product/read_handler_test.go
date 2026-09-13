@@ -1,6 +1,7 @@
 package product
 
 import (
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -120,6 +121,12 @@ func TestConvertedPriceFor_RefusesACurrencyTheCatalogueDoesNotCarry(t *testing.T
     if false == strings.Contains(err.Error(), "XXX") {
         t.Errorf("the refusal reads %q and does not name the code that was refused", err.Error())
     }
+
+    /* the caller's mistake, so the door answers it as the caller's 400 */
+    var serverRefusal *conversionRefusal
+    if true == errors.As(err, &serverRefusal) {
+        t.Errorf("an unknown code was marked as the server's refusal")
+    }
 }
 
 /* the product's own currency is looked up in the same list, so a catalogue that lost it refuses rather than
@@ -136,5 +143,34 @@ func TestConvertedPriceFor_RefusesWhenTheProductsOwnCurrencyIsMissing(t *testing
     )
     if nil == err {
         t.Fatalf("a product quoted in a missing currency was converted into %+v", converted)
+    }
+
+    /* the catalogue's fault, not the caller's — the caller sent a code the catalogue carries — so the door
+       answers it as a 500 with the cause journaled, not as a 400 the caller cannot act on */
+    var serverRefusal *conversionRefusal
+    if false == errors.As(err, &serverRefusal) {
+        t.Errorf("a product quoted in a missing currency was refused as the caller's mistake: %v", err)
+    }
+}
+
+/* the same distinction for a stored rate that is not a usable price: the caller cannot fix the row */
+func TestConvertedPriceFor_MarksAnUnusableStoredRateAsTheServersRefusal(t *testing.T) {
+    catalogue := []*entity.Currency{
+        entity.NewCurrency("cur-eur", "EUR", "Euro", 0, conversionQuoteInstant),
+        entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.0842, conversionQuoteInstant),
+    }
+
+    _, err := convertedPriceFor(
+        conversionRequest(t, "/products/api/read/prod-1/?currency=USD"),
+        conversionProduct(),
+        catalogue,
+    )
+    if nil == err {
+        t.Fatal("a product priced against a zero rate was converted")
+    }
+
+    var serverRefusal *conversionRefusal
+    if false == errors.As(err, &serverRefusal) {
+        t.Errorf("a zero stored rate was refused as the caller's mistake: %v", err)
     }
 }

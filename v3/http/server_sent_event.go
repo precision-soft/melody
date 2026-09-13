@@ -6,6 +6,7 @@ import (
     "strconv"
     "strings"
     "sync"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -85,10 +86,39 @@ func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
 }
 
 type ServerSentEventWriter struct {
-    mutex   sync.Mutex
-    writer  nethttp.ResponseWriter
-    flusher nethttp.Flusher
-    broken  bool
+    mutex       sync.Mutex
+    writer      nethttp.ResponseWriter
+    flusher     nethttp.Flusher
+    broken      bool
+    writeBudget time.Duration
+    clock       serverSentEventClock
+}
+
+/* serverSentEventClock is the instant a frame's deadline is counted from; an interface rather than a func value so the writer stays comparable, the way it was before the budget existed — a func field would have made a value that was comparable stop being one, an incompatible change of the published surface. */
+type serverSentEventClock interface {
+    Now() time.Time
+}
+
+type systemServerSentEventClock struct{}
+
+func (instance systemServerSentEventClock) Now() time.Time {
+    return time.Now()
+}
+
+/* WithWriteBudget makes every frame re-arm the connection's write deadline, budget from the moment the frame is written, and hands the same writer back. net/http arms a server's WriteTimeout ONCE, absolute from the moment the request line was read: on a stream that lives longer than that, every write from then on fails, the handler learns it only when the next event arrives, and that event — the first after the deadline — is the one lost, on a connection the client still believes open. Re-armed per frame the deadline means what a stream needs it to mean: a client that stops reading is still cut, budget after the LAST frame it did not take, and a stream that keeps writing keeps living. The budget a handler hands in is the server's own WriteTimeout, read off the request's server; zero leaves the deadline as the server armed it.
+
+   The deadline is set through a ResponseController, so it reaches the connection through whatever wrapped the writer, the kernel's recording writer included. A writer that cannot be unwrapped to the connection answers ErrNotSupported, and then every frame is written as it was before this door existed — the re-arming is a capability of the connection, and a writer without it is not a broken stream. */
+func (instance *ServerSentEventWriter) WithWriteBudget(budget time.Duration) *ServerSentEventWriter {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if 0 > budget {
+        budget = 0
+    }
+
+    instance.writeBudget = budget
+
+    return instance
 }
 
 /* Send emits one event frame. An event carrying no data is refused rather than written: the event stream grammar dispatches nothing for a frame with an empty data buffer, so a caller naming an event type and no payload sent a frame the browser is required to discard and had no way to find out. A field value that would collapse to empty once its control bytes are removed is refused for the same reason — an id rewritten to the empty string silently resets the client's resume cursor.
@@ -183,6 +213,8 @@ func (instance *ServerSentEventWriter) writeFrame(frame string) error {
         return exception.NewError("server sent event stream is broken by an earlier partial write", nil, nil)
     }
 
+    instance.rearmWriteDeadlineLocked()
+
     written, writeErr := io.WriteString(instance.writer, frame)
     if nil != writeErr {
         if 0 < written {
@@ -195,6 +227,20 @@ func (instance *ServerSentEventWriter) writeFrame(frame string) error {
     instance.flusher.Flush()
 
     return nil
+}
+
+/* rearmWriteDeadlineLocked moves the connection's write deadline to now plus the budget before a frame is written; without a budget, or on a writer the controller cannot reach the connection through, it does nothing and the frame goes out under the deadline the server armed. */
+func (instance *ServerSentEventWriter) rearmWriteDeadlineLocked() {
+    if 0 >= instance.writeBudget {
+        return
+    }
+
+    var clock serverSentEventClock = systemServerSentEventClock{}
+    if nil != instance.clock {
+        clock = instance.clock
+    }
+
+    _ = nethttp.NewResponseController(instance.writer).SetWriteDeadline(clock.Now().Add(instance.writeBudget))
 }
 
 /* the two terminators of the grammar, named so each site says which one it ends with. A comment deliberately ends the FRAME and not merely the line: the blank line is what makes a comment-only keepalive observable to a client that reads frame by frame, which is the whole point of the preamble a stream flushes at subscription time — without it a client cannot tell a live stream from a hung one. The hazard a single newline would avoid, a keepalive landing between the fields of a half-built event and dispatching it, cannot arise here: Send composes every frame whole and writes it under the lock, so nothing is ever buffered when a comment runs. */

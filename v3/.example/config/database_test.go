@@ -164,3 +164,54 @@ func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
         t.Fatalf("expected the archive's budget to be spent in under three seconds, took %s", elapsed)
     }
 }
+
+/* the first resolution of the archive repository applies the migration set after the dial, a wait of up to the lock window on a held migration lock; that wait runs under the process context the storage carries, so a cancelled process ends it at once — under a background context it ran the whole window while the teardown waited behind it. Over a refusing connector the dial refuses first either way, so the arm that separates the two is the context's refusal being what the migration set hands back. */
+func TestArchiveStorageCarriesTheProcessContextIntoTheMigrationSet(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    storage := persistence.NewArchiveStorageAt(bun.NewDB(sql.OpenDB(&refusingConnector{}), pgdialect.New()), "postgres:5432/melody_example_v3_archive").WithContext(ctx)
+
+    if ctx != storage.Context() {
+        t.Fatal("expected the storage to hand back the context it was bound to")
+    }
+
+    if context.Background() != persistence.NewArchiveStorage(nil).Context() {
+        t.Fatal("expected a storage nobody bound to answer a background context")
+    }
+
+    _, resolveErr := repository.NewCatalogReadingRepository(storage)
+    if nil == resolveErr {
+        t.Fatal("expected the cancelled context to refuse the first resolution")
+    }
+
+    if false == errors.Is(resolveErr, context.Canceled) {
+        t.Fatalf("expected the migration set to hand back the context's cancellation, got %v", resolveErr)
+    }
+}
+
+/* the composition root binds the process context onto the handle it publishes */
+func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    moduleInstance := &Module{processContext: ctx, archiveWired: true, archiveLocation: "postgres:5432/melody_example_v3_archive"}
+    serviceContainer := melodycontainer.NewContainer()
+    melodycontainer.MustRegister(
+        serviceContainer,
+        serviceArchiveDatabase,
+        func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+            return newUndialedDatabase(), nil
+        },
+    )
+    moduleInstance.registerArchiveStorageService(&containerRegistrar{Container: serviceContainer})
+
+    storage, resolveErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](serviceContainer, persistence.ServiceArchiveStorage)
+    if nil != resolveErr {
+        t.Fatalf("resolving the archive storage failed: %v", resolveErr)
+    }
+
+    if ctx != storage.Context() {
+        t.Fatal("expected the published storage to carry the process context")
+    }
+}

@@ -2,6 +2,7 @@ package user
 
 import (
     "encoding/json"
+    "errors"
     nethttp "net/http"
     "strings"
 
@@ -24,7 +25,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
         var dto adminUserCreateRequest
         decodeErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
         if nil != decodeErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+            return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decodeErr), nil
         }
 
         normalizedUsername := strings.TrimSpace(dto.Username)
@@ -74,6 +75,13 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             normalizeRoles(dto.Roles),
         )
         if nil != createErr {
+            /* the read above is a check, the unique index is the guard: two callers that both passed the
+               check are told apart here, and the one the index refused is answered the same 400 the check
+               answers, not the 500 of a write that failed */
+            if true == errors.Is(createErr, repository.ErrUsernameAlreadyExists) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
+            }
+
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create user", createErr), nil
         }
 

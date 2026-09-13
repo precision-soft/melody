@@ -389,7 +389,7 @@ func TestDatabaseResetCommandArchiveOnlyEnvironmentResetsTheArchiveAlone(t *test
 func TestDatabaseResetCommandReseedsTheCatalogueBeforeTouchingTheArchive(t *testing.T) {
     buffer := &bytes.Buffer{}
     storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v3")
-    runtimeInstance, _ := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorageAt(newUndialedResetStorage().Database(), "postgres:5432/melody_example_v3_archive"))
+    runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorageAt(newUndialedResetStorage().Database(), "postgres:5432/melody_example_v3_archive"))
 
     runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, buffer))
     if nil == runErr {
@@ -414,6 +414,17 @@ func TestDatabaseResetCommandReseedsTheCatalogueBeforeTouchingTheArchive(t *test
         if false == strings.Contains(output, line) {
             t.Fatalf("expected the completed step %q to be reported before the failure, got %q", line, output)
         }
+    }
+
+    /* the cache is the catalogue's and is cleared as the catalogue's last step: an archive that refused after
+       the reseed used to leave every stale entry standing behind a non-zero exit — the account the reset
+       removed still authenticating from the cache */
+    if 1 != cacheInstance.clears() {
+        t.Fatalf("expected the cache to be cleared once before the archive was reached, got %d clears", cacheInstance.clears())
+    }
+
+    if false == strings.Contains(output, "cache cleared") {
+        t.Fatalf("expected the clear to be reported before the archive's failure, got %q", output)
     }
 }
 

@@ -56,22 +56,23 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
     }
 
     /* an archive that cannot be REACHED — its locker resolves by opening the postgres handle — does not take the reading and the export with it: the run goes on without the archive and its failure takes the exit code at the end, after the two halves that do not depend on postgres have been done. The old form read that failure as "no archive wired" and exited zero over a reading nobody recorded. */
-    archiveLock, archiveWired, lockErr := archiveLockOf(runtimeInstance)
+    archiveLock, lockErr := archiveLockOf(runtimeInstance)
     archiveFailure := lockErr
 
-    if true == archiveWired && nil == archiveFailure {
+    if nil == archiveFailure {
         acquired, acquireErr := archiveLock.Acquire(runtimeInstance)
         if nil != acquireErr {
-            return acquireErr
-        }
-
-        if false == acquired {
+            /* an ERROR taking the lock — the connection lost between the open and the advisory lock, a pool that
+               refused — is the archive being unreachable, the same case as a refusal of the open above: the
+               reading and the export go on without the archive, and the failure takes the exit code at the end */
+            archiveFailure = archiveOwnRefusalOrWrapped("catalog report refresh: the archive's lock could not be taken", acquireErr)
+        } else if false == acquired {
             fmt.Fprintln(writer, "another process is taking this reading right now; nothing was read, exported or recorded by this one")
 
             return nil
+        } else {
+            defer archiveLock.Release(runtimeInstance)
         }
-
-        defer archiveLock.Release(runtimeInstance)
     }
 
     reading, refreshErr := reportService.Refresh(runtimeInstance.Context())
@@ -80,10 +81,10 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
     }
 
     archived := false
-    if true == archiveWired && nil == archiveFailure {
+    if nil == archiveFailure {
         recorded, archiveErr := reportService.Archive(runtimeInstance, reading)
         if nil != archiveErr {
-            archiveFailure = exception.NewError("catalog report refresh: recording the reading in the archive did not complete", nil, archiveErr)
+            archiveFailure = archiveOwnRefusalOrWrapped("catalog report refresh: recording the reading in the archive did not complete", archiveErr)
         }
 
         archived = recorded
@@ -124,19 +125,42 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
         }
 
         if nil != archiveFailure {
-            fmt.Fprintln(writer, "the sink did not receive this reading either: "+exportErr.Error())
+            /* both halves failed: the console names the archive's refusal — the one that names the database —
+               beside the sink's, and the exit carries both, so neither failure hides the other */
+            fmt.Fprintln(writer, "the archive did not record this reading: "+archiveFailure.Error())
+            fmt.Fprintln(writer, "the sink did not receive it either: "+exportErr.Error())
+
+            return errors.Join(archiveFailure, exportErr)
         }
 
         return exportErr
     }
 
     if nil != archiveFailure {
-        fmt.Fprintln(writer, "the reading was taken and exported; the archive did not record it")
+        if true == exported {
+            fmt.Fprintln(writer, "the reading was taken and exported; the archive did not record it")
+        } else {
+            fmt.Fprintln(writer, "the reading was taken; no sink is configured, and the archive did not record it")
+        }
 
         return archiveFailure
     }
 
     return nil
+}
+
+/* archiveOwnRefusalOrWrapped hands back this application's own refusal as it is — the archive's database named
+   with where it is, the migration step that did not complete — so the console line, which the cli engine
+   renders from the message alone, keeps naming the database; anything else is wrapped with what was being
+   done. It is the rule archiveLockOf already keeps for the lock's resolution, applied to the two other doors
+   the archive is reached through. */
+func archiveOwnRefusalOrWrapped(headline string, cause error) error {
+    var ownException *exception.Error
+    if true == errors.As(cause, &ownException) {
+        return cause
+    }
+
+    return exception.NewError(headline, nil, cause)
 }
 
 var _ melodyclicontract.Command = (*CatalogReportRefreshCommand)(nil)
@@ -147,29 +171,20 @@ const archiveLockName = "example.catalog.reading.archive"
 /* archiveLockTtl is accepted by CreateLock for interface compatibility and is not honoured as an expiry by the postgres backend: a session advisory lock lives exactly as long as the backend session that took it, so a process that dies mid-refresh releases it when its connection drops. It is written as a real duration all the same, because the locker contract takes one, the in-process locker honours it, and a zero would read as a decision nobody made. */
 const archiveLockTtl = 30 * time.Second
 
-/* archiveLockOf hands back the lock the run is taken under, or says there is no archive to take it for.
+/* archiveLockOf hands back the lock the run is taken under.
 
    The lock is what makes processes that OVERLAP on one schedule record ONE reading between them rather than one each: it is held around the whole run, so the loser takes no reading at all. Two runs that do not overlap — one host's tick a second after another's — are two readings, keyed on the instant each took, and the archive holds both; the identity of a reading is the second it was taken at, and the lock does not change that. It is taken by name from the container rather than through the framework's general locker, because that one is redis when redis is configured and the archive is not on redis: a lock held in the very database being written is exclusion that cannot disagree with the write it guards. Without postgres the locker under this name is the in-process one, over the in-process archive.
 
-   "Not wired" is asked of the container, not read off a failure: the locker's provider is registered only when an archive is, and when it is, resolving it OPENS the postgres handle — so a refusal of that resolution is the archive being unreachable, which is handed back, where it used to read as "no archive" and exit zero over a reading that was never recorded. */
-func archiveLockOf(runtimeInstance melodyruntimecontract.Runtime) (melodylockcontract.Lock, bool, error) {
-    if false == runtimeInstance.Container().Has(persistence.ServiceArchiveLocker) {
-        return nil, false, nil
-    }
-
+   The locker is registered under this name on EVERY wiring — the archive's advisory lock with postgres, the in-process one without — so there is no "not wired" to ask the container about; resolving it OPENS the postgres handle when there is one, so a refusal of that resolution is the archive being unreachable, which is handed back, where it used to read as "no archive" and exit zero over a reading that was never recorded. */
+func archiveLockOf(runtimeInstance melodyruntimecontract.Runtime) (melodylockcontract.Lock, error) {
     locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](
         runtimeInstance.Container(),
         persistence.ServiceArchiveLocker,
     )
     if nil != lockerErr {
         /* a refusal of this application's own — the archive's database named with where it is — is handed back as it is, so the console line names the database; anything else is wrapped with what was being resolved */
-        var ownException *exception.Error
-        if true == errors.As(lockerErr, &ownException) {
-            return nil, true, lockerErr
-        }
-
-        return nil, true, exception.NewError("catalog report refresh: the archive's locker could not be resolved", nil, lockerErr)
+        return nil, archiveOwnRefusalOrWrapped("catalog report refresh: the archive's locker could not be resolved", lockerErr)
     }
 
-    return locker.CreateLock(archiveLockName, archiveLockTtl), true, nil
+    return locker.CreateLock(archiveLockName, archiveLockTtl), nil
 }

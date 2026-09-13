@@ -7,15 +7,18 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
+    "sync"
     "testing"
     "time"
-    "strings"
 
     melodyconfig "github.com/precision-soft/melody/v3/config"
     melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyexception "github.com/precision-soft/melody/v3/exception"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyserializercontract "github.com/precision-soft/melody/v3/serializer/contract"
     melodyvalidation "github.com/precision-soft/melody/v3/validation"
@@ -391,5 +394,142 @@ func TestBuildErrorTraceIsEmptyWithoutDebug(t *testing.T) {
 
     if 2 != len(buildErrorTrace(causeErr, true)) {
         t.Fatalf("expected the whole unwrap chain under debug, got %d", len(buildErrorTrace(causeErr, true)))
+    }
+}
+
+/* recordingLogger keeps every record a door wrote through the runtime's logger; the records are what the
+   journal would hold */
+type recordingLogger struct {
+    melodyloggingcontract.Logger
+    mutex   sync.Mutex
+    records []recordedLine
+}
+
+type recordedLine struct {
+    level   string
+    message string
+    context melodyloggingcontract.Context
+}
+
+func (instance *recordingLogger) Error(message string, context melodyloggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, recordedLine{level: "error", message: message, context: context})
+}
+
+/* lines answers the records of the server-error journal alone, so a presenter record about its own
+   collaborators — a serializer it could not resolve — is not counted as the cause of a 500 */
+func (instance *recordingLogger) lines() []recordedLine {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    var serverErrorLines []recordedLine
+    for _, line := range instance.records {
+        if "handler answered a server error" == line.message {
+            serverErrorLines = append(serverErrorLines, line)
+        }
+    }
+
+    return serverErrorLines
+}
+
+/* runtimeWithJournal is the presenter's runtime under the PRODUCTION environment, carrying a logger that
+   records, and a request whose route is nameable */
+func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request, *recordingLogger) {
+    t.Helper()
+
+    runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvProduction)
+    logger := &recordingLogger{Logger: melodylogging.NewNopLogger()}
+
+    registrar := runtimeInstance.Container().(melodycontainercontract.Registrar)
+    melodycontainer.MustRegister(
+        registrar,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    /* the serializer manager is registered so the envelope renders through it and the presenter's own
+       "failed to resolve the serializer" records do not stand beside the one this probe counts */
+    melodycontainer.MustRegister(
+        registrar,
+        melodyserializer.ServiceSerializerManager,
+        func(resolver melodycontainercontract.Resolver) (*melodyserializer.SerializerManager, error) {
+            return melodyserializer.NewSerializerManager(
+                map[string]melodyserializercontract.Serializer{
+                    melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
+                },
+            )
+        },
+    )
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/twofactor/verify%2Fx", nil)
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+
+    return runtimeInstance, request, logger
+}
+
+/* the kernel journals a handler's failure only when it is RETURNED; a 500 answered as a Response reached the
+   terminate listener alone, so outside development the cause existed nowhere — the presenter writes the one
+   record, at error, with the cause and the route, and only for the server's own class */
+func TestApiErrorWithErrJournalsTheCauseOfAServerError(t *testing.T) {
+    runtimeInstance, request, logger := runtimeWithJournal(t)
+
+    cause := errors.New(causeSecret)
+
+    response := ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", cause)
+
+    body := responseBodyOf(t, response)
+    if true == strings.Contains(body, causeSecret) {
+        t.Fatalf("the cause reached the body under production: %q", body)
+    }
+
+    lines := logger.lines()
+    if 1 != len(lines) {
+        t.Fatalf("a 500 wrote %d records, wanted exactly one", len(lines))
+    }
+
+    if "error" != lines[0].level || "handler answered a server error" != lines[0].message {
+        t.Fatalf("the record is %q at %s, wanted the server error at error", lines[0].message, lines[0].level)
+    }
+
+    rendered := fmt.Sprintf("%v", lines[0].context)
+    if false == strings.Contains(rendered, causeSecret) {
+        t.Fatalf("the record carries no cause: %v", lines[0].context)
+    }
+
+    if nethttp.StatusInternalServerError != lines[0].context["statusCode"] || "could not verify the code" != lines[0].context["publicMessage"] {
+        t.Fatalf("the record does not name the status and the public message: %v", lines[0].context)
+    }
+
+    if "POST" != lines[0].context["method"] || "/twofactor/verify%2Fx" != lines[0].context["path"] {
+        t.Fatalf("the record does not name the route as routed: %v", lines[0].context)
+    }
+
+    if false == melodyexception.IsAlreadyLogged(melodyexception.Logged(cause)) {
+        t.Fatal("a plain error cannot carry the mark, and Logged wraps it; the presenter must not rely on the mark alone")
+    }
+}
+
+func TestApiErrorWithErrJournalsNothingForAClientsRefusal(t *testing.T) {
+    runtimeInstance, request, logger := runtimeWithJournal(t)
+
+    _ = ApiErrorWithErr(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", errors.New(causeSecret))
+
+    if 0 != len(logger.lines()) {
+        t.Fatalf("a 400 wrote %d records, wanted none", len(logger.lines()))
+    }
+}
+
+func TestApiErrorJournalsNothingWithoutACause(t *testing.T) {
+    runtimeInstance, request, logger := runtimeWithJournal(t)
+
+    _ = ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "session is not available")
+    _ = ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "no cause", nil)
+
+    if 0 != len(logger.lines()) {
+        t.Fatalf("a 500 without a cause wrote %d records, wanted none", len(logger.lines()))
     }
 }

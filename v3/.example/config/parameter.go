@@ -39,6 +39,14 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter(parameterReportExportEndpoint, "%env(default::"+environmentKeyReportExportEndpoint+")%")
     registrar.RegisterParameter(parameterRatesBaseUrl, "%env(default::"+environmentKeyRatesBaseUrl+")%")
 
+    /* the base currency defaults to the seed's rather than to the empty string: an empty base would refuse
+       every document, and a catalogue with no base named is a catalogue quoted against the one it ships with */
+    registrar.RegisterParameter(parameterRatesDefaultBaseCurrency, defaultRatesBaseCurrency)
+    registrar.RegisterParameter(
+        parameterRatesBaseCurrency,
+        "%env(default:"+parameterRatesDefaultBaseCurrency+":"+environmentKeyRatesBaseCurrency+")%",
+    )
+
     /* the two outbound urls are where the process points, which an operator reads in debug:parameters, so they are not redacted as a rule; written with a userinfo — the shape the amqp dsn is marked for, and one the client sends as a credential — the url IS a credential, and the mark covers it together with the parameter whose template reads it. The value is read raw here, before resolution: a .env key is a literal, and the userinfo is in the literal or nowhere. */
     for _, environmentKey := range []string{environmentKeyRatesBaseUrl, environmentKeyReportExportEndpoint} {
         if true == urlCarriesUserinfo(instance.environmentValue(environmentKey)) {

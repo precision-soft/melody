@@ -115,6 +115,14 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         }
 
         fmt.Fprintln(writer, "catalogue reset: the nomenclature was reseeded")
+
+        /* the cache is cleared HERE, as the catalogue's last step, not after the archive: the entities it holds
+           are the catalogue's, and an archive that refuses between the reseed and a clear placed after it left
+           the catalogue reseeded with every stale entry standing — the very account the reset removed still
+           authenticating from the cache, the class the clear exists to close */
+        if clearErr := clearCache(runtimeInstance, writer); nil != clearErr {
+            return clearErr
+        }
     }
 
     /* the archive is a set of its own on a database of its own, so it is reset through its own door — and it is SKIPPED rather than refused when this environment wired no archive, the way the catalogue half is skipped when only the archive is wired. An operator who never configured postgres is not told their reset failed over a database they never asked for. */
@@ -126,7 +134,19 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         fmt.Fprintln(writer, "archive reset: the reading archive was dropped and recreated on "+archiveStorage.Location())
     }
 
-    /* the state a fresh volume holds includes an EMPTY cache: the entities are cached under keys with no expiry and are cleared by name, by the listeners that watch the write events — and a reset writes through no door that dispatches one, so without this an account the reset removed kept authenticating on the login door with its old digest, from a cache nothing could clear afterwards. On the shared cache this reaches the running server; on the in-process fallback it reaches this process alone, which the line below says. */
+    /* an environment that wired the archive alone has no catalogue to reseed and nothing of its own in the cache;
+       the cache is cleared all the same, so a reset leaves the same state whichever halves are wired */
+    if false == storage.IsPersistent() {
+        if clearErr := clearCache(runtimeInstance, writer); nil != clearErr {
+            return clearErr
+        }
+    }
+
+    return nil
+}
+
+/* clearCache empties the cache and says so. The state a fresh volume holds includes an EMPTY cache: the entities are cached under keys with no expiry and are cleared by name, by the listeners that watch the write events — and a reset writes through no door that dispatches one, so without this an account the reset removed kept authenticating on the login door with its old digest, from a cache nothing could clear afterwards. On the shared cache this reaches the running server; on the in-process fallback it reaches this process alone, which the line says. A clear that fails takes the exit code, and the only door that clears the cache again is this reset — a cache:clear command of its own is filed for the harvest. */
+func clearCache(runtimeInstance melodyruntimecontract.Runtime, writer io.Writer) error {
     cacheInstance, cacheErr := melodycontainer.FromResolver[melodycachecontract.Cache](
         runtimeInstance.Container(),
         melodycache.ServiceCache,
@@ -170,7 +190,7 @@ func databaseResetPlanLineList(storage *persistence.CatalogStorage, archiveStora
             lineList,
             "  - the bun bookkeeping tables, so an older set's rows go with them",
             fmt.Sprintf("  - the rows of %s and %s, which this application wrote", persistence.AuditTable, melodyaudit.DefaultTransactionTable),
-            "  and then reseed the nomenclature",
+            "  and then reseed the nomenclature and clear the cache",
         )
     }
 
@@ -183,7 +203,13 @@ func databaseResetPlanLineList(storage *persistence.CatalogStorage, archiveStora
         }
     }
 
-    return append(lineList, "and then clear the cache")
+    /* the cache holds the catalogue's entities and is cleared as the catalogue's last step; an environment that
+       wired the archive alone has no catalogue half, and the plan says the clear on its own line */
+    if false == storage.IsPersistent() {
+        lineList = append(lineList, "and then clear the cache")
+    }
+
+    return lineList
 }
 
 /* databaseLocationLabel is what the plan prints for a handle nobody located: the composition root locates both handles, so the fallback is a test's, and it is spelled as an absence rather than left blank so a blank in a plan is never mistaken for a database with no name. */

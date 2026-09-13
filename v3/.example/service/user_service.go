@@ -170,6 +170,48 @@ func (instance *UserService) Create(
     return user, nil
 }
 
+/* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the
+   admin update door serialise on the account instead of the last whole-set write winning; the account is
+   read back after the grant, so the event carries what the directory holds and the listeners drop the
+   entries the account is served from. */
+func (instance *UserService) GrantRole(
+    runtimeInstance melodyruntimecontract.Runtime,
+    userId string,
+    role string,
+) (*entity.User, repository.GrantRoleOutcome, error) {
+    ctx := WriteContext(runtimeInstance)
+
+    outcome, grantErr := instance.userRepository.GrantRole(ctx, userId, role)
+    if nil != grantErr {
+        return nil, outcome, grantErr
+    }
+
+    if repository.GrantRoleGranted != outcome {
+        return nil, outcome, nil
+    }
+
+    granted, found, findErr := instance.userRepository.FindById(ctx, userId)
+    if nil != findErr {
+        return nil, outcome, findErr
+    }
+
+    if false == found {
+        return nil, repository.GrantRoleAccountAbsent, nil
+    }
+
+    updatedEvent := event.NewUserUpdatedEvent(granted, granted.Username)
+    _, dispatchErr := instance.eventDispatcher.DispatchName(
+        runtimeInstance,
+        event.UserUpdatedEventName,
+        updatedEvent,
+    )
+    if nil != dispatchErr {
+        return nil, outcome, dispatchErr
+    }
+
+    return granted, outcome, nil
+}
+
 func (instance *UserService) Update(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,

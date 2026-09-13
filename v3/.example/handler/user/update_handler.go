@@ -2,6 +2,7 @@ package user
 
 import (
     "encoding/json"
+    "errors"
     nethttp "net/http"
     "strings"
 
@@ -34,7 +35,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
         var dto adminUserUpdateRequest
         decodeErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
         if nil != decodeErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+            return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decodeErr), nil
         }
 
         userService := service.MustGetUserService(runtimeInstance.Container())
@@ -107,6 +108,12 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
             targetUser.Roles,
         )
         if nil != updateErr {
+            /* the read above is a check, the unique index is the guard: a rename the index refused after
+               the check had passed is the caller's 400, not a failure of the write */
+            if true == errors.Is(updateErr, repository.ErrUsernameAlreadyExists) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
+            }
+
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to update user", updateErr), nil
         }
 

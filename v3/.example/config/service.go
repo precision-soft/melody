@@ -177,7 +177,10 @@ func (instance *Module) registerArchiveStorageService(registrar melodyapplicatio
                 return nil, resolveErr
             }
 
-            return persistence.NewArchiveStorageAt(database, instance.archiveLocation), nil
+            /* the process context travels with the handle: the repository built over it applies the archive's
+               migration set at its first resolution, a wait of up to the lock window on a held migration
+               lock, and that wait ends with the process's signal the way the dial does */
+            return persistence.NewArchiveStorageAt(database, instance.archiveLocation).WithContext(instance.processContext), nil
         },
     )
 }

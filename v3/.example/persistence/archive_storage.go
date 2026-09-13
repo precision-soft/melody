@@ -1,6 +1,7 @@
 package persistence
 
 import (
+    "context"
     bun "github.com/uptrace/bun"
 )
 
@@ -20,6 +21,7 @@ const ServiceArchiveLocker = "service.example.archive.locker"
 type ArchiveStorage struct {
     database *bun.DB
     location string
+    context  context.Context
 }
 
 func NewArchiveStorage(database *bun.DB) *ArchiveStorage {
@@ -29,6 +31,22 @@ func NewArchiveStorage(database *bun.DB) *ArchiveStorage {
 /* NewArchiveStorageAt names the database the handle is open on, the way the catalogue handle is named: the reset prints both before it destroys either, and two databases told apart only by their tables is what that plan exists to prevent. */
 func NewArchiveStorageAt(database *bun.DB, location string) *ArchiveStorage {
     return &ArchiveStorage{database: database, location: location}
+}
+
+/* WithContext binds the process's signal context to the handle, for the work its first resolution does beyond the dial — applying the archive's migration set, which waits up to the lock window on a held migration lock — so a SIGTERM during that first resolution ends it the way it ends the dial; without one the work runs under a background context, which is the honest state of a handle a test built. */
+func (instance *ArchiveStorage) WithContext(ctx context.Context) *ArchiveStorage {
+    instance.context = ctx
+
+    return instance
+}
+
+/* Context is the context the handle's first-resolution work runs under: the process's signal context when the composition root bound one, a background context otherwise. */
+func (instance *ArchiveStorage) Context() context.Context {
+    if nil == instance.context {
+        return context.Background()
+    }
+
+    return instance.context
 }
 
 /* Database is nil when the environment configured no archive connection. */

@@ -32,7 +32,7 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
 
         putErr := storage.Put(runtimeInstance, key, bytes.NewReader(body), int64(len(body)), storagecontract.PutOptions{ContentType: "application/octet-stream"})
         if nil != putErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not store the object"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not store the object", putErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"stored": key, "bytes": len(body)}), nil
@@ -55,7 +55,7 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
 
         content, readErr := io.ReadAll(reader)
         if nil != readErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", readErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "content": string(content)}), nil

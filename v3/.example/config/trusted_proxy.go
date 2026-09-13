@@ -28,7 +28,7 @@ var trustedProxyLookup = net.LookupHost
 
    Both budgets share ONE resolver because they are two halves of one policy and the trusted list must not drift apart: the write throttle meters the writes that reach a handler, the request budget meters every request ahead of authentication. Left on the peer address, that one charged the whole world to the proxy, so one client could spend everyone's hour; trusting the whole private address space instead charged the header to whoever sat in it, so any other container of the deployment chose its own key per request — a budget it could refill at will, or a victim's it could spend — and, behind the compose balancer, the docker gateway every host client enters through was read as one more hop, which put the whole host population back on the balancer's key. The list is the balancer itself, from configuration.
 
-   The entries are kept as written and the names among them are resolved when the resolver is first asked and again once the interval has passed, on the request that finds the list stale and outside the lock — every other request keeps the list last resolved, so a lookup that hangs costs one request, not a burst. */
+   The entries are kept as written and the names among them are resolved when the resolver is first asked and again once the interval has passed, on the request that finds the list stale and outside the lock — every other request keeps the list last resolved, so a lookup that hangs costs one request, not a burst. The interval cuts both ways, and both are the declared posture: a balancer restarted onto a new address is a stranger for up to a minute, and its OLD address is believed for the same minute — a peer docker hands that address to inside it would be trusted; and a lookup that fails at a refresh leaves the list empty for the minute, every client behind the balancer on the balancer's key, which fails closed. */
 type trustedProxyResolver struct {
     entryList []string
 
@@ -78,38 +78,33 @@ func (instance *trustedProxyResolver) Resolve(request melodyhttpcontract.Request
     return instance.current()(request)
 }
 
-/* current hands back the resolver over the list last resolved, resolving it first when there is none and again when the interval has passed — that refresh runs on the request that found the list stale, after the lock is released, and lands under the lock when it is done. */
+/* current hands back the resolver over the list last resolved, resolving it when there is none and again when the interval has passed. Both resolutions run OUTSIDE the lock, on the one request that found nothing or found the list stale, and land under the lock when they are done: every other request keeps the list last resolved — and, before there is one, a list that trusts NOTHING, so a request served while the first lookup is in flight is charged to its peer, which fails closed. The first form resolved the first list under the lock, and a lookup that hung held every concurrent request of the process for as long as it hung, on the listener that runs ahead of authentication for every request. */
 func (instance *trustedProxyResolver) current() melodyhttpmiddleware.ClientIpResolver {
     instance.mutex.Lock()
 
-    if nil == instance.resolver {
-        instance.resolver = forwardedClientIpResolver(instance.resolvedList())
-        instance.resolvedAt = instance.now()
-        resolver := instance.resolver
-        instance.mutex.Unlock()
-
-        return resolver
-    }
-
     resolver := instance.resolver
-    stale := trustedProxyRefreshInterval <= instance.now().Sub(instance.resolvedAt)
-    refreshHere := stale && false == instance.refreshing
-    if true == refreshHere {
+    stale := nil == resolver || trustedProxyRefreshInterval <= instance.now().Sub(instance.resolvedAt)
+    resolveHere := stale && false == instance.refreshing
+    if true == resolveHere {
         instance.refreshing = true
     }
 
     instance.mutex.Unlock()
 
-    if true == refreshHere {
-        refreshed := forwardedClientIpResolver(instance.resolvedList())
+    if true == resolveHere {
+        resolved := forwardedClientIpResolver(instance.resolvedList())
 
         instance.mutex.Lock()
-        instance.resolver = refreshed
+        instance.resolver = resolved
         instance.resolvedAt = instance.now()
         instance.refreshing = false
         instance.mutex.Unlock()
 
-        return refreshed
+        return resolved
+    }
+
+    if nil == resolver {
+        return forwardedClientIpResolver(nil)
     }
 
     return resolver

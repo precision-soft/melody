@@ -86,9 +86,10 @@ func seedCategoryList() []*entity.Category {
    and the instant, which is what makes "the refresh landed" a measurement rather than a hope. */
 var seedRateAsOf = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 
-/* the rates are quoted against the euro, one euro costing this many units of the currency, which is the
-   base the provider the refresh reads also quotes against. A conversion cancels the base, so the catalogue
-   never has to name it. */
+/* the rates are quoted against the euro, one euro costing this many units of the currency. A conversion
+   cancels the base, so no reader has to name it; the refresh does, through the base currency parameter
+   (RATES_BASE_CURRENCY, EUR by default to match this seed), and refuses a provider's document quoted against
+   another — a table quoted against two bases is a table no conversion between the two halves is true on. */
 func seedCurrencyList() []*entity.Currency {
     return []*entity.Currency{
         entity.NewCurrency("cur-eur", "EUR", "Euro", 1, seedRateAsOf),

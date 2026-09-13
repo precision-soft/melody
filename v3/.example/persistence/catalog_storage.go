@@ -46,6 +46,7 @@ type CatalogStorage struct {
     location      string
     auditRegistry *melodyaudit.Registry
     tracker       *melodyaudit.Tracker
+    recorder      *melodyaudit.Recorder
 }
 
 func NewCatalogStorage(database *bun.DB) *CatalogStorage {
@@ -71,6 +72,7 @@ func NewCatalogStorageAt(database *bun.DB, location string) *CatalogStorage {
         location:      location,
         auditRegistry: registry,
         tracker:       melodyaudit.NewTracker(database, recorder),
+        recorder:      recorder,
     }
 }
 
@@ -86,6 +88,12 @@ func (instance *CatalogStorage) IsPersistent() bool {
 /* Location names the database the handle is open on, as the connection was declared, and is empty for a handle nobody located. */
 func (instance *CatalogStorage) Location() string {
     return instance.location
+}
+
+/* Recorder is the audit recorder the tracker writes through, for a repository door that runs its own
+   transaction — a read locked FOR UPDATE and the write it decides — and records the change inside it. */
+func (instance *CatalogStorage) Recorder() *melodyaudit.Recorder {
+    return instance.recorder
 }
 
 /* Tracker is the handle the audited repositories write through. It is nil when there is no database, which is the same condition under which those repositories are not built at all. */

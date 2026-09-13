@@ -9,6 +9,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
 )
 
 /* the command announced a grant it never made. It looked the account up, printed "granted role ... to
@@ -152,5 +153,97 @@ func TestGrantRoleCommandSaysWhenTheCacheIsThisProcessOwn(t *testing.T) {
 
     if false == strings.Contains(captured.String(), processLocalCacheNotice) {
         t.Fatalf("expected the command to say the cache is this process's own, got %q", captured.String())
+    }
+}
+
+/* the flag is stored as the admin doors store a role — trimmed — so a re-run finds the role held instead of
+   appending it again with its space */
+func TestGrantRoleCommandTrimsTheRoleBeforeStoringIt(t *testing.T) {
+    fixture := newCommandFixture(t)
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+
+    for range 2 {
+        if runErr := command.Run(fixture.runtime, newFlagContext("  "+entity.RoleEditor+" ", "user")); nil != runErr {
+            t.Fatalf("a padded role was refused: %v", runErr)
+        }
+    }
+
+    stored := storedRoles(t, fixture, "user")
+    if 2 != len(stored) || entity.RoleUser != stored[0] || entity.RoleEditor != stored[1] {
+        t.Fatalf("a padded role granted twice stored %v, wanted [%s %s] once", stored, entity.RoleUser, entity.RoleEditor)
+    }
+}
+
+func TestGrantRoleCommandRefusesABlankRole(t *testing.T) {
+    fixture := newCommandFixture(t)
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+
+    before := storedRoles(t, fixture, "user")
+
+    if runErr := command.Run(fixture.runtime, newFlagContext("   ", "user")); nil != runErr {
+        t.Fatalf("a blank role errored instead of being answered as no role: %v", runErr)
+    }
+
+    after := storedRoles(t, fixture, "user")
+    if strings.Join(before, ",") != strings.Join(after, ",") {
+        t.Fatalf("a blank role changed the account from %v to %v", before, after)
+    }
+}
+
+/* the voter compares a role's spelling exactly, so a spelling outside the application's vocabulary would be
+   stored, reported granted and grant nothing */
+func TestGrantRoleCommandRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
+    fixture := newCommandFixture(t)
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+
+    before := storedRoles(t, fixture, "user")
+
+    runErr := command.Run(fixture.runtime, newFlagContext("ROLE_ADMIM", "user"))
+    if nil == runErr {
+        t.Fatal("a role the application does not know was granted")
+    }
+
+    if false == strings.Contains(runErr.Error(), "ROLE_ADMIM") || false == strings.Contains(runErr.Error(), entity.RoleAdmin) {
+        t.Fatalf("the refusal reads %q, wanted it to name the spelling and the vocabulary", runErr.Error())
+    }
+
+    after := storedRoles(t, fixture, "user")
+    if strings.Join(before, ",") != strings.Join(after, ",") {
+        t.Fatalf("a refused role changed the account from %v to %v", before, after)
+    }
+}
+
+/* the repository is the arbiter, not the read the command made: two grants of different roles on one
+   account, each reading the account before either wrote, both land — a read, an append and a whole-set
+   write used to let the last writer take the other's role with it */
+func TestGrantRoleCommandGrantsThroughTheRepositorysAtomicDoor(t *testing.T) {
+    fixture := newCommandFixture(t)
+
+    account, _, _ := fixture.userRepository.FindByUsername(context.Background(), "user")
+
+    outcome, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleEditor)
+    if nil != grantErr || repository.GrantRoleGranted != outcome {
+        t.Fatalf("the first grant answered %d, %v", outcome, grantErr)
+    }
+
+    /* the command's read is the pre-grant account (the fixture's cache was never told), and the repository
+       still answers the truth */
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+    if runErr := command.Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user")); nil != runErr {
+        t.Fatalf("a grant of a role held since the command's read failed: %v", runErr)
+    }
+
+    stored := storedRoles(t, fixture, "user")
+    if 2 != len(stored) {
+        t.Fatalf("the role was appended a second time: %v", stored)
+    }
+
+    if _, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleAdmin); nil != grantErr {
+        t.Fatalf("the admin grant failed: %v", grantErr)
+    }
+
+    stored = storedRoles(t, fixture, "user")
+    if 3 != len(stored) || entity.RoleAdmin != stored[2] {
+        t.Fatalf("two grants on one account stored %v, wanted user, editor, admin", stored)
     }
 }

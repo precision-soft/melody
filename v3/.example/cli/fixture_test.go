@@ -15,7 +15,9 @@ import (
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/.example/event"
     melodyevent "github.com/precision-soft/melody/v3/event"
+    melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
@@ -53,10 +55,38 @@ func newCommandFixture(t *testing.T) *commandFixture {
         examplecache.NewGobSerializer(),
     )
 
+    /* the dispatcher carries the invalidation the application's subscriber performs on an update — the
+       three entries an account is served from — so a second run of a command reads the directory, not the
+       memo the first run planted before it wrote; the journal half of that subscriber is not wired, these
+       tests read the directory and not the journal */
+    dispatcher := melodyevent.NewEventDispatcher(clockInstance)
+    dispatcher.AddListener(
+        event.UserUpdatedEventName,
+        func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+            updatedEvent, isUpdated := eventValue.Payload().(*event.UserUpdatedEvent)
+            if false == isUpdated || nil == updatedEvent {
+                return nil
+            }
+
+            for _, key := range []string{
+                service.CacheKeyUserById(updatedEvent.User().Id),
+                service.CacheKeyUserByUsername(updatedEvent.User().Username),
+                service.CacheKeyUserList,
+            } {
+                if deleteErr := cacheInstance.Delete(key); nil != deleteErr {
+                    return deleteErr
+                }
+            }
+
+            return nil
+        },
+        0,
+    )
+
     userService := service.NewUserService(
         userRepository,
         cacheInstance,
-        melodyevent.NewEventDispatcher(clockInstance),
+        dispatcher,
     )
 
     containerInstance := melodycontainer.NewContainer()

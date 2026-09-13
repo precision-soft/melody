@@ -71,22 +71,30 @@ func (instance *refreshSequence) indexOf(event string) int {
 
 /* sequenceLocker hands out a lock that records its turns and can be told to answer that the lock is held elsewhere */
 type sequenceLocker struct {
-    sequence *refreshSequence
-    inner    melodylockcontract.Locker
-    heldAway bool
+    sequence   *refreshSequence
+    inner      melodylockcontract.Locker
+    heldAway   bool
+    acquireErr error
 }
 
 func (instance *sequenceLocker) CreateLock(name string, ttl time.Duration) melodylockcontract.Lock {
-    return &sequenceLock{sequence: instance.sequence, inner: instance.inner.CreateLock(name, ttl), heldAway: instance.heldAway}
+    return &sequenceLock{sequence: instance.sequence, inner: instance.inner.CreateLock(name, ttl), heldAway: instance.heldAway, acquireErr: instance.acquireErr}
 }
 
 type sequenceLock struct {
-    sequence *refreshSequence
-    inner    melodylockcontract.Lock
-    heldAway bool
+    sequence   *refreshSequence
+    inner      melodylockcontract.Lock
+    heldAway   bool
+    acquireErr error
 }
 
 func (instance *sequenceLock) Acquire(runtimeInstance melodyruntimecontract.Runtime) (bool, error) {
+    if nil != instance.acquireErr {
+        instance.sequence.record("acquire-failed")
+
+        return false, instance.acquireErr
+    }
+
     if true == instance.heldAway {
         instance.sequence.record("acquire-refused")
 
@@ -130,6 +138,7 @@ type sequenceArchive struct {
     sequence *refreshSequence
     mutex    sync.Mutex
     rows     []*repository.CatalogReadingRecord
+    refusal  error
 }
 
 func (instance *sequenceArchive) Append(ctx context.Context, record *repository.CatalogReadingRecord) error {
@@ -137,6 +146,10 @@ func (instance *sequenceArchive) Append(ctx context.Context, record *repository.
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if nil != instance.refusal {
+        return instance.refusal
+    }
 
     for _, existing := range instance.rows {
         if true == existing.TakenAt.Equal(record.TakenAt) {
@@ -183,6 +196,7 @@ type refreshFixture struct {
 type refreshFixtureOption struct {
     lockerProvider func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error)
     withoutLocker  bool
+    withoutSink    bool
     sinkStatus     int
 }
 
@@ -240,6 +254,10 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
         return reportService, nil
     })
     melodycontainer.MustRegisterType(serviceContainer, func(resolver melodycontainercontract.Resolver) (*reporting.CatalogReportExporter, error) {
+        if true == option.withoutSink {
+            return reporting.NewCatalogReportExporter(""), nil
+        }
+
         return reporting.NewCatalogReportExporter(fixture.sink.URL + "/v1/report-sink"), nil
     })
     melodycontainer.MustRegister(
@@ -360,12 +378,15 @@ func TestCatalogReportRefreshCommandHandsBackAnUnreachableArchiveAfterReadingAnd
 }
 
 /* with no locker registered there is no archive: the run reads and exports as it did before there was one, and reports the archive as not written rather than failing over it */
-func TestCatalogReportRefreshCommandRunsWithoutAnArchiveWhenNoneIsWired(t *testing.T) {
+/* the locker is registered on every wiring — in-process without postgres — so a container without one is not a
+   state the application can be in: the door hands back the resolution's refusal, and the run goes on without
+   the archive and fails at the end, the way an unreachable archive does */
+func TestCatalogReportRefreshCommandTreatsAMissingLockerAsAnUnreachableArchive(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{withoutLocker: true})
 
     output, runErr := runRefresh(t, fixture)
-    if nil != runErr {
-        t.Fatalf("expected the refresh to run without an archive, got %v", runErr)
+    if nil == runErr {
+        t.Fatal("expected a container without the archive's locker to be reported, got nil")
     }
 
     if 1 != fixture.sinkHits || 0 != fixture.archive.appended() {
@@ -411,5 +432,92 @@ func TestCatalogReportRefreshCommandHandsBackTheArchivesOwnRefusalUnwrapped(t *t
     _, runErr := runRefresh(t, fixture)
     if own != runErr {
         t.Fatalf("expected the archive's own refusal to be handed back as it is, got %v", runErr)
+    }
+}
+
+/* an ERROR taking the lock — not a lock held elsewhere — is the archive being unreachable, and the reading and
+   the export go on without it; the previous form returned before either, so a connection lost between the
+   open and the advisory lock cost the tick its reading and its export */
+func TestCatalogReportRefreshCommandReadsAndExportsWhenTheLockCannotBeTaken(t *testing.T) {
+    sequence := &refreshSequence{}
+    acquireErr := errors.New("pgsql lock acquire failed")
+    fixture := newRefreshFixture(t, refreshFixtureOption{
+        lockerProvider: func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
+            return &sequenceLocker{sequence: sequence, inner: melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), acquireErr: acquireErr}, nil
+        },
+    })
+
+    output, runErr := runRefresh(t, fixture)
+    if false == errors.Is(runErr, acquireErr) {
+        t.Fatalf("expected the lock's failure to take the exit code at the end, got %v", runErr)
+    }
+
+    if 1 != fixture.sinkHits || 0 != fixture.archive.appended() {
+        t.Fatalf("expected one export and no row, got export=%d archive=%d", fixture.sinkHits, fixture.archive.appended())
+    }
+
+    if false == strings.Contains(output, "the archive did not record it") {
+        t.Fatalf("expected the console to say the archive did not record the reading, got %q", output)
+    }
+}
+
+/* the archive's own refusal on the Archive branch reaches the console AS IT IS — the cli engine renders the
+   message alone, and the message is the one that names the database and the step — where the previous form
+   wrapped it under a headline that named neither */
+func TestCatalogReportRefreshCommandKeepsTheArchivesOwnRefusalOnTheArchiveBranch(t *testing.T) {
+    fixture := newRefreshFixture(t, refreshFixtureOption{})
+    own := exception.NewError("the archive database at postgres:5432/melody_example_v3 refused the insert", nil, errors.New("connection reset"))
+    fixture.archive.refusal = own
+
+    _, runErr := runRefresh(t, fixture)
+    if own != runErr {
+        t.Fatalf("expected the archive's own refusal to be handed back as it is, got %v", runErr)
+    }
+
+    /* a second fixture: the first run's cache holds the product list serialized, and a second run over it reads
+       a map where the service asserts a type (a failure of the double, not of the door) */
+    foreign := newRefreshFixture(t, refreshFixtureOption{})
+    foreign.archive.refusal = errors.New("driver: bad connection")
+
+    _, runErr = runRefresh(t, foreign)
+    if nil == runErr || false == strings.Contains(runErr.Error(), "recording the reading in the archive did not complete") {
+        t.Fatalf("expected a foreign failure to be wrapped with what was being done, got %v", runErr)
+    }
+}
+
+/* both halves failing: the console names the archive's refusal beside the sink's and the exit carries both,
+   where the previous form printed and returned the sink's alone */
+func TestCatalogReportRefreshCommandReportsBothHalvesWhenBothRefuse(t *testing.T) {
+    fixture := newRefreshFixture(t, refreshFixtureOption{sinkStatus: http.StatusInternalServerError})
+    own := exception.NewError("the archive database at postgres:5432/melody_example_v3 refused the insert", nil, errors.New("connection reset"))
+    fixture.archive.refusal = own
+
+    output, runErr := runRefresh(t, fixture)
+    if false == errors.Is(runErr, own) {
+        t.Fatalf("expected the exit to carry the archive's refusal, got %v", runErr)
+    }
+
+    if false == strings.Contains(runErr.Error(), "refused the export") {
+        t.Fatalf("expected the exit to carry the sink's refusal as well, got %v", runErr)
+    }
+
+    if false == strings.Contains(output, "postgres:5432/melody_example_v3") {
+        t.Fatalf("expected the console to name the database the archive refused on, got %q", output)
+    }
+}
+
+/* the console says "exported" only when something was exported: with no sink configured the reading was taken
+   and the archive refused, and the line says exactly that */
+func TestCatalogReportRefreshCommandDoesNotClaimAnExportThatDidNotHappen(t *testing.T) {
+    fixture := newRefreshFixture(t, refreshFixtureOption{withoutSink: true})
+    fixture.archive.refusal = errors.New("driver: bad connection")
+
+    output, _ := runRefresh(t, fixture)
+    if true == strings.Contains(output, "taken and exported") {
+        t.Fatalf("expected no claim of an export with no sink configured, got %q", output)
+    }
+
+    if false == strings.Contains(output, "no sink is configured") {
+        t.Fatalf("expected the console to say no sink is configured, got %q", output)
     }
 }

@@ -48,23 +48,41 @@ type CurrencyService struct {
     clock              melodyclockcontract.Clock
 }
 
-/* refuseNonPositiveRate is the one spelling of the rule, read by both write doors. A conversion divides by
-   the source rate, so a zero divides by zero and a negative flips the price's sign; and the column is NOT
-   NULL, so there is no "not quoted yet" to fall back on — a currency enters the catalogue with a quote or
-   it does not enter it. */
-func refuseNonPositiveRate(currencyId string, rate float64) error {
-    if 0 < rate {
+/* the range a rate is admitted in. The lower bound is below the smallest real quote by three orders of
+   magnitude and the upper one above the largest by the same, so no currency is refused for being cheap or
+   dear; what they refuse is a number that is valid JSON and not a price — 1e308, which a conversion turns
+   into an infinity the serializer cannot render, or a denormal that does the same from below. */
+const (
+    minUsableRate = 1e-6
+    maxUsableRate = 1e9
+)
+
+/* refuseUnusableRate is the one spelling of the rule, read by both write doors. A conversion divides by the
+   source rate, so a zero divides by zero and a negative flips the price's sign; an infinity or a value the
+   range above excludes produces a converted price that is not a finite number, which the read door then
+   cannot answer; and the column is NOT NULL, so there is no "not quoted yet" to fall back on — a currency
+   enters the catalogue with a quote or it does not enter it. */
+func refuseUnusableRate(currencyId string, rate float64) error {
+    if true == isUsableRate(rate) {
         return nil
     }
 
     return exception.NewError(
-        "the exchange rate must be positive",
+        "the exchange rate must be a positive, finite number within the range a quote can take",
         exceptioncontract.Context{
             "currencyId": currencyId,
             "rate":       rate,
+            "minimum":    minUsableRate,
+            "maximum":    maxUsableRate,
         },
         nil,
     )
+}
+
+/* isUsableRate is the two comparisons alone: an infinity fails the upper one and a NaN fails both, so
+   neither needs a check of its own that the comparisons would shadow */
+func isUsableRate(rate float64) bool {
+    return minUsableRate <= rate && rate <= maxUsableRate
 }
 
 func (instance *CurrencyService) List() ([]*entity.Currency, error) {
@@ -139,7 +157,7 @@ func (instance *CurrencyService) Create(
     name string,
     rate float64,
 ) (*entity.Currency, error) {
-    if rateErr := refuseNonPositiveRate(currencyId, rate); nil != rateErr {
+    if rateErr := refuseUnusableRate(currencyId, rate); nil != rateErr {
         return nil, rateErr
     }
 
@@ -206,6 +224,22 @@ func (instance *CurrencyService) Update(
     return &modified, true, nil
 }
 
+/* RateUpdateOutcome is what UpdateRate did with a quote, in a word the caller can count under the right
+   heading: written, or not written for one of three reasons that are not failures and are not the same —
+   the currency stopped existing between the listing and its update, the quote is older than the one the
+   catalogue already holds, or the quote is the one it already holds. The bool this replaced folded the last
+   two into "absent" — on mysql a full-row UPDATE that changes nothing affects zero rows, which the door read
+   as the row having vanished, so a provider whose quotes had not moved was reported as three deleted
+   currencies every tick. */
+type RateUpdateOutcome int
+
+const (
+    RateUpdateAbsent RateUpdateOutcome = iota
+    RateUpdateStale
+    RateUpdateUnchanged
+    RateUpdateWritten
+)
+
 /* UpdateRate is the door the rate refresh writes through, and it goes through the service rather than
    straight to the repository for one reason: the currency list and every currency by id are cached, and
    the listeners that drop those entries are subscribed to the updated event this dispatches. A rate written
@@ -213,27 +247,46 @@ func (instance *CurrencyService) Update(
    own; the http server sees the drop through the shared cache alone, and on the in-process fallback it
    serves what it cached until it restarts.
 
-   The rate is judged by refuseNonPositiveRate, the spelling Create reads too, and the refusal names the
-   currency so a caller sweeping a whole document can say which quote was bad. */
+   The rate is judged by refuseUnusableRate, the spelling Create reads too, and the refusal names the
+   currency so a caller sweeping a whole document can say which quote was bad and go on to the next.
+
+   A quote older than the instant the catalogue holds is not written: the provider's document is a reading
+   taken at rateAsOf, and a reading older than the one already stored is a replay or a stale cache in
+   front of the provider, never a newer price. A quote equal to the stored one, at the same instant, is
+   not written either, and the cache entries of the currency are dropped without an event: the write would
+   change nothing and the event would journal a change that did not happen, while the drop is what heals a
+   cache that kept the previous rate after the invalidation of an earlier tick failed. */
 func (instance *CurrencyService) UpdateRate(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
     rate float64,
     rateAsOf time.Time,
-) (*entity.Currency, bool, error) {
-    if rateErr := refuseNonPositiveRate(currencyId, rate); nil != rateErr {
-        return nil, false, rateErr
+) (*entity.Currency, RateUpdateOutcome, error) {
+    if rateErr := refuseUnusableRate(currencyId, rate); nil != rateErr {
+        return nil, RateUpdateAbsent, rateErr
     }
 
     ctx := runtimeInstance.Context()
 
     currency, found, findErr := instance.currencyRepository.FindById(ctx, currencyId)
     if nil != findErr {
-        return nil, false, findErr
+        return nil, RateUpdateAbsent, findErr
     }
 
     if false == found {
-        return nil, false, nil
+        return nil, RateUpdateAbsent, nil
+    }
+
+    if true == rateAsOf.Before(currency.RateAsOf) {
+        return currency, RateUpdateStale, nil
+    }
+
+    if rate == currency.Rate && true == rateAsOf.Equal(currency.RateAsOf) {
+        if dropErr := instance.dropCachedCurrency(currencyId); nil != dropErr {
+            return nil, RateUpdateUnchanged, dropErr
+        }
+
+        return currency, RateUpdateUnchanged, nil
     }
 
     /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy */
@@ -243,10 +296,10 @@ func (instance *CurrencyService) UpdateRate(
 
     updated, updateErr := instance.currencyRepository.Update(ctx, &modified)
     if nil != updateErr {
-        return nil, false, updateErr
+        return nil, RateUpdateAbsent, updateErr
     }
     if false == updated {
-        return nil, false, nil
+        return nil, RateUpdateAbsent, nil
     }
 
     updatedEvent := event.NewCurrencyUpdatedEvent(&modified)
@@ -256,10 +309,21 @@ func (instance *CurrencyService) UpdateRate(
         updatedEvent,
     )
     if nil != dispatchErr {
-        return nil, true, dispatchErr
+        return nil, RateUpdateWritten, dispatchErr
     }
 
-    return &modified, true, nil
+    return &modified, RateUpdateWritten, nil
+}
+
+/* dropCachedCurrency drops the two entries a currency is served from, the same two the updated listener
+   drops — by the keys, without the event, for the unchanged quote whose only job is to make sure the cache
+   agrees with a row that did not move. */
+func (instance *CurrencyService) dropCachedCurrency(currencyId string) error {
+    if byIdErr := instance.cache.Delete(CacheKeyCurrencyById(currencyId)); nil != byIdErr {
+        return byIdErr
+    }
+
+    return instance.cache.Delete(CacheKeyCurrencyList)
 }
 
 func (instance *CurrencyService) DeleteById(

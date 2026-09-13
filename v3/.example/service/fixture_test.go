@@ -16,9 +16,19 @@ import (
    the whole property under test: the doors cannot be asked "for how long" any other way. It keeps values
    as they are, because these probes are not about serialization. */
 type ttlRecordingCache struct {
-    mutex  sync.Mutex
-    values map[string]any
-    writes []cacheWrite
+    mutex   sync.Mutex
+    values  map[string]any
+    writes  []cacheWrite
+    deletes int
+}
+
+/* deleteCount is how many entries a door dropped by key, the observable of an invalidation done without an
+   event */
+func (instance *ttlRecordingCache) deleteCount() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.deletes
 }
 
 type cacheWrite struct {
@@ -67,6 +77,7 @@ func (instance *ttlRecordingCache) Delete(key string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    instance.deletes++
     delete(instance.values, key)
 
     return nil

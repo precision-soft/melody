@@ -187,7 +187,7 @@ go run . melody:cron:run             # run the scheduler loop until interrupted
 
 The runner dispatches each scheduled command with its declared flags, so declared defaults are honored on a scheduled tick exactly as under the cli entry point: `product:list` declares `--limit` with a default of `5` and prints the value it read (`product list: limit=5`), whether invoked directly or by the runner.
 
-`example:grant:role` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase:
+`example:grant:role` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase. The flag is trimmed and has to name one of the three roles the application knows (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`) — the voter compares a role's spelling exactly, so any other spelling would be stored and grant nothing — and the grant goes through the repository's atomic door, which reads and widens the account's set under one lock, so a grant that runs beside an admin update of the same account cannot lose the other's write; an account that already holds the role is a no-op, not a second entry:
 
 ```bash
 go run . example:grant:role --role admin --user ada    # the command's own --role
@@ -235,9 +235,23 @@ of it was proven by compilation.
   the provider could not be read — a schedule that swallowed that would leave the catalogue quoting stale
   rates in silence. With the key blank the command is a no-op that says so and exits zero, the same switch
   every optional door here carries.
+- Every rate of the catalogue is quoted against ONE base, named by `RATES_BASE_CURRENCY` (`EUR` by default,
+  the seed's base): a conversion cancels the base by dividing one rate by another, which is arithmetic only
+  while every rate shares it. The refresh therefore judges the provider's document whole before it writes a
+  quote, and refuses it — nothing written, exit non-zero, both bases named — when it is quoted against another
+  base, carries no `asOf`, is stamped more than five minutes into the future, or quotes one currency under
+  two spellings. Codes are matched folded, so a provider writing `usd` quotes the seed's `USD`.
+- What the refresh did is printed under one heading per currency: `UPDATED` (written), `SKIPPED` (not quoted
+  by the provider, or deleted inside the run), `UNCHANGED` (the quote the catalogue already held, at the
+  instant it already held it — nothing written, no event, the currency's cache entries dropped), `STALE`
+  (older than the reading stored — a replay, kept out) and `REFUSED` (a quote the write door would not take:
+  zero, negative, infinite or outside `[1e-6, 1e9]`). One refused quote does not stop the sweep: the currencies
+  after it are written on the same run, and the exit code names the currencies refused.
 - `GET /products/api/read/:id/?currency=USD` answers the product with its price restated in the currency the
   caller named, stamped with the instant of the quote it used. Without the parameter the answer carries no
-  conversion at all; a code the catalogue does not carry is a `400`.
+  conversion at all; a code the catalogue does not carry is a `400`, while a product quoted in a currency the
+  catalogue lost, or against a rate that is not a usable price, is the catalogue's fault and a `500` with the
+  cause journaled.
 - `catalog:report:refresh` pushes its reading to `APP_REPORTING_EXPORT_ENDPOINT` when one is configured, and
   takes the command's exit code with it if the sink refuses.
 
@@ -283,7 +297,7 @@ Three things about it are worth reading rather than inferring:
 
 - **A reading's identity is the instant it was taken at, to the second.** That is the resolution the reading already states about itself: its payload writes `recorded_at` as RFC3339, which carries no fraction, so a key kept finer would disagree with the very value it keys. The instant is the table's primary key, so two refreshes inside one second are the same reading — and the second one is told it did not write rather than being failed.
 - **The archive is written by the SCHEDULE, not by a request.** A reading is taken on the request path too, whenever a caller finds a cold cache; archiving there would put a write to a second database on a read, make a read door fail when PostgreSQL is down, and fill the archive with rows nobody scheduled.
-- **The write is taken under a PostgreSQL advisory lock** ([`pgsql.NewLocker`](../../integrations/bunorm/pgsql/v3/lock.go)), registered under a name of its own rather than the framework's locker service — that one is Redis when Redis is configured, and the archive is not on Redis. A lock held in the very database being written is exclusion that cannot disagree with the write it guards, and a session advisory lock is released when its connection drops, so a process that dies mid-refresh leaves nothing to clean up. The lock is taken around the whole run — the reading, the row, the export — so processes that OVERLAP on one schedule record one reading between them: the loser takes no reading at all and says so. Two runs that do not overlap, one host's tick a second after another's, are two readings keyed on the instant each took; the identity of a reading is the second it was taken at, and the lock does not change that. Without PostgreSQL the locker under that name is the in-process one, over the in-process archive, so the history door answers what the schedule recorded in that process rather than an empty list.
+- **The write is taken under a PostgreSQL advisory lock** ([`pgsql.NewLocker`](../../integrations/bunorm/pgsql/v3/lock.go)), registered under a name of its own rather than the framework's locker service — that one is Redis when Redis is configured, and the archive is not on Redis. A lock held in the very database being written is exclusion that cannot disagree with the write it guards, and a session advisory lock is released when its connection drops, so a process that dies mid-refresh leaves nothing to clean up. The lock is taken around the whole run — the reading, the row, the export — so processes that OVERLAP on one schedule record one reading between them: the loser takes no reading at all and says so. Two runs that do not overlap, one host's tick a second after another's, are two readings keyed on the instant each took; the identity of a reading is the second it was taken at, and the lock does not change that. Without PostgreSQL the locker under that name is the in-process one, over the in-process archive — which is a repository of ONE process: the refresh command records into its own process's archive and exits, and the http server's history door reads its own, which nothing writes, so without PostgreSQL the history door answers an empty list. The in-process archive exists so the command has a producer to run against, not so the server has something to show; the same topology holds for the cache's in-process fallback, described above.
 
 The archive's schema is a set of its own, in the same package, and it has to be: `bun_migrations` is per database, so two databases need two sets and one set could never span them. It is exposed as a migration **context** of the `bunorm/migrate` module, which gives it the `db:archive:*` command family (`db:archive:migrate`, `db:archive:status`, `db:archive:rollback`, `db:archive:unlock`, …) pinned to its own manager — so `db:archive:migrate` can only ever reach PostgreSQL. The base `db:*` family is pinned to the catalogue's manager for the same reason, and that pin is not symmetry: unpinned it takes the registry's default, and in an environment that wired the archive alone an unqualified `db:migrate` would aim the catalogue's MySQL DDL at PostgreSQL.
 
@@ -337,6 +351,19 @@ Most JSON endpoints return a small, consistent response envelope:
 - optional `error`
 
 This keeps frontend code predictable and minimizes ad-hoc handling.
+
+A refusal of the server's own class — a `500` a handler answers as a response, with the cause it holds — is
+JOURNALED by the presenter, at error, with the cause, the status, the public message and the route as the
+router matched it: the kernel journals a handler's failure only when the failure is RETURNED, so a door that
+answered it as a response reached the terminate listener alone, one info line and no cause, and outside
+development the reason a door answered `500` existed nowhere. A client's own refusal, below `500`, is not
+journaled; its cause travels in the body's debug-gated context under the development environment alone.
+
+The event stream (`GET /events/stream/`) re-arms the server's write deadline before every frame and sends a
+keepalive comment every half of it, so a stream that outlives the server's `WriteTimeout` keeps delivering —
+`net/http` arms that deadline once, from the request line, and the first event published after it used to be
+the one lost, on a connection the client still believed open. A write that fails while the client is still
+there is journaled as a frame lost; a client that left is the ordinary end of a stream and journals nothing.
 
 ---
 

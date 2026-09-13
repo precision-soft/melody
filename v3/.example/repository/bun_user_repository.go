@@ -50,13 +50,14 @@ func (instance *userRow) toEntity() *entity.User {
 }
 
 func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepository {
-    return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker()}
+    return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder()}
 }
 
-/* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, so who was granted which role, and when, is answerable after the fact — and the password column is recorded as changed without its value ever entering the trail. */
+/* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, so who was granted which role, and when, is answerable after the fact — and the password column is recorded as changed without its value ever entering the trail. The one write that runs its own transaction, GrantRole, records through the recorder inside that transaction, which is the tracker's own contract for a caller that holds a unit of work. */
 type bunUserRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
+    recorder *melodyaudit.Recorder
 }
 
 /* seedIfEmpty writes the opening directory into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
@@ -174,7 +175,7 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
     }
 
     if true == usernameExists {
-        return fmt.Errorf("username already exists")
+        return ErrUsernameAlreadyExists
     }
 
     if "" == strings.TrimSpace(user.Id) {
@@ -231,7 +232,7 @@ func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User
     }
 
     if true == takenByAnother {
-        return false, fmt.Errorf("username already exists")
+        return false, ErrUsernameAlreadyExists
     }
 
     updateErr := instance.tracker.Update(auditContext(ctx), persistence.AuditEntityUser, id, newUserRow(user))
@@ -240,6 +241,68 @@ func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User
     }
 
     return true, nil
+}
+
+/* GrantRole reads the row locked FOR UPDATE and writes the widened set in the same transaction, so a grant
+   and an admin update of the same account serialise on the row instead of the last whole-set write winning;
+   the audit entry is recorded through the same transaction, the way the tracker records its own. */
+func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, role string) (GrantRoleOutcome, error) {
+    trimmedId := strings.TrimSpace(id)
+    if "" == trimmedId {
+        return GrantRoleAccountAbsent, fmt.Errorf("id is required")
+    }
+
+    outcome := GrantRoleAccountAbsent
+
+    txErr := instance.database.RunInTx(auditContext(ctx), nil, func(ctx context.Context, tx bun.Tx) error {
+        before := &userRow{Id: trimmedId}
+
+        selectErr := tx.NewSelect().Model(before).WherePK().For("UPDATE").Scan(ctx)
+        if true == errors.Is(selectErr, sql.ErrNoRows) {
+            return nil
+        }
+        if nil != selectErr {
+            return selectErr
+        }
+
+        current := before.toEntity()
+        if true == holdsRole(current.Roles, role) {
+            outcome = GrantRoleAlreadyHeld
+
+            return nil
+        }
+
+        after := newUserRow(entity.NewUser(
+            current.Id,
+            current.Username,
+            current.Password,
+            append(append([]string{}, current.Roles...), role),
+        ))
+
+        if _, updateErr := tx.NewUpdate().Model(after).WherePK().Exec(ctx); nil != updateErr {
+            return updateErr
+        }
+
+        recordErr := instance.recorder.RecordUpdate(
+            melodyaudit.WithDatabase(ctx, tx),
+            persistence.AuditEntityUser,
+            trimmedId,
+            before,
+            after,
+        )
+        if nil != recordErr {
+            return recordErr
+        }
+
+        outcome = GrantRoleGranted
+
+        return nil
+    })
+    if nil != txErr {
+        return GrantRoleAccountAbsent, txErr
+    }
+
+    return outcome, nil
 }
 
 func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
@@ -271,23 +334,57 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
     return true, nil
 }
 
+/* ErrUsernameAlreadyExists is the refusal both write doors answer for a name another account holds, whether
+   the read that precedes the write caught it or the unique index did; a sentinel so the http doors can tell
+   it from a failure of the write itself and answer the caller's 400 rather than a 500. */
+var ErrUsernameAlreadyExists = errors.New("username already exists")
+
 /* the check that precedes the write is a read, so two callers can both pass it before either has written;
    the unique index the migration set adds is what actually holds the name, and this is where its refusal
    is given the message the door already answers when the check catches the name in time. The match is on
    the index's own name — this application's identifier, not the driver's wording — because the driver
    spells the refusal as `Duplicate entry '<value>' for key '<table>.<index>'`, measured on the running
    server; any other failure is handed back untouched, so a duplicate on the primary key stays the
-   diagnosis it is rather than being reported as a name that is taken. */
+   diagnosis it is rather than being reported as a name that is taken.
+
+   The name is looked for down the whole chain of causes, not in the text of the error handed in: every
+   write goes through the audit tracker, which hands back its own exception — "audited insert failed" —
+   with the driver's refusal as its cause, and an exception renders its message alone. Read at the top, the
+   index's name was never there, and the refusal the index was added for reached the admin doors as a 500. */
 func asUsernameAlreadyExists(writeErr error) error {
     if nil == writeErr {
         return nil
     }
 
-    if false == strings.Contains(writeErr.Error(), migration.UserUsernameIndexName) {
+    if false == errorChainMentions(writeErr, migration.UserUsernameIndexName) {
         return writeErr
     }
 
-    return fmt.Errorf("username already exists")
+    return ErrUsernameAlreadyExists
+}
+
+/* errorChainMentions answers whether any link of the chain — the error, its cause, the cause's cause, and
+   every branch of a joined error — renders the text given. */
+func errorChainMentions(err error, text string) bool {
+    if nil == err {
+        return false
+    }
+
+    if true == strings.Contains(err.Error(), text) {
+        return true
+    }
+
+    if joined, isJoined := err.(interface{ Unwrap() []error }); true == isJoined {
+        for _, branch := range joined.Unwrap() {
+            if true == errorChainMentions(branch, text) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    return errorChainMentions(errors.Unwrap(err), text)
 }
 
 func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {

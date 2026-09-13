@@ -28,7 +28,34 @@ type UserRepository interface {
 
     Update(ctx context.Context, user *entity.User) (bool, error)
 
+    /* GrantRole adds one role to the account's set ATOMICALLY — read and write under one lock — so a grant
+       that runs beside an admin update of the same account cannot lose the other's write the way a read,
+       an append and a whole-set Update can; it answers what it did, and a role the account already holds is
+       an answer, not a second entry in the column. */
+    GrantRole(ctx context.Context, id string, role string) (GrantRoleOutcome, error)
+
     DeleteById(ctx context.Context, id string) (bool, error)
+}
+
+/* GrantRoleOutcome is what GrantRole did, so the caller can tell an account that disappeared from one that
+   already held the role, neither of which is a failure. */
+type GrantRoleOutcome int
+
+const (
+    GrantRoleAccountAbsent GrantRoleOutcome = iota
+    GrantRoleAlreadyHeld
+    GrantRoleGranted
+)
+
+/* holdsRole is the one spelling of "the account carries this role", read by both implementations. */
+func holdsRole(roles []string, role string) bool {
+    for _, held := range roles {
+        if role == held {
+            return true
+        }
+    }
+
+    return false
 }
 
 func MustGetUserRepository(resolver melodycontainercontract.Resolver) UserRepository {

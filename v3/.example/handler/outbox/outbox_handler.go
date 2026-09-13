@@ -28,7 +28,7 @@ func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outbox
 
         storeInstance, resolveErr := store.Resolve()
         if nil != resolveErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox store is unavailable"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox store is unavailable", resolveErr), nil
         }
 
         enqueueErr := database.RunInTx(runtimeInstance.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
@@ -36,7 +36,7 @@ func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outbox
             return storeInstance.Enqueue(ctx, tx, message.OutboxNotice{Reference: reference, Text: text})
         })
         if nil != enqueueErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not enqueue the outbox message"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not enqueue the outbox message", enqueueErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{
@@ -51,12 +51,12 @@ func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) 
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         relayInstance, resolveErr := relay.Resolve()
         if nil != resolveErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox relay is unavailable"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox relay is unavailable", resolveErr), nil
         }
 
         published, runErr := relayInstance.RunOnce(runtimeInstance)
         if nil != runErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "outbox relay failed"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "outbox relay failed", runErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{
@@ -69,12 +69,12 @@ func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) 
 func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if _, resolveErr := store.Resolve(); nil != resolveErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox store is unavailable"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox store is unavailable", resolveErr), nil
         }
 
         rows, queryErr := database.QueryContext(runtimeInstance.Context(), "SELECT status, COUNT(*) FROM melody_outbox GROUP BY status")
         if nil != queryErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status", queryErr), nil
         }
         defer rows.Close()
 
@@ -83,7 +83,7 @@ func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxi
             var status string
             var count int
             if scanErr := rows.Scan(&status, &count); nil != scanErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status"), nil
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status", scanErr), nil
             }
 
             counts[status] = count
@@ -91,7 +91,7 @@ func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxi
 
         /* an iteration error ends the loop exactly like exhaustion does, with the failure parked on the rows: unread, a connection dropped after the first row served a truncated counts map as a 200 — an existing dead count silently reading as no dead rows */
         if rowsErr := rows.Err(); nil != rowsErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status", rowsErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, counts), nil

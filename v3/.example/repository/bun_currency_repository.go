@@ -23,13 +23,18 @@ type currencyRow struct {
     RateAsOf time.Time `bun:"rate_as_of,notnull"`
 }
 
+/* newCurrencyRow is the one place an entity becomes a row, and the instant is moved to UTC here: the mysql
+   dialect renders a time.Time in the value's OWN location when no location is configured, and the driver
+   reads the column back as UTC, so an instant a provider stamped with an offset was stored as its wall clock
+   and read back shifted by that offset. The in-memory repository keeps the value as given, which is right
+   there — an instant compares equal across locations — and the two agree once the row carries UTC. */
 func newCurrencyRow(currency *entity.Currency) *currencyRow {
     return &currencyRow{
         Id:       currency.Id,
         Code:     currency.Code,
         Name:     currency.Name,
         Rate:     currency.Rate,
-        RateAsOf: currency.RateAsOf,
+        RateAsOf: currency.RateAsOf.UTC(),
     }
 }
 

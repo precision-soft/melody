@@ -35,7 +35,7 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
         if nil != resolveErr {
-            return nil, resolveErr
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }
 
         limit, limitErr := historyLimitOf(request)
@@ -43,9 +43,12 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, limitErr.Error()), nil
         }
 
+        /* a failure of the archive is rendered through the presenter, the envelope every sibling read door
+           answers a repository failure in, rather than returned for the kernel's exception listener to render
+           in a second shape — one client, one envelope for one class of failure */
         readingList, readErr := reportService.RecentReadings(runtimeInstance, limit)
         if nil != readErr {
-            return nil, readErr
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", readErr), nil
         }
 
         payload := make([]map[string]any, 0, len(readingList))

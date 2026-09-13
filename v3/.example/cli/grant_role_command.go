@@ -4,6 +4,8 @@ import (
     "fmt"
     "strings"
 
+    "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -45,7 +47,12 @@ func (instance *GrantRoleCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
-    role := commandContext.String("role")
+    /* the flag is trimmed and judged against the roles the application knows BEFORE anything is read: the
+       two admin doors normalise what they store, and this third role-writing door used to store the flag as
+       typed — " ROLE_EDITOR" with its space, which the no-op check then never matched, so every re-run
+       appended the role again and wrote an audit entry; and ROLE_ADMIM, which the voter compares exactly, so
+       the console reported a grant that granted nothing */
+    role := strings.TrimSpace(commandContext.String("role"))
     user := commandContext.String("user")
 
     if "" == role {
@@ -54,15 +61,19 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
         return nil
     }
 
+    if true == strings.Contains(role, ",") {
+        /* the roles column is one comma-joined value, so a role carrying a comma comes back as several on the next read — the same refusal the two admin doors make, at the only other door that writes roles */
+        return fmt.Errorf("role %q must not contain commas", role)
+    }
+
+    if false == entity.IsKnownRole(role) {
+        return fmt.Errorf("role %q is not one this application knows (%s)", role, strings.Join(entity.KnownRoleList(), ", "))
+    }
+
     /* first use: the lazy handle resolves the user service now and memoizes the success for later runs in the same process. */
     userService, resolveErr := instance.userService.Resolve()
     if nil != resolveErr {
         return resolveErr
-    }
-
-    if true == strings.Contains(role, ",") {
-        /* the roles column is one comma-joined value, so a role carrying a comma comes back as several on the next read — the same refusal the two admin doors make, at the only other door that writes roles */
-        return fmt.Errorf("role %q must not contain commas", role)
     }
 
     account, known, findErr := userService.FindByUsername(user)
@@ -82,20 +93,23 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
         return nil
     }
 
-    /* the role is ADDED to the list the account holds, never substituted for it: the update door takes the whole set, so passing the one role would strip every other. The stored digest travels back unchanged for the same reason. */
-    _, updated, updateErr := userService.Update(
-        runtimeInstance,
-        account.Id,
-        account.Username,
-        account.Password,
-        append(append([]string{}, account.Roles...), role),
-    )
-    if nil != updateErr {
-        return updateErr
+    /* the role is ADDED through the repository's atomic door, which reads and writes the account under one
+       lock: a grant that ran beside an admin update of the same account used to be a read, an append and a
+       whole-set write, and whichever of the two wrote last took the other's change with it. The repository
+       is the arbiter — an account that already held the role by the time the lock was taken is a no-op
+       here too, whatever the cached read above said. */
+    _, outcome, grantErr := userService.GrantRole(runtimeInstance, account.Id, role)
+    if nil != grantErr {
+        return grantErr
     }
 
-    if false == updated {
+    switch outcome {
+    case repository.GrantRoleAccountAbsent:
         return fmt.Errorf("user %q disappeared before the role could be granted", user)
+    case repository.GrantRoleAlreadyHeld:
+        fmt.Printf("user %q already holds role %q; nothing to do\n", user, role)
+
+        return nil
     }
 
     fmt.Printf("granted role %q to user %q\n", role, user)
@@ -108,7 +122,7 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
     return nil
 }
 
-/* holdsRole answers whether the account already carries the role, so a second run of the same command is a no-op rather than a second entry in the column and a second line in the audit trail. */
+/* holdsRole answers whether the account already carries the role, so a second run of the same command is answered without a write; the repository judges the same question again under its lock, which is what makes the answer hold when the read above was served from a cache. */
 func holdsRole(roles []string, role string) bool {
     for _, held := range roles {
         if role == held {

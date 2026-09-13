@@ -4,6 +4,8 @@ import (
     "bytes"
     "errors"
     "strings"
+    "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -206,5 +208,94 @@ func TestNewExampleModule_HandsBothBudgetsTheSameTrustedProxyResolver(t *testing
 
     if 1 != len(moduleInstance.trustedProxyResolver.entryList) || "10.1.2.3" != moduleInstance.trustedProxyResolver.entryList[0] {
         t.Fatalf("expected the resolver to hold the configured entries, got %v", moduleInstance.trustedProxyResolver.entryList)
+    }
+}
+
+/* slowLookupTable is a lookup that takes as long as it is told and counts, under a lock, how many times it was
+   entered — the figure the single-flight and the "not a burst" promise are measured on */
+func slowLookupTable(t *testing.T, delay time.Duration) *atomic.Int64 {
+    t.Helper()
+
+    lookups := &atomic.Int64{}
+    previous := trustedProxyLookup
+    trustedProxyLookup = func(host string) ([]string, error) {
+        lookups.Add(1)
+        time.Sleep(delay)
+
+        return []string{balancerAddress}, nil
+    }
+    t.Cleanup(func() {
+        trustedProxyLookup = previous
+    })
+
+    return lookups
+}
+
+/* the FIRST resolution runs outside the lock too: while it is in flight, every other request is charged to its
+   peer — a list that trusts nothing — instead of waiting; the previous form resolved the first list under the
+   lock and a hung lookup held every concurrent request of the process, on the listener ahead of authentication */
+func TestTrustedProxyResolver_DoesNotHoldConcurrentRequestsOnTheFirstLookup(t *testing.T) {
+    lookups := slowLookupTable(t, 300*time.Millisecond)
+    resolver := resolverOver(t, "load-balancer", time.Now)
+
+    started := make(chan struct{})
+    go func() {
+        close(started)
+        resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    }()
+    <-started
+    time.Sleep(20 * time.Millisecond)
+
+    before := time.Now()
+    key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    waited := time.Since(before)
+
+    if 100*time.Millisecond < waited {
+        t.Fatalf("a request during the first lookup waited %s for it, wanted it served at once", waited)
+    }
+
+    if balancerAddress != key {
+        t.Fatalf("a request during the first lookup was charged to %q, wanted its peer (a list that trusts nothing)", key)
+    }
+
+    if 1 != lookups.Load() {
+        t.Fatalf("two requests during the first resolution ran %d lookups, wanted one", lookups.Load())
+    }
+}
+
+/* the cost the GoDoc promises, pinned: one lookup a minute — the refresh advances the instant the list was
+   resolved at — and no burst: twenty requests finding the list stale at once run ONE lookup between them */
+func TestTrustedProxyResolver_LooksUpOnceAMinuteAndNeverInABurst(t *testing.T) {
+    lookups := slowLookupTable(t, 0)
+
+    now := time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC)
+    resolver := resolverOver(t, "load-balancer", func() time.Time { return now })
+
+    resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    now = now.Add(trustedProxyRefreshInterval)
+
+    for range 100 {
+        resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    }
+
+    if 2 != lookups.Load() {
+        t.Fatalf("a hundred requests over a stale list ran %d lookups, wanted two (the first and one refresh)", lookups.Load())
+    }
+
+    slow := slowLookupTable(t, 100*time.Millisecond)
+    now = now.Add(trustedProxyRefreshInterval)
+
+    var group sync.WaitGroup
+    for range 20 {
+        group.Add(1)
+        go func() {
+            defer group.Done()
+            resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+        }()
+    }
+    group.Wait()
+
+    if 1 != slow.Load() {
+        t.Fatalf("twenty concurrent requests over a stale list ran %d lookups, wanted one", slow.Load())
     }
 }

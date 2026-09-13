@@ -2,8 +2,11 @@ package event
 
 import (
     "context"
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
+    "sync"
     "testing"
     "time"
 
@@ -11,6 +14,8 @@ import (
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -211,5 +216,155 @@ func TestStreamHandler_RefusesWithoutCommittingWhenTheHubIsNotRegistered(t *test
             "expected the refusal to leave the response uncommitted, but the handler had already written status %d",
             writer.CommittedStatusCode(),
         )
+    }
+}
+
+/* warningRecordingLogger keeps the warnings a door wrote through the runtime's logger */
+type warningRecordingLogger struct {
+    melodyloggingcontract.Logger
+    mutex    sync.Mutex
+    warnings []string
+}
+
+func (instance *warningRecordingLogger) Warning(message string, context melodyloggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.warnings = append(instance.warnings, message)
+}
+
+func (instance *warningRecordingLogger) recorded() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.warnings...)
+}
+
+/* streamServer mounts the real handler on a real net/http server with the write timeout given, the way
+   the application's server carries it: net/http arms that deadline once, from the request line, and the
+   handler is what has to keep the stream alive past it */
+func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *melodyhttp.ServerSentEventHub, *warningRecordingLogger) {
+    t.Helper()
+
+    containerInstance := melodycontainer.NewContainer()
+    hub := melodyhttp.NewServerSentEventHub()
+    logger := &warningRecordingLogger{Logger: melodylogging.NewNopLogger()}
+
+    melodycontainer.MustRegister(
+        containerInstance,
+        subscriber.ServiceCatalogNotificationHub,
+        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+            return hub, nil
+        },
+    )
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, httpRequest *nethttp.Request) {
+        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("stream-test", time.Now()))
+        _, _ = StreamHandler()(runtimeInstance, writer, request)
+    }))
+    server.Config.WriteTimeout = writeTimeout
+    server.Start()
+    t.Cleanup(server.Close)
+    t.Cleanup(func() { _ = containerInstance.Close() })
+
+    return server, hub, logger
+}
+
+/* the server's write deadline is armed once, from the request line; an event published after it used to be
+   the one lost, on a connection cut under a client that still believed it open. Re-armed per frame by the
+   writer, with the keepalive filling the idle stretch, an event published past the server's timeout is
+   delivered. */
+func TestStreamHandler_DeliversAnEventPublishedPastTheServersWriteTimeout(t *testing.T) {
+    server, hub, _ := streamServer(t, time.Second)
+
+    response, requestErr := nethttp.Get(server.URL + "/events/stream/?topic=visitor")
+    if nil != requestErr {
+        t.Fatalf("opening the stream failed: %v", requestErr)
+    }
+    defer response.Body.Close()
+
+    /* the subscription exists once the hub counts it, which is the only thing that makes the broadcast below
+       a delivery rather than a publish to nobody */
+    deadline := time.Now().Add(2 * time.Second)
+    for 0 == hub.Broadcast("visitor", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
+        time.Sleep(10 * time.Millisecond)
+    }
+
+    time.Sleep(1500 * time.Millisecond)
+
+    if 1 != hub.Broadcast("visitor", melodyhttp.ServerSentEvent{Event: "catalog", Data: `{"action":"created"}`}) {
+        t.Fatal("the stream was no longer subscribed when the event was published")
+    }
+
+    received := make(chan string, 1)
+    go func() {
+        buffer := make([]byte, 4096)
+        var collected []byte
+        for {
+            count, readErr := response.Body.Read(buffer)
+            collected = append(collected, buffer[:count]...)
+            if true == strings.Contains(string(collected), `data: {"action":"created"}`) || nil != readErr {
+                received <- string(collected)
+
+                return
+            }
+        }
+    }()
+
+    select {
+    case body := <-received:
+        if false == strings.Contains(body, `event: catalog`) {
+            t.Fatalf("the event published past the write timeout was not delivered; the stream carried %q", body)
+        }
+    case <-time.After(3 * time.Second):
+        t.Fatal("the stream delivered nothing within three seconds of the publish")
+    }
+}
+
+/* a failed write is a frame lost only when the SERVER cut the stream — the client leaving is the ordinary
+   end, and the request context says which is which */
+func TestJournalServerSideCut_WarnsOnlyWhileTheClientIsStillThere(t *testing.T) {
+    _, _, logger := streamServer(t, time.Second)
+    containerInstance := melodycontainer.NewContainer()
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    cancelled, cancel := context.WithCancel(context.Background())
+    cancel()
+    journalServerSideCut(runtimeInstance, cancelled, "visitor", "event", errors.New("write: broken pipe"))
+
+    if 0 != len(logger.recorded()) {
+        t.Fatalf("a client that left was journaled as a server cut: %v", logger.recorded())
+    }
+
+    journalServerSideCut(runtimeInstance, context.Background(), "visitor", "event", errors.New("write: i/o timeout"))
+
+    if 1 != len(logger.recorded()) || "event stream cut by the server with a frame in flight" != logger.recorded()[0] {
+        t.Fatalf("a server cut with a frame in flight was journaled as %v", logger.recorded())
+    }
+}
+
+func TestKeepaliveIntervalFor_IsHalfTheBudgetOrTheDefault(t *testing.T) {
+    if 15*time.Second != keepaliveIntervalFor(30*time.Second) {
+        t.Errorf("a 30 s budget keeps alive every %s, wanted 15 s", keepaliveIntervalFor(30*time.Second))
+    }
+
+    if defaultKeepaliveInterval != keepaliveIntervalFor(0) {
+        t.Errorf("no budget keeps alive every %s, wanted the default", keepaliveIntervalFor(0))
     }
 }

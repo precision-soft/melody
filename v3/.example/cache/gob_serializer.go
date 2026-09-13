@@ -60,6 +60,13 @@ func layoutDescriptionOf(valueType reflect.Type, visited map[reflect.Type]bool) 
         valueType = valueType.Elem()
     }
 
+    /* a map is looked through to its key and its element the way a slice is to its element: a struct held as
+       a map value is decoded by gob by field name exactly like one held directly, so a field added to it has
+       to move the token too. An interface stays opaque — its dynamic type is not in the layout. */
+    if reflect.Map == valueType.Kind() {
+        return "map[" + layoutDescriptionOf(valueType.Key(), visited) + "]" + layoutDescriptionOf(valueType.Elem(), visited)
+    }
+
     if reflect.Struct != valueType.Kind() {
         return valueType.String()
     }

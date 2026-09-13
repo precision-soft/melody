@@ -1,6 +1,7 @@
 package product
 
 import (
+    "errors"
     "fmt"
     "math"
     nethttp "net/http"
@@ -85,6 +86,11 @@ func ApiReadHandler() melodyhttpcontract.Handler {
 
         converted, convertErr := convertedPriceFor(request, product, currencies)
         if nil != convertErr {
+            var serverRefusal *conversionRefusal
+            if true == errors.As(convertErr, &serverRefusal) {
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the price could not be converted", convertErr), nil
+            }
+
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, convertErr.Error()), nil
         }
 
@@ -159,14 +165,18 @@ func convertedPriceFor(
         return nil, fmt.Errorf("unknown currency code %q", requestedCode)
     }
 
+    /* the two refusals below are the SERVER's, not the caller's: the caller sent a code the catalogue
+       carries, and what cannot be converted is the product's own row — quoted in a currency the catalogue
+       does not hold, or against a rate that is not a usable price. They are wrapped so the door answers
+       them as a 500 with the cause journaled, where the unknown code above stays the caller's 400. */
     source, sourceFound := currencyById(currencies, product.CurrencyId)
     if false == sourceFound {
-        return nil, fmt.Errorf("the product is quoted in a currency the catalogue does not carry")
+        return nil, &conversionRefusal{cause: fmt.Errorf("the product is quoted in a currency the catalogue does not carry (%q)", product.CurrencyId)}
     }
 
     price, convertErr := service.ConvertAmount(product.Price, source, target)
     if nil != convertErr {
-        return nil, convertErr
+        return nil, &conversionRefusal{cause: convertErr}
     }
 
     return &ConvertedPriceResponse{
@@ -175,6 +185,20 @@ func convertedPriceFor(
         Price:      price,
         RateAsOf:   target.RateAsOf.UTC().Format(time.RFC3339),
     }, nil
+}
+
+/* conversionRefusal marks a refusal of the conversion that is the catalogue's fault rather than the
+   caller's, so the door can answer it as a 500 and keep the caller's mistakes at 400. */
+type conversionRefusal struct {
+    cause error
+}
+
+func (instance *conversionRefusal) Error() string {
+    return instance.cause.Error()
+}
+
+func (instance *conversionRefusal) Unwrap() error {
+    return instance.cause
 }
 
 func currencyById(currencies []*entity.Currency, currencyId string) (*entity.Currency, bool) {

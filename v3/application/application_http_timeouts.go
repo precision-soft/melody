@@ -8,7 +8,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* the per-request server limits are fixed in this major: nothing implements an override and nothing can inject one — the configuration the application consults is always the one it built itself. The values bound every request the server admits; a slow client is cut instead of holding a connection open forever. The shutdown wait is the one limit that is configurable, through MELODY_HTTP_SHUTDOWN_TIMEOUT, because its right value belongs to the supervisor's termination grace rather than to the framework. */
+/* the per-request server limits are fixed in this major: nothing implements an override and nothing can inject one — the configuration the application consults is always the one it built itself. The values bound every request the server admits; a slow client is cut instead of holding a connection open forever. The write timeout is armed by net/http once, from the request line, so a handler that streams re-arms it per frame through the event-stream writer's write budget rather than through a larger figure here. The shutdown wait is the one limit that is configurable, through MELODY_HTTP_SHUTDOWN_TIMEOUT, because its right value belongs to the supervisor's termination grace rather than to the framework. */
 const (
     defaultHttpReadTimeout       = 15 * time.Second
     defaultHttpReadHeaderTimeout = 5 * time.Second

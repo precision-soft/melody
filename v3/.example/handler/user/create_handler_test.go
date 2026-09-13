@@ -2,11 +2,14 @@ package user
 
 import (
     "context"
+    "errors"
+    "fmt"
     nethttp "net/http"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
 )
 
 /* the create door holds the same line the update door holds: a role carrying a comma would come back as several roles on the next read, among them an administrator nobody granted, and an account that reads as an administrator is then shielded from every other administrator by protectsAnotherAdmin */
@@ -93,5 +96,48 @@ func TestApiCreateHandlerAcceptsAPlainRoleList(t *testing.T) {
 
     if 2 != len(created.Roles) || entity.RoleUser != created.Roles[0] || entity.RoleEditor != created.Roles[1] {
         t.Fatalf("unexpected roles stored: %v", created.Roles)
+    }
+}
+
+/* the check that precedes the write is a read, so two callers can pass it before either has written; the
+   unique index refuses the second, and its refusal — wrapped by the audit tracker, recognised by the
+   repository's seam — is the caller's 400, the same answer the check gives, not a 500 of a failed write */
+func TestApiCreateHandlerAnswersTheIndexsRefusalOfATakenUsernameAs400(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"))
+    userRepository.refuseWrites(fmt.Errorf("audited insert failed: %w", repository.ErrUsernameAlreadyExists))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoor(
+        t,
+        runtimeInstance,
+        ApiCreateHandler(),
+        nethttp.MethodPost,
+        "/users/api/create/",
+        nil,
+        `{"username":"taken","password":"a-password","roles":["`+entity.RoleUser+`"]}`,
+    )
+
+    if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, "username already exists") {
+        t.Fatalf("the index's refusal answered %d: %s, wanted 400 username already exists", statusCode, body)
+    }
+}
+
+func TestApiCreateHandlerAnswersAnyOtherFailedWriteAs500(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"))
+    userRepository.refuseWrites(errors.New("audited insert failed"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, _ := callDoor(
+        t,
+        runtimeInstance,
+        ApiCreateHandler(),
+        nethttp.MethodPost,
+        "/users/api/create/",
+        nil,
+        `{"username":"plain","password":"a-password","roles":["`+entity.RoleUser+`"]}`,
+    )
+
+    if nethttp.StatusInternalServerError != statusCode {
+        t.Fatalf("a failed write answered %d, wanted 500", statusCode)
     }
 }

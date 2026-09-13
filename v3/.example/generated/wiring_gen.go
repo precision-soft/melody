@@ -257,11 +257,20 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, currencyServiceErr
             }
 
+            clockInstance, clockInstanceErr := melodycontainer.FromResolverByType[contract.Clock](resolver)
+            if nil != clockInstanceErr {
+                return nil, clockInstanceErr
+            }
+
             ratesBaseUrl := configuration.MustGet("app.rates.base_url").MustString()
+
+            ratesBaseCurrency := configuration.MustGet("app.rates.base_currency").MustString()
 
             return service.NewRateRefreshService(
                 currencyService,
+                clockInstance,
                 ratesBaseUrl,
+                ratesBaseCurrency,
             ), nil
         },
     )
