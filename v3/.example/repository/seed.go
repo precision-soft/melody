@@ -91,7 +91,7 @@ var seedRateAsOf = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
    never has to name it. */
 func seedCurrencyList() []*entity.Currency {
     return []*entity.Currency{
-        entity.NewCurrency("cur-eur", "EUR", "Euro", 1, seedRateAsOf),
+        entity.NewCurrency("cur-eur", entity.RateBaseCurrencyCode, "Euro", 1, seedRateAsOf),
         entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.1, seedRateAsOf),
         entity.NewCurrency("cur-ron", "RON", "Romanian Leu", 5.05, seedRateAsOf),
     }

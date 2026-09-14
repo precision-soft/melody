@@ -2,6 +2,9 @@ package event
 
 import (
     "context"
+    "bufio"
+    "errors"
+    "strings"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -211,5 +214,45 @@ func TestStreamHandler_RefusesWithoutCommittingWhenTheHubIsNotRegistered(t *test
             "expected the refusal to leave the response uncommitted, but the handler had already written status %d",
             writer.CommittedStatusCode(),
         )
+    }
+}
+
+
+type failingStreamWriter struct { recordingResponseWriter; failure error }
+func (instance *failingStreamWriter) Write(payload []byte) (int, error) { return 0, instance.failure }
+
+func TestStreamHandlerReportsServerWriteFailure(t *testing.T) {
+    request, runtimeInstance := streamRequest(t, "/events/stream/?topic=probe", false)
+    failure := errors.New("socket write refused")
+    _, err := StreamHandler()(runtimeInstance, &failingStreamWriter{failure: failure}, request)
+    if false == errors.Is(err, failure) { t.Fatalf("server write failure disappeared: %v", err) }
+}
+
+func TestStreamHandlerDeliversAfterTheServerWriteTimeout(t *testing.T) {
+    _, runtimeInstance := streamRequest(t, "/events/stream/?topic=probe", false)
+    hub, err := subscriber.CatalogNotificationHubFromRuntime(runtimeInstance)
+    if nil != err { t.Fatal(err) }
+    server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, incoming *nethttp.Request) {
+        request := melodyhttp.NewRequest(incoming, nil, runtimeInstance, nil)
+        _, _ = StreamHandler()(runtimeInstance, writer, request)
+    }))
+    server.Config.WriteTimeout = 100*time.Millisecond
+    server.Start()
+    defer server.Close()
+    client := &nethttp.Client{Timeout: 2*time.Second}
+    response, err := client.Get(server.URL+"/events/stream/?topic=probe")
+    if nil != err { t.Fatal(err) }
+    defer response.Body.Close()
+    reader := bufio.NewReader(response.Body)
+    line, err := reader.ReadString('\n')
+    if nil != err || false == strings.Contains(line, "connected") { t.Fatalf("stream did not open: %q %v", line, err) }
+    timer := time.NewTimer(150*time.Millisecond)
+    defer timer.Stop()
+    <-timer.C
+    hub.Broadcast("probe", melodyhttp.ServerSentEvent{Data:"after-timeout"})
+    for {
+        line, err = reader.ReadString('\n')
+        if nil != err { t.Fatalf("event lost after server timeout: %v", err) }
+        if strings.Contains(line, "data: after-timeout") { break }
     }
 }

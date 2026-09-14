@@ -49,7 +49,6 @@ func TestFlagDefinition_CarriesTheKindNameUsageAndDefaultOfEveryShippedFlag(t *t
     }
 }
 
-/* a flag that declares no validator must answer nil rather than a function that accepts everything: the engine tells the two apart, and one that always passes would validate the declared default too */
 func TestFlagDefinition_AFlagWithoutAValidatorAnswersNoValidator(t *testing.T) {
     for _, flag := range []Flag{
         &StringFlag{Name: "format"},
@@ -86,7 +85,6 @@ func TestFlagDefinition_TheNeutralValidatorCallsTheTypedOne(t *testing.T) {
     }
 }
 
-/* a value of the wrong type reports a wiring mistake in an adapter or in a hand-written flag type: swallowed, the validator would quietly pass every value it could not read */
 func TestFlagDefinition_TheNeutralValidatorRefusesAValueOfAnotherType(t *testing.T) {
     called := false
     flag := &IntFlag{

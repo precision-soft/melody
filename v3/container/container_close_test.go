@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "reflect"
+    "sort"
     "strings"
     "sync"
     "sync/atomic"
@@ -2333,6 +2334,209 @@ func TestTeardownCloseOrder_TheSerialOrderIsUnchangedByTheWaves(t *testing.T) {
     }
 }
 
+/* a ring the drain cannot open is closed as one unit and the drain CONTINUES past it: a pure dependency of a ring member — created after its dependent, so the creation-order tie-break put it first — is released by the ring's close and closed after it, as the edge says. Closed whole in creation order, the remainder closed that dependency FIRST, against the one edge that ordered it, and the remainder named it as if it were on the ring. */
+func TestTeardownCloseOrder_APureDependencyOfARingMemberClosesAfterTheRingAndIsNotARingMember(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:ring.dependency"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}, "service:ring.dependency": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a":          1,
+        "service:ring.b":          2,
+        "service:ring.dependency": 3,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:ring.dependency"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the ring closed first and its pure dependency after it, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    sort.Strings(ringMembers)
+    if false == reflect.DeepEqual([]string{"service:ring.a", "service:ring.b"}, ringMembers) {
+        t.Fatalf("expected the ring members alone to be reported, got %v", ringMembers)
+    }
+
+    if closeWaveIndexOf["service:ring.dependency"] <= closeWaveIndexOf["service:ring.a"] {
+        t.Fatalf("expected the pure dependency one wave past the ring, got ring %d dependency %d", closeWaveIndexOf["service:ring.a"], closeWaveIndexOf["service:ring.dependency"])
+    }
+}
+
+/* two rings joined by a bridge: the first ring closes, the bridge is released and closes, the second ring closes — the bridge is on no ring and is not reported as one, and the two rings take two waves of their own, each closed serially */
+func TestTeardownCloseOrder_TwoRingsJoinedByABridgeCloseInOrderAndTheBridgeIsNoRingMember(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:bridge", "service:ring.e", "service:ring.f"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}, "service:bridge": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}},
+        "service:bridge": {"service:ring.e": struct{}{}},
+        "service:ring.e": {"service:ring.f": struct{}{}},
+        "service:ring.f": {"service:ring.e": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a": 1,
+        "service:ring.b": 2,
+        "service:bridge": 3,
+        "service:ring.e": 4,
+        "service:ring.f": 5,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:bridge", "service:ring.f", "service:ring.e"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the first ring, the bridge, then the second ring, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    sort.Strings(ringMembers)
+    if false == reflect.DeepEqual([]string{"service:ring.a", "service:ring.b", "service:ring.e", "service:ring.f"}, ringMembers) {
+        t.Fatalf("expected the four ring members alone to be reported, got %v", ringMembers)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] != closeWaveIndexOf["service:ring.b"] || closeWaveIndexOf["service:ring.e"] != closeWaveIndexOf["service:ring.f"] {
+        t.Fatalf("expected each ring in one wave of its own, got %v", closeWaveIndexOf)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] >= closeWaveIndexOf["service:bridge"] || closeWaveIndexOf["service:bridge"] >= closeWaveIndexOf["service:ring.e"] {
+        t.Fatalf("expected the waves ring, bridge, ring in that order, got %v", closeWaveIndexOf)
+    }
+}
+
+/* a ring that depends on another ring DIRECTLY — a member's edge into the other ring, no bridge node between them — is the one shape where the count of what depends on a ring is fed by a ring member: with that term dropped the dependency ring reads as depended on by nothing and closes first, under the very edge that orders it after. The bridge shape beside it does not see the term, because there the dependent of the second ring is the bridge, a plain node. */
+func TestTeardownCloseOrder_ARingDependingDirectlyOnAnotherRingClosesBeforeIt(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:ring.c", "service:ring.d"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}, "service:ring.c": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}},
+        "service:ring.c": {"service:ring.d": struct{}{}},
+        "service:ring.d": {"service:ring.c": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a": 1,
+        "service:ring.b": 2,
+        "service:ring.c": 3,
+        "service:ring.d": 4,
+    }
+
+    closeOrder, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:ring.d", "service:ring.c"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the dependent ring before the ring it depends on, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] >= closeWaveIndexOf["service:ring.c"] {
+        t.Fatalf("expected the dependent ring's wave before the dependency ring's, got %v", closeWaveIndexOf)
+    }
+}
+
+/* a ring's wave is one of its own, past every wave the drain assigned so far: a ring sharing its index with a drained, unrelated node would have that node closed one at a time with the ring's members under an armed teardown, for no reason the graph gives */
+func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
+    nodeKeys := []string{"service:lone.dependent", "service:lone.dependency", "service:ring.a", "service:ring.b"}
+
+    edges := map[string]map[string]struct{}{
+        "service:lone.dependent": {"service:lone.dependency": struct{}{}},
+        "service:ring.a":         {"service:ring.b": struct{}{}},
+        "service:ring.b":         {"service:ring.a": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:lone.dependent":  1,
+        "service:lone.dependency": 2,
+        "service:ring.a":          3,
+        "service:ring.b":          4,
+    }
+
+    _, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    for _, loneKey := range []string{"service:lone.dependent", "service:lone.dependency"} {
+        if closeWaveIndexOf[loneKey] == closeWaveIndexOf["service:ring.a"] {
+            t.Fatalf("expected the ring in a wave no unrelated node shares, got %v", closeWaveIndexOf)
+        }
+    }
+}
+
+/* a ring's wave is one past the last wave that CLOSED, not one past every wave assigned: a stalled node that a closed chain had pushed to a provisional wave three put the ring at four and itself at five, and the operator's view printed a wave nothing closed in */
+func TestTeardownCloseOrder_TheWaveIndexesHaveNoHole(t *testing.T) {
+    nodeKeys := []string{"service:chain.0", "service:chain.1", "service:chain.2", "service:dep", "service:ring.a", "service:ring.b"}
+
+    edges := map[string]map[string]struct{}{
+        "service:chain.0": {"service:chain.1": struct{}{}},
+        "service:chain.1": {"service:chain.2": struct{}{}},
+        "service:chain.2": {"service:dep": struct{}{}},
+        "service:ring.a":  {"service:ring.b": struct{}{}, "service:dep": struct{}{}},
+        "service:ring.b":  {"service:ring.a": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:chain.0": 1,
+        "service:chain.1": 2,
+        "service:chain.2": 3,
+        "service:dep":     4,
+        "service:ring.a":  5,
+        "service:ring.b":  6,
+    }
+
+    _, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    highest := 0
+    populated := make(map[int]struct{})
+    for _, waveIndex := range closeWaveIndexOf {
+        populated[waveIndex] = struct{}{}
+        if waveIndex > highest {
+            highest = waveIndex
+        }
+    }
+
+    for waveIndex := 0; waveIndex <= highest; waveIndex++ {
+        if _, closesSomething := populated[waveIndex]; false == closesSomething {
+            t.Fatalf("expected every wave up to %d to close something, wave %d closes nothing: %v", highest, waveIndex, closeWaveIndexOf)
+        }
+    }
+
+    if closeWaveIndexOf["service:dep"] <= closeWaveIndexOf["service:ring.a"] {
+        t.Fatalf("expected the dependency the ring releases to close after the ring, got %v", closeWaveIndexOf)
+    }
+}
+
+/* the rings are found once and the count of what depends on each is kept as nodes close, so a stall reads the next ring off the counts: found and scanned again at every stall, a teardown of hundreds of disjoint rings spent seconds where the sequential close spent milliseconds — measured, four hundred rings closed in seven milliseconds this way — twenty under the race detector — and in two seconds the other; the bound is a quarter of the retired form's figure and over ten times the honest one under the detector, wide enough for a loaded host and still four times short of the form it retires */
+func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
+    const ringCount = 400
+
+    nodeKeys := make([]string, 0, 2*ringCount)
+    edges := make(map[string]map[string]struct{}, 2*ringCount)
+    creationOrderOf := make(map[string]int, 2*ringCount)
+
+    for ringIndex := 0; ringIndex < ringCount; ringIndex++ {
+        first := fmt.Sprintf("service:ring.%d.a", ringIndex)
+        second := fmt.Sprintf("service:ring.%d.b", ringIndex)
+        nodeKeys = append(nodeKeys, first, second)
+        edges[first] = map[string]struct{}{second: {}}
+        edges[second] = map[string]struct{}{first: {}}
+        creationOrderOf[first] = 2 * ringIndex
+        creationOrderOf[second] = 2*ringIndex + 1
+    }
+
+    startedAt := time.Now()
+    closeOrder, _, cycleNodeKeys := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+    elapsed := time.Since(startedAt)
+
+    if 2*ringCount != len(closeOrder) || 2*ringCount != len(cycleNodeKeys) {
+        t.Fatalf("expected every ring member closed and reported, got %d closed and %d reported", len(closeOrder), len(cycleNodeKeys))
+    }
+
+    if 500*time.Millisecond < elapsed {
+        t.Fatalf("expected %d rings to drain within 500ms, took %s", ringCount, elapsed)
+    }
+}
+
 /* arming is the moment the application says its teardown graph is complete, so it is the moment a declared edge naming a service nobody registered stops being a tolerated no-op and becomes the ordering that is not there. */
 func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
     serviceContainer := NewContainer()
@@ -2661,6 +2865,97 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
 
     if 1 != peak.Load() {
         t.Fatalf("expected the cycle remainder to close one service at a time, got %d at once", peak.Load())
+    }
+}
+
+/* two rings — each a pair declaring one another — are two waves closed one service at a time, not one: a teardown keyed on a single ring wave closed the second ring's members at once */
+func TestContainer_Close_ArmedEachRingClosesOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var running, peak atomic.Int64
+
+    for _, pair := range [][2]string{{"ring.a", "ring.b"}, {"ring.b", "ring.a"}, {"ring.e", "ring.f"}, {"ring.f", "ring.e"}} {
+        if registerErr := serviceContainer.Register(
+            pair[0],
+            func(_ containercontract.Resolver) (*concurrentCloser, error) {
+                return &concurrentCloser{running: &running, peak: &peak}, nil
+            },
+            WithoutTypeRegistration(),
+            WithTeardownDependency(pair[1]),
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+    }
+
+    armParallelTeardown(t, serviceContainer)
+
+    buildEveryRegisteredService(t, serviceContainer, "ring.a", "ring.b", "ring.e", "ring.f")
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
+        t.Fatalf("expected the two declared rings to be reported, got %v", closeErr)
+    }
+
+    if 1 != peak.Load() {
+        t.Fatalf("expected each ring to close one service at a time, got %d at once", peak.Load())
+    }
+}
+
+/* the close report names the members of the ring alone: the pure dependency a ring member resolves is closed after the ring, in the order the graph proves, and naming it beside the ring sent the operator looking for a ring it is not on — while the operator's view already left it unflagged */
+func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "cycle.c",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "c"}, nil },
+        WithoutTypeRegistration(),
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.b",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            if _, resolveErr := resolver.Get("cycle.c"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &poolDeclarerService{label: "b"}, nil
+        },
+        WithoutTypeRegistration(),
+        WithTeardownDependency("cycle.a"),
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.a",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            if _, resolveErr := resolver.Get("cycle.b"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &poolDeclarerService{label: "a"}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+
+    MustFromResolver[*poolDeclarerService](serviceContainer, "cycle.a")
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the ring to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    nodes, areNodes := typedError.Context()["nodes"].([]string)
+    if false == areNodes {
+        t.Fatalf("expected the ring members in the close error context, got %v", typedError.Context())
+    }
+
+    sort.Strings(nodes)
+    if false == reflect.DeepEqual([]string{"service:cycle.a", "service:cycle.b"}, nodes) {
+        t.Fatalf("expected the ring members alone to be named, got %v", nodes)
     }
 }
 
@@ -3032,6 +3327,26 @@ func TestContainer_CloseWithContext_ArmedTwoClosersOfOneWaveThatOverlapAreBothNa
     }
 }
 
+/* a teardown reached with its deadline already gone and nothing to close spent nothing on anything: it kept a record naming nobody — an empty budget, an empty map of durations — and the application then wrote "teardown overran its deadline" about a teardown that did nothing */
+func TestContainer_CloseWithContext_ATeardownThatClosedNothingKeepsNoOverrunRecord(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := serviceContainer.(interface {
+        CloseWithContext(context.Context) error
+    }).CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("expected a clean close of an empty container, got %v", closeErr)
+    }
+
+    if record := serviceContainer.(interface {
+        TeardownDeadlineOverrun() exceptioncontract.Context
+    }).TeardownDeadlineOverrun(); nil != record {
+        t.Fatalf("expected no overrun record for a teardown that closed nothing, got %v", record)
+    }
+}
+
 /* a close that failed under an overrun carries the deadline record beside its failures, so the operator reading a failed teardown asks the same question about the budget as one reading a clean one */
 func TestContainer_CloseWithContext_AFailureUnderAnOverrunCarriesTheDeadlineRecordBesideTheFailures(t *testing.T) {
     serviceContainer := NewContainer()
@@ -3171,6 +3486,128 @@ type poolDeclarerService struct {
 
 func (instance *poolDeclarerService) Close() error { return nil }
 
+/* the declaration's raw edge towards "type:<T>" is not written into the graph: a declaration turned ambiguous by a second, non-strict registration under the type expands to nothing, and the raw edge — translated through the alias of the first service the moment the type had been resolved THROUGH ITSELF — closed a ring with the resolution that first service had made, so the close reported a cycle on the default path over a teardown in which every service closed. The sibling test above resolves by name and never creates the type node, which is why it stayed green over the edge. */
+func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdgeBehind(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "declarer"}, nil },
+        WithTeardownDependencyOfType[*sharedPoolService](),
+    )
+
+    serviceContainer.MustRegister(
+        "app.pool.first",
+        func(resolver containercontract.Resolver) (*sharedPoolService, error) {
+            if _, resolveErr := resolver.Get("app.declarer"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &sharedPoolService{label: "first"}, nil
+        },
+        WithTypeRegistration(false),
+    )
+
+    /* resolved through the TYPE, so a "type:<T>" node exists and is aliased onto the first pool — the node the raw edge used to be translated through */
+    serviceContainer.MustGetByType(reflect.TypeOf((*sharedPoolService)(nil)))
+
+    serviceContainer.MustRegister(
+        "app.pool.second",
+        func(_ containercontract.Resolver) (*sharedPoolService, error) { return &sharedPoolService{label: "second"}, nil },
+        WithTypeRegistration(false),
+    )
+
+    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool.second")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
+    }
+}
+
+/* capturedDeclarerPool holds the declarer by a pointer it was handed, not one it resolved: the walk sees the pointer, the graph sees nothing */
+type capturedDeclarerPool struct {
+    declarer *poolDeclarerService
+}
+
+func (instance *capturedDeclarerPool) Close() error { return nil }
+
+/* a pointer held back against a declaration keyed by a TYPE is no ordering the walk may write: the declaration is expanded for the plan, and the ring check reads the plan's graph — it used to translate the raw graph a second time for itself, where the expansion never arrived, so the inference stood beside the declaration, the plan carried both directions, and the armed close reported a cycle over a teardown in which every service closed. The name form of the same declaration never had the defect, which is the control. */
+func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRing(t *testing.T) {
+    for _, byType := range []bool{true, false} {
+        serviceContainer := NewContainer()
+        declarerInstance := &poolDeclarerService{label: "declarer"}
+
+        option := WithTeardownDependency("app.pool")
+        if true == byType {
+            option = WithTeardownDependencyOfType[*capturedDeclarerPool]()
+        }
+
+        serviceContainer.MustRegister(
+            "app.declarer",
+            func(_ containercontract.Resolver) (*poolDeclarerService, error) { return declarerInstance, nil },
+            option,
+        )
+
+        serviceContainer.MustRegister(
+            "app.pool",
+            func(_ containercontract.Resolver) (*capturedDeclarerPool, error) {
+                return &capturedDeclarerPool{declarer: declarerInstance}, nil
+            },
+        )
+
+        if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); nil != armErr {
+            t.Fatalf("byType=%v arm: %v", byType, armErr)
+        }
+
+        MustFromResolver[*poolDeclarerService](serviceContainer, "app.declarer")
+        MustFromResolver[*capturedDeclarerPool](serviceContainer, "app.pool")
+
+        plan := serviceContainer.(teardownPlanner).TeardownPlan()
+
+        for _, entry := range plan {
+            if "service:app.pool" == entry.NodeKey && 0 != len(entry.Dependencies) {
+                t.Fatalf("byType=%v: the held pointer back was written as an inference over the declaration it contradicts: %v", byType, entry.Dependencies)
+            }
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("byType=%v: expected a clean armed teardown, got %v", byType, closeErr)
+        }
+    }
+}
+
+/* a resolution between two names of ONE instance collapses onto a self-edge, and a self-edge is no edge: the drain skipped it, the walk skipped it, and the plan published it — a service listed as closed before itself, with the operator's view saying "proved" */
+func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "app.a",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "a"}, nil },
+        WithoutTypeRegistration(),
+    )
+
+    serviceContainer.MustRegister(
+        "app.b",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            value, resolveErr := resolver.Get("app.a")
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return value.(*poolDeclarerService), nil
+        },
+        WithoutTypeRegistration(),
+    )
+
+    MustFromResolver[*poolDeclarerService](serviceContainer, "app.b")
+
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if 0 != len(entry.Dependencies) {
+            t.Fatalf("%s is listed as closed before %v — one instance under two names, ordered against itself", entry.NodeKey, entry.Dependencies)
+        }
+    }
+}
+
 /* what a declared type stands for is the plan's to expand, for one plan: written into the graph by the operator's view, the expansion outlived the registration that made the declaration ambiguous — a second, non-strict name under the type, which the plan then drops — and the edge left behind closed a ring with the resolution the first name had made, so the close reported a cycle on the DEFAULT path, over a teardown in which every service closed */
 func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t *testing.T) {
     serviceContainer := NewContainer()
@@ -3212,4 +3649,18 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
     }
+}
+
+
+
+func TestContainerClosesContextOnlyServices(t *testing.T) {
+    serviceContainer := NewContainer()
+    failure := errors.New("context-only close failed")
+    value := &contextOnlyCleanup{failure: failure}
+    MustRegister(serviceContainer, "context-only", func(resolver containercontract.Resolver) (*contextOnlyCleanup, error) { return value, nil })
+    _ = serviceContainer.MustGet("context-only")
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    err := serviceContainer.(interface { CloseWithContext(context.Context) error }).CloseWithContext(ctx)
+    if 1 != value.calls || ctx != value.seen || nil == err { t.Fatalf("context-only service skipped or failure lost: calls=%d err=%v", value.calls, err) }
 }

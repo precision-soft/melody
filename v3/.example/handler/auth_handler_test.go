@@ -11,7 +11,6 @@ import (
     "strings"
     "testing"
     "time"
-
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
@@ -265,5 +264,67 @@ func TestLogoutHandlerToleratesARequestCarryingNoSession(t *testing.T) {
 
     if nil == response {
         t.Fatal("the logout door answered no response")
+    }
+}
+
+
+func TestLoginDecoderDiagnosticRemainsAvailableInDebug(t *testing.T) {
+    runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvDevelopment)
+    incoming := httptest.NewRequest(nethttp.MethodPost, "/login", strings.NewReader("{"))
+    incoming.Header.Set("Content-Type", "application/json")
+    request := melodyhttp.NewRequest(incoming, nil, runtimeInstance, nil)
+    response, err := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != err { t.Fatal(err) }
+    body, err := io.ReadAll(response.BodyReader())
+    if nil != err || false == strings.Contains(string(body), "unexpected EOF") { t.Fatalf("decoder diagnosis disappeared: %s err=%v", body, err) }
+}
+
+
+type loginBodyRepository struct {
+    repository.UserRepository
+    usernames []string
+}
+
+func (instance *loginBodyRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+    instance.usernames = append(instance.usernames, username)
+    return nil, false, nil
+}
+
+/* Query credentials must never reach authentication, including when they fill a missing body field. */
+func TestLoginHandlerRequiresCredentialsInBody(t *testing.T) {
+    for _, testCase := range []struct {
+        name, query, body, contentType string
+        status, lookups int
+    }{
+        {"query only", "username=url-user&password=url-secret", "", "application/x-www-form-urlencoded", 400, 0},
+        {"password from query", "password=url-secret", "username=body-user", "application/x-www-form-urlencoded", 400, 0},
+        {"username from query", "username=url-user", "password=body-secret", "application/x-www-form-urlencoded", 400, 0},
+        {"form body", "username=url-user&password=url-secret", "username=body-user&password=body-secret", "application/x-www-form-urlencoded", 401, 1},
+        {"json body", "username=url-user&password=url-secret", `{"username":"body-user","password":"body-secret"}`, "application/json", 401, 1},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            repositoryInstance := &loginBodyRepository{}
+            containerInstance := melodycontainer.NewContainer()
+            if err := melodycontainer.Register[*service.UserService](containerInstance, service.ServiceUserService,
+                func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
+                    return service.NewUserService(repositoryInstance, nil, nil), nil
+                }); nil != err {
+                t.Fatal(err)
+            }
+            runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+            httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login?"+testCase.query, strings.NewReader(testCase.body))
+            httpRequest.Header.Set("Content-Type", testCase.contentType)
+            request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
+            response, err := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+            if nil != err || nil == response {
+                t.Fatalf("handler response=%v error=%v", response, err)
+            }
+            if testCase.status != response.StatusCode() || testCase.lookups != len(repositoryInstance.usernames) {
+                t.Fatalf("status=%d authentication lookups=%v; want status=%d lookups=%d", response.StatusCode(), repositoryInstance.usernames, testCase.status, testCase.lookups)
+            }
+            if 1 == testCase.lookups && "body-user" != repositoryInstance.usernames[0] {
+                t.Fatalf("authenticated username from wrong source: %v", repositoryInstance.usernames)
+            }
+        })
     }
 }

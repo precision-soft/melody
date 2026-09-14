@@ -148,8 +148,11 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 return response, nil
             }
 
+            /* the excluded prefixes are read against the spelling the router matched, as every other path prefix in front of the application is */
+            requestPath := http.RequestPathAsRouted(httpRequest.URL.EscapedPath())
+
             for _, excludedPath := range config.ExcludedPaths() {
-                if "" != excludedPath && true == strings.HasPrefix(httpRequest.URL.Path, excludedPath) {
+                if "" != excludedPath && true == strings.HasPrefix(requestPath, excludedPath) {
                     return response, nil
                 }
             }

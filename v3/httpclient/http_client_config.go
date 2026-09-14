@@ -51,10 +51,23 @@ func refuseBaseUrlWithoutTrailingSlash(baseUrl string) {
 }
 
 type HttpClientConfig struct {
-    baseUrl   string
-    timeout   time.Duration
-    headers   map[string]string
-    transport *TransportConfig
+    baseUrl          string
+    timeout          time.Duration
+    headers          map[string]string
+    transport        *TransportConfig
+    withoutRedirects bool
+}
+
+/* WithoutRedirects makes the client answer a redirect as the response it is instead of following it: the 3xx status and its Location reach the caller. A client that follows keeps net/http's rules, and one of them turns a POST answered 301, 302 or 303 into a GET without its body — so a caller that posts to a sink and reads the success of what came back has read the success of a page the sink pointed at, not of what the sink stored. A caller whose target must be where it was configured names that here and judges the status itself. */
+func (instance *HttpClientConfig) WithoutRedirects() *HttpClientConfig {
+    instance.withoutRedirects = true
+
+    return instance
+}
+
+/* FollowsRedirects answers whether the client follows a redirect, which it does unless WithoutRedirects was named. */
+func (instance *HttpClientConfig) FollowsRedirects() bool {
+    return false == instance.withoutRedirects
 }
 
 func (instance *HttpClientConfig) WithTransport(transport *TransportConfig) *HttpClientConfig {

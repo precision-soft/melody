@@ -75,7 +75,7 @@ func StringAt(parameterBag bagcontract.ParameterBag, name string, index int) (st
     return values[index], true, nil
 }
 
-/* AppendString appends through the concrete bag's own critical section when it has one: the contract-level fallback reads and writes under two separate locks, and two concurrent appends through that window keep only one of the two values — a lost update no race detector reports, because each individual access is locked. */
+/* AppendString uses an atomic appender when available. The Get/Set fallback requires caller synchronization for concurrent appends. */
 func AppendString(parameterBag bagcontract.ParameterBag, name string, value string) error {
     concreteBag, isConcrete := parameterBag.(*ParameterBag)
     if true == isConcrete {

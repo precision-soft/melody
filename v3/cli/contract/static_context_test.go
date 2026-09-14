@@ -71,7 +71,6 @@ func TestStaticContext_TheZeroValueAnswersZeroesAndDiscards(t *testing.T) {
     }
 }
 
-/* the double keeps the contract the parsed context keeps: what a command is handed is its own, or a command that sorts what it was given rewrites what every later reader sees */
 func TestStaticContext_AnswersACopyOfWhatItHolds(t *testing.T) {
     commandContext := &StaticContext{
         ArgumentValues:    []string{"alpha"},

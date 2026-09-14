@@ -17,8 +17,11 @@ import (
 )
 
 func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcontract.Kernel) {
-    eventDispatcher := kernelInstance.EventDispatcher()
+    instance.registerSubscribers(kernelInstance.EventDispatcher())
+}
 
+/* registerSubscribers installs the application's subscribers on the dispatcher; a door of its own so what the composition root INSTALLS can be read off a dispatcher, not only what each subscriber does once installed. */
+func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.EventDispatcher) {
     instance.registerRequiredRequestContextListener(eventDispatcher)
 
     /* the registration each call answers is deliberately discarded: these five are installed once at boot and live for the process, so nothing here ever removes them. An application that removes a subscriber at runtime must keep what AddSubscriber returns — the subscriber value is not accepted back. */
@@ -41,6 +44,13 @@ func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcont
     eventDispatcher.AddSubscriber(
         subscriber.NewSecurityAuthenticationEventSubscriber(),
     )
+
+    /* the store is nil when the environment gave the example no database, and then there is no enrollment to release — the same switch the enroll and verify routes read */
+    if nil != instance.twoFactorStore {
+        eventDispatcher.AddSubscriber(
+            subscriber.NewTwoFactorEnrollmentSubscriber(instance.twoFactorStore),
+        )
+    }
 
     instance.registerCorsListeners(eventDispatcher)
     instance.registerRateLimitRequestListener(eventDispatcher)
@@ -89,22 +99,24 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
         ))
     }
 
-    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetConfig(budget))
+    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetConfig(budget, instance.trustedProxyResolver))
 }
 
 /* requestBudgetConfig is the hourly budget as this example wires it. The client key is resolved through the
-   same trusted-proxy door the write throttle uses: with the peer address alone, every client behind the
-   compose load balancer — behind any reverse proxy — is charged to one key, so the budget stops being per
-   client and becomes a single hourly allowance the first runaway script spends for everyone, on a listener
-   that runs ahead of authentication and therefore refuses them at the door. */
-func requestBudgetConfig(budget int) *melodyhttpmiddleware.RateLimitConfig {
+   same trusted-proxy door the write throttle uses, over the same list: with the peer address alone, every
+   client behind the compose load balancer — behind any reverse proxy — is charged to one key, so the budget
+   stops being per client and becomes a single hourly allowance the first runaway script spends for everyone,
+   on a listener that runs ahead of authentication and therefore refuses them at the door; with a header
+   believed from anywhere inside the deployment, the same listener let any neighbouring process pick the key
+   it was charged to. */
+func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver) *melodyhttpmiddleware.RateLimitConfig {
     rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
         melodyhttpmiddleware.NewFixedWindowLimiter(budget, time.Hour),
         nil,
         nil,
     )
 
-    rateLimitConfig.SetClientIpResolver(forwardedClientIpResolver())
+    rateLimitConfig.SetClientIpResolver(trustedProxyResolver.Resolve)
 
     return rateLimitConfig
 }

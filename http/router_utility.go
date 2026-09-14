@@ -249,6 +249,11 @@ func requestPathIsCanonical(path string) bool {
         return true
     }
 
+    /* leading or trailing whitespace is the third fold the consumers do not read alike: the router keeps it, so "/public " is a segment of its own and reaches the catch-all, while the access-control matcher trims it and answers with the rule of "/public" — a public one, granting the protected handler to an anonymous request; measured, on the two frozen majors as released. The trim is not removed from the matcher, because a matcher without it leaves the whitespace spelling with no rule at all, which is a grant too; the spelling is refused here, where every consumer is still reading one string */
+    if strings.TrimSpace(path) != path {
+        return false
+    }
+
     trimmedPath := path
     if 1 < len(trimmedPath) {
         trimmedPath = strings.TrimRight(trimmedPath, "/")

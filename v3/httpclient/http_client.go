@@ -82,8 +82,16 @@ func NewHttpClient(config *HttpClientConfig) *HttpClient {
     }
 
     instance.client.CheckRedirect = instance.credentialStrippingRedirectPolicy
+    if false == config.FollowsRedirects() {
+        instance.client.CheckRedirect = answerRedirectAsTheResponse
+    }
 
     return instance
+}
+
+/* answerRedirectAsTheResponse is the policy of a client built WithoutRedirects: net/http reads ErrUseLastResponse as "hand the redirect back unfollowed, with its body open", so the caller receives the 3xx and decides. Nothing is stripped, because nothing is sent on. */
+func answerRedirectAsTheResponse(request *nethttp.Request, via []*nethttp.Request) error {
+    return nethttp.ErrUseLastResponse
 }
 
 /* defaultMaxRedirects mirrors net/http's own cap; it is stated here because the client installs its own policy. */

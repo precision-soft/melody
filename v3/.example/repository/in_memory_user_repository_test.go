@@ -150,3 +150,24 @@ func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.
         t.Fatalf("expected the identifier to still name the account that took it, got exists=%t user=%v", exists, found)
     }
 }
+
+
+func TestConcurrentRoleGrantsPreserveBothRoles(t *testing.T) {
+    instance := newInMemoryUserRepository().(*inMemoryUserRepository)
+    start := make(chan struct{})
+    results := make(chan error, 2)
+    for _, role := range []string{entity.RoleEditor, entity.RoleAdmin} {
+        go func(role string) {
+            <-start
+            _, _, err := instance.GrantRole(context.Background(), "user", role)
+            results <- err
+        }(role)
+    }
+    close(start)
+    for range 2 { if err := <-results; nil != err { t.Fatal(err) } }
+    account, _, err := instance.FindByUsername(context.Background(), "user")
+    if nil != err { t.Fatal(err) }
+    held := map[string]bool{}
+    for _, role := range account.Roles { held[role] = true }
+    if false == held[entity.RoleEditor] || false == held[entity.RoleAdmin] { t.Fatalf("concurrent grant lost a role: %v", account.Roles) }
+}

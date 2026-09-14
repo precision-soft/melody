@@ -43,11 +43,18 @@ func ActorFromContext(ctx context.Context) string {
    It also owns the one audit tracker the audited repositories share. There is one because the trail is one: a registry per repository would mean each deciding on its own which fields are too sensitive to record, and the answer belongs to the application rather than to whichever repository asked last. */
 type CatalogStorage struct {
     database      *bun.DB
+    location      string
     auditRegistry *melodyaudit.Registry
     tracker       *melodyaudit.Tracker
+    recorder      *melodyaudit.Recorder
 }
 
 func NewCatalogStorage(database *bun.DB) *CatalogStorage {
+    return NewCatalogStorageAt(database, "")
+}
+
+/* NewCatalogStorageAt is the constructor the composition root uses: it names the database the handle is open on — host, port and schema, as the connection was declared — so a command about to destroy what the handle reaches can say WHICH database that is. A handle without a location is one a test built. */
+func NewCatalogStorageAt(database *bun.DB, location string) *CatalogStorage {
     if nil == database {
         return &CatalogStorage{}
     }
@@ -62,8 +69,10 @@ func NewCatalogStorage(database *bun.DB) *CatalogStorage {
 
     return &CatalogStorage{
         database:      database,
+        location:      location,
         auditRegistry: registry,
         tracker:       melodyaudit.NewTracker(database, recorder),
+        recorder:      recorder,
     }
 }
 
@@ -74,6 +83,11 @@ func (instance *CatalogStorage) Database() *bun.DB {
 
 func (instance *CatalogStorage) IsPersistent() bool {
     return nil != instance.database
+}
+
+/* Location names the database the handle is open on, as the connection was declared, and is empty for a handle nobody located. */
+func (instance *CatalogStorage) Location() string {
+    return instance.location
 }
 
 /* Tracker is the handle the audited repositories write through. It is nil when there is no database, which is the same condition under which those repositories are not built at all. */
@@ -89,3 +103,7 @@ func (instance *CatalogStorage) EnsureAuditSchema(ctx context.Context) error {
 
     return instance.auditRegistry.EnsureSchema(ctx, instance.database)
 }
+
+
+/* Recorder joins repository-owned transactions that must read and modify a locked row together. */
+func (instance *CatalogStorage) Recorder() *melodyaudit.Recorder { return instance.recorder }

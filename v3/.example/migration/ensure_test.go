@@ -481,3 +481,43 @@ func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
         t.Fatalf("the archive set did not run over a handle the catalogue set had already migrated: the memo let one set answer for the other")
     }
 }
+
+/* a failure of the database on the archive's first resolution travelled up raw, and the container's by-type resolution relabelled it "service not registered in resolver" — a headline that sent the operator to the wiring for a database that had refused. Every failure of a set is handed back as this application's exception naming the set and the step, with the driver's error as the cause, so the headline says which database and errors.Is still reaches the cause. */
+func TestEnsureArchiveMigratedNamesTheArchiveSetAndTheStepOverADatabaseThatRefuses(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    refusal := errors.New("ERROR: permission denied for schema public (SQLSTATE 42501)")
+    recorder.execHook = func(query string) error {
+        if true == strings.Contains(query, "CREATE TABLE") && true == strings.Contains(query, "bun_migrations") {
+            return refusal
+        }
+
+        return nil
+    }
+
+    ensureErr := EnsureArchiveMigrated(context.Background(), database)
+    if nil == ensureErr {
+        t.Fatal("expected the refused init to fail the resolution")
+    }
+
+    if false == strings.Contains(ensureErr.Error(), "initialising the bookkeeping did not complete on the archive set") {
+        t.Fatalf("expected the failure to name the archive set and the step, got %q", ensureErr.Error())
+    }
+
+    if false == errors.Is(ensureErr, refusal) {
+        t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
+    }
+
+    if "archive" != exception.LogContext(ensureErr)["set"] || "db:archive:unlock" != exception.LogContext(ensureErr)["unlockCommand"] {
+        t.Fatalf("expected the context to carry the set and its unlock command, got %v", exception.LogContext(ensureErr))
+    }
+}
+
+/* the lock refusal already names its remedy; wrapping it again would bury the remedy under a second headline, so an exception of this application's own is handed back as it is */
+func TestMigrationStepFailureLeavesAnOwnExceptionUntouched(t *testing.T) {
+    own := exception.NewError("migration: the migration lock is held", nil, nil)
+
+    if own != migrationStepFailure("archive", "applying the set", "db:archive:unlock", own) {
+        t.Fatal("expected the application's own exception to be handed back unwrapped")
+    }
+}

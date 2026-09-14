@@ -288,6 +288,30 @@ func TestHmacTokenSource_EndpointMismatchIsAnonymous(t *testing.T) {
     }
 }
 
+/* the signed path is bound to the spelling the router matched: an envelope signed for the two-segment resource "/internal/files/a/b" authenticated a request for "/internal/files/a%2Fb" — the one-segment resource "a/b" the router serves elsewhere — because the decoded URL.Path read both alike; the routed spelling keeps them apart, and a caller names the encoded separator as it sends it */
+func TestHmacTokenSource_EndpointIsBoundToTheSpellingTheRouterRoutes(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    decodedHeader, _ := signer.Sign("GET", "/internal/files/a/b", nil, nil)
+    crossed, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2Fb", nil, signer.HeaderName(), decodedHeader))
+    if true == crossed.IsAuthenticated() {
+        t.Fatal("expected an envelope signed for /internal/files/a/b to be refused for the one-segment resource /internal/files/a%2Fb")
+    }
+
+    routedHeader, _ := signer.Sign("GET", "/internal/files/a%2Fb", nil, nil)
+    routed, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2Fb", nil, signer.HeaderName(), routedHeader))
+    if false == routed.IsAuthenticated() {
+        t.Fatal("expected an envelope signed for the routed spelling /internal/files/a%2Fb to authenticate")
+    }
+
+    decodedSegmentHeader, _ := signer.Sign("GET", "/internal/files/café", nil, nil)
+    decodedSegment, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/caf%C3%A9", nil, signer.HeaderName(), decodedSegmentHeader))
+    if false == decodedSegment.IsAuthenticated() {
+        t.Fatal("expected a segment that decodes to no separator to be bound by its decoded spelling, as before")
+    }
+}
+
 func TestHmacTokenSource_BodyTamperingIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
     headerValue, _ := signer.Sign("POST", "/internal/orders", []byte(`{"sku":"X-1"}`), nil)

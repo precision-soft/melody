@@ -13,7 +13,7 @@ func NewManager(
 ) *Manager {
     catalogsByLocale := make(map[string]translationcontract.Catalog)
     for _, catalog := range catalogs {
-        /* refused, not skipped: a nil catalog is a wiring mistake, and dropping it silently builds a translator that answers raw message ids for a whole locale with nothing pointing at the hole — the same judgement every sibling constructor applies to a nil collaborator */
+
         if true == internal.IsNilInterface(catalog) {
             exception.Panic(exception.NewError("translation catalog is nil", nil, nil))
         }
@@ -54,7 +54,7 @@ func (instance *Manager) HasMessage(messageId string, domain string, locale stri
 }
 
 func (instance *Manager) lookup(messageId string, domain string, locale string) (string, string, bool) {
-    /* the empty domain resolves HERE, at the one door every catalog is asked through: the shipped MapCatalog coerces it too, but the contract does not oblige an application's catalog to, and a lookup handing "" through verbatim missed in exactly the catalogs that took the contract at its word */
+    /* Normalize the default domain here; custom catalogs need not normalize it themselves. */
     if "" == domain {
         domain = DefaultDomain
     }

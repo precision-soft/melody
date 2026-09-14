@@ -59,3 +59,14 @@ func TestCacheKeysLeaveAnOrdinaryIdentifierAlone(t *testing.T) {
         t.Fatalf("expected the username to be folded and spliced as it reads, got %q", CacheKeyUserByUsername("  ADMIN  "))
     }
 }
+
+/* the bound is the widest column a caller-chosen identifier is stored in, so a longer one names a row no write door admits; the empty spelling is refused with it */
+func TestCacheSafeIdentifierBoundsTheLengthOfACallerChosenIdentifier(t *testing.T) {
+    if false == CacheSafeIdentifier(strings.Repeat("a", 255)) || false == CacheSafeIdentifier("ad min") {
+        t.Fatal("expected an identifier within the bound to be admitted, spaces included, since the key part escapes them")
+    }
+
+    if true == CacheSafeIdentifier(strings.Repeat("a", 256)) || true == CacheSafeIdentifier("") {
+        t.Fatal("expected an identifier over the bound, and the empty one, to be refused")
+    }
+}

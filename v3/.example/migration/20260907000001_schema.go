@@ -43,7 +43,7 @@ func downSchema(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/* the column definitions mirror the tables the bun create-table builder used to produce, captured from a live SHOW CREATE TABLE, so a volume provisioned before the migration set and one provisioned by it hold the same schema */
+/* This is the current catalogue schema; older example volumes are rebuilt with example:db:reset. */
 const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_category` (" +
     "`id` VARCHAR(255) NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +

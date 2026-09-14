@@ -4,8 +4,10 @@ import (
     "context"
     "fmt"
     "io"
+    "net"
     "net/http"
     "net/http/cookiejar"
+    "net/url"
     "strings"
     "time"
 )
@@ -112,6 +114,11 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
     /* the cookie jar keys sessions by the host of the url, so the session established against the direct address is not sent to the load balancer: this half signs in through the load balancer itself */
     signInExampleHttpEditor(client, loadBalancerUrl, exampleHostHeader)
 
+    /* the key the budget charges through the balancer must NOT be the balancer's own address, and that is what separates the chain being honoured from its FALLBACK: with the balancer's name unresolved or stale the list is empty, no header is believed, and every client behind the balancer is charged to the balancer's own address — the peer the example sees. The counts alone (budget+1 in both arms below) read the same in both states, so a fallback would have been green. The balancer's addresses are read off the url's host, the way the example resolves the name it trusts. */
+    balancerAddressList := balancerAddressesOf(loadBalancerUrl)
+
+    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
+
     balancerSpentAt := 0
     for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
         status := requestThrottledWrite(client, loadBalancerUrl, exampleHostHeader, "")
@@ -132,6 +139,45 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
         )
     }
     pass("example rate limit enforced the shared budget through the load balancer (429 past the budget)")
+
+    balancerKeys := exampleRateLimitKeys("example http", redisAddress, exampleRateLimitPrefix)
+    if 1 != len(balancerKeys) {
+        fail("example http: expected the writes through the load balancer to charge exactly one key, found %v", balancerKeys)
+    }
+    for _, balancerAddress := range balancerAddressList {
+        if strings.HasSuffix(balancerKeys[0], ":"+balancerAddress) {
+            fail(
+                "example http: through the load balancer the budget was charged to the balancer's own address %s (%v) — its attestation was not read (the trusted proxy list is empty or stale)",
+                balancerAddress,
+                balancerKeys,
+            )
+        }
+    }
+    pass("example rate limit charged the client the balancer attested, not the balancer itself (the trusted proxy list resolves)")
+
+    /* the balancer APPENDS the peer it saw to the chain the client sent, so a client that sends its own X-Forwarded-For arrives as "<what it sent>, <its address>". With the whole private space trusted, the address the balancer appended — this harness's container, and the docker gateway for every host client — read as one more hop, and the client's own entry became the key: a fresh budget per call. Trusting the balancer alone, the appended address is the client the balancer attested, and what the client wrote to its left is never read. */
+    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
+
+    balancerSpoofSpentAt := 0
+    for attempt := 1; attempt <= exampleRateLimitBudget+1; attempt++ {
+        status := requestThrottledWrite(client, loadBalancerUrl, exampleHostHeader, fmt.Sprintf("203.0.113.%d", attempt))
+        if http.StatusTooManyRequests == status {
+            balancerSpoofSpentAt = attempt
+            break
+        }
+        if http.StatusUnauthorized == status || http.StatusForbidden == status {
+            fail("example http: load balancer call %d with a spoofed header returned %d — the section reached the firewall, not the limiter", attempt, status)
+        }
+    }
+
+    if exampleRateLimitBudget+1 != balancerSpoofSpentAt {
+        fail(
+            "example http: through the load balancer a spoofed X-Forwarded-For was believed — the budget was exhausted at call %d, wanted %d (the address the balancer appended was read as a trusted hop)",
+            balancerSpoofSpentAt,
+            exampleRateLimitBudget+1,
+        )
+    }
+    pass("example rate limit ignored a spoofed X-Forwarded-For sent through the load balancer (budget spent once)")
 }
 
 /* exampleHostHeader is the virtual host the load balancer serves the example under. */
@@ -236,6 +282,38 @@ func requestExample(client *http.Client, method string, baseUrl string, path str
 }
 
 /* resetExampleRateLimitCounters clears the counters one limiter wrote, so a section starts from a full budget instead of inheriting a spent one. The prefix is a parameter because the applications under test keep separate counters: they share one redis, and a section that measures an exact exhaustion point cannot have another application spending its budget. */
+/* balancerAddressesOf resolves the host of the load balancer url to the addresses the example sees the balancer under; a host that does not resolve fails the section, because an assertion against no address would pass over anything. */
+func balancerAddressesOf(loadBalancerUrl string) []string {
+    parsed, parseErr := url.Parse(loadBalancerUrl)
+    if nil != parseErr {
+        fail("example http: parse the load balancer url %q: %v", loadBalancerUrl, parseErr)
+    }
+
+    addressList, lookupErr := net.LookupHost(parsed.Hostname())
+    if nil != lookupErr || 0 == len(addressList) {
+        fail("example http: the load balancer host %q resolves to nothing (%v)", parsed.Hostname(), lookupErr)
+    }
+
+    return addressList
+}
+
+/* exampleRateLimitKeys lists the keys the budget has charged, which name the client each was charged to. */
+func exampleRateLimitKeys(label string, redisAddress string, prefix string) []string {
+    if "" == redisAddress {
+        fail("%s: REDIS_ADDRESS is required to read the rate limit counters", label)
+    }
+
+    client := openRedis(redisAddress)
+    defer client.Close()
+
+    keys, keysErr := client.Do(context.Background(), client.B().Keys().Pattern(prefix+"*").Build()).AsStrSlice()
+    if nil != keysErr {
+        fail("%s: list rate limit keys: %v", label, keysErr)
+    }
+
+    return keys
+}
+
 func resetExampleRateLimitCounters(label string, redisAddress string, prefix string) {
     if "" == redisAddress {
         fail("%s: REDIS_ADDRESS is required to clear the rate limit counters", label)

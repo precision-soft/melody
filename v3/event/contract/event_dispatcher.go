@@ -9,12 +9,12 @@ type ListenerRegistration struct {
     ListenerId uint64
 }
 
-/* SubscriberRegistration identifies one installation of a subscriber, the way ListenerRegistration identifies one registration of a listener. It exists because the subscriber value cannot identify itself: a subscriber that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one pointer and nothing in the value can ever tell them apart. Filed under the value, a removal for either instance took both instances' listeners down and reported a plausible count for it. The id is the dispatcher's own, issued at installation and unique for the life of the dispatcher, so two installations of one subscriber — of one zero-size subscriber included — are two registrations that are removed independently. */
+/* SubscriberRegistration uniquely identifies one installation for the dispatcher’s lifetime. Retain it for removal; subscriber pointer identity cannot distinguish repeated installations or zero-sized values. */
 type SubscriberRegistration struct {
     SubscriberId uint64
 }
 
-/* RequiredListenerRegistrar is an optional interface an EventDispatcher may implement to mark registered listeners as required. When a listener stops event propagation before a required listener behind it (lower priority) has run, Dispatch/DispatchName return an error instead of silently completing, so a caller such as the http kernel fails closed rather than proceeding as if the required listener — for example the security access-control listener — had run. A listener that legitimately short-circuits past required listeners opts out through MarkListenerMaySkipRequiredListeners. Both marks default off, so a dispatcher and its callers behave exactly as before unless a listener is explicitly marked. A listener error also ends the dispatch; when a required listener sits behind the failing one, the returned error reports the skip and carries the failure as its cause. */
+/* RequiredListenerRegistrar marks listeners whose omission must make dispatch fail. Stopping propagation before a required listener returns a skip error unless the stopper explicitly opts out. A listener failure never receives that opt-out: the skip error retains the failure as its cause. Both marks default off. */
 type RequiredListenerRegistrar interface {
     MarkListenerRequired(registration ListenerRegistration)
 

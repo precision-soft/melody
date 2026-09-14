@@ -46,9 +46,9 @@
 # ------------------------------------------------------------------------------------------------------
 
 integrations/amqp/v3 ~ incompatible ~ (*Transport).Close ~ changed from func(github.com/precision-soft/melody/v3/runtime/contract.Runtime) error to func() error ~ keep ~ the amqp transport follows the messagebus contract's Close, which dropped its Runtime parameter so the container's ordered teardown can reach it; same adjudication as the framework row, shipping on the next amqp tag as a documented break
-integrations/amqp/v3 ~ compatible ~ ServerSentEventBackplaneConfig.CallTimeout ~ added ~ keep ~ bounds one publish write, which the amqp client runs with its context discarded; a broker that stopped reading held the write, every later broadcast and the hub shutdown for good, and v3.14.0 is the last minor that ships features
+integrations/amqp/v3 ~ compatible ~ ServerSentEventBackplaneConfig.CallTimeout ~ added ~ keep ~ bounds each stretch of a publish attempt — the wait for its turn and the write, which the amqp client runs with its context discarded; a broker that stopped reading held the write, every later broadcast and the hub shutdown for good, and v3.14.0 is the last minor that ships features
 integrations/amqp/v3 ~ compatible ~ (*ServerSentEventBackplane).CloseWithContext ~ added ~ keep ~ the optional context-taking close the container's teardown prefers, so the budget an operator declares reaches the stretches this component spends instead of stopping at a constant it invented; Close stays as the door for a caller with no budget, and v3.14.0 is the last minor that ships features
-integrations/amqp/v3 ~ compatible ~ TransportConfig.PublishTimeout ~ added ~ keep ~ bounds the write of one send for the same reason the backplane field exists; the confirmation wait after the write keeps the caller context, and v3.14.0 is the last minor that ships features
+integrations/amqp/v3 ~ compatible ~ TransportConfig.PublishTimeout ~ added ~ keep ~ bounds the write of one send for the same reason the backplane field exists; the confirmation wait after the write is bounded by it too, and v3.14.0 is the last minor that ships features
 integrations/amqp/v3 ~ compatible ~ (*Transport).CloseWithContext ~ added ~ keep ~ the optional context-taking close the container's teardown prefers, so the budget an operator declares reaches the stretches this component spends instead of stopping at a constant it invented; Close stays as the door for a caller with no budget, and v3.14.0 is the last minor that ships features
 integrations/awss3/v3 ~ compatible ~ Config.String ~ added ~ keep ~ redacts AccessKey and SecretKey on every fmt verb — both are exported fields a plain %v prints in the clear; a defect repair mirroring the encrypt key provider, and v3.14.0 is the last minor that ships features
 integrations/awss3/v3 ~ compatible ~ Config.Format ~ added ~ keep ~ answers the numeric verbs fmt never routes through Stringer with the same redacted String rendering, so no verb reflection-walks the secret fields
@@ -282,6 +282,8 @@ v3 ~ compatible ~ ./exception.PanicCause ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.BootCollisionKindHttpRoute ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.BootCollisionKindHttpRouteName ~ added ~ unclassified ~
 v3 ~ compatible ~ ./httpclient.(*HttpClient).Close ~ added ~ unclassified ~
+v3 ~ compatible ~ ./httpclient.(*HttpClientConfig).FollowsRedirects ~ added ~ keep ~ the read side of WithoutRedirects, so a caller can tell which policy the client it was handed carries
+v3 ~ compatible ~ ./httpclient.(*HttpClientConfig).WithoutRedirects ~ added ~ keep ~ a client that hands a redirect back instead of following it; net/http re-sends a POST answered 301, 302 or 303 as a GET without its body, and the example's report export read the 200 of the page a moved sink pointed at as the sink having received the reading
 v3 ~ compatible ~ ./httpclient.(*HttpClient).RequestStreamWithContext ~ added ~ unclassified ~
 v3 ~ compatible ~ ./httpclient.TransportConfig.MaxIdleConnsPerHost ~ added ~ unclassified ~
 v3 ~ compatible ~ ./httpclient.TransportCount ~ added ~ unclassified ~
@@ -322,6 +324,7 @@ v3 ~ compatible ~ ./http.RegenerateRequestSession ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RequestAttributeScheme ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RequestContextFromResolver ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RequestContextMustFromResolver ~ added ~ unclassified ~
+v3 ~ compatible ~ ./http.RequestPathAsRouted ~ added ~ keep ~ the spelling of a request path the router reads, for the canonical-path guard, the access-control matcher and the firewall path matcher to read the same; decoded, /public%2F was folded onto the public rule of /public while the router served the catch-all handler behind it, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./http.RouteManifestEntry.Host ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RouteManifestEntry.Locales ~ added ~ unclassified ~
 v3 ~ compatible ~ ./http.RouteManifestEntry.Priority ~ added ~ unclassified ~

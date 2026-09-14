@@ -1,15 +1,17 @@
 package contract
 
-/* TeardownPlanEntry is one service as the container's teardown will meet it: the node it is filed under, the wave it belongs to, and the services it is closed before.
-
-   It lives in the contract package because it is a shape a consumer READS — the debug command renders it, and an application arming the parallel teardown checks it — while the door that answers it stays on the concrete container, reached through a type assertion, for the reason written at IsClosed. */
+/* TeardownPlanEntry describes a built service in the container’s current teardown plan. The concrete container exposes the plan as an optional capability. */
 type TeardownPlanEntry struct {
     /* NodeKey is the service as the teardown graph knows it: "service:<name>" for a registration filed under a name, "type:<identity>" for one filed only under its type. */
     NodeKey string
-    /* WaveIndex is which wave closes it, counting from zero. The waves are walked in order whether or not the parallel teardown is armed, so the figure describes both worlds; what arming changes is whether the members of one wave are closed together. */
+    /* WaveIndex is zero-based. Waves retain their order when parallel teardown is disabled; arming permits concurrency within a wave. */
     WaveIndex int
-    /* Dependencies are the services this one is closed BEFORE, in the graph's own key space. EMPTY means nothing in this container orders this service against any other — neither a resolution, nor a declaration, nor a collaborator it was seen to hold — so under waves it closes beside everything else in its wave. */
+    /* Dependencies lists outgoing graph edges: services closed after this one. An empty list does not exclude incoming dependencies or serial-group constraints. */
     Dependencies []string
-    /* SerialGroup is the group of services this one is closed one after the other WITH inside its wave, counting from one, and zero for a service in no group. Two services seen holding each other — or a ring of them — carry no edge, because no ordering between them is true, but they are not unrelated: a wave closes such a group one service at a time while the rest of the wave starts together. Without the figure the view read "same wave, no dependencies" for a pair the teardown deliberately keeps apart. */
+    /* SerialGroup identifies services closed sequentially within one wave; zero means no group. Mutual captured references can require serialization without an ordering edge. */
     SerialGroup int
+    /* Aliases lists other graph keys collapsed onto this instance, which is closed once under NodeKey. */
+    Aliases []string
+    /* Cycle marks members of a strongly connected component. The component takes its own wave and closes in reverse creation order; dependencies outside it are released afterwards without receiving the cycle flag. Dependencies remains the full outgoing edge list. */
+    Cycle bool
 }

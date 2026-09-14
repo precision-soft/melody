@@ -92,7 +92,7 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string, po
     }
 }
 
-/* stringifyArgument renders a plain placeholder, keeping an ABSENT parameter visible as the placeholder itself: rendering it as an empty string — what a nil map lookup stringifies to — deletes the value from the message with no channel through which anyone learns of it, so a renamed parameter key ships every message quietly missing its amount, name or count. The visible {name} is the most observable of the options (icu errors, symfony leaves the placeholder), without turning every render into an error. A parameter present with a nil value still renders empty: the caller said so explicitly. */
+/* Missing arguments remain visible as placeholders; an explicitly nil argument renders empty. */
 func stringifyArgument(name string, parameters map[string]any) string {
     value, exists := parameters[name]
     if false == exists {

@@ -45,7 +45,8 @@ func (instance *container) ArmParallelTeardown() error {
     defer instance.mutex.Unlock()
 
     if true == instance.isClosed {
-        return newContainerClosedError("ArmParallelTeardown")
+        /* the cause is the one Register answers, the context is this door's own: the resolver's constructor has one slot, the key being created, and "creatingKey: ArmParallelTeardown" read as a service of that name in creation */
+        return exception.NewError("container is closed", exceptioncontract.Context{"door": "ArmParallelTeardown"}, ErrContainerClosed)
     }
 
     if refusalErr := instance.refuseUnregisteredDeclaredTeardownEdgesLocked(); nil != refusalErr {
@@ -59,9 +60,11 @@ func (instance *container) ArmParallelTeardown() error {
     return nil
 }
 
-/* recordDeclaredTeardownEdgeLocked writes a hand-declared ordering into the same graph a resolution writes into, in the same key space, and keeps a note of it beside the graph. Both halves are needed: the teardown must read ONE graph or it can order two ways, and the refusal below must be able to name the spelling somebody wrote. */
+/* recordDeclaredTeardownEdgeLocked keeps a note of a hand-declared ordering beside the graph, and writes the NAME form into the same graph a resolution writes into, in the same key space, so the teardown reads one graph. The TYPE form is not written: what a type stands for is the plan's to expand, for one plan, and the raw edge towards "type:<T>" left in the graph outlived the expansion that dropped it — a declaration turned ambiguous by a second, non-strict registration under the type expanded to nothing, while the raw edge was translated through the alias of the first service the moment that type had been resolved through itself, and the close reported a cycle on the default path over a teardown in which every service closed. The refusal below still names the spelling somebody wrote, from the note. */
 func (instance *container) recordDeclaredTeardownEdgeLocked(serviceName string, dependencyNodeKey string, dependencySpelling string) {
-    instance.registerDependencyLocked(containerNameNodeKey(serviceName), dependencyNodeKey)
+    if true == strings.HasPrefix(dependencyNodeKey, containerNameNodeKeyPrefix) {
+        instance.registerDependencyLocked(containerNameNodeKey(serviceName), dependencyNodeKey)
+    }
 
     instance.declaredTeardownEdges = append(
         instance.declaredTeardownEdges,
@@ -272,10 +275,11 @@ type teardownPlan struct {
     closeOrder       []string
     closeWaveIndexOf map[string]int
     cycleNodeKeys    []string
-    cycleWaveIndex   int
+    cycleWaveIndexes map[int]struct{}
     valueOfNodeKey   map[string]any
     canonicalEdges   map[string]map[string]struct{}
     unorderedGroupOf map[string]int
+    aliasesOf        map[string][]string
 }
 
 /* teardownPlanLocked works out that plan from what the container holds right now. It is one computation with two readers — the teardown itself, and the operator's read-only view — for the same reason teardownCloseOrder is shared with the scope: two of these would be two chances to describe an order that is not the one that runs.
@@ -464,29 +468,14 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         assignRepresentative(nodeKey, value)
     }
 
-    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it. A declaration keyed by a type is expanded onto the name that type is registered under at the same moment, for this plan, and translated with the rest: after this the graph is one graph, and the walk reads it once */
-    expandedEdges := instance.expandedDeclaredTypeEdgesLocked()
-
-    /* what the providers HELD joins what they resolved in the graph the walk reads — the canonical one, merged below AFTER the translation, since that is the graph the drain runs over and the one place a second source of edges could otherwise silently do nothing. The inferences are this plan's and are not written into the container's graph, where the view would leave them to outlive the state they were drawn from. The pairs the walk could NOT order — held both ways, or around a ring — come back as canonical keys too, and are grouped so that a wave closes each group one service at a time */
-    inferredEdges, unorderedPairs := instance.teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey, representativeOf)
-
+    /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it. A declaration keyed by a type is expanded onto the name that type is registered under at the same moment, for this plan, and translated with the rest: after this the graph is one graph, and it is built ONCE, here, before the walk reads it — the walk used to translate the raw graph a second time for its own ring check, and the expansion, being this plan's, never reached that copy: a pointer held back against a declaration keyed by a type was written as an inference over a declaration the ring check could not see, the plan carried both directions, and the armed close reported a cycle over a teardown in which every service closed. An edge that collapses onto itself — a resolution between two names of one instance — is no edge, and used to reach the plan as a service closed before itself */
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
-
-    for _, inferredEdge := range inferredEdges {
-        dependencies, exists := canonicalEdges[inferredEdge[0]]
-        if false == exists {
-            dependencies = make(map[string]struct{})
-            canonicalEdges[inferredEdge[0]] = dependencies
-        }
-
-        dependencies[inferredEdge[1]] = struct{}{}
-    }
 
     addCanonicalEdge := func(dependentKey string, dependencyKey string) {
         canonicalDependent, dependentCreated := representativeOf[dependentKey]
         canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
 
-        if false == dependentCreated || false == dependencyCreated {
+        if false == dependentCreated || false == dependencyCreated || canonicalDependent == canonicalDependency {
             return
         }
 
@@ -505,8 +494,21 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         }
     }
 
-    for _, expandedEdge := range expandedEdges {
+    for _, expandedEdge := range instance.expandedDeclaredTypeEdgesLocked() {
         addCanonicalEdge(expandedEdge[0], expandedEdge[1])
+    }
+
+    /* what the providers HELD joins what they resolved and declared, in the one canonical graph — merged AFTER the walk read it, since that is the graph the drain runs over and the one place a second source of edges could otherwise silently do nothing. The inferences are this plan's and are not written into the container's graph, where the view would leave them to outlive the state they were drawn from. The pairs the walk could NOT order — held both ways, or around a ring — come back as canonical keys too, and are grouped so that a wave closes each group one service at a time */
+    inferredEdges, unorderedPairs := instance.teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey, representativeOf, canonicalEdges)
+
+    for _, inferredEdge := range inferredEdges {
+        dependencies, exists := canonicalEdges[inferredEdge[0]]
+        if false == exists {
+            dependencies = make(map[string]struct{})
+            canonicalEdges[inferredEdge[0]] = dependencies
+        }
+
+        dependencies[inferredEdge[1]] = struct{}{}
     }
 
     /* an alias group is as old as its OLDEST member: the same instance filed under a name and under a type came into being once, and the stamp of the later filing would claim it was built after services that were in fact built from it */
@@ -537,20 +539,34 @@ func (instance *container) teardownPlanLocked() teardownPlan {
 
     unorderedGroupOf := unorderedGroupsOf(sameWavePairs)
 
-    /* the wave the cycle remainder was given is the one wave that is closed one service at a time whatever the caller armed: its members constrain one another, so it is a set with an order and not a set without relations, and the drain's remainder order is the only order it has */
-    cycleWaveIndex := -1
-    if 0 < len(cycleNodeKeys) {
-        cycleWaveIndex = closeWaveIndexOf[cycleNodeKeys[0]]
+    /* the wave a ring was given is a wave closed one service at a time whatever the caller armed: its members constrain one another, so it is a set with an order and not a set without relations, and the ring's own order is the only order it has; a graph with two rings has two such waves */
+    cycleWaveIndexes := make(map[int]struct{})
+    for _, cycleNodeKey := range cycleNodeKeys {
+        cycleWaveIndexes[closeWaveIndexOf[cycleNodeKey]] = struct{}{}
+    }
+
+    /* the aliases travel with the plan so that a reader asking by any spelling of one instance is answered about the node it was collapsed onto: without them the operator's view had no entry for a name the plan had folded away, and read that as a service never built */
+    aliasesOf := make(map[string][]string)
+
+    for nodeKey, canonicalNodeKey := range representativeOf {
+        if nodeKey != canonicalNodeKey {
+            aliasesOf[canonicalNodeKey] = append(aliasesOf[canonicalNodeKey], nodeKey)
+        }
+    }
+
+    for _, aliases := range aliasesOf {
+        sort.Strings(aliases)
     }
 
     return teardownPlan{
         closeOrder:       closeOrder,
         closeWaveIndexOf: closeWaveIndexOf,
         cycleNodeKeys:    cycleNodeKeys,
-        cycleWaveIndex:   cycleWaveIndex,
+        cycleWaveIndexes: cycleWaveIndexes,
         valueOfNodeKey:   valueOfNodeKey,
         canonicalEdges:   canonicalEdges,
         unorderedGroupOf: unorderedGroupOf,
+        aliasesOf:        aliasesOf,
     }
 }
 
@@ -653,7 +669,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         )
     }
 
-    /* the replaced instances belong past everything the graph proved, the cycle remainder included: they carry no edges anymore, so nothing can be said about what they still hold — of one another either, which is why each of them is a wave of its own rather than one wave shared, closed in the order they were evicted */
+    /* the replaced instances belong past everything the graph proved, the rings included: they carry no edges anymore, so nothing can be said about what they still hold — of one another either, which is why each of them is a wave of its own rather than one wave shared, closed in the order they were evicted */
     replacedWaveIndex := 0
 
     for _, waveIndex := range closeWaveIndexOf {
@@ -720,7 +736,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
         closeable, isCloseable := candidate.value.(closer)
         if false == isCloseable {
-            return nil, false
+            if _, supported := candidate.value.(contextCloser); false == supported { return nil, false }
         }
 
         return closeable, true
@@ -780,8 +796,8 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 continue
             }
 
-            /* the cycle remainder is the one wave whose members are NOT unrelated: each of them waits on another, in a ring the drain could not open, and closing them at once is closing them in no order at all — measured, three services declared in a ring were all inside their Close at the same moment. They are closed one after the other, in the remainder's own order, as teardownCloseOrder promises; the waves before and after them are untouched */
-            if waveIndex == plan.cycleWaveIndex {
+            /* a ring's wave is a wave whose members are NOT unrelated: each of them waits on another, in a ring the drain could not open, and closing them at once is closing them in no order at all — measured, three services declared in a ring were all inside their Close at the same moment. They are closed one after the other, in the ring's own order, as teardownCloseOrder promises; the waves before and after them, and what the ring released into the waves after it, are untouched */
+            if _, ringWave := plan.cycleWaveIndexes[waveIndex]; true == ringWave {
                 for _, candidate := range wave {
                     closeOneCandidate(candidate)
                 }
@@ -893,7 +909,8 @@ func teardownDeadlineContext(
     spentBy map[string]time.Duration,
     starved []string,
 ) exceptioncontract.Context {
-    if false == hasDeadline || false == finishedAt.After(deadline) {
+    if false == hasDeadline || false == finishedAt.After(deadline) || 0 == len(closeDurations) {
+        /* a teardown reached with the deadline already gone and nothing to close spent nothing on anything: a record here named nobody, and the journal called an empty teardown an overrun */
         return nil
     }
 
@@ -927,9 +944,7 @@ func teardownDeadlineContext(
 
    The context-taking form is preferred whole rather than being given the plain form as a fallback for an expired deadline: a service told its deadline has already passed can still say what it did not manage to release, which is the half of a teardown an operator actually reads, and calling the unbounded form instead would spend a budget that is already gone. */
 func closeServiceValueWithin(closeContext context.Context, value any, closeable interface{ Close() error }) error {
-    contextCloseable, isContextCloseable := value.(interface {
-        CloseWithContext(closeContext context.Context) error
-    })
+    contextCloseable, isContextCloseable := value.(contextCloser)
     if true == isContextCloseable {
         return closeServiceValueWithContext(closeContext, contextCloseable)
     }
@@ -940,9 +955,7 @@ func closeServiceValueWithin(closeContext context.Context, value any, closeable 
 /* closeServiceValueWithContext is closeServiceValue's twin for the context-taking door, containing a panicking close the same way and for the same reasons. */
 func closeServiceValueWithContext(
     closeContext context.Context,
-    closeable interface {
-        CloseWithContext(closeContext context.Context) error
-    },
+    closeable contextCloser,
 ) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -1103,7 +1116,7 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
 
 /* teardownCloseOrder puts a set of created services into the order they have to be closed in: a dependent before everything it depends on, so nothing is torn down while something still using it is alive. Ties are broken by creation order, latest first — see closesBefore for why that and not the node key.
 
-   The edges are expected in the same key space as the nodes; an edge naming a node that was not created is dropped rather than followed, and a self-edge is ignored. What a cycle leaves behind is returned separately and appended last, so the caller can both close it and report it.
+   The edges are expected in the same key space as the nodes; an edge naming a node that was not created is dropped rather than followed, and a self-edge is ignored. A ring the drain cannot open — two or more nodes each waiting on another of them — is closed as one unit, its members one after the other in creation order, latest first, since no order among them is true; the drain then continues past it, so a pure dependency of a ring member is released by that close and closed after it, in the order the edge proves. The members of every ring are returned separately, so the caller can report them: they are the only nodes the graph could not order, and naming the pure dependencies beside them named services the order does honour — measured, a dependency created after its ring dependent was closed before it while the remainder was closed whole, and the operator's view read that dependency as proved.
 
    It also answers the WAVE each node belongs to: one past the last of its dependents, which makes a wave the set of nodes with no relation to one another at that moment. The wave falls out of this same drain rather than out of a second walk over the graph — two walks are two chances to order a teardown differently, which is the reason this function is shared in the first place — and the serial order is unchanged by its presence, so a caller that ignores the waves closes exactly what it closed before, in exactly that order.
 
@@ -1175,17 +1188,30 @@ func teardownCloseOrder(
         closeWaveIndexOf[nodeKey] = 0
     }
 
-    for 0 < availableHeap.Len() {
-        current := heap.Pop(availableHeap).(string)
+    /* the rings of the stalled nodes, found once at the first stall — closing a ring or releasing a stalled node removes a whole component and changes no edge among the rest, so the components left are the components found —, each with the count of stalled nodes outside it that depend on it; the count is kept as nodes close, so the ring the drain can close next is read off the counts instead of off the graph. Found and scanned again at every stall, a teardown of a thousand rings spent a hundred seconds where the sequential close spent milliseconds. */
+    var rings [][]string
+    ringIndexOf := make(map[string]int)
+    var outsideDependentsOf []int
+    var ringClosed []bool
 
-        closeOrder = append(closeOrder, current)
-
+    /* releasing a node lets go of its edges: each dependency lands one wave past it and, once its last dependent has let go, joins the drain. The members of a ring being released together do not release one another — their edges among themselves are the ring, which has no order to hand out — but a member's edge into ANOTHER ring is let go of like any other, which is how that ring stops being depended on */
+    releaseDependenciesOf := func(current string, ringMembers map[string]struct{}) {
         dependencies, exists := adjacency[current]
         if false == exists {
-            continue
+            return
         }
 
+        currentRingIndex, currentOnRing := ringIndexOf[current]
+
         for dependencyKey := range dependencies {
+            if dependencyRingIndex, onRing := ringIndexOf[dependencyKey]; true == onRing && (false == currentOnRing || currentRingIndex != dependencyRingIndex) {
+                outsideDependentsOf[dependencyRingIndex] = outsideDependentsOf[dependencyRingIndex] - 1
+            }
+
+            if _, inRing := ringMembers[dependencyKey]; true == inRing {
+                continue
+            }
+
             if closeWaveIndexOf[current]+1 > closeWaveIndexOf[dependencyKey] {
                 closeWaveIndexOf[dependencyKey] = closeWaveIndexOf[current] + 1
             }
@@ -1201,35 +1227,210 @@ func teardownCloseOrder(
     }
 
     cycleNodeKeys := make([]string, 0)
-    for nodeKey, degree := range inDegree {
-        if 0 < degree {
-            cycleNodeKeys = append(cycleNodeKeys, nodeKey)
+
+    /* the last wave a node actually closed in, which is what a ring's wave is one past: one past every wave ASSIGNED so far counted the provisional waves of nodes still stalled, so the wave indexes had holes the operator's view printed */
+    lastClosedWaveIndex := -1
+
+    for {
+        for 0 < availableHeap.Len() {
+            current := heap.Pop(availableHeap).(string)
+
+            closeOrder = append(closeOrder, current)
+            if closeWaveIndexOf[current] > lastClosedWaveIndex {
+                lastClosedWaveIndex = closeWaveIndexOf[current]
+            }
+
+            releaseDependenciesOf(current, nil)
         }
-    }
 
-    sort.Slice(
-        cycleNodeKeys,
-        func(leftIndex int, rightIndex int) bool {
-            return closesBefore(creationOrderOf, cycleNodeKeys[leftIndex], cycleNodeKeys[rightIndex])
-        },
-    )
+        if len(closeOrder) == len(inDegree) {
+            break
+        }
 
-    closeOrder = append(closeOrder, cycleNodeKeys...)
+        /* the drain stalled: every node left waits on another node left, so what is left holds at least one ring. The ring no stalled node outside it depends on is closed as one unit, its members one after the other in creation order — no order among them is true, so the tie-break is the order —, and the drain CONTINUES past it: a pure dependency of a ring member is released by that close and takes its place in the order the graph proves, where the remainder used to be closed whole in creation order and a dependency created after its ring dependent was closed before it, against the edge that said otherwise. */
+        if nil == rings {
+            remaining := make(map[string]struct{})
+            for nodeKey, degree := range inDegree {
+                if 0 < degree {
+                    remaining[nodeKey] = struct{}{}
+                }
+            }
 
-    /* what a cycle leaves behind has no wave that means anything, because its members constrain one another: it gets a wave of its own, past everything the drain proved, and a caller closing in waves runs that one serially. */
-    if 0 < len(cycleNodeKeys) {
-        cycleWaveIndex := 0
+            rings = stronglyConnectedRings(remaining, adjacency)
+            outsideDependentsOf = make([]int, len(rings))
+            ringClosed = make([]bool, len(rings))
 
-        for _, waveIndex := range closeWaveIndexOf {
-            if waveIndex >= cycleWaveIndex {
-                cycleWaveIndex = waveIndex + 1
+            for ringIndex, ring := range rings {
+                sort.Slice(
+                    ring,
+                    func(leftIndex int, rightIndex int) bool {
+                        return closesBefore(creationOrderOf, ring[leftIndex], ring[rightIndex])
+                    },
+                )
+
+                for _, nodeKey := range ring {
+                    ringIndexOf[nodeKey] = ringIndex
+                }
+            }
+
+            for dependentKey := range remaining {
+                dependentRingIndex, dependentOnRing := ringIndexOf[dependentKey]
+
+                for dependencyKey := range adjacency[dependentKey] {
+                    if dependencyRingIndex, onRing := ringIndexOf[dependencyKey]; true == onRing && (false == dependentOnRing || dependentRingIndex != dependencyRingIndex) {
+                        outsideDependentsOf[dependencyRingIndex] = outsideDependentsOf[dependencyRingIndex] + 1
+                    }
+                }
             }
         }
 
-        for _, nodeKey := range cycleNodeKeys {
-            closeWaveIndexOf[nodeKey] = cycleWaveIndex
+        ringIndex := sourceRingAmong(rings, ringClosed, outsideDependentsOf, creationOrderOf)
+        ring := rings[ringIndex]
+        ringClosed[ringIndex] = true
+
+        /* the ring's wave is one past the last wave that closed, so it is a wave of its own that a caller closing in waves runs one service at a time; what the ring releases lands one past it */
+        ringWaveIndex := lastClosedWaveIndex + 1
+
+        ringMembers := make(map[string]struct{}, len(ring))
+        for _, nodeKey := range ring {
+            ringMembers[nodeKey] = struct{}{}
+            closeWaveIndexOf[nodeKey] = ringWaveIndex
+            inDegree[nodeKey] = 0
+        }
+
+        lastClosedWaveIndex = ringWaveIndex
+
+        for _, nodeKey := range ring {
+            closeOrder = append(closeOrder, nodeKey)
+            cycleNodeKeys = append(cycleNodeKeys, nodeKey)
+
+            releaseDependenciesOf(nodeKey, ringMembers)
         }
     }
 
     return closeOrder, closeWaveIndexOf, cycleNodeKeys
+}
+
+/* sourceRingAmong answers the index of the ring the drain can close next: one still open that no stalled node outside it depends on — a ring is a strongly connected component of two or more nodes over the edges between the stalled nodes, and a stalled node that is on no ring depends on a ring and is released once that ring is closed. Where several rings qualify the one whose first member closes first is taken — the members are already in the order they close, creation order latest first —, so the order is a function of the graph and the creation order alone. A stall always has such a ring: every stalled node is depended on by a stalled node, so the components the stalled nodes form have a source, and a source component of one node would be a node depending on itself, which the drain ignores. */
+func sourceRingAmong(rings [][]string, ringClosed []bool, outsideDependentsOf []int, creationOrderOf map[string]int) int {
+    chosen := -1
+
+    for ringIndex, ring := range rings {
+        if true == ringClosed[ringIndex] || 0 < outsideDependentsOf[ringIndex] {
+            continue
+        }
+
+        if -1 == chosen || true == closesBefore(creationOrderOf, ring[0], rings[chosen][0]) {
+            chosen = ringIndex
+        }
+    }
+
+    return chosen
+}
+
+/* stronglyConnectedRings answers the strongly connected components of two or more nodes over the given nodes, following only the edges between them — Tarjan's walk, iterative over an explicit stack so a long chain cannot deepen the goroutine's. A component of one node is not a ring: a self-edge is ignored by the drain, so such a node waits on somebody else and is released when they close. */
+func stronglyConnectedRings(nodes map[string]struct{}, adjacency map[string]map[string]struct{}) [][]string {
+    orderedNodes := make([]string, 0, len(nodes))
+    for nodeKey := range nodes {
+        orderedNodes = append(orderedNodes, nodeKey)
+    }
+
+    sort.Strings(orderedNodes)
+
+    neighboursOf := func(nodeKey string) []string {
+        neighbours := make([]string, 0, len(adjacency[nodeKey]))
+        for dependencyKey := range adjacency[nodeKey] {
+            if _, inNodes := nodes[dependencyKey]; true == inNodes && dependencyKey != nodeKey {
+                neighbours = append(neighbours, dependencyKey)
+            }
+        }
+
+        sort.Strings(neighbours)
+
+        return neighbours
+    }
+
+    type frame struct {
+        nodeKey    string
+        neighbours []string
+        next       int
+    }
+
+    index := 0
+    indexOf := make(map[string]int, len(nodes))
+    lowLinkOf := make(map[string]int, len(nodes))
+    onStack := make(map[string]struct{}, len(nodes))
+    stack := make([]string, 0, len(nodes))
+    rings := make([][]string, 0)
+
+    for _, root := range orderedNodes {
+        if _, visited := indexOf[root]; true == visited {
+            continue
+        }
+
+        frames := []frame{{nodeKey: root, neighbours: neighboursOf(root)}}
+        indexOf[root] = index
+        lowLinkOf[root] = index
+        index = index + 1
+        stack = append(stack, root)
+        onStack[root] = struct{}{}
+
+        for 0 < len(frames) {
+            current := &frames[len(frames)-1]
+
+            if current.next < len(current.neighbours) {
+                neighbour := current.neighbours[current.next]
+                current.next = current.next + 1
+
+                if _, visited := indexOf[neighbour]; false == visited {
+                    indexOf[neighbour] = index
+                    lowLinkOf[neighbour] = index
+                    index = index + 1
+                    stack = append(stack, neighbour)
+                    onStack[neighbour] = struct{}{}
+                    frames = append(frames, frame{nodeKey: neighbour, neighbours: neighboursOf(neighbour)})
+
+                    continue
+                }
+
+                if _, waiting := onStack[neighbour]; true == waiting && indexOf[neighbour] < lowLinkOf[current.nodeKey] {
+                    lowLinkOf[current.nodeKey] = indexOf[neighbour]
+                }
+
+                continue
+            }
+
+            finished := *current
+            frames = frames[:len(frames)-1]
+
+            if 0 < len(frames) {
+                parent := &frames[len(frames)-1]
+                if lowLinkOf[finished.nodeKey] < lowLinkOf[parent.nodeKey] {
+                    lowLinkOf[parent.nodeKey] = lowLinkOf[finished.nodeKey]
+                }
+            }
+
+            if lowLinkOf[finished.nodeKey] != indexOf[finished.nodeKey] {
+                continue
+            }
+
+            component := make([]string, 0)
+            for {
+                member := stack[len(stack)-1]
+                stack = stack[:len(stack)-1]
+                delete(onStack, member)
+                component = append(component, member)
+
+                if member == finished.nodeKey {
+                    break
+                }
+            }
+
+            if 1 < len(component) {
+                rings = append(rings, component)
+            }
+        }
+    }
+
+    return rings
 }

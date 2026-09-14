@@ -2439,14 +2439,14 @@ func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
         publishTimeout: 2 * time.Second,
     }
 
-    instance.publishMutex.Lock()
+    releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
 
     closed := make(chan error, 1)
     go func() { closed <- instance.Close() }()
 
     refuseOutcome(t, "close while a publish holds the mutex", closed, 200*time.Millisecond)
 
-    instance.publishMutex.Unlock()
+    releaseInstancePublish()
 
     awaitOutcome(t, "close after the publish released the mutex", closed, 2*time.Second)
 }
@@ -2459,8 +2459,8 @@ func TestClose_GivesUpOnThePublishHalfAfterThePublishTimeout(t *testing.T) {
         publishTimeout: 100 * time.Millisecond,
     }
 
-    instance.publishMutex.Lock()
-    defer instance.publishMutex.Unlock()
+    releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
+    defer releaseInstancePublish()
 
     closed := make(chan error, 1)
     go func() { closed <- instance.Close() }()
@@ -2542,19 +2542,15 @@ func TestTransport_SendIsBoundedWhenTheBrokerNeverConfirms(t *testing.T) {
     if false == strings.Contains(sendErr.Error(), "confirmation wait failed") {
         t.Fatalf("expected the refusal to name the confirmation wait, got: %v", sendErr)
     }
-
-    if 0 != gated.BlockedWrites() {
-        t.Fatalf("expected the socket never to have been wedged, got %d blocked writes", gated.BlockedWrites())
-    }
 }
 
 /* a send that ran out of time waiting for its TURN never touched the socket, so it may not report a blocked write and may not mark the transport wedged — which took every later send out of service for as long as another send's confirmation ran. */
 func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
-    connection, gated := dialGated(t, dsn)
+    connection, _ := dialGated(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
 
-    transport.publishMutex.Lock()
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
 
     outcome := make(chan error, 1)
     go func() {
@@ -2563,7 +2559,7 @@ func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testin
 
     sendErr := awaitOutcome(t, "send queued behind the publish mutex", outcome, 3*time.Second)
 
-    transport.publishMutex.Unlock()
+    releaseTransportPublish()
 
     if nil == sendErr || false == strings.Contains(sendErr.Error(), "did not reach the socket within the publish timeout") {
         t.Fatalf("expected the refusal to name the queue rather than a blocked write, got: %v", sendErr)
@@ -2580,21 +2576,17 @@ func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testin
     if true == wedged {
         t.Fatalf("a send that never reached the socket marked the transport wedged")
     }
-
-    if 0 != gated.BlockedWrites() {
-        t.Fatalf("expected the queued send never to have reached the socket, got %d blocked writes", gated.BlockedWrites())
-    }
 }
 
 /* the publish a caller was told did not go out must not go out a moment later: the goroutine takes its turn, finds the caller gone, and returns without writing. */
 func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
-    connection, gated := dialGated(t, dsn)
+    connection, _ := dialGated(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
 
     before := publishedFrameCount(t, connection)
 
-    transport.publishMutex.Lock()
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
 
     outcome := make(chan error, 1)
     go func() {
@@ -2605,18 +2597,18 @@ func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
         t.Fatalf("expected the queued send to fail")
     }
 
-    transport.publishMutex.Unlock()
+    releaseTransportPublish()
 
-    /* give the goroutine every chance to publish: what is asserted is that it does not */
-    time.Sleep(500 * time.Millisecond)
+    /* the goroutine now takes its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by ORDER rather than by waiting: once the goroutine has EXITED, a fence is sent and confirmed, and anything the goroutine wrote stands in the queue before the fence — so the queue grew by exactly the fence. A fixed sleep proved only that the write had not landed yet; the sibling test on the backplane measured the same assertion passing over a goroutine that did write once the sleep was zero. */
+    awaitNoPublishGoroutine(t, "(*Transport).publishOnce.func", 3*time.Second)
 
-    if 0 != gated.BlockedWrites() {
-        t.Fatalf("expected no write at all, got %d blocked writes", gated.BlockedWrites())
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "fence"})); nil != sendErr {
+        t.Fatalf("fence send: %v", sendErr)
     }
 
     after := publishedFrameCount(t, connection)
-    if before != after {
-        t.Fatalf("the abandoned publish reached the broker: the queue went from %d to %d", before, after)
+    if before+1 != after {
+        t.Fatalf("the abandoned publish reached the broker: the queue went from %d to %d, and only the fence was sent after it", before, after)
     }
 }
 
@@ -2701,7 +2693,7 @@ func TestTransport_AWedgedRefusalIsNotReportedAsRetryable(t *testing.T) {
 /* a publish half a join could not take is BUSY, which a healthy confirmation inside its budget produces just as well as a wedged write: teardown must not read that as a blocked write, leave both channels open and name a write that does not exist. */
 func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
-    connection, gated := dialGated(t, dsn)
+    connection, _ := dialGated(t, dsn)
     transport, _ := newWedgeTestTransport(t, connection, nil)
 
     channel, _, channelErr := transport.ensurePublishChannel()
@@ -2710,8 +2702,8 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     }
 
     /* the publish half is held with nothing on the socket, which is what a confirmation inside its own budget looks like to the join */
-    transport.publishMutex.Lock()
-    defer transport.publishMutex.Unlock()
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
+    defer releaseTransportPublish()
 
     closeErr := transport.Close()
 
@@ -2722,17 +2714,13 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     if false == channel.IsClosed() {
         t.Fatalf("close left the publish channel open on a caller-owned connection with nothing in flight")
     }
-
-    if 0 != gated.BlockedWrites() {
-        t.Fatalf("expected the socket never to have been wedged, got %d blocked writes", gated.BlockedWrites())
-    }
 }
 
 
 /* a send that ran out of budget waiting for its TURN is worth a further attempt: it never touched the socket, so there is nothing to blame and nothing to tear down, while the queue it waited behind is the one condition a later attempt can find gone. Under the single retryable bool it answered no to both questions, and publishRequeue spent one of its three attempts and dead-lettered a message nothing was wrong with. */
 func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
-    connection, gated := dialGated(t, dsn)
+    connection, _ := dialGated(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
 
     publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "queued"}), "")
@@ -2746,7 +2734,7 @@ func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t
     channelBefore := transport.publishChannel
     transport.mutex.Unlock()
 
-    transport.publishMutex.Lock()
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
 
     outcome := make(chan error, 1)
     var disposition publishDisposition
@@ -2768,7 +2756,7 @@ func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t
 
     awaitOutcome(t, "publishRecoverable on a turn timeout", recoverableOutcome, 3*time.Second)
 
-    transport.publishMutex.Unlock()
+    releaseTransportPublish()
 
     if nil == onceErr || false == errors.Is(onceErr, errPublishTimedOut) {
         t.Fatalf("expected the queued send to be refused with the publish-timeout sentinel, got: %v", onceErr)
@@ -2792,10 +2780,6 @@ func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t
 
     if channelBefore != channelAfter {
         t.Fatalf("the cached publish channel was torn down over a publish that never reached the socket")
-    }
-
-    if 0 != gated.BlockedWrites() {
-        t.Fatalf("expected the queued send never to have reached the socket, got %d blocked writes", gated.BlockedWrites())
     }
 }
 

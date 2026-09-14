@@ -537,7 +537,9 @@ func (instance *scope) Closed() bool {
     return nil == instance.container.Load()
 }
 
-/* Close ends the request the scope stands for and closes the services the scope itself built. Only those: an override was installed from outside and belongs to whoever installed it, and a singleton reached through the scope belongs to the root container, which closes it when the process ends — closing either here would tear down, once per request, something the next request still needs. What the scope built is exactly what a service which read one of those entries turned into, so it holds that request and has nobody else to close it. */
+/* Close ends the request the scope stands for and closes the services the scope itself built. Only those: an override was installed from outside and belongs to whoever installed it, and a singleton reached through the scope belongs to the root container, which closes it when the process ends — closing either here would tear down, once per request, something the next request still needs. What the scope built is exactly what a service which read one of those entries turned into, so it holds that request and has nobody else to close it.
+
+   It is CloseWithContext under no term: the callers the framework ships — the http kernel on the way out of a handler, the cli after a command — declare none, and a service that can take a deadline is told there is none, the way the container's own Close tells its services. */
 func (instance *scope) Close() error {
     return instance.CloseWithContext(context.Background())
 }
@@ -585,7 +587,7 @@ func (instance *scope) CloseWithContext(closeContext context.Context) error {
     return closeCreatedScopeInstances(closeContext, createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
 }
 
-/* closeCreatedScopeInstances closes each service the scope built, once. One instance filed under its name and its type is first collapsed onto the name node along the alias links recorded at filing time, with the edges of both nodes merged onto the survivor, so a dependency edge recorded against either alias constrains the one close that happens; whatever identity the links do not cover is still caught by the pointer/value marks at close time. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
+/* closeCreatedScopeInstances closes each service the scope built, once, each through the door the container prefers — CloseWithContext where the value carries it, under the caller's context, and Close otherwise. One instance filed under its name and its type is first collapsed onto the name node along the alias links recorded at filing time, with the edges of both nodes merged onto the survivor, so a dependency edge recorded against either alias constrains the one close that happens; whatever identity the links do not cover is still caught by the pointer/value marks at close time. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
 
    The order is the scope's own dependency graph, dependents before their dependencies: a scoped repository holding a scoped transaction is the ordinary case now that a scope owns registrations, and closing the two by name would be a coin flip. Nodes the graph says nothing about, and nodes left over by a cycle, fall back to creation order, latest first — the same tie-break the container's teardown applies, because the two share one walk. The evicted instances close after the ordered walk, under the same marks. */
 func closeCreatedScopeInstances(
@@ -716,7 +718,7 @@ func closeCreatedScopeInstances(
 
         closeable, isCloseable := value.(closer)
         if false == isCloseable {
-            return
+            if _, supported := value.(contextCloser); false == supported { return }
         }
 
         closeErr := closeServiceValueWithin(closeContext, value, closeable)

@@ -5,7 +5,6 @@ import (
     "crypto/tls"
     "database/sql"
     "errors"
-    "fmt"
     "math"
     "net"
     "strings"
@@ -403,7 +402,7 @@ func (instance *Provider) open(ctx context.Context, resolver containercontract.R
     user := configuration.MustGet(instance.userParameterName).MustString()
     password := configuration.MustGet(instance.passwordParameterName).MustString()
 
-    /* an empty database or user is refused here, by name, before the driver sees it: pgdriver.WithDatabase and pgdriver.WithUser PANIC on an empty string, so a connection parameter left empty in the configuration reached the caller as a panic out of the open, not as the refusal every other open failure is. An empty host is left to the driver — it does not panic, the address "<empty>:port" simply fails to dial — and an empty password is a legitimate value. */
+    /* an empty database or user is refused here, by name, before the driver sees it: pgdriver.WithDatabase and pgdriver.WithUser PANIC on an empty string, so a connection parameter left empty in the configuration reached the caller as a panic out of the open, not as the refusal every other open failure is. An empty host is left to the driver — it does not panic, the address "<empty>:port" may connect to localhost — and an empty password is a legitimate value. */
     if "" == databaseName {
         return nil, exception.NewError("pgsql database open refused: the database name is empty", map[string]any{"parameter": instance.databaseParameterName}, nil)
     }
@@ -417,7 +416,11 @@ func (instance *Provider) open(ctx context.Context, resolver containercontract.R
     poolConfig := instance.resolvedPoolConfig()
     timeoutConfig := instance.resolvedTimeoutConfig()
 
-    address := fmt.Sprintf("%s:%s", host, port)
+    addressHost := host
+    if strings.HasPrefix(addressHost, "[") && strings.HasSuffix(addressHost, "]") {
+        addressHost = addressHost[1 : len(addressHost)-1]
+    }
+    address := net.JoinHostPort(addressHost, port)
 
     /* every deadline the driver applies is named here, none governs invisibly: without these three, pgdriver's own defaults — 5s dial, 10s per read, 5s per write — silently cap the configured connect timeout and cut every legitimately long query. A zero read or write deadline survives only on the migration derivation, where it deliberately means "lifted". */
     connectorOptions := []pgdriver.Option{

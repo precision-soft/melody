@@ -18,7 +18,7 @@ func NewParameterBag() *ParameterBag {
     }
 }
 
-/* NewParameterBagFromValues keeps the single and the repeated key apart by type: url.Values carries every value as a list even when the key appeared once, so a key with one occurrence is stored as the string it really is — which is what lets String and Input hand it back — while a genuinely repeated key stays a string slice, to be read through StringSlice or StringAt. Reading the repeated one as a single string is refused loudly rather than answered with a guess. */
+/* NewParameterBagFromValues stores a single occurrence as a string and repeated occurrences as a string slice. Read repeated keys with StringSlice or StringAt. */
 func NewParameterBagFromValues(values url.Values) *ParameterBag {
     parameterBag := NewParameterBag()
 
@@ -50,7 +50,6 @@ func (instance *ParameterBag) Set(name string, value any) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* the zero value is constructible outside the constructors and carries a nil map; the first write allocates it instead of panicking on the assignment — the reads already answer the zero value, so the panic surfaced only after the bag looked functional */
     if nil == instance.parameters {
         instance.parameters = make(map[string]any)
     }
@@ -58,7 +57,7 @@ func (instance *ParameterBag) Set(name string, value any) {
     instance.parameters[name] = value
 }
 
-/* Get hands back a copy at the depth the bag's own writers go, exactly like All: handed back live, a stored []string or map[string]string was the bag's own, so a caller mutating an element wrote into the bag behind its lock — visible to every later reader and racing a concurrent All or StringSlice copy. Scalars are returned as stored and cost nothing; only the two aliasing shapes pay the copy. */
+/* Get copies stored string slices and string maps; other value types remain opaque and are returned as stored. */
 func (instance *ParameterBag) Get(name string) (any, bool) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -91,7 +90,7 @@ func (instance *ParameterBag) Count() int {
     return len(instance.parameters)
 }
 
-/* All copies as deep as the bag's own writers go: a string slice or a string map handed back live would alias the stored value, and a caller mutating the copy would write into the bag behind its lock. Other value types are opaque to the bag and are handed back as stored. */
+/* All uses the same copy depth as Get: string slices and string maps only. */
 func (instance *ParameterBag) All() map[string]any {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -105,7 +104,6 @@ func (instance *ParameterBag) All() map[string]any {
     return copied
 }
 
-/* copyStoredParameterValue is the one spelling of the copy depth Get and All share: the two shapes the bag's own writers produce are copied, everything else is opaque to the bag and handed back as stored. */
 func copyStoredParameterValue(value any) any {
     switch typedValue := value.(type) {
     case []string:
@@ -125,7 +123,7 @@ func copyStoredParameterValue(value any) any {
     }
 }
 
-/* AppendString adds one string under the name inside a single critical section: the read-modify-write helper of the same name works over the contract through Get and Set, whose window between the two locks loses one of two concurrent appends without an error — a lost update the race detector cannot see, because every individual access is locked. */
+/* AppendString holds one lock across the read-modify-write operation. */
 func (instance *ParameterBag) AppendString(name string, value string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

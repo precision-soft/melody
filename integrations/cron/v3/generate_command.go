@@ -663,6 +663,12 @@ func printPrunedDestinations(commandContext clicontract.Context, pruned []string
 
 /* atomicWriteFile replaces one destination atomically and cleans up its own temporary file on failure. Crash leftovers are not discovered or removed by --prune. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
+    if info, statErr := os.Stat(destination); nil == statErr {
+        mode = info.Mode().Perm()
+    } else if false == errors.Is(statErr, os.ErrNotExist) {
+        return exception.NewError("cron: could not read destination permissions", exceptioncontract.Context{"destination": destination}, statErr)
+    }
+
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
     if nil != createErr {
         return exception.NewError(

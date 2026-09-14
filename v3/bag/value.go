@@ -15,7 +15,6 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return "", false
     }
 
-    /* a present-but-nil value reports as unset, matching what the typed accessors report for the same state; otherwise Has and String would agree while String and Int contradicted each other */
     if nil == value {
         return "", false
     }
@@ -25,7 +24,6 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return stringValue, true
     }
 
-    /* a string slice read as one string is refused loudly, never guessed at: the request bags keep the single and the repeated key apart by type, so what lands here is a genuine array. The empty string would lose the value and one element would hide the rest; the slice is read with StringSlice or StringAt. */
     if _, isSlice := value.([]string); true == isSlice {
         exception.Panic(
             exception.NewError(
@@ -38,7 +36,6 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         )
     }
 
-    /* a present value that is neither a string nor a string slice — an int, a bool, a float — reports absent rather than present-but-empty: returning ("", true) defeated StringOrDefault, which substitutes the default only when the value is absent, so an int parameter read through it came back "" instead of the default. Absent is the honest answer for "there is no string here", and it restores the default-fallback contract the sibling accessors keep. */
     return "", false
 }
 

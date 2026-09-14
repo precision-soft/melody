@@ -136,6 +136,125 @@ func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
     }
 }
 
+/* an entry the async storage refused — its queue full — is dead-lettered by the storage itself, with the change-set, before the refusal is returned; the recorder used to dead-letter it a second time on the same logger, so every dropped entry was journaled twice, exactly under the queue-full storm the dead-letter exists for. One record per dropped entry, and the refusal still reaches the caller */
+func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettered(t *testing.T) {
+    delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
+    storage := NewAsyncStorage(delegate, 1)
+    logger := &fakeLogger{}
+    storage.WithLogger(logger)
+    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(logger)
+
+    /* the first save parks the worker inside the delegate, the second fills the buffer of one, the third is refused */
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "2", parityAccount{Id: 2}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "3", parityAccount{Id: 3})
+    if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
+        t.Fatalf("expected the refusal of a full queue to reach the caller, got %v", saveErr)
+    }
+
+    close(delegate.release)
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(logger.errorMessages) {
+        t.Fatalf("expected the dropped entry dead-lettered once, got %d records: %v", len(logger.errorMessages), logger.errorMessages)
+    }
+}
+
+/* skipped on the sentinel alone, the recorder's record was lost whenever the storage journaled through the emergency default and the recorder through the application's logger — the wiring the readme describes — so the queue-full storm the dead-letter exists for left the application's journal empty; the record is skipped only when the storage journaled through this recorder's own logger */
+func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing.T) {
+    emergency := installDefaultAsyncStorageLogger(t)
+    delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
+    storage := NewAsyncStorage(delegate, 1)
+    application := &fakeLogger{}
+    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(application)
+
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "2", parityAccount{Id: 2}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "3", parityAccount{Id: 3})
+    if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
+        t.Fatalf("expected the refusal of a full queue to reach the caller, got %v", saveErr)
+    }
+
+    close(delegate.release)
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(application.errorMessages) {
+        t.Fatalf("expected the application's journal to carry the dropped entry once, got %d records: %v", len(application.errorMessages), application.errorMessages)
+    }
+
+    if 1 != emergency.count() {
+        t.Fatalf("expected the storage's own journal to carry the dropped entry once, got %d", emergency.count())
+    }
+}
+
+/* the sentinels are exported: a storage of the application's own that reports its refusal through one of them has journaled nothing this recorder knows of, so the entry is dead-lettered here, once */
+func TestRecorder_DeadLettersAnEntryAForeignStorageRefusedWithTheSentinel(t *testing.T) {
+    storage := &sentinelReturningStorage{sentinel: ErrAsyncStorageClosed}
+    application := &fakeLogger{}
+    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(application)
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1})
+    if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
+        t.Fatalf("expected the storage's refusal to reach the caller, got %v", saveErr)
+    }
+
+    if 1 != len(application.errorMessages) {
+        t.Fatalf("expected the refused entry dead-lettered once, got %d records: %v", len(application.errorMessages), application.errorMessages)
+    }
+}
+
+/* the closed half of the skip: an entry a closed async storage refused is journaled by the storage through the logger it shares with the recorder, and by the recorder not again */
+func TestRecorder_DoesNotDeadLetterAgainAnEntryTheClosedAsyncStorageAlreadyDeadLettered(t *testing.T) {
+    storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}, 1), release: make(chan struct{})}, 1)
+    logger := &fakeLogger{}
+    storage.WithLogger(logger)
+    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(logger)
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1})
+    if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
+        t.Fatalf("expected the refusal of a closed storage to reach the caller, got %v", saveErr)
+    }
+
+    if 1 != len(logger.errorMessages) {
+        t.Fatalf("expected the refused entry dead-lettered once, got %d records: %v", len(logger.errorMessages), logger.errorMessages)
+    }
+}
+
+/* sentinelReturningStorage is a storage of the application's own that reports every save through one of the exported sentinels, wrapped, and journals nothing */
+type sentinelReturningStorage struct {
+    sentinel error
+}
+
+func (instance *sentinelReturningStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+    return fmt.Errorf("foreign storage refused the entries: %w", instance.sentinel)
+}
+
 func TestRecorder_WithLoggerRefusesATypedNilLogger(t *testing.T) {
     defer func() {
         recovered := recover()

@@ -5,7 +5,6 @@ import (
     "crypto/tls"
     "database/sql"
     "errors"
-    "fmt"
     "math"
     "net"
     "strings"
@@ -424,7 +423,11 @@ func (instance *Provider) open(ctx context.Context, resolver containercontract.R
     poolConfig := instance.resolvedPoolConfig()
     timeoutConfig := instance.resolvedTimeoutConfig()
 
-    address := fmt.Sprintf("%s:%s", host, port)
+    addressHost := host
+    if strings.HasPrefix(addressHost, "[") && strings.HasSuffix(addressHost, "]") {
+        addressHost = addressHost[1 : len(addressHost)-1]
+    }
+    address := net.JoinHostPort(addressHost, port)
 
     driverConfig := driver.NewConfig()
     driverConfig.User = user

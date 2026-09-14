@@ -13,7 +13,7 @@ type Attachment struct {
     Filename    string
     ContentType string
     Content     []byte
-    /* when ContentId is non-empty the attachment is embedded inline (Content-Disposition: inline) inside a multipart/related part so an HTML body can reference it as <img src="cid:..."> */
+    /* A non-empty ContentId embeds the attachment inline in multipart/related for HTML cid references. */
     ContentId string
 }
 

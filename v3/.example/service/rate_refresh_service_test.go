@@ -1,12 +1,15 @@
 package service
 
 import (
+    "fmt"
     "net/http"
     "net/http/httptest"
     "sync/atomic"
     "testing"
     "time"
 
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/httpclient"
 )
 
@@ -196,5 +199,76 @@ func TestRateRefreshServiceRefresh_DoesNothingWithNoProviderConfigured(t *testin
 
     if 0 != outcome.Attempts || 0 != outcome.Updated || 0 != outcome.Skipped {
         t.Errorf("an unconfigured refresh reported %+v, wanted every count at zero", outcome)
+    }
+}
+
+func TestRateRefreshService_RefusesForeignBaseWithoutChangingAnyQuote(t *testing.T) {
+    for _, base := range []string{"USD", "", "EUR"} {
+        t.Run(base, func(t *testing.T) {
+            currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+            currencyService.clock = &frozenClock{instant: currencyQuoteInstant.Add(time.Hour)}
+            provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
+                writer.Header().Set("Content-Type", "application/json")
+                _, _ = fmt.Fprintf(writer, "{\"base\":%q,\"asOf\":\"2026-09-07T09:30:00Z\",\"rates\":{\"EUR\":1,\"USD\":2,\"RON\":3}}", base)
+            })
+            client := provider.client(t)
+            melodycontainer.MustRegister(runtimeInstance.Container(), ServiceRatesHttpClient,
+                func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
+                    return client, nil
+                },
+            )
+            type quote struct {
+                rate float64
+                asOf time.Time
+            }
+            before := map[string]quote{}
+            currencies, err := currencyService.currencyRepository.All(runtimeInstance.Context())
+            if nil != err {
+                t.Fatal(err)
+            }
+            for _, currency := range currencies {
+                before[currency.Id] = quote{currency.Rate, currency.RateAsOf}
+            }
+
+            outcome, refreshErr := NewRateRefreshService(currencyService, provider.server.URL).Refresh(runtimeInstance)
+            if "EUR" == base {
+                if nil != refreshErr || 0 == outcome.Updated {
+                    t.Fatalf("valid base must update quotes: outcome=%+v error=%v", outcome, refreshErr)
+                }
+                return
+            }
+            if nil == refreshErr || 0 != outcome.Updated {
+                t.Errorf("foreign or absent base must be refused before any update: outcome=%+v error=%v", outcome, refreshErr)
+            }
+            if events := dispatcher.names(); 0 != len(events) {
+                t.Errorf("refused document emitted updates: %v", events)
+            }
+            stored, readErr := currencyService.currencyRepository.All(runtimeInstance.Context())
+            if nil != readErr {
+                t.Fatal(readErr)
+            }
+            for _, currency := range stored {
+                if previous := before[currency.Id]; previous.rate != currency.Rate || false == previous.asOf.Equal(currency.RateAsOf) {
+                    t.Errorf("refused document changed %s", currency.Id)
+                }
+            }
+        })
+    }
+}
+
+
+func TestRefreshNormalizesCodesAndContinuesAfterBadQuote(t *testing.T) {
+    currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+    provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
+        _, _ = fmt.Fprint(writer, `{"base":"EUR","asOf":"2026-09-07T09:00:00Z","rates":{"EUR":0," usd ":2,"ron":3}}`)
+    })
+    client := provider.client(t)
+    melodycontainer.MustRegister(runtimeInstance.Container(), ServiceRatesHttpClient,
+        func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) { return client, nil })
+    outcome, err := NewRateRefreshService(currencyService, provider.server.URL).Refresh(runtimeInstance)
+    if nil == err || 2 != outcome.Updated || 2 != len(dispatcher.names()) { t.Fatalf("bad quote prevented later valid quotes: outcome=%+v events=%v err=%v", outcome, dispatcher.names(), err) }
+    for id, wanted := range map[string]float64{"cur-usd":2, "cur-ron":3} {
+        stored, _, _ := currencyService.currencyRepository.FindById(runtimeInstance.Context(), id)
+        if wanted != stored.Rate { t.Fatalf("%s quote=%v; want %v", id, stored.Rate, wanted) }
     }
 }

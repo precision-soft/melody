@@ -2211,3 +2211,72 @@ func TestSanitizeUrlTextually_AnOpaqueReferenceLosesItsUserinfo(t *testing.T) {
         }
     }
 }
+
+/* a POST answered 302 is re-sent by net/http as a GET without its body: a caller that posts to a sink and reads what came back as the sink's answer has read the page the sink pointed at. Built WithoutRedirects, the client hands the 3xx back and the target sees the one POST. */
+func TestHttpClient_WithoutRedirectsAnswersTheRedirectAsTheResponse(t *testing.T) {
+    sinkPosts := 0
+    pageGets := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        if "/sink" == request.URL.Path {
+            sinkPosts = sinkPosts + 1
+            http.Redirect(writer, request, "/page", http.StatusFound)
+
+            return
+        }
+
+        pageGets = pageGets + 1
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil).WithoutRedirects())
+    defer client.Close()
+
+    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1})
+    if nil != requestErr {
+        t.Fatalf("expected the redirect to be answered, not refused: %v", requestErr)
+    }
+
+    if http.StatusFound != response.StatusCode() || "/page" != response.Headers().Get("Location") {
+        t.Fatalf("expected the 302 and its Location to reach the caller, got %d %q", response.StatusCode(), response.Headers().Get("Location"))
+    }
+
+    if 1 != sinkPosts || 0 != pageGets {
+        t.Fatalf("expected one post at the sink and no get at the page, got %d posts and %d gets", sinkPosts, pageGets)
+    }
+}
+
+/* the sister case, so the default is pinned beside the option: a client that was not told otherwise follows, and net/http's rewrite of the method is what it follows with. */
+func TestHttpClient_FollowsRedirectsUnlessToldOtherwise(t *testing.T) {
+    lastMethod := ""
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        if "/sink" == request.URL.Path {
+            http.Redirect(writer, request, "/page", http.StatusFound)
+
+            return
+        }
+
+        lastMethod = request.Method
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    config := NewHttpClientConfig("", 5*time.Second, nil)
+    if false == config.FollowsRedirects() {
+        t.Fatal("expected a config that was not told otherwise to follow redirects")
+    }
+
+    client := NewHttpClient(config)
+    defer client.Close()
+
+    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1})
+    if nil != requestErr {
+        t.Fatalf("expected the redirect to be followed: %v", requestErr)
+    }
+
+    if http.StatusOK != response.StatusCode() || http.MethodGet != lastMethod {
+        t.Fatalf("expected the page to answer a GET, got %d after %q", response.StatusCode(), lastMethod)
+    }
+}

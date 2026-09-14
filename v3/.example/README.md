@@ -136,8 +136,7 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
-The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose: everything else in the example falls under the
-`^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate would be answered with a redirect to the login page instead of the readiness of the process.
+The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose, so a probe that had to authenticate is not answered with a redirect to the login page instead of the readiness of the process. The other public rules of [`config/security.go`](./config/security.go) are the login and logout doors, the frontend bundle (`/`, `/index.html`, `/assets`, `/favicon`, `/i18n`, `/routes`), `/metrics`, `/openapi.json` and the cipher round-trip probe, which reads nothing from the caller; every other route carries a role — a door that writes through the example into a backend (the object storage, the outbox, the message bus) carries the write role the catalogue writes carry, and what no rule names falls under the `^/` catch-all, which requires a signed-in user.
 
 > The committed [`.env`](./.env) points the integration endpoints at the dev compose service names (`redis:6379`, `mysql`, …), so the fully-wired experience is [`./dc up:all --build`](#running-fully-against-containers), which runs this same app inside the dev container where those names resolve. A bare host `go run .` needs those services reachable (override the endpoints to the mapped host ports, [see below](#running-the-binary-directly-against-mapped-ports)) — or remove their lines from `.env` to boot with the in-process fallbacks and zero infrastructure.
 
@@ -178,7 +177,7 @@ cd v3/.example
 go run . melody:cron:generate --out ./generated_conf/cron/crontab
 ```
 
-The example schedules three commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
+The example schedules four commands in [`config/cron.go`](./config/cron.go) (`example:currency:refresh-rates` every half hour, `catalog:report:refresh` hourly, `product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
 
 The same `cron.Configuration` also drives an **in-process scheduler** for single-binary deployments with no external crontab. `melody:cron:run` ticks in-process and invokes each scheduled command when it is due; `--once` evaluates every schedule against the current time, runs the due commands and exits:
 
@@ -193,7 +192,7 @@ The runner dispatches each scheduled command with its declared flags, so declare
 `example:grant:role` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase:
 
 ```bash
-go run . example:grant:role --role admin --user ada    # the command's own --role
+go run . example:grant:role --role ROLE_ADMIN --user user    # the command's own --role
 go run . --role worker app:info                        # the runtime process role
 ```
 
@@ -220,6 +219,8 @@ The lock service follows a single priority: Redis if configured, otherwise MySQL
 Several wirings deliberately defer their resolution to first use instead of the composition root:
 
 - `example:exclusive:tick` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the first `CreateLock` — with a distributed locker configured (Redis or MySQL), run it from two shells at once and exactly one executes while the other exits zero. Under the in-memory fallback the exclusivity is per-process, so two separate shells both execute.
+- The in-process cache fallback is per process too, and that bounds what a console writer can promise: the entities are cached with no expiry and cleared by name by listeners subscribed to the write events, which run in the process that DISPATCHED. With Redis the cache is shared and `example:grant:role`, `currency:refresh:rates` or `example:db:reset` reach the running server; without it they reach their own process, and a server started beside them keeps what it cached until it restarts — each of the three says so on its output when that is the wiring it ran under.
+- The cache keys carry, inside the `melody-example-v3:cache:` namespace, a token computed from the layout of the cached types ([`cache.LayoutToken`](./cache/gob_serializer.go)): gob decodes by field name and stays silent about a field the payload does not carry, so a build that added a field over a live Redis read every entry with that field at zero — a currency with no rate, refused by every conversion — until something dropped the keys. Under the token a build reads only what a build of the same layout wrote. What an older build left stands orphaned in Redis, outside the reach of `example:db:reset` (which clears the current layout's namespace); after a deploy that changed a cached type, drop the old prefix once — `redis-cli --scan --pattern 'melody-example-v3:cache:*'` lists both.
 - The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered in the `StoreFactory`/`RelayFactory` shape: the store (which ensures the `melody_outbox` schema) and the relay (which opens the transport) are built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. Endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
 - The encrypt module resolves the shared `*bun.DB` through a `DatabaseFactory` evaluated at the first `melody:encrypt:database` run, so http- and worker-mode processes register the command without touching the database.
 - The message-bus transport ([`config/messagebus.go`](./config/messagebus.go)) is handed a dialer and nothing else, the rule its outbox twin states in the same words: the transport closes only a connection it dialed itself, so one opened in the composition root would be owned by nobody. Nothing dials at boot — a process that never publishes never opens a connection, and `db:migrate --help` no longer pays a full amqp handshake before printing its usage. An `AMQP_DSN` this application cannot reach therefore does not stop the boot: it surfaces at the first publish, through the transport's own retry loop, which is where a broker that is merely down already surfaced.
@@ -251,8 +252,7 @@ client that carries no base at all. Both are registered by NAME and not by type:
 type, so a resolution by type could only answer with whichever landed first, and the boot refuses the second
 registration outright.
 
-The rate is quoted against a base — one unit of that base costs `rate` units of the currency — so a
-conversion between two currencies cancels it and the catalogue never has to know what the base was. The
+Every stored rate is quoted against EUR, the base used by the seed: one EUR costs `rate` units of the currency. A provider document with a different or missing `base` is refused before any write, preserving every existing quote. Conversion between two currencies cancels their shared base. The
 instant stored is the PROVIDER's rather than the moment the refresh ran, because a reader deciding whether a
 price is stale needs the age of the reading. In development the provider is a vhost of the compose load
 balancer at `rates.melody.localhost.precision-soft.com`, which also serves the failure arms the bands drive.
@@ -278,13 +278,13 @@ The set lives in a database of this major's own — `melody_example_v3`, named i
 
 This example holds **two** databases: the catalogue on MySQL and an archive of catalogue readings on PostgreSQL. They are two independent switches — `MYSQL_HOST` and `PGSQL_HOST`, each empty-means-unwired — so all four combinations boot: both live, either one alone, or neither.
 
-The archive is what the scheduled report leaves behind. `catalog:report:refresh` takes a reading of the catalogue, leaves it in the cache and pushes it to the export endpoint; it now also records it, one row per reading, so `GET /reports/api/history/` can answer how the catalogue has moved. The listing carries the same role the catalogue listings carry — a reading is the catalogue counted, so whoever may not read the nomenclature may not read its history either — and takes a `limit` the door caps, because the archive grows for the life of a volume.
+The archive is what the scheduled report leaves behind. `catalog:report:refresh` takes a reading of the catalogue, leaves it in the cache, records it — one row per reading, so `GET /reports/api/history/` can answer how the catalogue has moved — and then pushes it to the export endpoint: the archive is the durable half and depends on nothing the sink does, so a sink that refuses takes the exit code after the row is there rather than leaving a hole in the history. The archive is opened at the first use of the reading repository — the refresh's own last step, or the history door — and never at boot: a process that takes no reading never dials PostgreSQL, and the open is bounded by a budget of its own, three attempts inside a second, under the process's signal context. The listing carries the same role the catalogue listings carry — a reading is the catalogue counted, so whoever may not read the nomenclature may not read its history either — and takes a `limit` the door caps, because the archive grows for the life of a volume.
 
 Three things about it are worth reading rather than inferring:
 
 - **A reading's identity is the instant it was taken at, to the second.** That is the resolution the reading already states about itself: its payload writes `recorded_at` as RFC3339, which carries no fraction, so a key kept finer would disagree with the very value it keys. The instant is the table's primary key, so two refreshes inside one second are the same reading — and the second one is told it did not write rather than being failed.
 - **The archive is written by the SCHEDULE, not by a request.** A reading is taken on the request path too, whenever a caller finds a cold cache; archiving there would put a write to a second database on a read, make a read door fail when PostgreSQL is down, and fill the archive with rows nobody scheduled.
-- **The write is taken under a PostgreSQL advisory lock** ([`pgsql.NewLocker`](../../integrations/bunorm/pgsql/v3/lock.go)), registered under a name of its own rather than the framework's locker service — that one is Redis when Redis is configured, and the archive is not on Redis. A lock held in the very database being written is exclusion that cannot disagree with the write it guards, and a session advisory lock is released when its connection drops, so a process that dies mid-refresh leaves nothing to clean up. Several processes running the same schedule record one reading between them rather than one each.
+- **The write is taken under a PostgreSQL advisory lock** ([`pgsql.NewLocker`](../../integrations/bunorm/pgsql/v3/lock.go)), registered under a name of its own rather than the framework's locker service — that one is Redis when Redis is configured, and the archive is not on Redis. A lock held in the very database being written is exclusion that cannot disagree with the write it guards, and a session advisory lock is released when its connection drops, so a process that dies mid-refresh leaves nothing to clean up. The lock is taken around the whole run — the reading, the row, the export — so processes that OVERLAP on one schedule record one reading between them: the loser takes no reading at all and says so. Two runs that do not overlap, one host's tick a second after another's, are two readings keyed on the instant each took; the identity of a reading is the second it was taken at, and the lock does not change that. Without PostgreSQL the locker under that name is the in-process one, over the in-process archive, so the history door answers what the schedule recorded in that process rather than an empty list.
 
 The archive's schema is a set of its own, in the same package, and it has to be: `bun_migrations` is per database, so two databases need two sets and one set could never span them. It is exposed as a migration **context** of the `bunorm/migrate` module, which gives it the `db:archive:*` command family (`db:archive:migrate`, `db:archive:status`, `db:archive:rollback`, `db:archive:unlock`, …) pinned to its own manager — so `db:archive:migrate` can only ever reach PostgreSQL. The base `db:*` family is pinned to the catalogue's manager for the same reason, and that pin is not symmetry: unpinned it takes the registry's default, and in an environment that wired the archive alone an unqualified `db:migrate` would aim the catalogue's MySQL DDL at PostgreSQL.
 
@@ -493,3 +493,18 @@ Required at runtime:
 - This example is intentionally compact and optimized for readability.
 - Treat it as a **reference implementation** for Melody wiring patterns, not as a stable API contract.
 - The framework APIs demonstrated here are authoritative; the example itself may evolve freely.
+
+
+### Input and reset guarantees
+
+Login credentials are accepted only from a JSON or URL-encoded POST body. Query parameters cannot supply either credential. SQL entity identifiers match exactly, including case, so lookups and cache invalidation use the same identity.
+
+A forced database reset resolves the cache before destructive work and invalidates it on completion or failure, because a failed reset may already have changed rows. A cache-clear failure is reported alongside the reset failure. With an in-process cache, this clears only the command's process; restart a separately running server to discard its cached entries. A shared cache clears only this application's configured namespace.
+
+Server errors rendered through `ApiErrorWithErr` retain their cause in the runtime logger. Production API responses contain only the public message; decoder details remain available in development responses.
+
+`example:grant:role` trims the role, accepts only `ROLE_USER`, `ROLE_EDITOR` and `ROLE_ADMIN`, and applies the grant atomically to the current account. It preserves the current password and existing roles. Repeating a grant does not create another write or audit entry.
+
+Rate timestamps must be present, no later than the injected clock, and no older than the stored quote. Equal timestamps remain acceptable so a retry can repeat cache invalidation. Timestamps are persisted as UTC. Currency codes are trimmed and compared without case; duplicate normalized codes reject the document. Nonpositive or nonfinite rates are rejected, and conversions that exceed the numeric range return a server error. A bad quote does not stop later valid quotes: the refresh reports `UPDATED`, `SKIPPED` and `FAILED`, and exits nonzero when any quote fails. An identical MySQL update still counts as a found currency.
+
+Event streams renew their 30-second write budget and send a heartbeat every 15 seconds, so the server's initial request deadline does not silently expire an idle stream. Write failures on a live request are returned for journalization; a disconnected client ends its subscription.

@@ -2808,6 +2808,118 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     }
 }
 
+/* the whitespace spelling routes to the catch-all under "/admin" while the access-control matcher trims it and answers with the rule of "/admin"; refused at the kernel, neither is asked */
+func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T) {
+    for _, rawPath := range []string{"/admin%20", "/admin%09", "/admin%C2%A0"} {
+        handlerRan := false
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/*path...",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                handlerRan = true
+                return TextResponse(nethttp.StatusOK, "admin"), nil
+            },
+        )
+
+        serviceContainer := newHttpTestContainer()
+        handler := NewKernel(router).ServeHttp(serviceContainer)
+
+        request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
+        recorder := httptest.NewRecorder()
+
+        handler.ServeHTTP(recorder, request)
+
+        if nethttp.StatusBadRequest != recorder.Code {
+            t.Fatalf("expected %q to be refused with %d, got %d", rawPath, nethttp.StatusBadRequest, recorder.Code)
+        }
+
+        if true == handlerRan {
+            t.Fatalf("the handler ran for %q, which should have been refused before routing to it", rawPath)
+        }
+    }
+}
+
+/* the LEADING twin of the padded path on this major: Go's own server refuses a request line that does not begin with "/", but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix — hands the kernel " /public" for "/api%20/public". As routed that is "%20/public", a target that does not begin with "/", which the canonical guard leaves to the router — and the router answered it 404 where the two frozen majors answer 400 and the upgrade notes promise it; the guard asks the leading form of the decoded path as well, so the three majors refuse it alike */
+func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.T) {
+    for _, rawPath := range []string{"/api%20/public", "/api%09/public", "/api%C2%A0/public"} {
+        handlerRan := false
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/*path...",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                handlerRan = true
+                return TextResponse(nethttp.StatusOK, "public"), nil
+            },
+        )
+
+        serviceContainer := newHttpTestContainer()
+        handler := nethttp.StripPrefix("/api", NewKernel(router).ServeHttp(serviceContainer))
+
+        request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
+        recorder := httptest.NewRecorder()
+
+        handler.ServeHTTP(recorder, request)
+
+        if nethttp.StatusBadRequest != recorder.Code {
+            t.Fatalf("expected %q to be refused with %d once the prefix was stripped, got %d", rawPath, nethttp.StatusBadRequest, recorder.Code)
+        }
+
+        if true == handlerRan {
+            t.Fatalf("the handler ran for %q, which should have been refused before routing to it", rawPath)
+        }
+    }
+}
+
+/* the canonical question is asked of the spelling the router reads: "/a%2F..%2Fb" is ONE segment naming "a/../b" for the router, and the guard reads it the same way instead of refusing the decoded "/a/../b" — while the real fold "/a/../b" is still refused, and "/public%2F" reaches the catch-all as the resource "public/" the router serves it as */
+func TestKernel_AsksTheCanonicalQuestionOfThePathAsSpelled(t *testing.T) {
+    for rawPath, expected := range map[string]struct {
+        code    int
+        catchAll bool
+    }{
+        "/a%2F..%2Fb": {code: nethttp.StatusOK, catchAll: true},
+        "/public%2F":  {code: nethttp.StatusOK, catchAll: true},
+        "/public":     {code: nethttp.StatusOK, catchAll: false},
+        "/a/../b":     {code: nethttp.StatusBadRequest, catchAll: false},
+    } {
+        reached := ""
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/public",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                reached = "public"
+                return TextResponse(nethttp.StatusOK, "public"), nil
+            },
+        )
+        router.Handle(
+            nethttp.MethodGet,
+            "/*path...",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                reached = "catch-all"
+                return TextResponse(nethttp.StatusOK, "catch-all"), nil
+            },
+        )
+
+        handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, rawPath, nil))
+
+        if expected.code != recorder.Code {
+            t.Fatalf("expected %q to answer %d, got %d", rawPath, expected.code, recorder.Code)
+        }
+
+        if expected.catchAll != ("catch-all" == reached) {
+            t.Fatalf("expected %q to reach the catch-all: %v, reached %q", rawPath, expected.catchAll, reached)
+        }
+    }
+}
+
 func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     handlerRan := false
 

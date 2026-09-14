@@ -2,6 +2,7 @@ package repository
 
 import (
     "context"
+    driver "github.com/go-sql-driver/mysql"
     "database/sql"
     "errors"
     "fmt"
@@ -50,13 +51,14 @@ func (instance *userRow) toEntity() *entity.User {
 }
 
 func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepository {
-    return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker()}
+    return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder()}
 }
 
 /* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, so who was granted which role, and when, is answerable after the fact — and the password column is recorded as changed without its value ever entering the trail. */
 type bunUserRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
+    recorder *melodyaudit.Recorder
 }
 
 /* seedIfEmpty writes the opening directory into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
@@ -148,7 +150,7 @@ func (instance *bunUserRepository) findRowById(ctx context.Context, id string) (
     selectErr := instance.database.
         NewSelect().
         Model(row).
-        Where("id = ?", id).
+        Where("id = ? AND BINARY id = BINARY ?", id, id).
         Limit(1).
         Scan(ctx)
     if nil != selectErr {
@@ -283,6 +285,14 @@ func asUsernameAlreadyExists(writeErr error) error {
         return nil
     }
 
+    var driverErr *driver.MySQLError
+    if errors.As(writeErr, &driverErr) && nil != driverErr {
+        if 1062 != driverErr.Number || false == strings.Contains(driverErr.Message, migration.UserUsernameIndexName) {
+            return writeErr
+        }
+        return fmt.Errorf("username already exists")
+    }
+
     if false == strings.Contains(writeErr.Error(), migration.UserUsernameIndexName) {
         return writeErr
     }
@@ -340,3 +350,26 @@ func (instance *bunUserRepository) identifierList(ctx context.Context) ([]string
 }
 
 var _ UserRepository = (*bunUserRepository)(nil)
+
+
+/* GrantRole reads the current row under the same transaction that writes only its roles and records the audit. */
+func (instance *bunUserRepository) GrantRole(ctx context.Context, username string, role string) (*entity.User, bool, error) {
+    var account *entity.User
+    changed := false
+    err := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        before := &userRow{}
+        err := tx.NewSelect().Model(before).Where("LOWER(username) = (? COLLATE utf8mb4_bin)", NormalizedUsername(username)).For("UPDATE").Scan(ctx)
+        if errors.Is(err, sql.ErrNoRows) { return nil }
+        if nil != err { return err }
+        account = before.toEntity()
+        for _, held := range account.Roles { if role == held { return nil } }
+        account.Roles = append(account.Roles, role)
+        after := newUserRow(account)
+        if _, err := tx.NewUpdate().Model(after).Column("roles").WherePK().Where("BINARY id = BINARY ?", account.Id).Exec(ctx); nil != err { return err }
+        if err := instance.recorder.RecordUpdate(melodyaudit.WithDatabase(auditContext(ctx), tx), persistence.AuditEntityUser, account.Id, before, after); nil != err { return err }
+        changed = true
+        return nil
+    })
+    if nil != err { return nil, false, err }
+    return account, changed, nil
+}

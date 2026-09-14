@@ -2,6 +2,8 @@ package cli
 
 import (
     "context"
+    melodycache "github.com/precision-soft/melody/v2/cache"
+    melodycachecontract "github.com/precision-soft/melody/v2/cache/contract"
     "database/sql"
     "database/sql/driver"
     "errors"
@@ -98,4 +100,21 @@ func TestDatabaseResetCommandWithForceReachesTheDatabase(t *testing.T) {
     if nil == runErr {
         t.Fatalf("expected --force to reach the undialed database and fail")
     }
+}
+
+
+type resetProbeCache struct {
+    melodycachecontract.Cache
+    clears int
+}
+
+func (instance *resetProbeCache) Clear() error { instance.clears++; return nil }
+
+func TestResetInvalidatesCacheWhenDatabaseWorkFails(t *testing.T) {
+    serviceContainer := newResetCommandContainer(t)
+    cacheInstance := &resetProbeCache{}
+    registerCliTestService[melodycachecontract.Cache](serviceContainer, melodycache.ServiceCache, cacheInstance)
+    _, err := runCliCommand(NewDatabaseResetCommand(testResetDatabaseServiceName), newCliTestRuntime(serviceContainer), []string{"--force"})
+    if nil == err { t.Fatal("expected the database refusal") }
+    if 1 != cacheInstance.clears { t.Fatalf("cache clears=%d; want one even after database failure", cacheInstance.clears) }
 }

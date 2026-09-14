@@ -164,3 +164,5 @@ reader, _ := splitter.Reader()  // a replica (or the primary if none configured)
 * PostgreSQL provider: [`../pgsql/v3/`](../pgsql/v3/)
 
 Each dialect module implements [`bunorm.Provider`](./provider.go): it builds the driver connector, constructs a Bun database handle with the correct dialect, and performs an initial `PingContext`, failing fast on errors. Both expose typed `PoolConfig`/`TimeoutConfig` and an optional post-build hook for driver options not surfaced by the typed configs.
+
+Missing required PostgreSQL connection fields expose the ConnectionParametersInvalid error capability; replica reads refuse this permanent configuration error instead of silently opening the primary.

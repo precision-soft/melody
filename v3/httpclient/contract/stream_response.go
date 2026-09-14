@@ -5,13 +5,13 @@ import (
     nethttp "net/http"
 )
 
-/* StreamResponse is a response whose body is still on the wire. The caller owns it: Close it on every path, including the ones that never read the body, because the connection behind it is released by nothing else. */
+/* StreamResponse owns a live response body. The caller must call Close even when the body is not read. */
 type StreamResponse interface {
     StatusCode() int
 
     Headers() nethttp.Header
 
-    /* Body is the live body. After Close it reads as a failure rather than a nil reader, so a consumer racing a watchdog gets an error instead of a nil dereference. */
+    /* Body returns a failing reader after Close rather than a nil reader. */
     Body() io.ReadCloser
 
     Close() error

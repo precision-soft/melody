@@ -37,7 +37,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
     refreshService := service.MustGetRateRefreshService(runtimeInstance.Container())
 
     outcome, refreshErr := refreshService.Refresh(runtimeInstance)
-    if nil != refreshErr {
+    if nil != refreshErr && 0 == outcome.Updated && 0 == outcome.Failed {
         return refreshErr
     }
 
@@ -54,6 +54,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
         "ATTEMPTS",
         "UPDATED",
         "SKIPPED",
+        "FAILED",
     }
 
     rows := [][]string{
@@ -62,6 +63,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
             fmt.Sprintf("%d", outcome.Attempts),
             fmt.Sprintf("%d", outcome.Updated),
             fmt.Sprintf("%d", outcome.Skipped),
+            fmt.Sprintf("%d", outcome.Failed),
         },
     }
 
@@ -69,7 +71,12 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
        section that drives this command can read what it printed without capturing a process stream */
     fprintTable(writer, headers, rows)
 
-    return nil
+    /* the refresh writes through the service so the listeners drop the cached currencies — in THIS process. On the shared cache the server rereads the new rate; on the in-process fallback the server keeps the rate it cached, which is the one failure the two GoDocs of the write path say the design prevents, and it prevents it only with redis. */
+    if true == cacheIsProcessLocal(runtimeInstance) {
+        _, _ = fmt.Fprintln(writer, processLocalCacheNotice)
+    }
+
+    return refreshErr
 }
 
 var _ melodyclicontract.Command = (*CurrencyRefreshRatesCommand)(nil)

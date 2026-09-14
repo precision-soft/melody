@@ -2,6 +2,8 @@ package presenter
 
 import (
     "errors"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "fmt"
     nethttp "net/http"
     "strings"
@@ -72,6 +74,11 @@ func ApiErrorWithErr(
     publicMessage string,
     causeErr error,
 ) melodyhttpcontract.Response {
+    if 500 <= statusCode && nil != causeErr && nil != runtimeInstance {
+        if logger := melodylogging.LoggerFromRuntime(runtimeInstance); nil != logger {
+            logger.Error(publicMessage, melodyloggingcontract.Context{"error": causeErr, "statusCode": statusCode})
+        }
+    }
     normalizedErrors := normalizeErrors([]string{publicMessage})
     debugEnabled := debugMode(runtimeInstance)
 

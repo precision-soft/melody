@@ -94,7 +94,7 @@ func (instance *HmacEnvelopeSigner) HeaderName() string {
     return instance.headerName
 }
 
-/* Sign builds the internal-auth header value binding the call to method, path, query string and the given body, optionally propagating an originating actor. The path argument may carry a query string (everything after the first '?'); it is signed separately and matched against the request's raw query at the callee. The returned string is written to HeaderName() on the outgoing request. */
+/* Sign builds the internal-auth header value binding the call to method, path, query string and the given body, optionally propagating an originating actor. The path argument may carry a query string (everything after the first '?'); it is signed separately and matched against the request's raw query at the callee. The path is matched at the callee against the spelling its router matched — each segment decoded on its own, a separator encoded inside a segment kept as "%2F" — so a caller signs "/files/café" for a request line "/files/caf%C3%A9" and "/files/a%2Fb" for the one-segment resource "a/b". The returned string is written to HeaderName() on the outgoing request. */
 func (instance *HmacEnvelopeSigner) Sign(
     method string,
     path string,

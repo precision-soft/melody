@@ -5,7 +5,6 @@ import (
     "crypto/tls"
     "database/sql"
     "errors"
-    "fmt"
     "math"
     "net"
     "reflect"
@@ -333,7 +332,11 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     poolConfig := instance.resolvedPoolConfig()
     timeoutConfig := instance.resolvedTimeoutConfig()
 
-    address := fmt.Sprintf("%s:%s", params.Host, params.Port)
+    addressHost := params.Host
+    if strings.HasPrefix(addressHost, "[") && strings.HasSuffix(addressHost, "]") {
+        addressHost = addressHost[1 : len(addressHost)-1]
+    }
+    address := net.JoinHostPort(addressHost, params.Port)
 
     driverConfig := driver.NewConfig()
     driverConfig.User = params.User

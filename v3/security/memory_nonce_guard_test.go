@@ -97,3 +97,31 @@ func TestNewMemoryNonceGuardWithClock_RefusesATypedNilClock(t *testing.T) {
         NewMemoryNonceGuardWithClock(unassignedClock)
     }, "nonce guard clock is nil")
 }
+
+func TestMemoryNonceGuardConcurrentSingleUse(t *testing.T) {
+    guard := NewMemoryNonceGuard()
+    start := make(chan struct{})
+    results := make(chan bool, 32)
+    failures := make(chan error, 32)
+    for index := 0; index < 32; index++ {
+        go func() {
+            <-start
+            seen, err := guard.Remember(nil, "concurrent-single-use", time.Minute)
+            failures <- err
+            results <- seen
+        }()
+    }
+    close(start)
+    accepted := 0
+    for index := 0; index < 32; index++ {
+        if err := <-failures; nil != err {
+            t.Errorf("remember: %v", err)
+        }
+        if false == <-results {
+            accepted++
+        }
+    }
+    if 1 != accepted {
+        t.Fatalf("accepted %d simultaneous uses, want one", accepted)
+    }
+}

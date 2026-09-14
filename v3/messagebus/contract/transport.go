@@ -13,6 +13,6 @@ type Transport interface {
 
     Nack(runtimeInstance runtimecontract.Runtime, envelope Envelope, requeue bool) error
 
-    /* Close takes no runtime: it is the container's ordered teardown that calls it — through the closer RegisterTransports registers — and the teardown recognizes Close() error and nothing else. The former Close(runtime) signature made every transport structurally unreachable at shutdown: nothing in the framework or in any production wiring ever called it, so a broker connection lived exactly as long as the process and every deploy tore it down abruptly. */
+    /* Close is called by the transport closer registered with the container; shutdown requires no request runtime. */
     Close() error
 }

@@ -107,7 +107,7 @@ func (instance *bunCategoryRepository) findRowById(ctx context.Context, id strin
     selectErr := instance.database.
         NewSelect().
         Model(row).
-        Where("id = ?", id).
+        Where("id = ? AND BINARY id = BINARY ?", id, id).
         Limit(1).
         Scan(ctx)
     if nil != selectErr {
@@ -177,6 +177,7 @@ func (instance *bunCategoryRepository) Update(ctx context.Context, category *ent
         NewUpdate().
         Model(newCategoryRow(category)).
         WherePK().
+        Where("BINARY id = BINARY ?", category.Id).
         Exec(ctx)
     if nil != updateErr {
         return false, updateErr
@@ -194,7 +195,7 @@ func (instance *bunCategoryRepository) DeleteById(ctx context.Context, id string
     result, deleteErr := instance.database.
         NewDelete().
         Model((*categoryRow)(nil)).
-        Where("id = ?", normalizedId).
+        Where("id = ? AND BINARY id = BINARY ?", normalizedId, normalizedId).
         Exec(ctx)
     if nil != deleteErr {
         return false, deleteErr

@@ -391,31 +391,105 @@ func TestHeldPointerIdentities_FindsAServiceAtTheDepthLimitWhicheverFieldComesFi
     }
 }
 
-/* wideHolder exceeds the total node budget without exceeding either array's element limit. The smaller control fits within the budget, including its pointer fields. */
+/* the depth limit is measured along the path: a service four links down the chain sits exactly at the limit and is found, five links down it is two past the limit and is not — there is no shorter path here to find it by */
+func TestHeldPointerIdentities_StopsAtTheDepthLimit(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}), heldIdentity) {
+        t.Fatalf("expected a service at the depth limit to be found")
+    }
+
+    if true == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}), heldIdentity) {
+        t.Fatalf("expected a service past the depth limit not to be found")
+    }
+}
+
+/* oddDepthLink and oddDepthTail put the held pointer at an ODD depth — a struct level between the last link and the pointer — so the pointer can sit exactly one past the limit, at thirteen: the chain of links alone lands pointers on even depths only, and the site that separates the depth guard from its absence is the pointer at thirteen, not one at fourteen */
+type oddDepthTail struct {
+    nested struct{ held *closeOrderServiceB }
+}
+
+type oddDepthLink struct {
+    next *oddDepthLink
+    tail *oddDepthTail
+}
+
+type oddDepthRoot struct {
+    chain *oddDepthLink
+}
+
+func (instance *oddDepthRoot) Close() error { return nil }
+
+func oddDepthChain(length int, held *closeOrderServiceB) *oddDepthLink {
+    tail := &oddDepthTail{}
+    tail.nested.held = held
+
+    head := &oddDepthLink{tail: tail}
+
+    for count := 1; count < length; count = count + 1 {
+        head = &oddDepthLink{next: head}
+    }
+
+    return head
+}
+
+/* three links put the held pointer at depth eleven, four at exactly thirteen — one past the limit — where the walk that asked the depth of the TAKEN item, and queued every child regardless, would still have read it */
+func TestHeldPointerIdentities_DoesNotReadAPointerOnePastTheDepthLimit(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(3, held)}), heldIdentity) {
+        t.Fatalf("expected a service at depth eleven to be found")
+    }
+
+    if true == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(4, held)}), heldIdentity) {
+        t.Fatalf("expected a service one past the depth limit not to be found")
+    }
+}
+
+/* wideHolder nests two arrays at the per-level limit, which is more cells than the walk's whole budget: the budget is spent level by level, so a service in a cell of such a table is not reached whatever cell it sits in — the first included, where the depth-first walk reached the first cells and not the last — while a service declared BESIDE the table, at a shallower depth, is reached before the table costs anything, which is the shape the walk exists for; a table within the budget is walked to its last cell. */
 type wideHolder struct {
     cells [256][256]struct{ service *closeOrderServiceB }
 }
 
 func (instance *wideHolder) Close() error { return nil }
 
+type wideHolderWithPeer struct {
+    cells [256][256]struct{ service *closeOrderServiceB }
+    peer  *closeOrderServiceB
+}
+
+func (instance *wideHolderWithPeer) Close() error { return nil }
+
+type boundedHolder struct {
+    cells [64][256]struct{ service *closeOrderServiceB }
+}
+
+func (instance *boundedHolder) Close() error { return nil }
+
 func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
-
-    first := &struct {
-        cells [128][128]struct{ service *closeOrderServiceB }
-    }{}
-    first.cells[0][0].service = held
-
-    if false == holdsIdentity(heldPointerIdentities(first), heldIdentity) {
-        t.Fatalf("expected a service in the first cell to be found inside the budget")
-    }
 
     last := &wideHolder{}
     last.cells[255][255].service = held
 
     if true == holdsIdentity(heldPointerIdentities(last), heldIdentity) {
-        t.Fatalf("expected the walk to stop at its budget before the last cell")
+        t.Fatalf("expected the walk to stop at its budget before the last cell of a table wider than it")
+    }
+
+    beside := &wideHolderWithPeer{peer: held}
+
+    if false == holdsIdentity(heldPointerIdentities(beside), heldIdentity) {
+        t.Fatalf("expected a peer declared after a table wider than the budget to be found before the table is paid for")
+    }
+
+    bounded := &boundedHolder{}
+    bounded.cells[63][255].service = held
+
+    if false == holdsIdentity(heldPointerIdentities(bounded), heldIdentity) {
+        t.Fatalf("expected the last cell of a table within the budget to be reached")
     }
 }
 
@@ -1131,16 +1205,32 @@ func newHubChain(hub *fatHub, length int) *hubLink {
     return head
 }
 
+/* collaboratorLink puts the held service a chosen number of links BELOW its holder: a service beside a table or a hub, at the holder's own depth, is taken from the queue before any cell of the table is paid for, so it is found whether or not the table is one node — the breadth-first order emptied three pins written that way; the service one link below the table, or four links below a hub walked twice, is queued after the cells and found only if they were not charged */
+type collaboratorLink struct {
+    next *collaboratorLink
+    held *closeOrderServiceB
+}
+
+func newCollaboratorChain(held *closeOrderServiceB, length int) *collaboratorLink {
+    head := &collaboratorLink{held: held}
+
+    for index := 1; index < length; index = index + 1 {
+        head = &collaboratorLink{next: head}
+    }
+
+    return head
+}
+
 type chainFirstHolder struct {
     chain  *hubLink
     hub    *fatHub
-    collab *closeOrderServiceB
+    collaborator *collaboratorLink
 }
 
 func (instance *chainFirstHolder) Close() error { return nil }
 
 type collaboratorFirstHolder struct {
-    collab *closeOrderServiceB
+    collaborator *collaboratorLink
     hub    *fatHub
     chain  *hubLink
 }
@@ -1153,24 +1243,25 @@ func TestHeldPointerIdentities_DoesNotWalkAWholeSubtreeAgainFromAShallowerPath(t
     heldIdentity, _ := pointerKeyOf(held)
     hub := &fatHub{}
 
-    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collab: held, hub: hub, chain: newHubChain(hub, 2)}), heldIdentity) {
+    /* the held service sits four links below the holder, at depth ten: a hub of forty-nine thousand items walked once leaves it room in the budget, walked twice from the chain's second path it does not */
+    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collaborator: newCollaboratorChain(held, 4), hub: hub, chain: newHubChain(hub, 2)}), heldIdentity) {
         t.Fatalf("expected the collaborator declared first to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collab: held}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collaborator: newCollaboratorChain(held, 4)}), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a chain of links to one large object to be found as well")
     }
 }
 
 type tableFirstCodec struct {
     table [256][256]byte
-    peer  *closeOrderServiceB
+    peer  *collaboratorLink
 }
 
 func (instance *tableFirstCodec) Close() error { return nil }
 
 type peerFirstCodec struct {
-    peer  *closeOrderServiceB
+    peer  *collaboratorLink
     table [256][256]byte
 }
 
@@ -1181,18 +1272,257 @@ func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&peerFirstCodec{peer: held}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&peerFirstCodec{peer: newCollaboratorChain(held, 1)}), heldIdentity) {
         t.Fatalf("expected the peer declared before the table to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&tableFirstCodec{peer: held}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&tableFirstCodec{peer: newCollaboratorChain(held, 1)}), heldIdentity) {
         t.Fatalf("expected the peer declared after the table to be found as well")
+    }
+}
+
+/* structOfScalarsAsWideAsTheBudget builds, through reflect, a struct of two hundred and fifty-six structs of two hundred and fifty-six integers: sixty-five thousand five hundred and thirty-six scalar fields, the walk's whole budget, which no array of the same content costs */
+func structOfScalarsAsWideAsTheBudget() reflect.Type {
+    integerFields := make([]reflect.StructField, 0, teardownWalkElementLimit)
+    for index := 0; index < teardownWalkElementLimit; index = index + 1 {
+        integerFields = append(integerFields, reflect.StructField{Name: reflectStructFieldName("Scalar", index), Type: reflect.TypeOf(0)})
+    }
+
+    inner := reflect.StructOf(integerFields)
+
+    innerFields := make([]reflect.StructField, 0, teardownWalkElementLimit)
+    for index := 0; index < teardownWalkElementLimit; index = index + 1 {
+        innerFields = append(innerFields, reflect.StructField{Name: reflectStructFieldName("Inner", index), Type: inner})
+    }
+
+    return reflect.StructOf(innerFields)
+}
+
+func reflectStructFieldName(prefix string, index int) string {
+    return prefix + string(rune('A'+index/26)) + string(rune('A'+index%26))
+}
+
+/* a struct of scalars was charged field by field where an array of scalars is one node: a struct as wide as the budget spent all of it, and the held service one level below it was never queued */
+func TestHeldPointerIdentities_CountsAStructOfScalarsAsOneNode(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    rootType := reflect.StructOf([]reflect.StructField{
+        {Name: "Table", Type: structOfScalarsAsWideAsTheBudget()},
+        {Name: "Peer", Type: reflect.TypeOf((*collaboratorLink)(nil))},
+    })
+
+    root := reflect.New(rootType)
+    root.Elem().Field(1).Set(reflect.ValueOf(newCollaboratorChain(held, 1)))
+
+    if false == holdsIdentity(heldPointerIdentities(root.Interface()), heldIdentity) {
+        t.Fatalf("expected the peer one link below the struct of scalars to be found: the struct is one node, not one per field")
+    }
+}
+
+/* cellTable is the shape the breadth-first order pays for at the QUEUE: every cell holds a pointer, so every cell is walkable, and a budget charged when an item is taken queued all of them before it took any — measured, four million cells cost 781 MB of queue and half a second, where the walk bounded at the queue costs the budget and nothing more */
+type cellTable struct {
+    cells [16][256][256]struct{ pointer *closeOrderServiceB }
+    peer  *collaboratorLink
+}
+
+func TestHeldPointerIdentities_ChargesTheBudgetWhenAnItemIsQueued(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+    table := &cellTable{peer: newCollaboratorChain(held, 1)}
+
+    runtime.GC()
+
+    var before runtime.MemStats
+    runtime.ReadMemStats(&before)
+
+    found := holdsIdentity(heldPointerIdentities(table), heldIdentity)
+
+    var after runtime.MemStats
+    runtime.ReadMemStats(&after)
+
+    runtime.KeepAlive(table)
+
+    /* a million cells queued cost about two hundred megabytes in the form charged at the taking; the form charged at the queue holds at most the budget of items, under four megabytes — sixteen megabytes is the line between the two, four times the honest figure */
+    allocated := after.TotalAlloc - before.TotalAlloc
+    if 16<<20 < allocated {
+        t.Fatalf("expected the walk over a million pointer-holding cells to queue no more than the budget, it allocated %d bytes", allocated)
+    }
+
+    if false == found {
+        t.Fatalf("expected the peer one link below the table to be found: it is queued at the depth of the table's rows, before any cell is charged")
+    }
+}
+
+/* cycleMemberLink, cycleMemberHead, cycleMemberTail and cycleMemberLeaf build the shape a cycle member's verdict must survive: through the chain the head is reached at a depth from which its leaf is cut, its tail's only way forward is the cycle back to the head, and the root reaches the tail directly as well, from a depth that has room */
+type cycleMemberLink struct {
+    next *cycleMemberLink
+    head *cycleMemberHead
+}
+
+type cycleMemberHead struct {
+    leaf *cycleMemberLeaf
+    tail *cycleMemberTail
+}
+
+type cycleMemberTail struct {
+    head *cycleMemberHead
+}
+
+type cycleMemberLeaf struct {
+    next   *cycleMemberLeaf
+    collaborator *closeOrderServiceB
+}
+
+type chainThenTailHolder struct {
+    chain *cycleMemberLink
+    tail  *cycleMemberTail
+}
+
+func (instance *chainThenTailHolder) Close() error { return nil }
+
+type tailThenChainHolder struct {
+    tail  *cycleMemberTail
+    chain *cycleMemberLink
+}
+
+func (instance *tailThenChainHolder) Close() error { return nil }
+
+func newCycleMemberShape(held *closeOrderServiceB) (*cycleMemberLink, *cycleMemberTail) {
+    head := &cycleMemberHead{leaf: &cycleMemberLeaf{next: &cycleMemberLeaf{next: &cycleMemberLeaf{collaborator: held}}}}
+    tail := &cycleMemberTail{head: head}
+    head.tail = tail
+
+    /* through the chain the head sits at depth six and the held pointer at fourteen, two past the limit; through the tail the head sits at four and the held pointer at twelve */
+    return &cycleMemberLink{next: &cycleMemberLink{head: head}}, tail
+}
+
+/* a ring whose only way forward is the way back to a head cut at the depth limit: the held service behind the head is past the limit through the chain and inside it through the tail, and it is found whichever of the two the holder lists first — the depth-first walk memoised the ring with the verdict of the first path and refused the shorter one, and which field came first decided */
+func TestHeldPointerIdentities_FindsAHeldServiceBehindARingFromTheShortPathWhicheverFieldComesFirst(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    chain, tail := newCycleMemberShape(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&tailThenChainHolder{tail: tail, chain: chain}), heldIdentity) {
+        t.Fatalf("expected the collaborator found through the short path declared first")
+    }
+
+    chain, tail = newCycleMemberShape(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&chainThenTailHolder{chain: chain, tail: tail}), heldIdentity) {
+        t.Fatalf("expected the collaborator found through the short path declared after the chain that cut it")
+    }
+}
+
+/* cyclicHub is the fat hub with one pointer back into the chain that leads to it: reached through the chain and again from the holder directly, it is paid for once, and the collaborator declared after it is found — walked once per path that reached it, the second walk spent the budget before that collaborator */
+type cyclicHub struct {
+    cells [64][256]struct{ left, right *closeOrderServiceB }
+    back  *cyclicHubLink
+}
+
+type cyclicHubLink struct {
+    next *cyclicHubLink
+    hub  *cyclicHub
+}
+
+type chainFirstCyclicHubHolder struct {
+    chain  *cyclicHubLink
+    hub    *cyclicHub
+    collaborator *closeOrderServiceB
+}
+
+func (instance *chainFirstCyclicHubHolder) Close() error { return nil }
+
+func TestHeldPointerIdentities_AHubOnARingIsPaidForOnceAndTheCollaboratorAfterItIsFound(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    hub := &cyclicHub{}
+    tail := &cyclicHubLink{hub: hub}
+    head := &cyclicHubLink{next: tail, hub: hub}
+    hub.back = head
+
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}), heldIdentity) {
+        t.Fatalf("expected the collaborator declared after a cyclic hub walked whole once to be found")
+    }
+}
+
+/* crossEdgeShape: the deep path reaches the ring's root R at depth 8 and, under it, a chain whose collaborator sits past the depth limit; A reaches back to R, and B holds A through a plain forward edge after A's walk has returned. The short path enters B directly, with room to spare. */
+type crossEdgeNode struct {
+    next  *crossEdgeNode
+    cross *crossEdgeNode
+    back  *crossEdgeNode
+    held  *closeOrderServiceB
+}
+
+type crossEdgeHolder struct {
+    chain *crossEdgeNode
+    short *crossEdgeNode
+}
+
+func (instance *crossEdgeHolder) Close() error { return nil }
+
+func newCrossEdgeShape(held *closeOrderServiceB) (chain *crossEdgeNode, holderOfMember *crossEdgeNode) {
+    beyondTheLimit := &crossEdgeNode{held: held}
+    underTheRoot := &crossEdgeNode{next: beyondTheLimit}
+    root := &crossEdgeNode{next: underTheRoot}
+    member := &crossEdgeNode{back: root}
+    holderOfMember = &crossEdgeNode{cross: member}
+    root.cross = member
+    root.back = holderOfMember
+
+    chain = root
+    for link := 0; link < 3; link = link + 1 {
+        chain = &crossEdgeNode{next: chain}
+    }
+
+    return chain, holderOfMember
+}
+
+/* a holder of a ring member through a plain forward edge, with the held service past the limit through the chain and inside it through the holder: found — the depth-first walk recorded the holder as whole while the ring was being cut, refused it from the short path that had room, and lost the service */
+func TestHeldPointerIdentities_FindsAHeldServiceBehindARingHeldThroughAForwardEdgeFromTheShortPath(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    chain, holderOfMember := newCrossEdgeShape(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&crossEdgeHolder{chain: chain, short: holderOfMember}), heldIdentity) {
+        t.Fatalf("expected the collaborator found through the short path into the holder of a cycle member")
+    }
+}
+
+type anyTableFirstCodec struct {
+    table [256][256]any
+    peer  *collaboratorLink
+}
+
+func (instance *anyTableFirstCodec) Close() error { return nil }
+
+type sliceTableFirstCodec struct {
+    table [256][256][]byte
+    peer  *collaboratorLink
+}
+
+func (instance *sliceTableFirstCodec) Close() error { return nil }
+
+/* an inline table of interfaces or slices is one node too: the walk enters neither, so counting each cell of it spent the whole budget before the pointer field declared after the table, exactly as a table of scalars did before it was counted as one node */
+func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&anyTableFirstCodec{peer: newCollaboratorChain(held, 1)}), heldIdentity) {
+        t.Fatalf("expected the peer declared after a table of interfaces to be found")
+    }
+
+    if false == holdsIdentity(heldPointerIdentities(&sliceTableFirstCodec{peer: newCollaboratorChain(held, 1)}), heldIdentity) {
+        t.Fatalf("expected the peer declared after a table of slices to be found")
     }
 }
 
 type selfReferringHolder struct {
     self   *selfReferringHolder
-    collab *closeOrderServiceB
+    collaborator *closeOrderServiceB
 }
 
 func (instance *selfReferringHolder) Close() error { return nil }
@@ -1202,7 +1532,7 @@ func TestHeldPointerIdentities_ReadsAValuePointingAtItselfOnce(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    holder := &selfReferringHolder{collab: held}
+    holder := &selfReferringHolder{collaborator: held}
     holder.self = holder
 
     identities := heldPointerIdentities(holder)
@@ -1228,6 +1558,7 @@ type busListener struct {
     peak     *atomic.Int32
 }
 
+/* Close holds until the other listener has entered its own Close as well — read from the peak, which only rises — or until a bound that only a serialised close reaches: two closes that overlap meet inside the window whatever the machine's load, where a fixed sleep met only when the scheduler was quick enough */
 func (instance *busListener) Close() error {
     now := instance.inFlight.Add(1)
 
@@ -1238,7 +1569,10 @@ func (instance *busListener) Close() error {
         }
     }
 
-    time.Sleep(30 * time.Millisecond)
+    deadline := time.Now().Add(2 * time.Second)
+    for 2 > instance.peak.Load() && true == time.Now().Before(deadline) {
+        time.Sleep(time.Millisecond)
+    }
 
     instance.inFlight.Add(-1)
 

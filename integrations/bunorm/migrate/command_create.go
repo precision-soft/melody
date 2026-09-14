@@ -42,7 +42,7 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
 
     migrationName := commandContext.Args().First()
     if "" == migrationName {
-        err := errors.New("migration name is required (usage: db:create <name>)")
+        err := errors.New("migration name is required (usage: " + instance.Name() + " <name>)")
         return err
     }
 

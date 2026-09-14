@@ -134,7 +134,6 @@ func TestSerializerManager_ResolveByAcceptHeader_WildcardSubtype_SelectsLexicalF
     }
 }
 
-/* each available type takes the quality of the most specific range covering it, so an exact range wins over a wildcard regardless of header order, and a q of 0 refuses rather than being ignored */
 func TestResolveByAcceptHeader_MostSpecificRangeWins(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -186,7 +185,6 @@ func TestResolveByAcceptHeader_ExplicitRefusalIsNotAcceptable(t *testing.T) {
     }
 }
 
-/* a typed nil passes the plain nil comparison, would be stored as a live serializer and would dereference its nil receiver on the first request the negotiation routes to it — the constructor refuses it with the same error the untyped nil gets */
 func TestNewSerializerManager_RefusesATypedNilSerializer(t *testing.T) {
     var typedNil *JsonSerializer
 
@@ -205,7 +203,6 @@ func TestNewSerializerManager_RefusesATypedNilSerializer(t *testing.T) {
     }
 }
 
-/* two spellings collapsing into one normalized mime are refused at construction: map iteration order would decide the surviving serializer, so the winner would change from one boot to the next with the loser dropped silently */
 func TestNewSerializerManager_RefusesCollidingMimeKeys(t *testing.T) {
     _, err := NewSerializerManager(
         map[string]serializercontract.Serializer{
@@ -223,7 +220,6 @@ func TestNewSerializerManager_RefusesCollidingMimeKeys(t *testing.T) {
     }
 }
 
-/* an empty accept header means the client takes anything, and a header matching nothing available still receives the default representation: a manager deliberately configured without json serves its first configured serializer in lexical mime order instead of refusing every such request while a serializer sits configured beside it */
 func TestResolveByAcceptHeader_WithoutJsonFallsBackToTheFirstConfiguredSerializer(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         "text/plain": &testSerializerPlain{},
@@ -245,7 +241,6 @@ func TestResolveByAcceptHeader_WithoutJsonFallsBackToTheFirstConfiguredSerialize
     }
 }
 
-/* a member whose q parameter falls outside the qvalue grammar is dropped whole: the previous leniency kept the member at full acceptance, so application/json;q=abc outweighed the sibling the client actually weighted */
 func TestResolveByAcceptHeader_MalformedQualityDropsTheMember(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -274,7 +269,6 @@ func TestResolveByAcceptHeader_MalformedQualityDropsTheMember(t *testing.T) {
     }
 }
 
-/* a comma inside a quoted parameter value stays inside its member: without quote awareness the refusal in text/plain;version="1,2";q=0 detached from the type it covered and the client was served the very representation it refused */
 func TestResolveByAcceptHeader_QuotedCommaKeepsTheRefusal(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeTextPlain: NewPlainTextSerializer(),
@@ -289,7 +283,6 @@ func TestResolveByAcceptHeader_QuotedCommaKeepsTheRefusal(t *testing.T) {
     }
 }
 
-/* a header that simply matches nothing available is not a refusal: the default representation is still served, which is what every client sending a narrow accept header against this framework relies on */
 func TestResolveByAcceptHeader_UnmatchedHeaderStillFallsBackToJson(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -308,7 +301,6 @@ func TestResolveByAcceptHeader_UnmatchedHeaderStillFallsBackToJson(t *testing.T)
     }
 }
 
-/* a refusal that leaves another registered type merely unmatched is a preference, not a refusal of the whole manager: the flag it replaced was raised by a single refused candidate, so Accept: application/json;q=0 answered 406 against a manager holding plain text beside json — the client was denied the very representation it never rejected. The refused type still may not be served, by the negotiation or by the fallback, so the json-first default has to step aside for it. */
 func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -318,7 +310,6 @@ func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *test
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
 
-    /* the second spelling refuses json through a wildcard rather than by name, so the repair cannot depend on the refusal being exact */
     for _, acceptHeader := range []string{"application/json;q=0", "application/*;q=0"} {
         resolved, resolveErr := manager.ResolveByAcceptHeader(acceptHeader)
         if nil != resolveErr {
@@ -330,14 +321,12 @@ func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *test
         }
     }
 
-    /* the refusal of every registered type stays a refusal: without this half the repair could simply have deleted the not-acceptable branch */
     _, everyTypeRefusedErr := manager.ResolveByAcceptHeader("*/*;q=0")
     if false == errors.Is(everyTypeRefusedErr, ErrNotAcceptable) {
         t.Fatalf("expected a header refusing every registered type to stay not acceptable, got %v", everyTypeRefusedErr)
     }
 }
 
-/* Get answers false for a mime that normalizes away to nothing, before it ever touches the map. The branch had no test of its own: an empty header value, a whitespace-only one and a bare parameter list all arrive here from the same place — a caller reading a Content-Type off a request that carried none — and without the guard the lookup would run with the empty key, which is exactly the key a manager built from a map with an empty spelling would have had, had the constructor not refused it. */
 func TestSerializerManager_Get_RefusesAMimeThatNormalizesToNothing(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -354,7 +343,6 @@ func TestSerializerManager_Get_RefusesAMimeThatNormalizesToNothing(t *testing.T)
     }
 }
 
-/* a mime the manager simply does not carry is a miss too, and it has to be told apart from the one above: both answer false, so a guard that returned early for every input would keep a test that only asserts the miss green while the registered serializer became unreachable. */
 func TestSerializerManager_Get_AnswersTheRegisteredSerializerAndMissesTheOthers(t *testing.T) {
     registered := NewJsonSerializer()
 
@@ -376,7 +364,6 @@ func TestSerializerManager_Get_AnswersTheRegisteredSerializerAndMissesTheOthers(
     }
 }
 
-/* the empty manager is the misconfiguration a deployment produces when the serializer map comes from configuration that resolved to nothing. Both error paths belong to it, and they are NOT the same answer: an empty accept header means "anything", so its failure says no default is configured, while a header that named something says nothing was found for that header — and only the second one carries the header in its context, which is the whole diagnostic. Since the fallback was widened, no other test reaches either branch. */
 func TestResolveByAcceptHeader_AnEmptyManagerRefusesBothWays(t *testing.T) {
     manager, managerErr := NewSerializerManager(nil)
     if nil != managerErr {
@@ -414,7 +401,6 @@ func TestResolveByAcceptHeader_AnEmptyManagerRefusesBothWays(t *testing.T) {
     }
 }
 
-/* an empty manager cannot even be asked for a default: defaultSerializer's zero-length branch is what turns "json is absent, take the first configured one" into an honest miss instead of an index into an empty slice. */
 func TestSerializerManager_DefaultSerializer_AnEmptyManagerHasNoDefault(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{})
     if nil != managerErr {
@@ -427,7 +413,6 @@ func TestSerializerManager_DefaultSerializer_AnEmptyManagerHasNoDefault(t *testi
     }
 }
 
-/* a nil map is the same manager as an empty one — the constructor substitutes an empty map rather than carrying the nil into every later lookup, where a read would work and the collision bookkeeping would not. */
 func TestNewSerializerManager_ANilMapBuildsAnEmptyManager(t *testing.T) {
     manager, managerErr := NewSerializerManager(nil)
     if nil != managerErr {
@@ -443,7 +428,6 @@ func TestNewSerializerManager_ANilMapBuildsAnEmptyManager(t *testing.T) {
     }
 }
 
-/* normalizeMime is used as an invariant by the matching above it — matchWildcardSubtype normalizes BOTH of its arguments — so a normalization that changed an already-normalized value would make a range match on the first pass and miss on the second. */
 func TestNormalizeMime_IsIdempotent(t *testing.T) {
     for _, rawMime := range []string{
         "Application/JSON; charset=utf-8",

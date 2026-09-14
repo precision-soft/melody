@@ -5,7 +5,7 @@ const (
     ServiceLifetimeScoped    = "scoped"
 )
 
-/* ServiceDescription is what a container can say about a registration without running its provider: the name, which lifetime owns it, whether an instance already exists, and the type — read from the built instance when there is one, from the provider's declared return type otherwise. It exists so an introspection command can list a container without building it. */
+/* ServiceDescription describes a registration without running its provider. Type comes from the built instance or, before construction, the provider’s return type. */
 type ServiceDescription struct {
     Name     string
     Lifetime string

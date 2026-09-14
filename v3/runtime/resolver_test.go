@@ -56,7 +56,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
     }
 }
 
-/* the name is registered without a type on purpose: a name registered under a type refuses an unassignable override at the install line now, so the mismatch a scope override can still carry lives on a name with no registered types — and the typed read must surface it rather than skip the bad override and answer the container's value */
+/* Omit type registration so the incompatible override reaches typed resolution rather than failing during registration. */
 func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -107,7 +107,6 @@ func TestMustFromRuntime_PanicsWhenMissingEverywhere(t *testing.T) {
     }, "service is not registered")
 }
 
-/* typedNilScopeRuntime yields a typed-nil scope beside a healthy container, the shape a custom Runtime implementation can legally produce */
 type typedNilScopeRuntime struct {
     container containercontract.Container
 }
@@ -124,7 +123,6 @@ func (instance *typedNilScopeRuntime) Container() containercontract.Container {
     return instance.container
 }
 
-/* a typed-nil scope used to be preferred over the healthy container and the promised may-not-be-nil error became a panic inside the resolution on the request path */
 func TestFromRuntime_FallsBackToTheContainerPastATypedNilScope(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -148,7 +146,6 @@ func TestFromRuntime_FallsBackToTheContainerPastATypedNilScope(t *testing.T) {
     }
 }
 
-/* typedNilRuntime is a typed-nil Runtime implementation: the guard must read through the interface */
 type typedNilRuntime struct{}
 
 func (instance *typedNilRuntime) Context() context.Context {
@@ -163,7 +160,6 @@ func (instance *typedNilRuntime) Container() containercontract.Container {
     return nil
 }
 
-/* a runtime that is itself present but carries neither a scope nor a container has nothing to resolve through, and says so: handing back a nil resolver would move the failure into the container call, where the message names a service instead of the wiring that has no resolver at all */
 func TestFromRuntime_RefusesARuntimeWithNeitherScopeNorContainer(t *testing.T) {
     runtimeInstance := &typedNilRuntime{}
 
@@ -192,7 +188,6 @@ func TestFromRuntime_RefusesATypedNilRuntime(t *testing.T) {
     }, "runtime may not be nil")
 }
 
-/* the refusal has to name the RUNTIME rather than the resolver behind it. With the guard reading a plain nil, a typed-nil runtime travels past this door and is refused three lines later for carrying no resolver — an error either way, which is why the assertion reads the message instead of its presence. Measured before it was written: the same mutant survives every test of the released v2 suite, so the gap is the released major's. */
 func TestFromRuntime_RefusesATypedNilRuntimeByNameRatherThanByItsMissingResolver(t *testing.T) {
     _, resolveErr := FromRuntime[string]((*typedNilRuntime)(nil), "service.test")
     if nil == resolveErr {
@@ -204,7 +199,6 @@ func TestFromRuntime_RefusesATypedNilRuntimeByNameRatherThanByItsMissingResolver
     }
 }
 
-/* typedNilContainerRuntime yields a typed-nil container beside an absent scope: the container door reads through the interface exactly as the scope door one line above it does */
 type typedNilContainerRuntime struct{}
 
 func (instance *typedNilContainerRuntime) Context() context.Context {
@@ -219,7 +213,6 @@ func (instance *typedNilContainerRuntime) Container() containercontract.Containe
     return (*nilableContainer)(nil)
 }
 
-/* a typed-nil container handed back as the resolver would dereference its nil receiver inside the container package, on the request path, in place of the refusal this door promises. The scope half of the same guard is pinned above; this is its container twin, unpinned on every major until here. */
 func TestFromRuntime_RefusesATypedNilContainerRatherThanResolvingThrough(t *testing.T) {
     _, resolveErr := FromRuntime[string](&typedNilContainerRuntime{}, "service.test")
     if nil == resolveErr {

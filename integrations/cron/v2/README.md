@@ -35,3 +35,5 @@ Everything else is stdlib. The package surface is shared across all three bindin
 ## Targeted deletion with `--prune`
 
 `--prune` renders the current configured destinations without writing and deletes only those files. It no longer generates replacements or scans neighboring files. Missing targets produce `cron.pruneDestinationMissing` warnings; other filesystem errors fail the run, preserving the report of completed removals. No output or log directories are created. Retire a destination while it is still configured, and run generation separately for replacements. See the [shared generator documentation](../README.md) for the full contract.
+
+Regeneration preserves existing destination permissions, including operator-restricted crontabs.

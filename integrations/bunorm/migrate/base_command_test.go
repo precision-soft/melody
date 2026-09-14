@@ -8,7 +8,6 @@ import (
     "testing"
     "testing/fstest"
     "time"
-
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -16,6 +15,9 @@ import (
     "github.com/precision-soft/melody/runtime"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
+    "bytes"
+    "encoding/json"
+    "github.com/precision-soft/melody/cli/output"
 )
 
 type stubResolver struct{}
@@ -380,5 +382,23 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
         if true == strings.HasPrefix(query, "INSERT") && true == strings.Contains(query, "bun_migrations") {
             t.Fatalf("the failed migration was marked applied: %q", query)
         }
+    }
+}
+
+
+func TestUnlockFailureIdentifiesTheLockAndRecoveryAction(t *testing.T) {
+    cause := errors.New("delete refused")
+    var buffer bytes.Buffer
+    out := newCommandOutput(&buffer, nil, output.Option{Format: output.FormatJson})
+    err := unlockMigrations(context.Background(), &recordingMigrationUnlocker{unlockError: cause}, out)
+    if false == errors.Is(err, cause) { t.Fatalf("lost unlock cause: %v", err) }
+    primary := errors.New("migration failed first")
+    if primary != out.finish("db:migrate", time.Now(), primary) { t.Fatal("primary failure replaced") }
+    var document struct { Warnings []struct { Code, Message string; Details map[string]any } }
+    if err := json.Unmarshal(buffer.Bytes(), &document); nil != err { t.Fatal(err) }
+    if 1 != len(document.Warnings) { t.Fatalf("warnings=%v", document.Warnings) }
+    warning := document.Warnings[0]
+    if "migrate.unlock_failed" != warning.Code || false == strings.Contains(warning.Message, "unlock") || "unlock" != warning.Details["action"] {
+        t.Fatalf("unlock diagnostic lacks identity or recovery action: %+v", warning)
     }
 }

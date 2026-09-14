@@ -51,7 +51,6 @@ func TestWildcardSubtypeMatching(t *testing.T) {
     }
 }
 
-/* the members a header can carry that are not media ranges at all — an empty one from a doubled comma, one whose parameters are doubled semicolons, a parameter with no equals sign, and one that normalizes away to nothing because it was only ever a parameter list — each has its own skip in the loop. Together they are the shapes a hand-assembled or proxy-rewritten Accept header actually arrives in, and a skip that fell through instead would put a member with an empty mime into the negotiation, where the empty key matches nothing and the header silently loses the range that followed it. */
 func TestParseAcceptHeader_SkipsTheMembersThatAreNotMediaRanges(t *testing.T) {
     parsed := parseAcceptHeader("application/json,,text/plain;;charset=utf-8;novalue,  ,;q=0.5")
 

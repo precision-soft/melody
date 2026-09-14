@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Text output failures propagate to the command result; custom command prefixes are reflected in create usage diagnostics.
+
+- Escape control characters in migration names and directions on every progress line. Failed lock release now identifies the unlock operation and its recovery precondition; JSON uses `migrate.unlock_failed` with structured action details while preserving the original migration failure.
+
 - Finalize Go migrations with long valid filenames using a short temporary name. A destination at the filesystem component limit no longer fails after creation because the temporary suffix exceeds that limit.
 
 - `db:migrate` and `db:rollback` retain a migration panic as the JSON failure when releasing the migration lock also fails. The unlock failure remains reported alongside it, and the original panic is re-raised unchanged.

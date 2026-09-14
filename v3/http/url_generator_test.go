@@ -2,6 +2,7 @@ package http
 
 import (
     nethttp "net/http"
+    "net/http/httptest"
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -321,6 +322,48 @@ func TestGeneratePath_CatchAllRequirementMatchesEmittedRemainder(t *testing.T) {
 
     if "/files/a/b" != pathValue {
         t.Fatalf("expected the emitted url to collapse the empty segment, got: %s", pathValue)
+    }
+}
+
+func TestGeneratePath_CatchAllPercentRequirementMatchesRouter(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    router.HandleWithOptions(
+        "/files/*path...",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(200), nil
+        },
+        NewRouteOptions(
+            "files",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            map[string]string{"path": "^100%25/c$"},
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    pathValue, err := urlGenerator.GeneratePath("files", map[string]string{"path": "100%/c"})
+    if nil != err {
+        t.Fatalf("the percent requirement must match the value received by the router; expected generation to succeed: %v", err)
+    }
+
+    if "/files/100%25/c" != pathValue {
+        t.Fatalf("expected the emitted url to escape the percent sign, got: %s", pathValue)
+    }
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router).ServeHttp(newHttpTestContainer()).ServeHTTP(
+        recorder,
+        httptest.NewRequest(nethttp.MethodGet, pathValue, nil),
+    )
+    if 200 != recorder.Code {
+        t.Fatalf("generated URL must satisfy the router requirement, got %d", recorder.Code)
     }
 }
 

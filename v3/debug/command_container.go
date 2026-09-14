@@ -174,8 +174,10 @@ func (instance *ContainerCommand) describeServiceList(
     shownNames := make(map[string]struct{}, len(items))
 
     for index := range items {
-        items[index].Teardown = view.forService(items[index].Name)
-        shownNames[items[index].Name] = struct{}{}
+        items[index].Teardown = view.forService(items[index].Name, items[index].Lifetime)
+        if containercontract.ServiceLifetimeContainer == items[index].Lifetime {
+            shownNames[items[index].Name] = struct{}{}
+        }
     }
 
     if output.FormatTable == option.Format {
@@ -238,9 +240,10 @@ func (instance *ContainerCommand) describeServiceList(
     )
 }
 
-/* containerServiceTeardownItem is the teardown's answer about one built container service, carried beside the service in every form the command answers: the wave the drain gives it, the services it is closed before, the services closed before it, and whether anything orders it at all. It is nil on a service the plan does not list — a registration never built, a scoped one — so the json document omits the key instead of inventing a wave for a service the teardown will never meet. */
+/* containerServiceTeardownItem is the teardown's answer about one built container service, carried beside the service in every form the command answers: the wave the drain gives it, the services it is closed before, the services closed before it, whether anything orders it at all, and the node the plan files it under — its own, or the one it was collapsed onto as an alias of the same instance. It is nil on a service the plan does not list — a registration never built, a scoped one — so the json document omits the key instead of inventing a wave for a service the teardown will never meet. The ordering reads `proved` where the graph relates the service to something, `none` where nothing does, and `cycle` where the service is on a dependency ring the drain could not open: the ring is closed as one unit, one service at a time, and the teardown reports it, which read as a proved order until the figure said otherwise. */
 type containerServiceTeardownItem struct {
     Wave         int      `json:"wave"`
+    Node         string   `json:"node"`
     ClosedBefore []string `json:"closedBefore"`
     ClosedAfter  []string `json:"closedAfter"`
     Ordering     string   `json:"ordering"`
@@ -257,11 +260,15 @@ type containerServiceTeardownItem struct {
 type teardownView struct {
     entries   []containercontract.TeardownPlanEntry
     byNodeKey map[string]*containerServiceTeardownItem
+    aliasesOf map[string][]string
     inWaves   bool
 }
 
 /* teardownNameNodeKeyPrefix is the spelling the plan gives a node filed under a name, as TeardownPlanEntry documents it; a node filed only under its type carries the other prefix and no name a listing could window on. */
 const teardownNameNodeKeyPrefix = "service:"
+
+/* teardownTypeNodeKeyPrefix is the spelling of a container TYPE node's key, the container's own; the view only reads it, to render an alias. */
+const teardownTypeNodeKeyPrefix = "type:"
 
 /* newTeardownView reads the plan once and answers nil for a container that does not carry the door or has nothing built; every reader below tolerates the nil, so a command over such a container renders its listing with no teardown in it rather than failing. */
 func newTeardownView(serviceContainer containercontract.Container) *teardownView {
@@ -279,14 +286,25 @@ func newTeardownView(serviceContainer containercontract.Container) *teardownView
     }
 
     byNodeKey := make(map[string]*containerServiceTeardownItem, len(entries))
+    aliasesOf := make(map[string][]string, len(entries))
 
     for _, entry := range entries {
-        byNodeKey[entry.NodeKey] = &containerServiceTeardownItem{
+        item := &containerServiceTeardownItem{
             Wave:         entry.WaveIndex,
+            Node:         entry.NodeKey,
             ClosedBefore: append([]string{}, entry.Dependencies...),
             ClosedAfter:  []string{},
             Group:        entry.SerialGroup,
         }
+
+        byNodeKey[entry.NodeKey] = item
+
+        /* an alias answers with the item of the node it was collapsed onto: the plan lists one instance once, and a name the plan folded away used to have no item at all — read by the json document as a service never built, and by a windowed listing as nothing to show */
+        for _, alias := range entry.Aliases {
+            byNodeKey[alias] = item
+        }
+
+        aliasesOf[entry.NodeKey] = entry.Aliases
     }
 
     /* the dependents are derived from the dependencies rather than asked of the container: the plan states each edge once, at its dependent, and this view is the one reader that needs the edge from its other end */
@@ -301,32 +319,56 @@ func newTeardownView(serviceContainer containercontract.Container) *teardownView
         }
     }
 
-    for _, item := range byNodeKey {
+    for _, entry := range entries {
+        item := byNodeKey[entry.NodeKey]
+
         sort.Strings(item.ClosedAfter)
 
         item.Ordering = "proved"
         if 0 == len(item.ClosedBefore) && 0 == len(item.ClosedAfter) {
             item.Ordering = "none"
         }
+
+        if true == entry.Cycle {
+            item.Ordering = "cycle"
+        }
     }
 
     return &teardownView{
         entries:   entries,
         byNodeKey: byNodeKey,
+        aliasesOf: aliasesOf,
         inWaves:   planned.TeardownRunsInWaves(),
     }
 }
 
-/* forService answers the teardown item of a service filed under its name, nil for a name the plan does not list. A service filed only under its type has no name to be asked by and reaches the table through the block alone. */
-func (instance *teardownView) forService(serviceName string) *containerServiceTeardownItem {
-    if nil == instance {
+/* forService answers the teardown item of a container service filed under its name, nil for a name the plan does not list and nil for a SCOPED registration whatever its name: a scoped service is built and closed by each scope and has no node in the container's plan, but a scoped registration is allowed to share its name with a built container service, and asked by the name alone it was handed that service's item — a `lifetime: scoped` row carrying a wave, which sent the operator to declare an ordering the scoped door refuses. A service filed only under its type has no name to be asked by and reaches the table through the block alone. */
+func (instance *teardownView) forService(serviceName string, lifetime string) *containerServiceTeardownItem {
+    if nil == instance || containercontract.ServiceLifetimeScoped == lifetime {
         return nil
     }
 
     return instance.byNodeKey[teardownNameNodeKeyPrefix+serviceName]
 }
 
-/* addBlock renders the plan for the nodes the listing shows: a node filed under a name is kept when that name is in the window, a node filed only under its type has no name a window could name and is kept always. The wave index is the plan's, not the window's, so a windowed listing still says where each shown service stands in the whole teardown. */
+/* readableAliases renders the node keys an instance is also filed under in the spelling an operator can read: a type key is the container's identity key — the package path, a NUL and the type's string — which the ordinary service, registered under a name and resolved through its type, carries as an alias on every row; printed raw it wrapped over three lines of escaped path on every service of the example application. The type's own string is what names it. */
+func readableAliases(aliases []string) []string {
+    readable := make([]string, 0, len(aliases))
+
+    for _, alias := range aliases {
+        if true == strings.HasPrefix(alias, teardownTypeNodeKeyPrefix) {
+            if separator := strings.LastIndex(alias, "\x00"); 0 <= separator {
+                alias = teardownTypeNodeKeyPrefix + alias[separator+1:]
+            }
+        }
+
+        readable = append(readable, alias)
+    }
+
+    return readable
+}
+
+/* addBlock renders the plan for the nodes the listing shows: a node filed under a name is kept when that name — or the name of any alias collapsed onto it — is in the window, a node filed only under its type has no name a window could name and is kept always. The wave index is the plan's, not the window's, so a windowed listing still says where each shown service stands in the whole teardown. */
 func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames map[string]struct{}) {
     if nil == instance {
         return
@@ -335,13 +377,16 @@ func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames 
     rows := make([][]string, 0, len(instance.entries))
 
     for _, entry := range instance.entries {
-        if true == strings.HasPrefix(entry.NodeKey, teardownNameNodeKeyPrefix) {
-            if _, shown := shownNames[strings.TrimPrefix(entry.NodeKey, teardownNameNodeKeyPrefix)]; false == shown {
-                continue
-            }
+        if true == strings.HasPrefix(entry.NodeKey, teardownNameNodeKeyPrefix) && false == instance.isShown(entry, shownNames) {
+            continue
         }
 
         item := instance.byNodeKey[entry.NodeKey]
+
+        node := entry.NodeKey
+        if 0 < len(entry.Aliases) {
+            node = fmt.Sprintf("%s (also %s)", entry.NodeKey, strings.Join(readableAliases(entry.Aliases), ", "))
+        }
 
         /* a group is printed by its number, empty for a service in none: the operator reads "these close one after the other" from two rows sharing a figure, which "same wave, no dependencies" used to hide */
         group := ""
@@ -353,7 +398,7 @@ func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames 
             rows,
             []string{
                 fmt.Sprintf("%d", entry.WaveIndex),
-                entry.NodeKey,
+                node,
                 strings.Join(item.ClosedBefore, ", "),
                 item.Ordering,
                 strings.Join(item.ClosedAfter, ", "),
@@ -381,6 +426,25 @@ func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames 
     }
 }
 
+/* isShown answers whether a node filed under a name is in the listing's window under any of its names: the window is applied to the names the listing shows, and an instance the plan lists under one name may be shown under another */
+func (instance *teardownView) isShown(entry containercontract.TeardownPlanEntry, shownNames map[string]struct{}) bool {
+    if _, shown := shownNames[strings.TrimPrefix(entry.NodeKey, teardownNameNodeKeyPrefix)]; true == shown {
+        return true
+    }
+
+    for _, alias := range entry.Aliases {
+        if false == strings.HasPrefix(alias, teardownNameNodeKeyPrefix) {
+            continue
+        }
+
+        if _, shown := shownNames[strings.TrimPrefix(alias, teardownNameNodeKeyPrefix)]; true == shown {
+            return true
+        }
+    }
+
+    return false
+}
+
 func renderServiceDescriptionState(item containerServiceDescriptionItem) string {
     if true == item.IsBuilt {
         return "built"
@@ -391,6 +455,7 @@ func renderServiceDescriptionState(item containerServiceDescriptionItem) string 
 
 type containerServiceListItem struct {
     Name             string                        `json:"name"`
+    Lifetime         string                        `json:"lifetime"`
     TypeName         string                        `json:"typeName"`
     ErrorString      string                        `json:"error"`
     ErrorCauseChain  []string                      `json:"errorCauseChain"`
@@ -520,31 +585,31 @@ func (instance *ContainerCommand) populateServiceList(
     option output.Option,
     envelope *output.Envelope,
 ) {
-    scopedNames := map[string]struct{}{}
-    serviceNames := ([]string)(nil)
-
+    registrations := []containerServiceDescriptionItem{}
     if reporter, ok := serviceContainer.(serviceDescriptionReporter); true == ok {
-        descriptions := reporter.ServiceDescriptions()
-
-        serviceNames = make([]string, 0, len(descriptions))
-        for _, description := range descriptions {
-            serviceNames = append(serviceNames, description.Name)
-
-            if containercontract.ServiceLifetimeScoped == description.Lifetime {
-                scopedNames[description.Name] = struct{}{}
-            }
+        for _, description := range reporter.ServiceDescriptions() {
+            registrations = append(registrations, containerServiceDescriptionItem{
+                Name: description.Name,
+                Lifetime: description.Lifetime,
+            })
         }
     } else {
-        serviceNames = serviceContainer.Names()
+        for _, name := range serviceContainer.Names() {
+            registrations = append(registrations, containerServiceDescriptionItem{
+                Name: name,
+                Lifetime: containercontract.ServiceLifetimeContainer,
+            })
+        }
     }
-
-    sort.Strings(serviceNames)
-
-    output.ApplySortOrder(serviceNames, option.Order)
-
-    total := len(serviceNames)
-
-    selected := output.WindowItems(serviceNames, option.Limit, option.Offset)
+    sort.SliceStable(registrations, func(left, right int) bool {
+        if registrations[left].Name == registrations[right].Name {
+            return registrations[left].Lifetime < registrations[right].Lifetime
+        }
+        return registrations[left].Name < registrations[right].Name
+    })
+    output.ApplySortOrder(registrations, option.Order)
+    total := len(registrations)
+    selected := output.WindowItems(registrations, option.Limit, option.Offset)
 
     okItems := make([]containerServiceListItem, 0, len(selected))
     errorItems := make([]containerServiceListItem, 0, len(selected))
@@ -552,10 +617,18 @@ func (instance *ContainerCommand) populateServiceList(
     /* the view is read AFTER the sweep resolved the window, because the plan lists what is built and the sweep is what builds it */
     shownNames := make(map[string]struct{}, len(selected))
 
-    for _, name := range selected {
-        shownNames[name] = struct{}{}
-
-        serviceInstance, getErr := resolveServiceForLifetime(serviceContainer, runScope, name, scopedNames)
+    for _, registration := range selected {
+        name := registration.Name
+        var serviceInstance any
+        var getErr error
+        if containercontract.ServiceLifetimeScoped == registration.Lifetime && false == internal.IsNilInterface(runScope) {
+            serviceInstance, getErr = runScope.Get(name)
+        } else {
+            serviceInstance, getErr = serviceContainer.Get(name)
+        }
+        if containercontract.ServiceLifetimeContainer == registration.Lifetime {
+            shownNames[name] = struct{}{}
+        }
 
         typeName := ""
         errorString := ""
@@ -574,6 +647,7 @@ func (instance *ContainerCommand) populateServiceList(
 
         item := containerServiceListItem{
             Name:             name,
+            Lifetime:         registration.Lifetime,
             TypeName:         typeName,
             ErrorString:      errorString,
             ErrorCauseChain:  errorCauseChain,
@@ -590,11 +664,11 @@ func (instance *ContainerCommand) populateServiceList(
     view := newTeardownView(serviceContainer)
 
     for index := range okItems {
-        okItems[index].Teardown = view.forService(okItems[index].Name)
+        okItems[index].Teardown = view.forService(okItems[index].Name, okItems[index].Lifetime)
     }
 
     for index := range errorItems {
-        errorItems[index].Teardown = view.forService(errorItems[index].Name)
+        errorItems[index].Teardown = view.forService(errorItems[index].Name, errorItems[index].Lifetime)
     }
 
     reportServiceSweepFailures(errorItems, envelope)
@@ -1200,7 +1274,7 @@ func (instance *ContainerCommand) populateSingleService(
         ErrorString:      errorString,
         ErrorCauseChain:  errorCauseChain,
         ErrorContextJson: errorContextJson,
-        Teardown:         view.forService(serviceName),
+        Teardown:         view.forService(serviceName, lifetime),
     }
 
     if output.FormatTable == option.Format {
@@ -1237,7 +1311,11 @@ func (instance *ContainerCommand) populateSingleService(
             block.AddRow("errorContextJson", details.ErrorContextJson)
         }
 
-        view.addBlock(builder, map[string]struct{}{serviceName: {}})
+        shownNames := map[string]struct{}{}
+        if containercontract.ServiceLifetimeContainer == lifetime {
+            shownNames[serviceName] = struct{}{}
+        }
+        view.addBlock(builder, shownNames)
 
         envelope.Table = builder.Build()
 

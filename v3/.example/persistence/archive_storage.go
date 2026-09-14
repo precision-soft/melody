@@ -19,10 +19,16 @@ const ServiceArchiveLocker = "service.example.archive.locker"
    The second reason is this major's own: two *bun.DB handles are registered here, and neither is on the container's type index, so a resolution by type could not tell them apart even if the generator tried. */
 type ArchiveStorage struct {
     database *bun.DB
+    location string
 }
 
 func NewArchiveStorage(database *bun.DB) *ArchiveStorage {
-    return &ArchiveStorage{database: database}
+    return NewArchiveStorageAt(database, "")
+}
+
+/* NewArchiveStorageAt names the database the handle is open on, the way the catalogue handle is named: the reset prints both before it destroys either, and two databases told apart only by their tables is what that plan exists to prevent. */
+func NewArchiveStorageAt(database *bun.DB, location string) *ArchiveStorage {
+    return &ArchiveStorage{database: database, location: location}
 }
 
 /* Database is nil when the environment configured no archive connection. */
@@ -32,4 +38,9 @@ func (instance *ArchiveStorage) Database() *bun.DB {
 
 func (instance *ArchiveStorage) IsPersistent() bool {
     return nil != instance.database
+}
+
+/* Location names the database the handle is open on, as the connection was declared, and is empty for a handle nobody located. */
+func (instance *ArchiveStorage) Location() string {
+    return instance.location
 }

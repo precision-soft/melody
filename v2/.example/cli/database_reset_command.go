@@ -1,7 +1,6 @@
 package cli
 
 import (
-    "context"
     "fmt"
     "io"
     "os"
@@ -50,7 +49,7 @@ func (instance *DatabaseResetCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
     if "" == instance.databaseServiceName {
         return melodyexception.NewError(
             "the example has no database configured, so there is nothing to reset",
@@ -73,7 +72,11 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         return nil
     }
 
-    ctx := context.Background()
+    finishCache, cacheErr := prepareDatabaseResetCache(runtimeInstance, writer)
+    if nil != cacheErr { return cacheErr }
+    defer finishCache(&runErr)
+
+    ctx := runtimeInstance.Context()
 
     database, resolveErr := melodycontainer.FromResolver[*bun.DB](
         runtimeInstance.Container(),
@@ -107,7 +110,7 @@ func databaseResetPlanLineList() []string {
     return append(
         lineList,
         "  - the bun bookkeeping tables, so an older set's rows go with them",
-        "and then reseed the nomenclature",
+        "and then reseed the nomenclature and clear the application cache",
     )
 }
 

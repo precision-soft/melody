@@ -54,7 +54,6 @@ func TestClockMustFromContainer_RefusesNilContainer(t *testing.T) {
     )
 }
 
-/* a nil pointer whose promoted interface methods are never reached: the guard under test must fire before any of them would dereference the nil receiver */
 type serviceResolverTestContainer struct {
     containercontract.Container
 }
@@ -69,12 +68,10 @@ func TestClockMustFromResolver_RefusesNilResolver(t *testing.T) {
     )
 }
 
-/* a nil pointer whose promoted interface methods are never reached: the resolver door's guard must fire before any of them would dereference the nil receiver */
 type serviceResolverTestResolver struct {
     containercontract.Resolver
 }
 
-/* the container door already refuses a typed nil; the resolver door is its twin and was pinned on no major — only the untyped nil was, which a plain comparison answers just as well. */
 func TestClockMustFromResolver_RefusesATypedNilResolver(t *testing.T) {
     var typedNil *serviceResolverTestResolver
 

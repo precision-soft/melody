@@ -226,17 +226,14 @@ func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
     }, "failed to get service from scope")
 }
 
-/* nilableScope embeds the interface so a nil pointer of this type is a typed nil that still satisfies containercontract.Scope */
 type nilableScope struct {
     containercontract.Scope
 }
 
-/* nilableContainer embeds the interface so a nil pointer of this type is a typed nil that still satisfies containercontract.Container */
 type nilableContainer struct {
     containercontract.Container
 }
 
-/* typedNilContext is a Context implementation carried as a typed nil, the shape a caller produces by passing an unassigned variable of a concrete context type: it is not equal to nil once it sits in the interface, so a plain comparison lets it through and the first Done() on the request path dereferences it */
 type typedNilContext struct{}
 
 func (instance *typedNilContext) Deadline() (time.Time, bool) {

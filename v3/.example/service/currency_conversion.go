@@ -49,7 +49,7 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
         return 0, exception.NewError("a conversion needs both currencies", nil, nil)
     }
 
-    if 0 >= from.Rate || 0 >= to.Rate {
+    if 0 >= from.Rate || 0 >= to.Rate || math.IsInf(from.Rate, 0) || math.IsInf(to.Rate, 0) || math.IsNaN(from.Rate) || math.IsNaN(to.Rate) {
         return 0, exception.NewError(
             "a currency without a positive rate cannot take part in a conversion",
             exceptioncontract.Context{
@@ -67,7 +67,11 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
        of value wherever they are read */
     converted := amount / from.Rate * to.Rate
 
-    return math.Round(converted*100.0) / 100.0, nil
+    rounded := math.Round(converted*100.0) / 100.0
+    if math.IsInf(rounded, 0) || math.IsNaN(rounded) {
+        return 0, exception.NewError("the converted amount is outside the supported numeric range", nil, nil)
+    }
+    return rounded, nil
 }
 
 /* foldCurrencyCode is the one spelling of what makes two codes the same name. Trim then upper-case, through

@@ -2,6 +2,7 @@ package migration
 
 import (
     "context"
+    "errors"
     "sync"
     "time"
 
@@ -49,15 +50,21 @@ type refusedMigrationAttempt struct {
 
    A success is recorded for good. A refusal that spent the retry window waiting for another process is recorded for as long as that window, so the resolutions arriving inside it are answered with it instead of each waiting again; every other failure is recorded not at all and is retried at the next resolution. The mutex serializes the callers of one process, and the bun migration lock serializes processes sharing the database — several instances of this example race here whenever a volume starts empty. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
-    return ensureMigratedSet(ctx, database, Migrations, migrationUnlockCommand)
+    return ensureMigratedSet(ctx, database, Migrations, catalogMigrationSetName, migrationUnlockCommand)
 }
 
 /* EnsureArchiveMigrated applies the ArchiveMigrations set to the archive database, through the same funnel EnsureMigrated runs — only the set and the unlock remedy differ, because the archive's lock lives in the archive's own database and is cleared by db:archive:unlock, not db:unlock. */
 func EnsureArchiveMigrated(ctx context.Context, database *bun.DB) error {
-    return ensureMigratedSet(ctx, database, ArchiveMigrations, archiveMigrationUnlockCommand)
+    return ensureMigratedSet(ctx, database, ArchiveMigrations, archiveMigrationSetName, archiveMigrationUnlockCommand)
 }
 
-func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migrations, unlockCommand string) error {
+/* the two sets by the name a failure reports them under: a refusal of the second database has to say which database refused, because the console line an operator reads names neither the host nor the role */
+const (
+    catalogMigrationSetName = "catalogue"
+    archiveMigrationSetName = "archive"
+)
+
+func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migrations, setName string, unlockCommand string) error {
     if nil == database {
         return exception.NewError("migration: bun database is nil", nil, nil)
     }
@@ -93,8 +100,9 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         migrate.WithMarkAppliedOnSuccess(true),
     )
 
+    /* every failure of the set is handed back as this application's exception naming the set and the step, with bun's error as the cause: a raw driver error travelling up through a by-type resolution is relabelled "service not registered in resolver" by the container, a headline that sends the operator to the wiring for a database that refused. errors.Is still reaches the cause. */
     if initErr := migrator.Init(ctx); nil != initErr {
-        return initErr
+        return migrationStepFailure(setName, "initialising the bookkeeping", unlockCommand, initErr)
     }
 
     lockStartedAt := time.Now()
@@ -114,13 +122,31 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
 
     if true == locked {
         if migrateErr := migrateWhileLocked(ctx, migrator, unlockCommand); nil != migrateErr {
-            return migrateErr
+            return migrationStepFailure(setName, "applying the set", unlockCommand, migrateErr)
         }
     }
 
     migratedDatabaseList[memoizationKey] = struct{}{}
 
     return nil
+}
+
+/* migrationStepFailure is the exception every refusal of a set is handed back as. An exception of this application's own is left as it is, so the lock refusal keeps the remedy it names and a failed unlock keeps its verdict; anything else — bun's, the driver's — is wrapped with the set and the step. */
+func migrationStepFailure(setName string, step string, unlockCommand string, cause error) error {
+    var ownException *exception.Error
+    if true == errors.As(cause, &ownException) {
+        return cause
+    }
+
+    return exception.NewError(
+        "migration: "+step+" did not complete on the "+setName+" set",
+        exceptioncontract.Context{
+            "set":           setName,
+            "step":          step,
+            "unlockCommand": unlockCommand,
+        },
+        cause,
+    )
 }
 
 /* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. */

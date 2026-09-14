@@ -995,3 +995,24 @@ func TestSizeCheckedReader_SurfacesAProbeFailureAtTheBoundaryInsteadOfFabricatin
         t.Fatalf("expected the boundary probe failure to surface rather than read as a clean end, got %v", readErr)
     }
 }
+
+func TestSizeCheckedReaderConcurrentRejectionObservation(t *testing.T) {
+    reader := &sizeCheckedReader{key: "concurrent", size: 1}
+    start := make(chan struct{})
+    done := make(chan struct{})
+    go func() {
+        <-start
+        for index := 0; index < 10000; index++ {
+            _ = reader.reject()
+        }
+        close(done)
+    }()
+    close(start)
+    for index := 0; index < 10000; index++ {
+        _ = reader.rejected.Load()
+    }
+    <-done
+    if false == reader.rejected.Load() {
+        t.Fatal("rejection was not published")
+    }
+}

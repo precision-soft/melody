@@ -29,7 +29,7 @@ type acceptedMime struct {
     qualityValue float64
 }
 
-/* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
+/* Invalid q-values discard the entire media range. */
 func parseAcceptHeader(acceptHeader string) []acceptedMime {
     parts := internal.SplitOutsideQuotes(acceptHeader, ',')
     result := make([]acceptedMime, 0, len(parts))
@@ -125,7 +125,7 @@ func matchWildcardSubtype(wildcardMime string, candidateMime string) bool {
     return true == strings.HasPrefix(candidateMime, prefix)
 }
 
-/* a q of 0 is a refusal, not an absence: it is kept in the parsed list so a candidate it covers can be excluded rather than falling through to the default */
+/* Keep q=0 ranges so fallback cannot serve an explicitly refused type. */
 func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int {
     acceptedMimeValue = normalizeMime(acceptedMimeValue)
     candidateMime = normalizeMime(candidateMime)

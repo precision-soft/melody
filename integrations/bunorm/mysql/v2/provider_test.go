@@ -12,7 +12,6 @@ import (
     "strings"
     "testing"
     "time"
-
     driver "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/integrations/bunorm/v2"
     "github.com/precision-soft/melody/v2/exception"
@@ -1137,5 +1136,34 @@ func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
 
     if 100*time.Millisecond != provider.computeBackoffDelay(0) {
         t.Fatalf("expected a zero attempt to read as the first, got %s", provider.computeBackoffDelay(0))
+    }
+}
+
+
+/* Inspect the address handed to the actual driver; abort before opening a socket. */
+func TestProviderPreservesIPv6HostAndPort(t *testing.T) {
+    for _, testCase := range []struct { host, want string }{
+        {"::1", "[::1]:3306"},
+        {"[::1]", "[::1]:3306"},
+        {"fe80::1%eth0", "[fe80::1%eth0]:3306"},
+        {"[fe80::1%eth0]", "[fe80::1%eth0]:3306"},
+        {"127.0.0.1", "127.0.0.1:3306"},
+        {"db.internal", "db.internal:3306"},
+    } {
+        t.Run(testCase.host, func(t *testing.T) {
+            stop := errors.New("stop before dial")
+            seen := ""
+            provider := newTestProvider(WithPostBuildHook(func(ctx context.Context, configuration *driver.Config) error {
+                seen = configuration.Addr
+                return stop
+            }))
+            database, err := provider.Open(newTestParams(testCase.host, "3306", "melody", "melody", "secret"), nil)
+            if nil != database || false == errors.Is(err, stop) {
+                t.Fatalf("expected pre-dial abort, got database=%v error=%v", database, err)
+            }
+            if testCase.want != seen {
+                t.Fatalf("driver address=%q; want %q", seen, testCase.want)
+            }
+        })
     }
 }

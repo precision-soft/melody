@@ -138,3 +138,21 @@ func TestConvertedPriceFor_RefusesWhenTheProductsOwnCurrencyIsMissing(t *testing
         t.Fatalf("a product quoted in a missing currency was converted into %+v", converted)
     }
 }
+
+
+func TestConversionRefusalDistinguishesClientAndCatalogueFailures(t *testing.T) {
+    for _, testCase := range []struct { name, code string; removeSource bool; expected int }{
+        {"unknown client code", "ZZZ", false, 400},
+        {"missing source in catalogue", "USD", true, 500},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            catalogue := conversionCatalogue()
+            if testCase.removeSource { catalogue = catalogue[1:] }
+            request := conversionRequest(t, "/products/api/read/prod-1/?currency="+testCase.code)
+            _, err := convertedPriceFor(request, conversionProduct(), catalogue)
+            if nil == err { t.Fatal("expected conversion refusal") }
+            response := conversionErrorResponse(nil, request, err)
+            if testCase.expected != response.StatusCode() { t.Fatalf("status=%d want=%d", response.StatusCode(), testCase.expected) }
+        })
+    }
+}

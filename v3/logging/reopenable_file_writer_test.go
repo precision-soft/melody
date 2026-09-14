@@ -312,3 +312,47 @@ func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentine
         t.Fatalf("expected a closed writer's refusal to stay a failed rotation")
     }
 }
+
+func TestReopenableFileWriterConcurrentWriteAndReopen(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "concurrent.log")
+    writer, err := NewReopenableFileWriter(path)
+    if nil != err {
+        t.Fatal(err)
+    }
+    defer func() { _ = writer.Close() }()
+    start := make(chan struct{})
+    results := make(chan error, 2)
+    go func() {
+        <-start
+        for index := 0; index < 1000; index++ {
+            if _, writeErr := writer.Write([]byte("record\n")); nil != writeErr {
+                results <- writeErr
+                return
+            }
+        }
+        results <- nil
+    }()
+    go func() {
+        <-start
+        for index := 0; index < 100; index++ {
+            if reopenErr := writer.Reopen(); nil != reopenErr {
+                results <- reopenErr
+                return
+            }
+        }
+        results <- nil
+    }()
+    close(start)
+    for index := 0; index < 2; index++ {
+        if operationErr := <-results; nil != operationErr {
+            t.Errorf("concurrent operation: %v", operationErr)
+        }
+    }
+    content, readErr := os.ReadFile(path)
+    if nil != readErr {
+        t.Fatal(readErr)
+    }
+    if string(content) != strings.Repeat("record\n", 1000) {
+        t.Fatal("concurrent reopen lost or corrupted records")
+    }
+}

@@ -157,3 +157,8 @@ Every command runs on the registry's DEDICATED migration connection where the pr
 Bun writes the destination first. The command therefore cannot make the entire creation atomic: a crash or an error before the final rename can leave Bun's original file, possibly incomplete. Such an error fails the command; inspect the named destination before retrying. Cleanup removes only the temporary file created by the finalizer. It never deletes the destination or other files based on their names or ages.
 
 After a successful rename, a directory-sync failure instead returns success with a warning naming the file and its unconfirmed crash durability. The complete file is already in place, so blindly retrying could create a second migration. The rewrite preserves Bun's permissions as narrowed by the process umask.
+
+
+A failed lock release emits `migrate.unlock_failed` in JSON warnings, with `action: "unlock"` and `requiresNoActiveMigration: true`. Verify that no migration is active before using the configured unlock command against the same database/manager. The original migration failure remains the primary error; an unlock failure also prevents a successful exit when migration work otherwise succeeded. Migration names and directions are escaped before terminal output.
+
+Text output failures propagate to the command result; custom command prefixes are reflected in create usage diagnostics.

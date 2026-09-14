@@ -1759,6 +1759,9 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/admin//",
         "/.well-known/acme-challenge/token",
         "/assets/app.css",
+        /* whitespace INSIDE the path is a spelling the router and the matcher read alike — neither trims it — so it is not refused */
+        "/public /",
+        "/a b/c",
     }
 
     for _, canonicalPath := range canonicalPaths {
@@ -1767,7 +1770,7 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         }
     }
 
-    /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request */
+    /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request. The whitespace spellings are the decoded forms of "/public%20", "/public%09" and "/public%C2%A0": the router keeps the whitespace and the matcher trims it */
     foldedPaths := []string{
         "/public ",
         " /public",
@@ -1783,6 +1786,15 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/./login",
         "/admin/.",
         "/../etc/passwd",
+        "/public ",
+        "/public\t",
+        "/public\u00a0",
+        "/ ",
+        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router routed as a segment of its own while the matcher trimmed it to "/public" */
+        " /public",
+        "\t/public",
+        "\u00a0/public",
+        " ",
     }
 
     for _, foldedPath := range foldedPaths {
@@ -1797,6 +1809,51 @@ func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
     for _, target := range []string{"*", "example.com:443", ""} {
         if false == requestPathIsCanonical(target) {
             t.Fatalf("expected non-path target %q to be left to the router", target)
+        }
+    }
+}
+
+func TestRequestPathAsRouted_KeepsAnEncodedSeparatorInsideItsSegmentAndDecodesTheRest(t *testing.T) {
+    for escapedPath, routed := range map[string]string{
+        "/":                    "/",
+        "/public":              "/public",
+        "/public/":             "/public/",
+        "/caf%C3%A9":           "/café",
+        "/a%20b/c":             "/a b/c",
+        "/a%25b":               "/a%b",
+        "/public%2F":           "/public%2F",
+        "/public%2f":           "/public%2F",
+        "/admin%2Fusers":       "/admin%2Fusers",
+        "/files/a%2Fb/c":       "/files/a%2Fb/c",
+        "/public%252F":         "/public%2F",
+        "/admin/users":         "/admin/users",
+        "/a+b":                 "/a+b",
+        "/a%zz/b":              "/a%zz/b",
+        "/a%2/b":               "/a%2/b",
+        "*":                    "*",
+        "example.com:443":      "example.com:443",
+        "":                     "",
+    } {
+        if routed != RequestPathAsRouted(escapedPath) {
+            t.Fatalf("expected %q to be read as %q, got %q", escapedPath, routed, RequestPathAsRouted(escapedPath))
+        }
+    }
+}
+
+/* the routed spelling is the router's own reading joined back: each segment is the one splitRequestPath binds, with a separator the segment carries put back as "%2F" — a plus sign is not a space here, and a malformed escape is left as sent, exactly as the router leaves it */
+func TestRequestPathAsRouted_AgreesWithTheRoutersOwnSegments(t *testing.T) {
+    for _, escapedPath := range []string{"/caf%C3%A9", "/a%20b/c", "/a+b", "/a%zz/b", "/files/a%2Fb/c", "/public%252F", "/x/%2E%2E/y", "/a%00b"} {
+        routedSegments := strings.Split(RequestPathAsRouted(escapedPath), "/")
+        routerSegments := splitRequestPath(escapedPath)
+
+        if len(routedSegments) != len(routerSegments) {
+            t.Fatalf("expected %q to have the router's %d segments, got %d: %q", escapedPath, len(routerSegments), len(routedSegments), routedSegments)
+        }
+
+        for index, routerSegment := range routerSegments {
+            if strings.ReplaceAll(routerSegment, "/", "%2F") != routedSegments[index] {
+                t.Fatalf("expected segment %d of %q to read %q as the router does, got %q", index, escapedPath, routerSegment, routedSegments[index])
+            }
         }
     }
 }

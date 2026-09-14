@@ -45,8 +45,8 @@ func LoginHandler() melodyhttpcontract.Handler {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid form"), nil
             }
 
-            dto.Username = httpRequest.FormValue("username")
-            dto.Password = httpRequest.FormValue("password")
+            dto.Username = httpRequest.PostForm.Get("username")
+            dto.Password = httpRequest.PostForm.Get("password")
         }
 
         username := strings.TrimSpace(dto.Username)

@@ -9,7 +9,6 @@ import (
     "testing"
     "testing/fstest"
     "time"
-
     "github.com/precision-soft/melody/integrations/bunorm/v3"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
@@ -656,5 +655,23 @@ func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
 
     if runErr := dispatchProbeCommand(command, runtimeInstance, []string{"migrate"}); nil != runErr {
         t.Fatalf("unexpected command error: %s", runErr.Error())
+    }
+}
+
+
+func TestUnlockFailureIdentifiesTheLockAndRecoveryAction(t *testing.T) {
+    cause := errors.New("delete refused")
+    var buffer bytes.Buffer
+    out := newCommandOutput(&buffer, nil, output.Option{Format: output.FormatJson})
+    err := unlockMigrations(context.Background(), &recordingMigrationUnlocker{unlockError: cause}, out)
+    if false == errors.Is(err, cause) { t.Fatalf("lost unlock cause: %v", err) }
+    primary := errors.New("migration failed first")
+    if primary != out.finish("db:migrate", time.Now(), primary) { t.Fatal("primary failure replaced") }
+    var document struct { Warnings []struct { Code, Message string; Details map[string]any } }
+    if err := json.Unmarshal(buffer.Bytes(), &document); nil != err { t.Fatal(err) }
+    if 1 != len(document.Warnings) { t.Fatalf("warnings=%v", document.Warnings) }
+    warning := document.Warnings[0]
+    if "migrate.unlock_failed" != warning.Code || false == strings.Contains(warning.Message, "unlock") || "unlock" != warning.Details["action"] {
+        t.Fatalf("unlock diagnostic lacks identity or recovery action: %+v", warning)
     }
 }

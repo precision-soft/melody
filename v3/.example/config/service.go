@@ -154,7 +154,7 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
                 return nil, resolveErr
             }
 
-            return persistence.NewCatalogStorage(database), nil
+            return persistence.NewCatalogStorageAt(database, instance.catalogLocation), nil
         },
     )
 }
@@ -177,7 +177,7 @@ func (instance *Module) registerArchiveStorageService(registrar melodyapplicatio
                 return nil, resolveErr
             }
 
-            return persistence.NewArchiveStorage(database), nil
+            return persistence.NewArchiveStorageAt(database, instance.archiveLocation), nil
         },
     )
 }

@@ -29,7 +29,7 @@ func newCurrencyRow(currency *entity.Currency) *currencyRow {
         Code:     currency.Code,
         Name:     currency.Name,
         Rate:     currency.Rate,
-        RateAsOf: currency.RateAsOf,
+        RateAsOf: currency.RateAsOf.UTC(),
     }
 }
 
@@ -114,7 +114,7 @@ func (instance *bunCurrencyRepository) findRowById(ctx context.Context, id strin
     selectErr := instance.database.
         NewSelect().
         Model(row).
-        Where("id = ?", id).
+        Where("id = ? AND BINARY id = BINARY ?", id, id).
         Limit(1).
         Scan(ctx)
     if nil != selectErr {
@@ -184,12 +184,16 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
         NewUpdate().
         Model(newCurrencyRow(currency)).
         WherePK().
+        Where("BINARY id = BINARY ?", currency.Id).
         Exec(ctx)
     if nil != updateErr {
         return false, updateErr
     }
 
-    return affectedAtLeastOneRow(result), nil
+    if affectedAtLeastOneRow(result) { return true, nil }
+    /* MySQL reports changed rows by default; an identical update still found its currency. */
+    _, stillPresent, readErr := instance.findRowById(ctx, id)
+    return stillPresent, readErr
 }
 
 func (instance *bunCurrencyRepository) DeleteById(ctx context.Context, id string) (bool, error) {
@@ -201,7 +205,7 @@ func (instance *bunCurrencyRepository) DeleteById(ctx context.Context, id string
     result, deleteErr := instance.database.
         NewDelete().
         Model((*currencyRow)(nil)).
-        Where("id = ?", normalizedId).
+        Where("id = ? AND BINARY id = BINARY ?", normalizedId, normalizedId).
         Exec(ctx)
     if nil != deleteErr {
         return false, deleteErr

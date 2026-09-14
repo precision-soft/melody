@@ -41,7 +41,7 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
         }
 
         return zero, exception.NewError(
-            "service not registered in resolver",
+            "service resolution failed",
             map[string]any{
                 "serviceName": serviceName,
             },
@@ -121,7 +121,7 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         }
 
         return zero, exception.NewError(
-            "service not registered in resolver",
+            "service resolution failed",
             map[string]any{
                 "serviceType": canonicalTargetType.String(),
             },

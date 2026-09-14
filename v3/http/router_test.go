@@ -1081,19 +1081,66 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(newHttpTestContainer())
 
-    for _, target := range []string{"/files/a%2Fb/c", "/files/a/b/c"} {
+    cases := []struct {
+        target string
+        expected string
+    }{
+        {"/files/a%2Fb/c", "a%2Fb/c"},
+        {"/files/a/b/c", "a/b/c"},
+        {"/files/a%252Fb/c", "a%252Fb/c"},
+        {"/files/a%25252Fb/c", "a%25252Fb/c"},
+        {"/files/100%25/c", "100%25/c"},
+        {"/files/a%2fb/c", "a%2Fb/c"},
+        {"/files/a%20b/c", "a b/c"},
+        {"/files/a%25%2Fb/c", "a%25%2Fb/c"},
+    }
+
+    for _, testCase := range cases {
+        target := testCase.target
         recorder := httptest.NewRecorder()
         handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, target, nil))
         if 200 != recorder.Code {
             t.Fatalf("expected %q to route, got %d", target, recorder.Code)
         }
+        if len(captured) == 0 {
+            t.Fatalf("expected %q to reach the handler", target)
+        }
+        if actual := captured[len(captured)-1]; actual != testCase.expected {
+            t.Errorf("target %q: expected catch-all %q, got %q", target, testCase.expected, actual)
+        }
     }
 
-    if 2 != len(captured) {
-        t.Fatalf("expected both requests to reach the handler, got %d", len(captured))
+    if len(cases) != len(captured) {
+        t.Fatalf("expected every request to reach the handler once, got %d", len(captured))
     }
+}
 
-    if captured[0] == captured[1] {
-        t.Fatalf("expected the encoded separator to keep the two targets apart, both bound %q", captured[0])
+func TestRouterConcurrentServingGuard(t *testing.T) {
+    router := &Router{}
+    router.freezeForServing()
+    start := make(chan struct{})
+    done := make(chan struct{})
+    go func() {
+        <-start
+        for index := 0; index < 10000; index++ {
+            router.freezeForServing()
+        }
+        close(done)
+    }()
+    close(start)
+    refused := 0
+    for index := 0; index < 10000; index++ {
+        func() {
+            defer func() {
+                if nil != recover() {
+                    refused++
+                }
+            }()
+            router.refuseRegistrationWhileServing("/late")
+        }()
+    }
+    <-done
+    if 10000 != refused {
+        t.Fatalf("refused %d late registrations, want 10000", refused)
     }
 }

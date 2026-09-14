@@ -51,11 +51,13 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewRegexRule("^/openapi.json", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
+        /* the platform check takes the distributed lock for its whole timeout and runs three object-storage operations per call, so it carries the requirement every other reader of the example carries; public, an anonymous caller spent the lock and the bucket's request budget for everyone at the cost of one GET */
         melodyaccesscontrol.NewRegexRule("^/platform/check", melodyaccesscontrol.RuleConfig{
-            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+            Attributes: []string{entity.RoleUser},
         }),
+        /* a dispatch sends one mail through the transport per call, a write to a backend the process does not own, so it is the write role; public, an anonymous POST was a mail sent on the example's behalf */
         melodyaccesscontrol.NewRegexRule("^/messagebus/dispatch", melodyaccesscontrol.RuleConfig{
-            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+            Attributes: []string{entity.RoleEditor},
         }),
         melodyaccesscontrol.NewRegexRule("^/encrypt/roundtrip", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
@@ -64,11 +66,12 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewRegexRule("^/twofactor", melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleUser},
         }),
+        /* the outbox doors insert a caller-chosen row into the catalogue database and make the process publish the pending rows on the broker, and the storage doors store the request body under any key of the bucket and read any object back: writes to three backends, behind the write role the catalogue writes carry. The status read shares the prefix and therefore the role — one rule per prefix, so a door added under it inherits the requirement rather than the catch-all. Public, all of them, an anonymous client wrote through the example into every backend it was wired to. */
         melodyaccesscontrol.NewRegexRule("^/outbox", melodyaccesscontrol.RuleConfig{
-            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+            Attributes: []string{entity.RoleEditor},
         }),
         melodyaccesscontrol.NewRegexRule("^/storage", melodyaccesscontrol.RuleConfig{
-            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+            Attributes: []string{entity.RoleEditor},
         }),
 
         /* publishing injects a frame into every stream open across the CLUSTER, so it is the write role the catalog writes themselves carry; streaming carries the catalog writes made behind those roles, so it is at least an authenticated reader, and the handler gates the topic on top of that. Both used to sit under a public "^/events" rule. */

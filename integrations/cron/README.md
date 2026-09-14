@@ -597,3 +597,5 @@ The **v3 binding only** additionally exposes:
 * Its sentinel errors: `ErrK8sImageMissing`, `ErrK8sInvalidRestartPolicy`, `ErrK8sInvalidName`, `ErrK8sDuplicateName`.
 * `Commands(configuration *Configuration) []clicontract.Command` ([`v3/command.go`](./v3/command.go)) — the integration's commands as a slice, for applications that wire `RegisterCliCommands` by hand instead of registering the module.
 * `(*Configuration).InTimezone(name string) *Configuration` and `(*Configuration).TimezoneName() string` ([`v3/configuration.go`](./v3/configuration.go)), the runner's `--timezone` flag ([`v3/runner_command.go`](./v3/runner_command.go)) and `ErrUnknownTimezone` ([`v3/errors.go`](./v3/errors.go)) — the zone the in-process runner evaluates under. See the timezone caveat above for what it does and does not reach.
+
+Regeneration preserves existing destination permissions, including operator-restricted crontabs.

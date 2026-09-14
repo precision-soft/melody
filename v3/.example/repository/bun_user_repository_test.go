@@ -2,6 +2,8 @@ package repository
 
 import (
     "fmt"
+    driver "github.com/go-sql-driver/mysql"
+    "github.com/precision-soft/melody/v3/exception"
     "strings"
     "testing"
 
@@ -96,5 +98,17 @@ func TestAsUsernameAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
 
     if nil != asUsernameAlreadyExists(nil) {
         t.Fatalf("expected a write that did not fail to stay unreported")
+    }
+}
+
+
+func TestUsernameConflictSurvivesAuditErrorWrapping(t *testing.T) {
+    for _, number := range []uint16{1062, 1146} {
+        cause := &driver.MySQLError{Number: number, Message: "Duplicate entry for key '"+migration.UserUsernameIndexName+"'"}
+        wrapped := exception.NewError("audited insert failed", nil, cause)
+        result := asUsernameAlreadyExists(wrapped)
+        if 1062 == number {
+            if "username already exists" != result.Error() { t.Fatalf("lost username conflict inside audit wrapper: %v", result) }
+        } else if wrapped != result { t.Fatalf("translated an unrelated driver error: %v", result) }
     }
 }

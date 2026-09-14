@@ -6,6 +6,7 @@ import (
     "io"
     "reflect"
     "strconv"
+    "sync"
     "time"
 
     "github.com/precision-soft/melody/v2/cli"
@@ -14,14 +15,41 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
 )
 
+type commandOutputWriter struct {
+    mutex sync.Mutex
+    writer io.Writer
+    err error
+}
+
+func (instance *commandOutputWriter) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+    if nil != instance.err {
+        return 0, instance.err
+    }
+    written, err := instance.writer.Write(payload)
+    if nil == err && written != len(payload) {
+        err = io.ErrShortWrite
+    }
+    instance.err = err
+    return written, err
+}
+
+func (instance *commandOutputWriter) failure() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+    return instance.err
+}
+
 type commandOutput struct {
-    writer    io.Writer
+    writer    *commandOutputWriter
     arguments []string
     option    output.Option
 
     /* the json accumulation: under --format=json every print records instead of writing, and finish renders the one machine-readable document the cli runner's silenced banner promises — the flag was accepted and validated long before this package honoured it */
     messages   []string
     warnings   []string
+    unlockFailure error
     database   *databaseIdentity
     details    map[string]string
     migrations map[string][]string
@@ -31,7 +59,7 @@ type commandOutput struct {
 /* newCommandOutput takes the command's positional arguments beside its writer and flags: the machine document declares an arguments field, and built without them it answered an empty list for every command, db:create included, whose one argument names the migration the document reports on. */
 func newCommandOutput(writer io.Writer, arguments []string, option output.Option) *commandOutput {
     return &commandOutput{
-        writer:    writer,
+        writer:    &commandOutputWriter{writer: writer},
         arguments: append([]string{}, arguments...),
         option:    option,
     }
@@ -91,6 +119,9 @@ func (instance *commandOutput) finishRun(commandName string, startedAt time.Time
 /* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded. */
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
+        if writeErr := instance.writer.failure(); nil != writeErr {
+            return errors.Join(runErr, writeErr)
+        }
         return runErr
     }
 
@@ -129,6 +160,13 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
 
     for _, warning := range instance.warnings {
         envelope.Warnings = append(envelope.Warnings, output.NewWarning("migrate.warning", warning, nil))
+    }
+
+    if nil != instance.unlockFailure {
+        envelope.Warnings = append(envelope.Warnings, output.NewWarning(
+            "migrate.unlock_failed", instance.unlockFailure.Error(),
+            map[string]any{"action": "unlock", "requiresNoActiveMigration": true},
+        ))
     }
 
     if nil != runErr {

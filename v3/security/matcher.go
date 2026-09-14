@@ -3,6 +3,7 @@ package security
 import (
     "strings"
 
+    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -35,7 +36,8 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
         return false
     }
 
-    path := request.HttpRequest().URL.Path
+    /* the spelling the router reads, so a firewall written for "/admin/" does not claim "/admin%2Fusers", a one-segment resource the router never routes under "/admin" — the access-control matcher behind the firewall reads the same spelling */
+    path := http.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
 
     if "" == instance.prefix {
         return true

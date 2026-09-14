@@ -4,15 +4,13 @@ import (
     "io"
 )
 
-/* StaticContext is a Context whose answers are given rather than parsed. It exists because a command's body is worth testing without a command line: before melody owned this contract a caller could build the engine's command struct itself and drive argv through it, and taking that away without offering a door would have made a command harder to test than it was. Hand it the values a run would have produced and call the command's Run directly.
-
-   A zero StaticContext answers the zero value of every flag, no arguments, and a writer that discards. It is a value holder, not a parser: it does not know which flags a command declares, so a name nothing set reads as unset rather than as the flag's declared default — pass the default when the case under test depends on it. It is not safe for concurrent modification while a command reads it. */
+/* StaticContext supplies command inputs without parsing. Unset flags return zero values rather than declared defaults; callers must supply defaults explicitly. The zero value has no arguments and discards output. Do not modify it concurrently with command execution. */
 type StaticContext struct {
     StringValues      map[string]string
     BoolValues        map[string]bool
     IntValues         map[string]int
     StringSliceValues map[string][]string
-    /* SetFlagNames are the flags IsSet reports as given on the command line, which is the difference between an explicit value that equals the default and no value at all */
+    /* SetFlagNames distinguishes explicitly supplied values from defaults for IsSet. */
     SetFlagNames   []string
     ArgumentValues []string
     WriterValue    io.Writer

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Build TCP addresses with `net.JoinHostPort`, preserving IPv6 literals with or without brackets, scoped IPv6 addresses, IPv4 and DNS names.
+
 - an empty database name or user is refused by name before the driver sees it. `pgdriver.WithDatabase` and `pgdriver.WithUser` panic on an empty string, so a connection parameter left empty reached the caller as a panic out of the open rather than as the refusal every other open failure is. An empty host is left to the driver, which does not panic on it, and an empty password stays a legitimate value.
 - `IsDuplicateKey` reads the SQLSTATE through `SQLState()` as well as through pgdriver's `Field('C')`. pgx's `pgconn.PgError` and lib/pq's `Error` carry the code that way and neither implements `Field`, so a consumer running bun over one of those drivers reached the door with a typed error it could not see: an insert that collided answered false and rendered as a server failure instead of a conflict. The message stays no identity.
 

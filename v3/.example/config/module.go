@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     nethttp "net/http"
 
     minio "github.com/minio/minio-go/v7"
@@ -72,13 +73,25 @@ type Module struct {
     databaseRegistry *melodybunorm.ManagerRegistry
     database         *bun.DB
 
+    /* processContext is what the registry's lazy opens are bound to: the archive is opened at the first resolution of the service that publishes it, on a request or a command, and an open that outlives the process's signal is an open the teardown waits for */
+    processContext context.Context
+
+    /* trustedProxyResolver is the one client resolver both budgets read the client through; the list it resolves is re-read on a schedule, so a balancer restarted onto a new address is trusted again within the interval */
+    trustedProxyResolver *trustedProxyResolver
+
     /* archiveWired is what the environment armed, kept as an answer rather than re-derived: the services, the migration context and the reset command each ask it, and asking the registry instead would open the connection to find out. */
     archiveWired bool
+
+    /* the two databases as their connections were declared — host:port/schema — carried to the handles the reset prints before it destroys anything; the registry knows them, but only by the manager's name, which is not what an operator reads a plan for */
+    catalogLocation string
+    archiveLocation string
     cipher           melodyencrypt.Cipher
 }
 
-func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module {
-    moduleInstance := &Module{configuration: configuration}
+/* NewExampleModule builds the eager half of the wiring. The context is the process's: a signal cancels it, and the database registry binds its lazy opens to it — an open in flight when the process is asked to stop ends with the signal rather than with its retry budget, so a teardown has nothing to wait behind. */
+func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Configuration) *Module {
+    moduleInstance := &Module{processContext: ctx, configuration: configuration}
+    moduleInstance.buildTrustedProxyResolver()
     moduleInstance.buildServerSentEvent()
     moduleInstance.buildObservability()
     moduleInstance.buildEncrypt()
@@ -133,6 +146,9 @@ const (
 
     environmentKeyCorsAllowOrigins     = "APP_CORS_ALLOW_ORIGINS"
     environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
+    environmentKeyTrustedProxyList     = "APP_TRUSTED_PROXY_LIST"
+    environmentKeyRatesBaseUrl         = "RATES_BASE_URL"
+    environmentKeyReportExportEndpoint = "APP_REPORTING_EXPORT_ENDPOINT"
 
 )
 

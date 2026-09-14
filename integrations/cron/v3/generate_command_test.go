@@ -3769,3 +3769,20 @@ func TestRunPruneDeletesConfiguredK8sManifest(t *testing.T) {
         t.Fatalf("manifest was not removed: %v", err)
     }
 }
+
+func TestAtomicWriteFilePreservesPrivateDestination(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "private.cron")
+    if err := os.WriteFile(path, []byte("old"), 0o600); nil != err {
+        t.Fatal(err)
+    }
+    if err := atomicWriteFile(path, []byte("new"), 0o644); nil != err {
+        t.Fatal(err)
+    }
+    info, err := os.Stat(path)
+    if nil != err {
+        t.Fatal(err)
+    }
+    if 0o600 != info.Mode().Perm() {
+        t.Fatalf("permissions widened to %o", info.Mode().Perm())
+    }
+}

@@ -1,7 +1,10 @@
 package cli
 
 import (
+    "bytes"
     "context"
+    "io"
+    "os"
     "strings"
     "testing"
 
@@ -120,4 +123,68 @@ func storedRoles(t *testing.T, fixture *commandFixture, username string) []strin
     }
 
     return append([]string{}, user.Roles...)
+}
+
+/* the grant's listeners drop the account's cache entries in the process that dispatched, and the fixture's cache is the in-process map: the command has to say so, because a session opened against a server on the same fallback keeps the roles it cached until that server restarts. Read off the process's standard output, which is where the command's own line goes. */
+func TestGrantRoleCommandSaysWhenTheCacheIsThisProcessOwn(t *testing.T) {
+    fixture := newCommandFixture(t)
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+
+    previousStdout := os.Stdout
+    reader, writer, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("open the capture pipe: %v", pipeErr)
+    }
+    os.Stdout = writer
+
+    runErr := command.Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user"))
+
+    _ = writer.Close()
+    os.Stdout = previousStdout
+
+    captured := &bytes.Buffer{}
+    _, _ = io.Copy(captured, reader)
+    _ = reader.Close()
+
+    if nil != runErr {
+        t.Fatalf("expected the grant to succeed, got %v", runErr)
+    }
+
+    if false == strings.Contains(captured.String(), processLocalCacheNotice) {
+        t.Fatalf("expected the command to say the cache is this process's own, got %q", captured.String())
+    }
+}
+
+
+func TestGrantRoleNormalizesAndRejectsUnknownRoles(t *testing.T) {
+    for _, role := range []string{" ROLE_EDITOR ", " ", "ROLE_ADMIM"} {
+        t.Run(role, func(t *testing.T) {
+            fixture := newCommandFixture(t)
+            err := NewGrantRoleCommand(fixture.lazyUserService()).Run(fixture.runtime, newFlagContext(role, "user"))
+            if " ROLE_EDITOR " == role {
+                if nil != err || false == holdsRole(storedRoles(t, fixture, "user"), entity.RoleEditor) { t.Fatalf("trimmed valid grant failed: %v", err) }
+            } else if nil == err { t.Fatalf("invalid role %q accepted", role) }
+        })
+    }
+}
+
+func TestGrantRolePreservesChangesAfterCachedLookup(t *testing.T) {
+    fixture := newCommandFixture(t)
+    _, _, err := fixture.userService.FindByUsername("user")
+    if nil != err { t.Fatal(err) }
+    account, _, _ := fixture.userRepository.FindByUsername(context.Background(), "user")
+    changed := *account
+    changed.Password = "replacement-password-hash"
+    changed.Roles = append(append([]string{}, account.Roles...), entity.RoleAdmin)
+    if _, err := fixture.userRepository.Update(context.Background(), &changed); nil != err { t.Fatal(err) }
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+    if err := command.Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user")); nil != err { t.Fatal(err) }
+    after, _, _ := fixture.userRepository.FindByUsername(context.Background(), "user")
+    if changed.Password != after.Password || false == holdsRole(after.Roles, entity.RoleAdmin) || false == holdsRole(after.Roles, entity.RoleEditor) {
+        t.Fatalf("grant overwrote a newer account: %+v", after)
+    }
+    previous := after
+    if err := command.Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user")); nil != err { t.Fatal(err) }
+    after, _, _ = fixture.userRepository.FindByUsername(context.Background(), "user")
+    if previous != after { t.Fatal("repeated grant wrote a new in-memory record") }
 }

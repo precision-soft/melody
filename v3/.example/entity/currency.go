@@ -2,6 +2,9 @@ package entity
 
 import "time"
 
+/* RateBaseCurrencyCode is the common base of every stored catalogue quote. */
+const RateBaseCurrencyCode = "EUR"
+
 func NewCurrency(
     id string,
     code string,

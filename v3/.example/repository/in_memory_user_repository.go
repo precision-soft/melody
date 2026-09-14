@@ -205,3 +205,19 @@ func (instance *inMemoryUserRepository) usernameTakenByAnotherLocked(username st
 }
 
 var _ UserRepository = (*inMemoryUserRepository)(nil)
+
+
+func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, username string, role string) (*entity.User, bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+    if err := ctx.Err(); nil != err { return nil, false, err }
+    account, found := instance.findByUsernameLocked(username)
+    if false == found { return nil, false, nil }
+    for _, held := range account.Roles { if role == held { return account, false, nil } }
+    modified := *account
+    modified.Roles = append(append([]string{}, account.Roles...), role)
+    for index, existing := range instance.users {
+        if existing == account { instance.users[index] = &modified; break }
+    }
+    return &modified, true, nil
+}

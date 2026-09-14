@@ -121,3 +121,6 @@ log.SetOutput(logging.NewStandardErrorLogger(logger, "standard logger").Writer()
 ```
 
 In practice the line is redundant wherever container stderr is already collected into the same place as the journal, and the melody record written microseconds later carries strictly more: the level, the connection context and the cause.
+
+
+IPv6 hosts may be supplied as `::1` or `[::1]`, with the port configured separately. Scoped literals such as `fe80::1%eth0` are also joined without changing the host or port.

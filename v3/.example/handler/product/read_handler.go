@@ -2,6 +2,7 @@ package product
 
 import (
     "fmt"
+    "errors"
     "math"
     nethttp "net/http"
     "strings"
@@ -19,6 +20,8 @@ import (
 
 /* the query parameter a caller names the currency they want the price in */
 const convertedCurrencyQueryParameter = "currency"
+
+var errConversionRequest = errors.New("invalid conversion request")
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
@@ -85,7 +88,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
 
         converted, convertErr := convertedPriceFor(request, product, currencies)
         if nil != convertErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, convertErr.Error()), nil
+            return conversionErrorResponse(runtimeInstance, request, convertErr), nil
         }
 
         response.Converted = converted
@@ -147,7 +150,7 @@ func convertedPriceFor(
 ) (*ConvertedPriceResponse, error) {
     requestedCode, present, indexErr := melodybag.StringAt(request.Query(), convertedCurrencyQueryParameter, 0)
     if nil != indexErr {
-        return nil, indexErr
+        return nil, fmt.Errorf("%w: %v", errConversionRequest, indexErr)
     }
 
     if false == present || "" == strings.TrimSpace(requestedCode) {
@@ -156,7 +159,7 @@ func convertedPriceFor(
 
     target, found := service.FindCurrencyByCode(currencies, requestedCode)
     if false == found {
-        return nil, fmt.Errorf("unknown currency code %q", requestedCode)
+        return nil, fmt.Errorf("%w: unknown currency code %q", errConversionRequest, requestedCode)
     }
 
     source, sourceFound := currencyById(currencies, product.CurrencyId)
@@ -206,4 +209,12 @@ func mapProduct(product *entity.Product) ProductResponse {
         CreatedAt:   product.CreatedAt.UTC().Format(nethttp.TimeFormat),
         UpdatedAt:   product.UpdatedAt.UTC().Format(nethttp.TimeFormat),
     }
+}
+
+
+func conversionErrorResponse(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, err error) melodyhttpcontract.Response {
+    if errors.Is(err, errConversionRequest) {
+        return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, err.Error())
+    }
+    return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "currency conversion is unavailable", err)
 }

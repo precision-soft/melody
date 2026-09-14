@@ -12,11 +12,11 @@ import (
     "strings"
     "testing"
     "time"
-
     "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/uptrace/bun"
     "github.com/uptrace/bun/driver/pgdriver"
     "github.com/uptrace/bun/schema"
 )
@@ -1200,5 +1200,57 @@ func TestProviderOpen_RefusesAnEmptyDatabaseOrUserInsteadOfPanicking(t *testing.
                 t.Fatalf("expected the refusal to name the field (%q), got %v", testCase.expected, openErr)
             }
         })
+    }
+}
+
+
+/* Inspect the address handed to the actual driver; abort before opening a socket. */
+func TestProviderPreservesIPv6HostAndPort(t *testing.T) {
+    for _, testCase := range []struct { host, want string }{
+        {"::1", "[::1]:5432"},
+        {"[::1]", "[::1]:5432"},
+        {"fe80::1%eth0", "[fe80::1%eth0]:5432"},
+        {"[fe80::1%eth0]", "[fe80::1%eth0]:5432"},
+        {"127.0.0.1", "127.0.0.1:5432"},
+        {"db.internal", "db.internal:5432"},
+    } {
+        t.Run(testCase.host, func(t *testing.T) {
+            stop := errors.New("stop before dial")
+            seen := ""
+            provider := NewProvider(WithPostBuildHook(func(ctx context.Context, configuration *pgdriver.Connector) error {
+                seen = configuration.Config().Addr
+                return stop
+            }))
+            database, err := provider.Open(newTestParams(testCase.host, "5432", "melody", "melody", "secret"), nil)
+            if nil != database || false == errors.Is(err, stop) {
+                t.Fatalf("expected pre-dial abort, got database=%v error=%v", database, err)
+            }
+            if testCase.want != seen {
+                t.Fatalf("driver address=%q; want %q", seen, testCase.want)
+            }
+        })
+    }
+}
+
+type unexpectedPrimaryProvider struct { opens int }
+
+func (instance *unexpectedPrimaryProvider) Open(bunorm.ConnectionParameters, loggingcontract.Logger) (*bun.DB, error) {
+    instance.opens++
+    return nil, errors.New("primary must not hide replica misconfiguration")
+}
+
+func TestMisconfiguredReplicaDoesNotOpenPrimary(t *testing.T) {
+    primary := &unexpectedPrimaryProvider{}
+    registry, err := bunorm.NewManagerRegistry(logging.NewNopLogger(),
+        bunorm.ProviderDefinition{Name: "primary", Provider: primary, IsDefault: true},
+        bunorm.ProviderDefinition{Name: "replica", Provider: NewProvider(), Params: newTestParams("localhost", "5432", "catalog", "", "")},
+    )
+    if nil != err {
+        t.Fatal(err)
+    }
+    defer func() { _ = registry.Close() }()
+    _, err = bunorm.NewReadWriteSplitter(registry, "primary", "replica").Reader()
+    if nil == err || 0 != primary.opens {
+        t.Fatalf("misconfiguration fell back to primary: opens=%d err=%v", primary.opens, err)
     }
 }

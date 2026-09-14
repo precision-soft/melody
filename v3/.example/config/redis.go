@@ -4,18 +4,24 @@ import (
     "time"
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
+    examplecache "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/exception"
 )
 
 const (
     /* every key this application writes carries its major in the prefix. The three example applications share one redis in development, the cache holds gob-encoded entities whose wire format is keyed on the fully qualified type name — which carries the major — and the rate-limit counter is asserted on exactly by the end-to-end harness. A prefix shared between majors would have one application read entries it cannot decode and spend another's budget. */
-    redisCacheKeyPrefix      = "melody-example-v3:cache:"
+    redisCacheKeyPrefixRoot  = "melody-example-v3:cache:"
     redisRateLimitKeyPrefix  = "melody-example-v3:rate_limit:"
     redisTokenStoreKeyPrefix = "melody-example-v3:token"
 
     /* the allowance covers a person editing the nomenclature and stops a script: a burst of catalogue writes from one address is refused until the window rolls over. */
     catalogWriteAllowance = 30
 )
+
+/* cacheKeyPrefix is the cache namespace with the layout token of the cached types inside it: the entities are gob-encoded under keys with no expiry, and gob decodes an older payload into a newer struct with the new field at zero, silently. A build reads only under the prefix of its own layout; the entries an older build left stand orphaned until example:db:reset clears the namespace, which the readme says. */
+func cacheKeyPrefix() string {
+    return redisCacheKeyPrefixRoot + examplecache.LayoutToken() + ":"
+}
 
 func (instance *Module) buildRedis() {
     address := instance.environmentValue(environmentKeyRedisAddress)

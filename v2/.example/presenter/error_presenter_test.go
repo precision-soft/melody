@@ -2,6 +2,8 @@ package presenter
 
 import (
     "context"
+    melodylogging "github.com/precision-soft/melody/v2/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     "errors"
     "fmt"
     "io"
@@ -308,4 +310,27 @@ func TestBuildErrorTraceIsEmptyWithoutDebug(t *testing.T) {
     if 2 != len(buildErrorTrace(causeErr, true)) {
         t.Fatalf("expected the whole unwrap chain under debug, got %d", len(buildErrorTrace(causeErr, true)))
     }
+}
+
+
+type causeRecordingLogger struct {
+    melodyloggingcontract.Logger
+    errors []melodyloggingcontract.Context
+    wanted error
+}
+func (instance *causeRecordingLogger) Error(message string, fields melodyloggingcontract.Context) { if instance.wanted == fields["error"] { instance.errors = append(instance.errors, fields) } }
+
+func TestApiServerErrorLogsCauseWithoutPublishingIt(t *testing.T) {
+    runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvProduction)
+    logger := &causeRecordingLogger{Logger: melodylogging.NewNopLogger()}
+    melodycontainer.MustRegister(runtimeInstance.Container(), melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) { return logger, nil })
+    request := requestAcceptingLines(t, runtimeInstance, "application/json")
+    cause := errors.New("private database failure")
+    logger.wanted = cause
+    response := ApiErrorWithErr(runtimeInstance, request, 500, "operation failed", cause)
+    if strings.Contains(responseBodyOf(t, response), cause.Error()) { t.Fatal("private cause was published") }
+    if 1 != len(logger.errors) || cause != logger.errors[0]["error"] { t.Fatalf("cause not recorded exactly once: %v", logger.errors) }
+    _ = ApiErrorWithErr(runtimeInstance, request, 400, "invalid input", cause)
+    if 1 != len(logger.errors) { t.Fatalf("client refusal logged as server failure: %v", logger.errors) }
 }

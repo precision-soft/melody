@@ -148,7 +148,10 @@ func (instance *Recorder) record(
     table := instance.registry.tableFor(entity)
 
     if saveErr := instance.storage.Save(ctx, table, entry); nil != saveErr {
-        instance.deadLetter(table, entry, saveErr)
+        /* an async storage that refused the entry — its queue full, or closed — dead-lettered it itself before returning, with the same change-set: a second record here journaled every dropped entry twice into the same journal, exactly under the queue-full storm the dead-letter exists for. Skipped on the sentinel alone, the record was lost instead whenever the storage journaled through the emergency default and this recorder through the application's logger, so the refusal names the logger it went through and the record is skipped only when that logger is this recorder's; a refusal from any other storage, sentinel or not, is dead-lettered here, once */
+        if false == journaledThrough(saveErr, instance.deadLetterLogger()) {
+            instance.deadLetter(table, entry, saveErr)
+        }
 
         return saveErr
     }
@@ -156,10 +159,16 @@ func (instance *Recorder) record(
     return nil
 }
 
-func (instance *Recorder) deadLetter(table string, entry Entry, saveErr error) {
+/* deadLetterLogger reads the logger a dead-letter goes through, under the lock WithLogger writes it under */
+func (instance *Recorder) deadLetterLogger() loggingcontract.Logger {
     instance.loggerMutex.RLock()
-    logger := instance.logger
-    instance.loggerMutex.RUnlock()
+    defer instance.loggerMutex.RUnlock()
+
+    return instance.logger
+}
+
+func (instance *Recorder) deadLetter(table string, entry Entry, saveErr error) {
+    logger := instance.deadLetterLogger()
 
     if nil == logger {
         return

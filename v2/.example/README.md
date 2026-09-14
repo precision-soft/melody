@@ -420,3 +420,12 @@ Required at runtime:
 - This example is intentionally compact and optimized for readability.
 - Treat it as a **reference implementation** for Melody wiring patterns, not as a stable API contract.
 - The framework APIs demonstrated here are authoritative; the example itself may evolve freely.
+
+
+### Input and reset guarantees
+
+Login credentials are accepted only from a JSON or URL-encoded POST body. Query parameters cannot supply either credential. SQL entity identifiers match exactly, including case, so lookups and cache invalidation use the same identity.
+
+A forced database reset resolves the cache before destructive work and invalidates it on completion or failure, because a failed reset may already have changed rows. A cache-clear failure is reported alongside the reset failure. With an in-process cache, this clears only the command's process; restart a separately running server to discard its cached entries. A shared cache clears only this application's configured namespace.
+
+Server errors rendered through `ApiErrorWithErr` retain their cause in the runtime logger. Production API responses contain only the public message; the supplied cause is available in development responses.

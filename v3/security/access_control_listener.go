@@ -55,7 +55,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
             path := ""
             if nil != requestEvent.Request().HttpRequest() && nil != requestEvent.Request().HttpRequest().URL {
-                path = requestEvent.Request().HttpRequest().URL.Path
+                /* the spelling the router matched, not the decoded URL.Path: decoded, "/public%2F" read "/public/" here and was folded onto the exact public rule of "/public" while the router served it through a protected catch-all — an anonymous request served the protected handler */
+                path = http.RequestPathAsRouted(requestEvent.Request().HttpRequest().URL.EscapedPath())
             }
 
             securityContext, exists := SecurityContextFromRuntime(runtimeInstance)

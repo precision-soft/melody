@@ -1,6 +1,11 @@
 package report
 
 import (
+    "context"
+    "io"
+    "strings"
+    "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/runtime"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -91,4 +96,14 @@ func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKeyWithoutPanicking(t *test
     if 2 != limit {
         t.Fatalf("expected the first value of the repeated key, got %d", limit)
     }
+}
+
+
+func TestHistoryFailureUsesThePublicApiEnvelope(t *testing.T) {
+    containerInstance := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    response, err := ApiHistoryHandler()(runtimeInstance, httptest.NewRecorder(), historyRequest(t, "/reports/api/history/"))
+    if nil != err || nil == response { t.Fatalf("missing API error response: response=%v err=%v", response, err) }
+    body, err := io.ReadAll(response.BodyReader())
+    if nil != err || 500 != response.StatusCode() || false == strings.Contains(string(body), `"success":false`) { t.Fatalf("invalid API error: %s err=%v", body, err) }
 }

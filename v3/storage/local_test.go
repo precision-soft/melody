@@ -228,7 +228,6 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
         t.Fatalf("expected put to fail when the source reader errors mid-stream")
     }
 
-    /* "copy", not "write": io.Copy answers one error for both sides, and on an upload streamed from a request body the likelier one is the READER dying with the client — a message blaming the storage write sends the operator at the disk when the source connection failed */
     if false == strings.Contains(putErr.Error(), "could not copy the payload") {
         t.Fatalf("expected the failure to name the copy, got %v", putErr)
     }
@@ -241,8 +240,6 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
         t.Fatalf("expected no object on disk after a failed put, but a partial object remains")
     }
 }
-
-/* a failed overwrite must not destroy the previously stored object (atomic put) */
 
 func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
     base := t.TempDir()
@@ -371,7 +368,6 @@ func TestLocalStorage_NegativeSizeMeansUnknownAndSkipsTheLengthCheck(t *testing.
     storage := NewLocalStorage(t.TempDir())
     runtimeInstance := testRuntime()
 
-    /* the contract's documented convention: a negative size is "length unknown" (the io convention http.Request.ContentLength uses), so the backend stores whatever the reader yields — while a non-negative declaration is verified strictly */
     if putErr := storage.Put(runtimeInstance, "unknown-size.txt", strings.NewReader("payload"), -1, storagecontract.PutOptions{}); nil != putErr {
         t.Fatalf("expected the unknown-size put to succeed, got %v", putErr)
     }

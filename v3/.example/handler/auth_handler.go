@@ -37,7 +37,7 @@ func LoginHandler() melodyhttpcontract.Handler {
         if true == strings.HasPrefix(contentType, "application/json") {
             decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
             if nil != decoderErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+                return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decoderErr), nil
             }
         } else {
             parseFormErr := httpRequest.ParseForm()
@@ -45,8 +45,8 @@ func LoginHandler() melodyhttpcontract.Handler {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid form"), nil
             }
 
-            dto.Username = httpRequest.FormValue("username")
-            dto.Password = httpRequest.FormValue("password")
+            dto.Username = httpRequest.PostForm.Get("username")
+            dto.Password = httpRequest.PostForm.Get("password")
         }
 
         username := strings.TrimSpace(dto.Username)

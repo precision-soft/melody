@@ -743,6 +743,59 @@ func TestFileServer_Filesystem_RefusesANonCanonicalPath(t *testing.T) {
 }
 
 /* the strip prefix is configuration, so the spelling has to be judged against the whole path: the doubled slash of "/static//a.txt" is swallowed by the strip and would leave a canonical-looking remainder behind */
+/* the file is resolved from the spelling the router matched, not from the decoded URL.Path: decoded, "/static/private%2Fsecret.txt" was "/static/private/secret.txt" here — the file under a protected prefix, served — while the access-control matcher read the one segment "private%2Fsecret.txt" under the rule of "/static" alone; measured, an anonymous request read the protected file. Routed, the request names a file whose name literally carries "%2F", which the disk does not hold */
+func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "private/secret.txt": &fstest.MapFile{Data: []byte("TOP SECRET")},
+        "caf\u00e9.txt":       &fstest.MapFile{Data: []byte("café")},
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "/static/",
+        false,
+        0,
+        false,
+    )
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    _, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private%2Fsecret.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected the encoded separator not to reach the file beneath it, got body %q", string(body))
+    }
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private/secret.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served || http.StatusOK != statusCode || "TOP SECRET" != string(body) {
+        t.Fatalf("expected the plain spelling to stay reachable, got served=%v status=%d body=%q", served, statusCode, string(body))
+    }
+
+    statusCode, _, body, served = server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/caf%C3%A9.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served || http.StatusOK != statusCode || "café" != string(body) {
+        t.Fatalf("expected a segment that decodes to no separator to resolve by its decoded spelling, got served=%v status=%d body=%q", served, statusCode, string(body))
+    }
+}
+
 func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
     fileSystem := fstest.MapFS{
         "index.html": &fstest.MapFile{
@@ -3464,5 +3517,51 @@ func TestFileServer_Embedded_RefusesAnEntryThatIsNotARegularFile(t *testing.T) {
 
     if false == found {
         t.Fatalf("expected the mode refusal to be recorded, got info %v", logger.infoMessages)
+    }
+}
+
+/* the exclusion list reads the spelling the router matched, as its GoDoc promises beside the firewall matcher: an entry for "/static/assets/" declines the directory, and "/static/assets%2Fx.txt" — one segment, a file whose name literally carries "%2F" — is not under it. Read decoded, that request was "/static/assets/x.txt", declined by the entry and never resolved, so the two consumers of one entry selected different requests. */
+func TestFileServer_ExclusionListReadsTheSpellingTheRouterRoutes(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "assets%2Fx.txt": &fstest.MapFile{Data: []byte("ONE SEGMENT")},
+        "assets/y.txt":   &fstest.MapFile{Data: []byte("UNDER THE DIRECTORY")},
+    }
+
+    config := NewFileServerConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "/static/",
+        false,
+        0,
+        false,
+    )
+
+    config.SetExcludedPathList([]string{"/static/assets/"})
+
+    server := NewFileServer(
+        NewOptions(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    statusCode, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/assets%2Fx.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served || http.StatusOK != statusCode || "ONE SEGMENT" != string(body) {
+        t.Fatalf("expected the one-segment resource outside the excluded directory to be served, got served=%v status=%d body=%q", served, statusCode, string(body))
+    }
+
+    _, _, _, served = server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/assets/y.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatal("expected the file under the excluded directory to be declined")
     }
 }

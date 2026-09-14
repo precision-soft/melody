@@ -883,7 +883,23 @@ func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAl
         firstOutcome <- storage.CloseWithContext(firstContext)
     }()
 
-    time.Sleep(5 * time.Millisecond)
+    /* the second closer arrives once the first has taken the storage — read from the flag the first closer sets under the mutex, where a fixed sleep read the scheduler */
+    awaitFirstCloser := time.Now().Add(2 * time.Second)
+    for {
+        storage.mutex.Lock()
+        taken := storage.closed
+        storage.mutex.Unlock()
+
+        if true == taken {
+            break
+        }
+
+        if true == time.Now().After(awaitFirstCloser) {
+            t.Fatal("the first closer never took the storage")
+        }
+
+        time.Sleep(50 * time.Microsecond)
+    }
 
     spentContext, cancelSpent := context.WithTimeout(context.Background(), time.Nanosecond)
     defer cancelSpent()
@@ -929,6 +945,75 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     drainGrace, cancellationGrace = storage.closeGracesWithin(roomyContext)
     if 0 >= drainGrace || 0 >= cancellationGrace {
         t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
+    }
+
+    /* a remainder between the floor and twice the floor keeps its DRAIN half — a save of half a millisecond that was finishing inside such a remainder was answered "budget already spent" when the floor was asked of the halves — and gives up its CANCELLATION half, which under a millisecond measures no reaction: given as a grace, a delegate that honoured its cancellation seven hundred microseconds later was reported to have ignored it, three hundred closes out of three hundred */
+    /* the remainder is re-read inside closeGracesWithin, and a scheduling stall between this deadline and that read moves it — measured four times in twenty thousand, worst three milliseconds, nineteen in twenty thousand under an oversubscribed machine — so the assertion is judged on the remainder as it stood AFTER the call, and only when that remainder still sat inside the window the case is about: a stall that pushed it below the floor is not this case, and the call is asked again */
+    for attempt := 0; ; attempt = attempt + 1 {
+        narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1900*time.Microsecond)
+
+        drainGrace, cancellationGrace = storage.closeGracesWithin(narrowContext)
+        deadline, _ := narrowContext.Deadline()
+        remainderAfter := time.Until(deadline)
+
+        cancelNarrow()
+
+        if asyncStorageCloseGraceFloor > remainderAfter {
+            if 100 <= attempt {
+                t.Fatalf("the remainder never stayed inside the window across %d attempts", attempt)
+            }
+
+            continue
+        }
+
+        if 0 >= drainGrace || asyncStorageCloseGraceFloor <= drainGrace {
+            t.Fatalf("expected a remainder above the floor but under twice it to keep a drain half under the floor, got %v", drainGrace)
+        }
+
+        if 0 != cancellationGrace {
+            t.Fatalf("expected a remainder above the floor but under twice it to give up the cancellation half, got %v", cancellationGrace)
+        }
+
+        break
+    }
+}
+
+/* swappingLogger installs another logger on the storage from inside its own Error, which is the narrowest window a WithLogger can land in: between the dead-letter and the refusal that names the journal. The refusal must name the logger the record went to. */
+type swappingLogger struct {
+    capturingLogger
+    storage *AsyncStorage
+    next    loggingcontract.Logger
+}
+
+func (instance *swappingLogger) Error(message string, context loggingcontract.Context) {
+    instance.capturingLogger.Error(message, context)
+    instance.storage.WithLogger(instance.next)
+}
+
+func TestAsyncStorage_TheRefusalNamesTheJournalTheEntryWasDeadLetteredThrough(t *testing.T) {
+    delegate := newRecordingStorage()
+    close(delegate.release)
+
+    storage := NewAsyncStorage(delegate, 4)
+    first := &swappingLogger{storage: storage, next: &capturingLogger{}}
+    storage.WithLogger(first)
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "late", Operation: "insert"})
+
+    if 1 != first.count() {
+        t.Fatalf("expected the record to land in the first logger, got %d", first.count())
+    }
+
+    if false == journaledThrough(saveErr, first) {
+        t.Fatal("expected the refusal to name the logger the record went to, not the one installed after it")
+    }
+
+    if true == journaledThrough(saveErr, first.next) {
+        t.Fatal("expected the refusal not to name the logger installed after the record was written")
     }
 }
 
@@ -1103,5 +1188,30 @@ func TestAsyncStorage_CloseObservesCancellationDuringWorkerJoin(t *testing.T) {
         }
     case <-time.After(500 * time.Millisecond):
         t.Fatal("close ignored caller cancellation while joining the worker")
+    }
+}
+
+func TestAsyncStorageReportsActualOutcomeAfterCancellation(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+    shortenCloseGrace(t)
+    delegate := newContextIgnoringStorage()
+    storage := NewAsyncStorage(delegate, 2)
+    if err := storage.Save(context.Background(), "audit", Entry{Entity: "stored"}); nil != err {
+        t.Fatal(err)
+    }
+    <-delegate.entered
+    released := make(chan struct{})
+    go func() {
+        <-storage.workerContext.Done()
+        close(delegate.release)
+        close(released)
+    }()
+    err := storage.Close()
+    <-released
+    if nil != err && strings.Contains(err.Error(), "dead-lettered") {
+        t.Fatalf("successful save reported as dead-lettered: %v (failed=%d)", err, storage.Failed())
+    }
+    if 0 != storage.Failed() {
+        t.Fatalf("successful delegate recorded failures: %d", storage.Failed())
     }
 }

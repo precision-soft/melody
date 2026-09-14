@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Regeneration preserves existing destination permissions, including operator-restricted crontabs.
+
 - `--prune` now renders the current destinations without writing and deletes only those explicit files, warning for missing targets. It no longer generates replacements or scans neighboring files using a shared marker. **Behavioural change:** run generation separately; retire files while their destinations are still configured.
 
 - `runner_command.go` — a catch-up minute is dispatched and reported as the real local instant it is, offset and all, wherever the zone has that minute. The minutes a jump below the reset threshold walked through were materialized in utc with the wall fields folded in, so the document of a minute caught up after a suspend or an ntp step carried a timestamp off from the truth by the whole zone offset (`03:01:00Z` for 03:01 in a +03:00 zone), under a comment that called them the span a spring-forward skipped — true of one of the three kinds of jump that branch handles. Only a minute the zone does not have, the spring-forward gap itself, stays utc-materialized, since no local instant renders those fields; it still evaluates, so a fixed-time entry pinned inside the gap still catches up exactly once. **Behavioural change** in the `at` of a catch-up minute's document

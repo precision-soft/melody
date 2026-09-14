@@ -18,7 +18,7 @@ func main() {
         embeddedPublicFiles,
     )
 
-    config.Configure(app)
+    config.Configure(ctx, app)
 
     /* the wiring is done, which is where the parallel teardown is armed: arming validates every declared teardown edge, so it needs the registrations. The boot has built services by then — the logger, the transports closer, whatever a module resolves while wiring — and arming walks those as the published memory they are, pointer words and layouts only; everything built from here on is walked where it is built.
 
@@ -27,7 +27,7 @@ func main() {
 
     if armable, isArmable := kernel.ServiceContainer().(interface{ ArmParallelTeardown() error }); true == isArmable {
         if armErr := armable.ArmParallelTeardown(); nil != armErr {
-            /* a panic raised here is outside Run, so no exit handler tears the booted container down on the way out: the logger's file, the pools and the broker connection the boot opened would go with the process unreleased. The application is closed first, and the refusal still ends the process the way a wiring mistake should. */
+            /* a panic raised here is outside Run, so no exit handler tears the booted container down on the way out: the logger's file, the pools and the broker connection the boot opened would go with the process unreleased. The application is closed first, and the refusal still ends the process the way a wiring mistake should. This close runs under no teardown budget and no shield — the configured budget is read by Run, which this path never reaches — so a closer that hangs here hangs the boot, which is the one place a wiring mistake is meant to be seen. */
             app.Close()
 
             panic(armErr)

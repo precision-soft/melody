@@ -5,7 +5,6 @@ import (
     "testing"
 )
 
-/* the contract is the whole of what a command may ask of its run, and the set is deliberately small: every method here is one a command in this tree actually calls, and a method added without a caller is a door the engine adapter has to keep answering forever. Asserted by name so a method silently dropped in a rewrite fails here rather than at the first command that needed it. */
 func TestContext_DeclaresExactlyTheReadersACommandNeeds(t *testing.T) {
     contextType := reflect.TypeOf((*Context)(nil)).Elem()
 

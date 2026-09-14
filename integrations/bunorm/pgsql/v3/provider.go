@@ -5,7 +5,6 @@ import (
     "crypto/tls"
     "database/sql"
     "errors"
-    "fmt"
     "math"
     "net"
     "reflect"
@@ -312,13 +311,13 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     /* the routing lives here because open is the one funnel every door shares — Open, OpenContext, the retry loop and the migration door all pass through it. Routed only on the retry path, the default retry-less open left bun's declaration mistakes on standard error. RouteDiagnostics installs nothing when the logger is the one already routed, so repeated attempts cost nothing. */
     bunorm.RouteDiagnostics(logger)
 
-    /* an empty database or user is refused here, by name, before the driver sees it: pgdriver.WithDatabase and pgdriver.WithUser PANIC on an empty string, so a connection parameter left unset by the configuration reached the caller as a panic out of the open, not as the refusal every other open failure is. An empty host is left to the driver — it does not panic, the address "<empty>:port" simply fails to dial — and an empty password is a legitimate value. */
+    /* Reject required fields before pgdriver can panic. The error capability keeps a permanent configuration error out of replica fallback. */
     if "" == params.Database {
-        return nil, exception.NewError("pgsql database open refused: the database name is empty", params.SafeContext(), nil)
+        return nil, &invalidConnectionParametersError{cause: exception.NewError("pgsql database open refused: the database name is empty", params.SafeContext(), nil)}
     }
 
     if "" == params.User {
-        return nil, exception.NewError("pgsql database open refused: the user is empty", params.SafeContext(), nil)
+        return nil, &invalidConnectionParametersError{cause: exception.NewError("pgsql database open refused: the user is empty", params.SafeContext(), nil)}
     }
 
     connectionConfig := NewConnectionConfig(params.Host, params.Port, params.Database, params.User, params.Password)
@@ -326,7 +325,11 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     poolConfig := instance.resolvedPoolConfig()
     timeoutConfig := instance.resolvedTimeoutConfig()
 
-    address := fmt.Sprintf("%s:%s", params.Host, params.Port)
+    addressHost := params.Host
+    if strings.HasPrefix(addressHost, "[") && strings.HasSuffix(addressHost, "]") {
+        addressHost = addressHost[1 : len(addressHost)-1]
+    }
+    address := net.JoinHostPort(addressHost, params.Port)
 
     /* every deadline the driver applies is named here, none governs invisibly: without these three, pgdriver's own defaults — 5s dial, 10s per read, 5s per write — silently cap the configured connect timeout and cut every legitimately long query. A zero read or write deadline survives only on the migration derivation, where it deliberately means "lifted". */
     connectorOptions := []pgdriver.Option{
@@ -584,4 +587,18 @@ func isNilInterface(value any) bool {
     default:
         return false
     }
+}
+
+type invalidConnectionParametersError struct { cause error }
+
+func (instance *invalidConnectionParametersError) Error() string {
+    return instance.cause.Error()
+}
+
+func (instance *invalidConnectionParametersError) Unwrap() error {
+    return instance.cause
+}
+
+func (instance *invalidConnectionParametersError) ConnectionParametersInvalid() bool {
+    return true
 }

@@ -2,6 +2,10 @@ package service
 
 import (
     "time"
+    "errors"
+    "fmt"
+
+    "github.com/precision-soft/melody/v3/.example/entity"
 
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -54,7 +58,10 @@ func NewRateRefreshService(
 /* RateRefreshService brings the exchange rates the catalogue quotes with up to the provider's. It writes
    through CurrencyService and not through the repository because the currency list and every currency by id
    are cached, and the listeners that drop those entries are subscribed to the event the service dispatches:
-   a rate written behind the cache is a rate no reader ever sees.
+   a rate written behind the cache is a rate no reader ever sees. The guarantee holds on the SHARED cache:
+   the listeners run in the process that dispatched, which is the scheduler or a console command and never
+   the http server, so on the in-process fallback the server keeps the currencies it cached until it
+   restarts — the refresh command says so on its output when that is the wiring it ran under.
 
    The client is resolved when a refresh runs rather than taken in the constructor, and that has an
    observable consequence rather than being a preference: nothing else in this application calls the
@@ -76,6 +83,7 @@ type RateRefreshOutcome struct {
     Attempts   int
     Updated    int
     Skipped    int
+    Failed     int
     AsOf       time.Time
 }
 
@@ -111,17 +119,43 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
 
     outcome := RateRefreshOutcome{Configured: true, Attempts: attempts, AsOf: document.AsOf}
 
+    if entity.RateBaseCurrencyCode != foldCurrencyCode(document.Base) {
+        return outcome, exception.NewError(
+            "the rate provider uses a different base from the catalogue",
+            exceptioncontract.Context{
+                "expectedBase": entity.RateBaseCurrencyCode,
+                "receivedBase": document.Base,
+            },
+            nil,
+        )
+    }
+
+    if document.AsOf.IsZero() || document.AsOf.After(instance.currencyService.clock.Now()) {
+        return outcome, fmt.Errorf("the provider quote instant must be present and not in the future")
+    }
+    document.AsOf = document.AsOf.UTC()
+    outcome.AsOf = document.AsOf
+    normalizedRates := make(map[string]float64, len(document.Rates))
+    for code, rate := range document.Rates {
+        normalized := foldCurrencyCode(code)
+        if _, exists := normalizedRates[normalized]; exists {
+            return outcome, fmt.Errorf("the rate document contains duplicate currency code %q", normalized)
+        }
+        normalizedRates[normalized] = rate
+    }
+
     currencies, listErr := instance.currencyService.List()
     if nil != listErr {
         return outcome, listErr
     }
 
+    var failures []error
     for _, currency := range currencies {
         if nil == currency {
             continue
         }
 
-        rate, quoted := document.Rates[currency.Code]
+        rate, quoted := normalizedRates[foldCurrencyCode(currency.Code)]
         if false == quoted {
             outcome.Skipped++
 
@@ -129,8 +163,11 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
         }
 
         _, updated, updateErr := instance.currencyService.UpdateRate(runtimeInstance, currency.Id, rate, document.AsOf)
+        if true == updated { outcome.Updated++ }
         if nil != updateErr {
-            return outcome, updateErr
+            outcome.Failed++
+            failures = append(failures, fmt.Errorf("refresh %s: %w", currency.Id, updateErr))
+            continue
         }
         if false == updated {
             outcome.Skipped++
@@ -138,10 +175,9 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
             continue
         }
 
-        outcome.Updated++
     }
 
-    return outcome, nil
+    return outcome, errors.Join(failures...)
 }
 
 /* readRateDocument spends up to rateRefreshAttemptCount exchanges on one reading. What is retried is

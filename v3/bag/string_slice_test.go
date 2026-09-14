@@ -170,7 +170,7 @@ func TestStringSlice_PresentNilReportsUnset(t *testing.T) {
     }
 }
 
-/* contractOnlyParameterBag implements the contract without being the concrete bag, which is what routes AppendString through its fallback: the fallback is the path a foreign implementation takes, and it is the one that cannot append inside a single critical section */
+/* This wrapper deliberately hides the atomic appender to exercise the contract fallback. */
 type contractOnlyParameterBag struct {
     values map[string]any
 }

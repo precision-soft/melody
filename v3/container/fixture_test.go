@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "testing"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -19,3 +20,7 @@ func refusalStageOf(t *testing.T, err error) string {
 
     return stage
 }
+
+
+type contextOnlyCleanup struct { calls int; seen context.Context; failure error }
+func (instance *contextOnlyCleanup) CloseWithContext(ctx context.Context) error { instance.calls++; instance.seen = ctx; return instance.failure }

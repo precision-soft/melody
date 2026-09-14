@@ -176,7 +176,6 @@ func TestBagFloat64_ConversionsAndErrors(t *testing.T) {
     }
 }
 
-/* a key set to nil is present but carries no value: String used to report it as set while Int, Bool, Float64 and Duration reported it as unset, so Has and the typed accessors contradicted each other on the same state */
 func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("key", nil)
@@ -208,7 +207,6 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     }
 }
 
-/* the request bags keep the single and the repeated key apart by type, so a []string landing under String is a genuine array: the empty string would lose the value and one element would hide the rest, which is why the read refuses loudly toward StringSlice/StringAt instead of guessing. */
 func TestString_RefusesASliceNamingTheParameter(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("tags", []string{"a", "b"})
@@ -228,7 +226,6 @@ func TestString_RefusesASliceNamingTheParameter(t *testing.T) {
     _, _ = String(parameterBag, "tags")
 }
 
-/* a key that appeared once in url.Values is stored as the string it is, and only a genuinely repeated key stays a slice — the separation String and Input depend on. */
 func TestNewParameterBagFromValues_KeepsTheSingleAndTheRepeatedKeyApartByType(t *testing.T) {
     parameterBag := NewParameterBagFromValues(url.Values{
         "single":   []string{"one"},

@@ -783,3 +783,18 @@ func TestCommandOutput_PrintFilesBlockEscapesControlCharacters(t *testing.T) {
         t.Fatalf("expected the escaped path and no raw carriage return, got %q", rendered)
     }
 }
+
+type refusedTextWriter struct { cause error }
+
+func (instance refusedTextWriter) Write([]byte) (int, error) {
+    return 0, instance.cause
+}
+
+func TestTextOutputPropagatesWriteFailure(t *testing.T) {
+    cause := errors.New("output refused")
+    report := newCommandOutput(refusedTextWriter{cause: cause}, nil, output.DefaultOption())
+    report.printSuccess("migration completed")
+    if err := report.finish("db:migrate", time.Now(), nil); false == errors.Is(err, cause) {
+        t.Fatalf("write failure was hidden: %v", err)
+    }
+}

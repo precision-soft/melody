@@ -8,7 +8,6 @@ import (
     "os"
     "strings"
     "testing"
-
     "github.com/precision-soft/melody/v3/cli"
 )
 
@@ -375,5 +374,30 @@ func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
     restoreDefaultRunnerOption(firstInstalled, firstPrevious)
     if &host != resolveDefaultRunnerOption().Writer {
         t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
+
+func TestRunnerEscapesUntrustedNamesOnEveryStep(t *testing.T) {
+    for _, fail := range []bool{false, true} {
+        t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
+            database, recorder := newFakeBunDatabase()
+            defer database.Close()
+            if fail {
+                recorder.execHook = func(query string) error { return errors.New("query refused") }
+            }
+            var buffer bytes.Buffer
+            err := RunQueriesWithOption(context.Background(), database, "up\rinjected", "name\x1b[2Jforged", []Query{{Name: "step", SQL: "SELECT 1"}}, RunnerOption{Writer: &buffer, NoColor: true})
+            if fail != (nil != err) {
+                t.Fatalf("failure=%v error=%v", fail, err)
+            }
+            rendered := buffer.String()
+            if strings.ContainsAny(rendered, "\r\x1b") {
+                t.Fatalf("terminal controls survived in output: %q", rendered)
+            }
+            if false == strings.Contains(rendered, `name\x1b[2Jforged`) || false == strings.Contains(rendered, `up\rinjected`) {
+                t.Fatalf("escaped names missing: %q", rendered)
+            }
+        })
     }
 }

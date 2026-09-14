@@ -109,7 +109,7 @@ func (instance *bunCurrencyRepository) findRowById(ctx context.Context, id strin
     selectErr := instance.database.
         NewSelect().
         Model(row).
-        Where("id = ?", id).
+        Where("id = ? AND BINARY id = BINARY ?", id, id).
         Limit(1).
         Scan(ctx)
     if nil != selectErr {
@@ -179,6 +179,7 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
         NewUpdate().
         Model(newCurrencyRow(currency)).
         WherePK().
+        Where("BINARY id = BINARY ?", currency.Id).
         Exec(ctx)
     if nil != updateErr {
         return false, updateErr
@@ -196,7 +197,7 @@ func (instance *bunCurrencyRepository) DeleteById(ctx context.Context, id string
     result, deleteErr := instance.database.
         NewDelete().
         Model((*currencyRow)(nil)).
-        Where("id = ?", normalizedId).
+        Where("id = ? AND BINARY id = BINARY ?", normalizedId, normalizedId).
         Exec(ctx)
     if nil != deleteErr {
         return false, deleteErr

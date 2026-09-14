@@ -610,24 +610,39 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
        The wait ends with the caller's deadline rather than with the open: a dial against a host that is black-holing packets ends when its own driver gives up, which is longer than any teardown may last, and a teardown that waited it out would hold the process past whatever grace its supervisor allows. What is abandoned is only the WAIT — the open still finishes on its own goroutine and still ends its database against the closed flag — so the cost of the deadline is that the answer names an outstanding session rather than having ended it. A caller that declared no deadline waits as before. */
     abandonedOpens := 0
 
-    for _, pendingOpen := range pendingOpens {
+    /* an open that finished is not abandoned, whatever the deadline says: with both channels ready — an open that ended during the pool teardown under a budget already spent, the ordinary state under a shared teardown deadline — a select picks at random, and the finished open was counted abandoned every other close, an error the container filed as a failed close and the application turned into exit 1 on a shutdown that had released everything. The done channel is read once more, without blocking, before the deadline is believed */
+    openHasEnded := func(done <-chan struct{}) bool {
         select {
-        case <-pendingOpen.done:
+        case <-done:
+            return true
         case <-closeContext.Done():
+            select {
+            case <-done:
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    for _, pendingOpen := range pendingOpens {
+        if false == openHasEnded(pendingOpen.done) {
             abandonedOpens++
         }
     }
 
     for _, migrationOpenDone := range pendingMigrationOpens {
-        select {
-        case <-migrationOpenDone:
-        case <-closeContext.Done():
+        if false == openHasEnded(migrationOpenDone) {
             abandonedOpens++
         }
     }
 
     /* bun's diagnostic channel is handed back LAST, while the logger this registry reports through is still alive: the container closes the registry before the logging service, because the registry resolves it. Everything above — a pool close that provokes a bun warning, an open finishing against the closed flag — still reaches the journal; what comes after belongs on standard error. It is handed back only when it is this registry's: a second registry in the same process, routed to its own logger, keeps its channel through this teardown. */
-    resetDiagnosticsRoutedTo(instance.currentLogger())
+    instance.lock.Lock()
+    closingLogger := instance.logger
+    instance.lock.Unlock()
+
+    resetDiagnosticsRoutedTo(closingLogger)
 
     /* teardown diagnostics must name every pool that failed to close, not the first alone: the caller gets one error, so the other failures would otherwise leave no trace anywhere */
     if 1 < len(failedNames) {

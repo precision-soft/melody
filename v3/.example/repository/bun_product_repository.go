@@ -146,7 +146,7 @@ func (instance *bunProductRepository) findRowById(ctx context.Context, id string
     selectErr := instance.database.
         NewSelect().
         Model(row).
-        Where("id = ?", id).
+        Where("id = ? AND BINARY id = BINARY ?", id, id).
         Limit(1).
         Scan(ctx)
     if nil != selectErr {

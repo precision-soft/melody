@@ -231,6 +231,27 @@ func splitRequestPath(value string) []string {
     return segments
 }
 
+/* RequestPathAsRouted is the spelling of a request path the router reads, for every other consumer of that path to read the same: the escaped path is split on the separators the client actually sent and each segment is unescaped on its own, with a separator that was ENCODED inside a segment kept encoded, as "%2F". So "/caf%C3%A9" reads "/café" for the router, the canonical guard and the access-control matcher alike, and "/admin%2Fusers" stays the one segment the router matches — where the decoded URL.Path read "/admin/users", the two-segment resource the router does not serve for that spelling. Read on the decoded path, the access-control matcher folded "/public%2F" onto "/public" and answered with the exact public rule while the router carried the request to a protected catch-all handler — measured, an anonymous request served the protected handler — and it claimed "/admin%2Fusers" under a rule written for "/admin", a prefix the router never routed it to. A target that does not begin with "/" is not path-routed and is returned as it came.
+
+   The spelling is not the router's identity to the letter: the router binds the decoded segment, so a segment that unescapes to a literal "%2F" — "%252F" — and one that carries an encoded separator — "%2F" — are two segments to it and one spelling here, and a rule written with "%2F" names both. Re-encoding "%" as "%25" would make the spelling round-trip, and would change the spelling of every rule that names a literal "%", which is a change for a major. */
+func RequestPathAsRouted(escapedPath string) string {
+    if false == strings.HasPrefix(escapedPath, "/") {
+        return escapedPath
+    }
+
+    segments := strings.Split(escapedPath, "/")
+    for index, segment := range segments {
+        unescapedSegment, unescapeErr := url.PathUnescape(segment)
+        if nil != unescapeErr {
+            continue
+        }
+
+        segments[index] = strings.ReplaceAll(unescapedSegment, "/", "%2F")
+    }
+
+    return strings.Join(segments, "/")
+}
+
 func splitNormalizedPath(value string) []string {
     /* an empty path is the root, which is what every consumer of it means. Answered as [""] instead, the tree walk started with no segments to consume and reached only the tree root, where a route registered as "/" does not live — it lives under the empty static child — so a request whose target normalized to nothing 404'd even against an application that had registered "/". */
     if "" == value {
@@ -262,6 +283,11 @@ func requestPathIsCanonical(path string) bool {
 
     if false == strings.HasPrefix(path, "/") {
         return true
+    }
+
+    /* leading or trailing whitespace is the third fold the consumers do not read alike: the router keeps it, so "/public " is a segment of its own and reaches the catch-all, while the access-control matcher trims it and answers with the rule of "/public" — a public one, granting the protected handler to an anonymous request; measured, on the two frozen majors as released. The trim is not removed from the matcher, because a matcher without it leaves the whitespace spelling with no rule at all, which is a grant too; the spelling is refused here, where every consumer is still reading one string */
+    if strings.TrimSpace(path) != path {
+        return false
     }
 
     trimmedPath := path
@@ -911,12 +937,12 @@ func matchesLocale(locales []string, params map[string]string) bool {
     return false
 }
 
-/* joinCatchAllSegments rebuilds the tail a catch-all binds while keeping an encoded separator inside the segment the client put it in. splitRequestPath unescapes each segment on its own for exactly that reason — a parameter may legitimately carry a slash — and joining the decoded segments back on "/" undid it: "/files/a%2Fb/c" and "/files/a/b/c" both bound "a/b/c", so a handler reassembling a storage key or a proxy target from the catch-all could not tell the two requests apart. Only the separator is re-escaped, so every other escape stays decoded exactly as it was and a tail carrying none is byte-identical to what it was before. */
+/* joinCatchAllSegments rebuilds the tail a catch-all binds while keeping an encoded separator inside the segment the client put it in. splitRequestPath unescapes each segment on its own for exactly that reason — a parameter may legitimately carry a slash — and joining the decoded segments back on "/" undid it: "/files/a%2Fb/c" and "/files/a/b/c" both bound "a/b/c", so a handler reassembling a storage key or a proxy target from the catch-all could not tell the two requests apart. Literal percent signs are escaped before slashes so an encoded slash and literal "%2F" remain distinct. Other characters stay decoded; separators between segments remain literal slashes. */
 func joinCatchAllSegments(pathSegments []string) string {
     escapedSegments := make([]string, 0, len(pathSegments))
 
     for _, segment := range pathSegments {
-        escapedSegments = append(escapedSegments, strings.ReplaceAll(segment, "/", "%2F"))
+        escapedSegments = append(escapedSegments, strings.ReplaceAll(strings.ReplaceAll(segment, "%", "%25"), "/", "%2F"))
     }
 
     return strings.Join(escapedSegments, "/")

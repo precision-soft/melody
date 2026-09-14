@@ -702,6 +702,42 @@ func TestCompressionMiddleware_AddsVaryOnExcludedPath(t *testing.T) {
     }
 }
 
+/* the exclusion list is read against the spelling the router matched: "/assets%2Fapp.js" is the one-segment resource "assets/app.js", which an exclusion of "/assets/app" does not name — read decoded it did, so the list and the firewall matcher selected different requests */
+func TestCompressionMiddleware_ReadsTheExclusionListAgainstTheSpellingTheRouterRoutes(t *testing.T) {
+    config := NewCompressionConfig(6, 10, nil, []string{"/assets/app"})
+    middleware := CompressionMiddleware(config)
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("melody ", 200))))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/assets%2Fapp.js", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the one-segment resource outside the excluded prefix to be compressed, got: %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
 /* An excluded content type is skipped because compressing it is pointless, not because the URL has a single representation; the header still has to be there. */
 func TestCompressionMiddleware_AddsVaryOnExcludedContentType(t *testing.T) {
     config := NewCompressionConfig(6, 10, []string{"image/"}, nil)

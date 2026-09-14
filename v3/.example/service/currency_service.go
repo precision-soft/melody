@@ -3,6 +3,7 @@ package service
 import (
     "context"
     "fmt"
+    "math"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
@@ -53,12 +54,12 @@ type CurrencyService struct {
    NULL, so there is no "not quoted yet" to fall back on — a currency enters the catalogue with a quote or
    it does not enter it. */
 func refuseNonPositiveRate(currencyId string, rate float64) error {
-    if 0 < rate {
+    if 0 < rate && false == math.IsInf(rate, 0) && false == math.IsNaN(rate) {
         return nil
     }
 
     return exception.NewError(
-        "the exchange rate must be positive",
+        "the exchange rate must be positive and finite",
         exceptioncontract.Context{
             "currencyId": currencyId,
             "rate":       rate,
@@ -90,6 +91,11 @@ func (instance *CurrencyService) List() ([]*entity.Currency, error) {
 }
 
 func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, error) {
+    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyCurrencyById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
@@ -204,7 +210,9 @@ func (instance *CurrencyService) Update(
 /* UpdateRate is the door the rate refresh writes through, and it goes through the service rather than
    straight to the repository for one reason: the currency list and every currency by id are cached, and
    the listeners that drop those entries are subscribed to the updated event this dispatches. A rate written
-   behind the cache is a rate no reader ever sees.
+   behind the cache is a rate no reader ever sees — in the process that dispatched, which is the refresh's
+   own; the http server sees the drop through the shared cache alone, and on the in-process fallback it
+   serves what it cached until it restarts.
 
    The rate is judged by refuseNonPositiveRate, the spelling Create reads too, and the refusal names the
    currency so a caller sweeping a whole document can say which quote was bad. */
@@ -218,6 +226,11 @@ func (instance *CurrencyService) UpdateRate(
         return nil, false, rateErr
     }
 
+    if rateAsOf.IsZero() || rateAsOf.After(instance.clock.Now()) {
+        return nil, false, fmt.Errorf("the quote instant must be present and not in the future")
+    }
+    rateAsOf = rateAsOf.UTC()
+
     ctx := runtimeInstance.Context()
 
     currency, found, findErr := instance.currencyRepository.FindById(ctx, currencyId)
@@ -227,6 +240,10 @@ func (instance *CurrencyService) UpdateRate(
 
     if false == found {
         return nil, false, nil
+    }
+
+    if rateAsOf.Before(currency.RateAsOf) {
+        return nil, false, fmt.Errorf("the quote is older than the stored rate")
     }
 
     /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy */

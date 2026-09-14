@@ -2,6 +2,7 @@ package service
 
 import (
     "testing"
+    "math"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
@@ -129,5 +130,13 @@ func TestFindCurrencyByCode_AnswersNothingForACodeTheCatalogueDoesNotCarry(t *te
         if _, exists := FindCurrencyByCode(currencies, spelling); true == exists {
             t.Errorf("%q matched a currency", spelling)
         }
+    }
+}
+
+
+func TestConvertAmountRejectsNonFiniteResults(t *testing.T) {
+    for _, rate := range []float64{1e308, math.Inf(1), math.NaN()} {
+        value, err := ConvertAmount(100, conversionCurrency("eur", "EUR", 1), conversionCurrency("usd", "USD", rate))
+        if nil == err || math.IsInf(value, 0) || math.IsNaN(value) { t.Fatalf("non-finite conversion escaped: value=%v err=%v", value, err) }
     }
 }

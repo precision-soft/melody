@@ -12,7 +12,6 @@ import (
     "strings"
     "testing"
     "time"
-
     "github.com/precision-soft/melody/config"
     configcontract "github.com/precision-soft/melody/config/contract"
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -1365,6 +1364,35 @@ func TestProviderOpen_RefusesAnEmptyDatabaseOrUserInsteadOfPanicking(t *testing.
 
             if nil == openErr || false == strings.Contains(openErr.Error(), testCase.expected) {
                 t.Fatalf("expected the refusal to name the field (%q), got %v", testCase.expected, openErr)
+            }
+        })
+    }
+}
+
+
+/* Inspect the address handed to the actual driver; abort before opening a socket. */
+func TestProviderPreservesIPv6HostAndPort(t *testing.T) {
+    for _, testCase := range []struct { host, want string }{
+        {"::1", "[::1]:5432"},
+        {"[::1]", "[::1]:5432"},
+        {"fe80::1%eth0", "[fe80::1%eth0]:5432"},
+        {"[fe80::1%eth0]", "[fe80::1%eth0]:5432"},
+        {"127.0.0.1", "127.0.0.1:5432"},
+        {"db.internal", "db.internal:5432"},
+    } {
+        t.Run(testCase.host, func(t *testing.T) {
+            stop := errors.New("stop before dial")
+            seen := ""
+            provider := newTestProvider(WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, configuration *pgdriver.Connector) error {
+                seen = configuration.Config().Addr
+                return stop
+            }))
+            database, err := provider.Open(newStubResolver(testCase.host, "5432", "melody", "melody", "secret"))
+            if nil != database || false == errors.Is(err, stop) {
+                t.Fatalf("expected pre-dial abort, got database=%v error=%v", database, err)
+            }
+            if testCase.want != seen {
+                t.Fatalf("driver address=%q; want %q", seen, testCase.want)
             }
         })
     }

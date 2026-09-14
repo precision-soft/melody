@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* the empty domain is the caller saying "the ordinary one", not a domain of its own: Add and Get must fold it to the same default, or a message added without a domain would be unreachable through a read that also omits it */
 func TestMapCatalog_TheEmptyDomainFoldsToTheDefaultOnBothSides(t *testing.T) {
     catalog := NewMapCatalog("en")
 
@@ -39,7 +38,6 @@ func TestMapCatalog_KeepsDomainsApart(t *testing.T) {
     }
 }
 
-/* the reader reports absence rather than an empty string: an empty translation is a legitimate value, and a caller that cannot tell the two apart falls back to the message id for a message that was deliberately blank */
 func TestMapCatalog_GetSeparatesAnAbsentMessageFromAnEmptyOne(t *testing.T) {
     catalog := NewMapCatalog("en")
 

@@ -3,6 +3,7 @@ package migrate
 import (
     "context"
     "errors"
+    "fmt"
     "time"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
@@ -28,9 +29,14 @@ func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputIns
     defer cancelUnlock()
 
     if unlockErr := unlocker.Unlock(unlockContext); nil != unlockErr {
-        outputInstance.printError(unlockErr)
+        reported := fmt.Errorf("migration unlock failed; verify no migration is running before using the unlock command for this database: %w", unlockErr)
+        if outputInstance.isJson() {
+            outputInstance.unlockFailure = reported
+        } else {
+            outputInstance.printError(reported)
+        }
 
-        return unlockErr
+        return reported
     }
 
     return nil

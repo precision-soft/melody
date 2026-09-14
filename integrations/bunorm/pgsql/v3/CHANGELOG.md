@@ -29,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Missing required PostgreSQL connection fields expose the ConnectionParametersInvalid error capability; replica reads refuse this permanent configuration error instead of silently opening the primary.
+
+- Build TCP addresses with `net.JoinHostPort`, preserving IPv6 literals with or without brackets, scoped IPv6 addresses, IPv4 and DNS names.
+
 - every failure of the advisory lock names the two halves of the key the server was asked for beside the caller's name, so a diagnostic can be matched against `pg_locks`.
 
 - an empty database name or user is refused by name before the driver sees it. `pgdriver.WithDatabase` and `pgdriver.WithUser` panic on an empty string, so a connection parameter left empty reached the caller as a panic out of the open rather than as the refusal every other open failure is. An empty host is left to the driver, which does not panic on it, and an empty password stays a legitimate value.

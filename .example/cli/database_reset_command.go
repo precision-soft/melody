@@ -1,7 +1,6 @@
 package cli
 
 import (
-    "context"
     "fmt"
     "io"
     "os"
@@ -54,7 +53,7 @@ func (instance *DatabaseResetCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
     if "" == instance.databaseServiceName {
         return melodyexception.NewError(
             "the example has no database configured, so there is nothing to reset",
@@ -77,7 +76,11 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         return nil
     }
 
-    ctx := context.Background()
+    finishCache, cacheErr := prepareDatabaseResetCache(runtimeInstance, writer)
+    if nil != cacheErr { return cacheErr }
+    defer finishCache(&runErr)
+
+    ctx := runtimeInstance.Context()
 
     database, resolveErr := melodycontainer.FromResolver[*bun.DB](
         runtimeInstance.Container(),
@@ -129,7 +132,7 @@ func databaseResetPlanLineList(journalDatabaseServiceName string) []string {
         lineList = append(lineList, "the journal database is not wired, so its set is left alone")
     }
 
-    return append(lineList, "and then reseed the nomenclature")
+    return append(lineList, "and then reseed the nomenclature and clear the application cache")
 }
 
 func printDatabaseResetPlan(writer io.Writer, journalDatabaseServiceName string) {

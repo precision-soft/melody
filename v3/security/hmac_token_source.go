@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v3/clock"
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
@@ -214,10 +215,13 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
         )
     }
 
-    if envelope.Path != httpRequest.URL.Path {
+    /* the signed path is bound to the spelling the router matched, not to the decoded URL.Path: decoded, "/files/a%2Fb" read "/files/a/b" here, so an envelope signed for the two-segment resource authenticated a request for the one-segment resource "a/b" the router serves elsewhere and the matchers judge under its own spelling. A signer that names a plain path signs the same string either way; only a separator encoded inside a segment is bound as "%2F" now. */
+    requestPath := http.RequestPathAsRouted(httpRequest.URL.EscapedPath())
+
+    if envelope.Path != requestPath {
         return exception.NewError(
             "internal-auth path does not match the request",
-            map[string]any{"signed": envelope.Path, "request": httpRequest.URL.Path},
+            map[string]any{"signed": envelope.Path, "request": requestPath},
             nil,
         )
     }

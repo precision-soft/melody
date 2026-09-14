@@ -52,3 +52,12 @@ func TestEnrollmentUpsertReplacesTheRecoveryCodesWithTheSecret(t *testing.T) {
         }
     }
 }
+
+/* the deletion is keyed on the account identifier and on nothing wider: a statement without the predicate would release every account's factor when one account is deleted. */
+func TestEnrollmentDeleteIsKeyedOnTheAccountIdentifierAlone(t *testing.T) {
+    rendered := NewStore(newRenderingDatabase()).enrollmentDelete("user-4").String()
+
+    if false == strings.HasPrefix(rendered, "DELETE FROM `melody_example_v3_two_factor`") || false == strings.Contains(rendered, "WHERE (user_identifier = 'user-4')") {
+        t.Fatalf("expected the enrollment of user-4 alone to be deleted, got %q", rendered)
+    }
+}

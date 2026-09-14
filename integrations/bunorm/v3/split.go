@@ -72,6 +72,11 @@ func (instance *ReadWriteSplitter) Reader() (*bun.DB, error) {
         return nil, databaseErr
     }
 
+    var invalidParameters interface { ConnectionParametersInvalid() bool }
+    if true == errors.As(databaseErr, &invalidParameters) && true == invalidParameters.ConnectionParametersInvalid() {
+        return nil, databaseErr
+    }
+
     if readerName == instance.primaryName {
         return nil, databaseErr
     }

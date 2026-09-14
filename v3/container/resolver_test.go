@@ -108,7 +108,7 @@ func TestFromResolver_MissingService_ReturnsError(t *testing.T) {
         t.Fatalf("expected *exception.Error, got: %T", err)
     }
 
-    if "service not registered in resolver" != typedError.Message() {
+    if "service resolution failed" != typedError.Message() {
         t.Fatalf("unexpected error message: %s", typedError.Message())
     }
 }
@@ -508,5 +508,20 @@ func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T)
 
     if _, typeExists := wrappedMelodyErr.Context()["serviceType"]; false == typeExists {
         t.Fatalf("expected the wrapper to name the service type, got %v", wrappedMelodyErr.Context())
+    }
+}
+
+func TestFromResolverDoesNotMislabelProviderFailure(t *testing.T) {
+    serviceContainer := NewContainer()
+    cause := errors.New("driver connection refused")
+    serviceContainer.MustRegister("broken", func(_ containercontract.Resolver) (*resolverTestService, error) {
+        return nil, cause
+    })
+    _, namedErr := FromResolver[*resolverTestService](serviceContainer, "broken")
+    _, typedErr := FromResolverByType[*resolverTestService](serviceContainer)
+    for _, err := range []error{namedErr, typedErr} {
+        if false == errors.Is(err, cause) || strings.Contains(err.Error(), "not registered") {
+            t.Fatalf("registered provider failure was mislabeled: %v", err)
+        }
     }
 }

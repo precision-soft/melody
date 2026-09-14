@@ -228,8 +228,8 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
             }
 
             if regex, exists := requirements[wildcardName]; true == exists {
-                /* matchPath tests the same regex against the remainder it actually receives — the emitted, non-empty segments joined by "/" — so the check must run on that collapsed remainder, not the merely edge-trimmed value: "a//b" emits "a/b", which matchPath accepts, so the generator must not refuse it. A requirement on a catch-all is a whitelist, the one place a traversal like "../../etc/passwd" is meant to be caught. */
-                if false == regex.MatchString(strings.Join(catchAllSegments, "/")) {
+                /* matchPath tests the same regex against the remainder it actually receives — the emitted, non-empty segments joined with literal percent signs escaped — so the check must run on that collapsed remainder, not the merely edge-trimmed value: "a//b" emits "a/b", which matchPath accepts, so the generator must not refuse it. A requirement on a catch-all is a whitelist, the one place a traversal like "../../etc/passwd" is meant to be caught. */
+                if false == regex.MatchString(joinCatchAllSegments(catchAllSegments)) {
                     return "", exception.NewError(
                         "catch-all parameter requirement failed",
                         exceptioncontract.Context{
